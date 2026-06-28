@@ -237,7 +237,7 @@ class CADWorkflow:
                 "files": files,
                 "validation": validation,
             }
-            _write_json(logs_dir / "run.log", log)
+            _write_json(logs_dir / "run.json", log)
             _write_json(logs_dir / "generation.json", log)
             return WorkflowResult(
                 status=log["status"],
@@ -259,7 +259,7 @@ class CADWorkflow:
                 "preflight": preflight,
                 "error": message,
             }
-            _write_json(logs_dir / "run.log", log)
+            _write_json(logs_dir / "run.json", log)
             _write_json(logs_dir / "generation.json", log)
             return WorkflowResult(
                 status="error",

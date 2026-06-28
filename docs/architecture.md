@@ -1,6 +1,10 @@
 # Software Architecture
 
-项目架构以 workflow 为主线，而不是以某个 CAD 工具为中心。
+CadFlow 架构以 workflow 为主线，而不是以某个 CAD 工具为中心。
+
+```text
+input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
+```
 
 ```text
 input.md
@@ -64,7 +68,7 @@ Standalone parts live under `examples/parts/`. Assembly-owned parts, assembly pl
 - `requirement/`：需求模板、字段等级、缺失信息回问策略。
 - `planning/`：设计分析、workflow routing、基准、接口、风险和确认 gate。
 - `part_modeling/`：常用零件模板、参数化入口和单零件生成闭环。
-- `assembly/`：装配规则、约束、间隙和验证意图。
+- `assembly/`：装配意图、轻量放置/约束规则、间隙记录和基础验证意图。
 - `review/`：按 check_level 审查。
 
 `requirement/knowledge/product_decomposition.md` 负责早期产品拆解，因为判断“需要哪些零件/参考件”本质上属于需求澄清。`policies/` 保存跨 skill 的全局策略，例如 check level 和输出契约。`knowledge/` 保存跨 skill 索引，具体知识优先放到所属 skill 的 `knowledge/` 下。
@@ -85,6 +89,8 @@ review.md
 exports/
 logs/
 ```
+
+`logs/` contains structured JSON logs such as `run.json` and `generation.json`.
 
 用户 workflow 应显式传入 `output_dir`。未传时使用 `runs/<instance_name>/` 作为 fallback。示例脚本属于 examples 自测，默认生成在各自 `model.py` 同目录，不代表任意用户项目的输出位置。
 
@@ -167,6 +173,13 @@ assembly_validation.json / assembly_review.md
 
 `assembly.json` 和 `constraint_assembly.json` 是 backend-neutral 配置。FreeCAD 脚本只是后续 export/backend path，不是 workflow 上层依赖。
 
+Assembly in the current open-source baseline means assembly intent planning,
+part lists, manufactured/reference component separation, backend-neutral
+assembly config, basic placement and bounding-box validation, and assembly
+review/report generation. It does not mean mature geometric constraint solving,
+automatic mating inference for arbitrary CAD files, full tolerance stack-up,
+industrial DFA, motion simulation, or production-ready assembly release.
+
 ### Existing MVP Layer
 
 这些模块继续保留，用于稳定 demo：
@@ -176,7 +189,7 @@ assembly_validation.json / assembly_review.md
 - `exporter.py`：STEP/STL 导出。
 - `validator.py`：preflight、几何、导出和意图一致性检查。
 - `assembly_planner.py`：装配意图规划、确认 gate 和 backend-neutral config 生成。
-- `assembly_validator.py`：装配 preflight、零件输入、bbox 放置、轻量约束和导出声明检查。
+- `assembly_validator.py`：装配 preflight、零件输入、bbox 放置、轻量约束意图和导出声明检查。
 - `report.py`：旧式 JSON/Markdown 报告。
 
 ## Data Contracts
@@ -212,12 +225,12 @@ assembly_validation.json / assembly_review.md
 
 ### check_level
 
-- `L0 Playground`：当前实现。
-- `L1 Maker`：报告框架。
-- `L2 Engineering`：预留。
-- `L3 Industrial`：预留。
-- `L4 Safety Critical`：预留。
+- `L0 Playground`：当前唯一完整支持的检查等级。
+- `L1 Maker`：当前提供报告 scaffold，不是完整可打印性验证。
+- `L2 Engineering`：预留，不代表工程放行。
+- `L3 Industrial`：预留，不代表工业 DFM/DFA 或生产 release。
+- `L4 Safety Critical`：预留，不能自动放行。
 
 ## Non-Goals
 
-当前架构不做 Agent OS、不做大规模服务化、不做复杂多 agent 调度、不把 FreeCAD 或 CadQuery 写死为唯一未来方向。
+当前架构不做 Agent OS、不做大规模服务化、不做复杂多 agent 调度、不把 FreeCAD 或 CadQuery 写死为唯一未来方向，也不声称具备成熟工业装配求解、运动仿真、完整工程校核或生产级放行能力。

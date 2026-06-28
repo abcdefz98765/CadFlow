@@ -19,6 +19,10 @@ exports/
 logs/
 ```
 
+`logs/` stores structured JSON logs. The workflow-level run record is
+`logs/run.json`; generation-loop details are also written to
+`logs/generation.json`.
+
 For assemblies, outputs may also include BOM, assembly reports,
 backend-neutral assembly configs, and backend-native assembly files.
 

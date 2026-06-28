@@ -2,7 +2,7 @@
 
 ## Phase 0: Current Baseline
 
-状态：已有 CadQuery MVP、STEP/STL 导出、基础 validator/report、FreeCAD handoff 和装配辅助脚本。
+状态：已有 CadQuery MVP、STEP/STL 导出、基础 validator/report、FreeCAD handoff 和初版 assembly planning/config/validation scaffold。
 
 主要入口：
 
@@ -18,7 +18,7 @@
 
 - `src/ai_native_cad/workflow.py`
 - `src/ai_native_cad/backends/`
-- 标准输出目录：`input.md`、`requirement.json`、`plan.md`、`model.py`、`review.md`、`exports/`、`logs/`
+- 标准输出目录：`input.md`、`requirement.json`、`plan.md`、`model.py`、`review.md`、`exports/`、`logs/run.json`
 - `examples/parts/mounting_plate/`
 - `examples/parts/circular_button/`
 - `knowledge/` 和 `policies/`
@@ -27,6 +27,7 @@
 验收：
 
 - mounting_plate demo 可运行。
+- `python examples/workflow/mounting_plate_demo.py` 一键 workflow demo 可运行。
 - workflow 输出稳定。
 - 上层 workflow 不直接绑定 CadQuery。
 - L0 真正支持，L1 有报告框架。
@@ -64,7 +65,7 @@
 
 - 早期产品拆解归 Requirement Skill。
 - Planning Skill 负责设计分析、workflow routing、接口/基准和风险 gate。
-- 装配规则放在 Assembly Skill。
+- 装配规则放在 Assembly Skill，但公开表述限定为 assembly intent planning、part/reference list、backend-neutral config、基础 placement/bounding-box validation 和 review/report。
 - 常用零件模板和参考组件知识放在 Part Modeling Skill 的 `knowledge/` 下。
 - 全局 check level 仍由 `policies/check_levels.md` 定义。
 - 输出目录和导出路径是 policy/utility，不作为单独 skill。
@@ -111,6 +112,7 @@
 - AI Engineering OS。
 - 多 agent 平台化调度。
 - 工业级 DFM/DFA。
+- 成熟工业装配约束求解、任意 CAD mating 自动推断和运动仿真。
 - 完整 GD&T。
 - FEA。
 - 安全关键件自动放行。

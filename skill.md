@@ -1,4 +1,4 @@
-# llm2cad Workflow Skill Index
+# CadFlow Workflow Skill Index
 
 This file is the top-level compatibility entry for agents that look for a
 single `skill.md` at the repository root.

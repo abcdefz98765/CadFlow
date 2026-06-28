@@ -12,7 +12,17 @@ input -> requirement -> planning -> part_modeling -> assembly -> review -> outpu
 
 Requirement 阶段负责澄清需求、识别候选零件/参考组件和缺失信息。Planning 阶段负责设计分析、workflow routing、接口/基准、风险和确认 gate。Part Modeling 再进入模板选择、参数化和单零件生成闭环。
 
+Assembly 在当前开源初版中表示 assembly intent planning、manufactured/reference parts 列表、backend-neutral assembly config、基础放置和 bounding-box validation、以及 assembly review/report。它不是成熟几何约束求解器，不自动推断任意 CAD 文件的 mating，也不提供完整 tolerance stack-up、工业 DFA、运动仿真或生产级装配放行。
+
 ## Run the Workflow
+
+One-command demo:
+
+```bash
+python examples/workflow/mounting_plate_demo.py
+```
+
+Python API:
 
 ```python
 from ai_native_cad import run_workflow
@@ -39,13 +49,14 @@ runs/mounting_plate_demo/
     model.step
     model.stl
   logs/
-    run.log
+    run.json
     generation.json
 ```
 
 ## Run the Mounting Plate Demo
 
 ```bash
+python examples/workflow/mounting_plate_demo.py
 python examples/parts/mounting_plate/model.py
 ```
 
@@ -73,13 +84,13 @@ python -m ai_native_cad.assembly_validator examples/assemblies/pet_button/assemb
 This is the preferred structure for a real pet button because it separates the
 base, moving cap, switch carrier, and tactile switch reference envelope.
 Review `examples/assemblies/pet_button/assembly_plan.md` before treating the
-placement configs as approved assembly intent. The validator writes both
-`assembly_validation.md` and `assembly_review.md`.
+placement configs as approved assembly intent. The validator writes
+`assembly_validation.json`, `assembly_validation.md`, and `assembly_review.md`.
 
 The assembly loop is:
 
 ```text
-part reports -> assembly_plan -> high-risk confirmation gate -> assembly.json / constraint_assembly.json -> assembly_review.md
+part reports -> assembly_plan -> high-risk confirmation gate -> assembly.json / constraint_assembly.json -> basic validation -> assembly_review.md
 ```
 
 Example scripts generate artifacts next to their own `model.py` files:
@@ -96,6 +107,29 @@ examples/parts/mounting_plate/report.md
 ```bash
 python -m pytest tests/ -q
 ```
+
+## Windows / CadQuery Environment Note
+
+CadQuery may be sensitive to Python environment conflicts. Prefer a clean virtual
+environment:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -U pip setuptools wheel
+python -m pip install -e ".[dev]"
+```
+
+If pip-based installation fails, create a clean conda environment and install
+CadQuery from conda-forge:
+
+```bash
+conda create -n cadflow python=3.11 -c conda-forge cadquery pytest
+conda activate cadflow
+python -m pip install -e . --no-deps
+```
+
+Avoid repairing a conflicted base conda environment in place.
 
 ## Good User Input
 
@@ -115,7 +149,7 @@ Agent 应输出或保留：
 - 参数化模型源码：`model.py`
 - 审查报告：`review.md`
 - 导出文件：`exports/`
-- 运行日志：`logs/`
+- 运行日志：`logs/run.json`、`logs/generation.json`
 
 ## Check Levels
 

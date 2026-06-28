@@ -1,6 +1,6 @@
 # Getting Started
 
-本项目现在以 Workflow-first 自然语言参数化 CAD 为主线。
+CadFlow 现在以 workflow-first 自然语言参数化 CAD 为主线。
 
 推荐先读：
 
@@ -17,6 +17,14 @@ pip install -e .
 ```
 
 ## Run the Workflow
+
+One-command demo:
+
+```bash
+python examples/workflow/mounting_plate_demo.py
+```
+
+Python API:
 
 ```python
 from ai_native_cad import run_workflow
@@ -40,11 +48,14 @@ runs/mounting_plate_demo/
   review.md
   exports/
   logs/
+    run.json
+    generation.json
 ```
 
 ## Run the Demo
 
 ```bash
+python examples/workflow/mounting_plate_demo.py
 python examples/parts/mounting_plate/model.py
 ```
 

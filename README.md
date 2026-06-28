@@ -1,6 +1,8 @@
-# llm2cad
+# CadFlow
 
-Workflow-first 的自然语言参数化 CAD 建模工具。
+CadFlow is an early-stage workflow-first natural-language parametric CAD toolkit.
+
+Python package: `ai_native_cad`
 
 本项目不是宏大的 AI Engineering OS，也不是一次性 Prompt to STL。短期目标是保留一个能跑的自然语言建模 MVP，同时把工程结构调整为可追踪、可替换后端、可逐步引入知识和策略的 CAD workflow。
 
@@ -20,6 +22,23 @@ part_spec -> preflight -> generate -> geometry check -> intent match -> export/r
 requirement + part reports -> assembly_plan -> confirmation gate -> assembly configs -> validation -> assembly_review
 ```
 
+Assembly in the current open-source baseline means:
+
+- assembly intent planning
+- part list / manufactured parts / reference components
+- backend-neutral assembly config
+- basic placement and bounding-box validation
+- assembly review/report generation
+
+It does not currently mean:
+
+- mature geometric constraint solving
+- automatic mating inference for arbitrary CAD files
+- full tolerance stack-up
+- industrial DFA
+- motion simulation
+- production-ready assembly release
+
 ## 当前定位
 
 - **Workflow First**：每次任务都保留输入、结构化需求、建模计划、模型代码、审查报告、导出文件和日志。
@@ -28,6 +47,17 @@ requirement + part reports -> assembly_plan -> confirmation gate -> assembly con
 - **Traceable by Default**：默认输出完整项目记录，方便复核和迭代。
 - **Skill Oriented**：把 requirement、planning、part modeling、assembly、review 收束为少量职责清晰的 skill。
 - **Knowledge Ready / Policy Ready**：`skills/<step>/knowledge/` 放步骤内知识，顶层 `knowledge/` 只做跨 skill 索引，`policies/` 放全局策略和等级定义。
+
+## Current Limitations
+
+- The natural-language parser is template-backed and deterministic in the MVP.
+- Unknown or underspecified requests may fall back to built-in part templates.
+- Current generated models are suitable for exploration and review, not production release.
+- L0 Playground is the only fully supported check level today.
+- L1 Maker currently provides a report scaffold, not complete printability validation.
+- L2/L3/L4 are reserved workflow levels and do not imply engineering sign-off.
+- Assembly support exists in the initial open-source version, but it is a basic planning/config/validation workflow, not a full constraint solver or industrial assembly system.
+- All outputs require human review before manufacturing or real-world use.
 
 ## 安装
 
@@ -42,9 +72,38 @@ pip install -e ".[dev]"
 python -m pytest tests/ -q
 ```
 
+### Windows / CadQuery environment note
+
+CadQuery may be sensitive to Python environment conflicts. Prefer a clean virtual
+environment:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -U pip setuptools wheel
+python -m pip install -e ".[dev]"
+```
+
+If pip-based installation fails, create a clean conda environment and install
+CadQuery from conda-forge:
+
+```bash
+conda create -n cadflow python=3.11 -c conda-forge cadquery pytest
+conda activate cadflow
+python -m pip install -e . --no-deps
+```
+
+Avoid repairing a conflicted base conda environment in place.
+
 ## 可运行入口
 
-### 1. Workflow 入口
+### 1. One-command workflow demo
+
+```bash
+python examples/workflow/mounting_plate_demo.py
+```
+
+### 2. Python workflow API
 
 ```python
 from ai_native_cad import run_workflow
@@ -70,11 +129,11 @@ runs/mounting_plate_demo/
     model.step
     model.stl
   logs/
-    run.log
+    run.json
     generation.json
 ```
 
-### 2. 现有单零件 demo
+### 3. 现有单零件 demo
 
 ```bash
 python examples/parts/mounting_plate/model.py
@@ -90,7 +149,7 @@ python examples/assemblies/enclosure/parts/wall_bracket/model.py
 
 示例脚本默认把生成物写在自己的 `model.py` 同目录，例如 `examples/parts/mounting_plate/model.step`。用户 workflow 应显式传入 `output_dir`；未传时才使用 `runs/<instance_name>/` 作为 fallback。
 
-### 3. 程序化旧入口
+### 4. 程序化旧入口
 
 ```python
 from ai_native_cad.generator import get_part_spec
@@ -100,9 +159,9 @@ spec = get_part_spec("mounting_plate")
 result = run_part("mounting_plate", spec)
 ```
 
-### 4. FreeCAD/装配辅助
+### 5. FreeCAD/装配辅助
 
-FreeCAD handoff、TechDraw 和装配脚本仍在 `scripts/` 中，属于工程承接层，不是主 workflow 的强依赖。
+FreeCAD handoff、TechDraw 和装配脚本仍在 `scripts/` 中，属于工程承接层，不是主 workflow 的强依赖。当前 assembly 是初版 workflow scaffold：记录装配意图、生成 backend-neutral config、执行基础放置和包围盒验证，并输出 review/report；它不是成熟工业装配求解器。
 
 ## 当前 check_level
 
@@ -115,7 +174,7 @@ FreeCAD handoff、TechDraw 和装配脚本仍在 `scripts/` 中，属于工程�
 ## 项目结构
 
 ```text
-llm2cad/
+CadFlow/
   README.md
   pyproject.toml
   docs/
@@ -175,7 +234,7 @@ llm2cad/
 
 ## 设计边界
 
-当前阶段不做完整工业 CAD 替代、复杂自由曲面、正式工程图自动标注、完整 GD&T、FEA、工业级 DFM 或安全关键件自动设计放行。CadQuery 是当前默认后端，FreeCAD 用作工程承接平台，未来可并行接入其他 CAD backend。
+当前阶段不做完整工业 CAD 替代、复杂自由曲面、成熟几何装配约束求解、自动任意 CAD 配合推断、正式工程图自动标注、完整 GD&T、FEA、工业级 DFM/DFA、运动仿真或安全关键件自动设计放行。CadQuery 是当前默认后端，FreeCAD 用作工程承接平台，未来可并行接入其他 CAD backend。
 
 ## Skill 结构
 
@@ -184,7 +243,7 @@ llm2cad/
 - `skills/requirement/`：需求澄清、产品意图、早期拆解、等级字段策略和缺失信息回问。
 - `skills/planning/`：设计分析、workflow routing、基准/接口、风险和确认 gate。
 - `skills/part_modeling/`：模板选择、参数化、单零件生成闭环和零件级检查。
-- `skills/assembly/`：装配 plan、确认 gate、约束、间隙和验证意图。
+- `skills/assembly/`：装配 plan、确认 gate、轻量放置/约束意图、间隙记录和基础验证意图。
 - `skills/review/`：按 check_level 审查。
 
 输出和导出路径是共享 contract，见 `policies/output_contract.md`，不再作为单独 skill。

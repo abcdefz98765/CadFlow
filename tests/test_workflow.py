@@ -20,7 +20,7 @@ def test_workflow_mounting_plate_outputs(tmp_output_dir):
     assert (root / "review.md").exists()
     assert (root / "exports" / "model.step").exists()
     assert (root / "exports" / "model.stl").exists()
-    assert (root / "logs" / "run.log").exists()
+    assert (root / "logs" / "run.json").exists()
     assert (root / "logs" / "generation.json").exists()
 
     review = Path(result.review_path).read_text(encoding="utf-8")

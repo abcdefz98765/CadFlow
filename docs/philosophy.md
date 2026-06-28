@@ -4,6 +4,10 @@
 
 CAD 生成不是一次 prompt 的结果，而是一条可检查的工程记录。输入、需求、设计分析、零件生成、装配、审查、导出和日志都应该保留下来。
 
+```text
+input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
+```
+
 ## Backend Agnostic
 
 CadQuery 是当前 MVP 后端，不是产品边界。workflow 层不能直接绑定某个 CAD 工具，未来可以接入 build123d、FreeCAD API、JSCAD 或 replicad。
@@ -11,6 +15,8 @@ CadQuery 是当前 MVP 后端，不是产品边界。workflow 层不能直接绑
 ## Engineering over Geometry
 
 项目优先处理工程意图：用途、关键尺寸、孔位、安装面、零件/参考件、接口、制造方式、检查等级和假设。几何只是这些决策的表达。
+
+当前 assembly 是初版 workflow scaffold：记录装配意图、区分制造件和参考件、生成 backend-neutral config，并做基础放置/包围盒验证和 review/report。它不是成熟工业装配约束求解器，也不覆盖任意 CAD mating 推断、完整 tolerance stack-up、工业 DFA、运动仿真或生产级 release。
 
 ## Traceable by Default
 
@@ -39,3 +45,5 @@ logs/
 ## Current Bias
 
 短期宁愿做一个窄而清晰、可运行、可追踪的自然语言 CAD MVP，也不扩张成笼统的 AI 工程平台。
+
+当前自然语言解析是 template-backed deterministic MVP；未知或信息不足的请求可能回退到内置零件模板。输出适合探索和 review，制造或真实使用前必须人工复核。

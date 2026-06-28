@@ -2,7 +2,7 @@
 
 ## 1. 产品定位
 
-本项目是一个开源的 Workflow-first 自然语言参数化 CAD 建模工具。用户通过自然语言描述机械零件或简单结构，系统将需求转化为结构化设计说明、建模计划、参数化 CAD 代码、审查报告和可打开的模型导出文件。
+CadFlow 是一个开源的 workflow-first 自然语言参数化 CAD 建模工具。用户通过自然语言描述机械零件或简单结构，系统将需求转化为结构化设计说明、建模计划、参数化 CAD 代码、审查报告和可打开的模型导出文件。
 
 项目不是单纯的 Prompt to CAD，也不是 Prompt to STL，更不是宏大的 AI Engineering OS。当前阶段聚焦一个可运行、可追踪、可扩展后端的自然语言 CAD MVP。
 
@@ -26,7 +26,8 @@ project/
     model.step
     model.stl
   logs/
-    run.log
+    run.json
+    generation.json
 ```
 
 ## 3. 当前版本目标
@@ -55,7 +56,7 @@ V0/V1 聚焦自然语言参数化建模：
 
 ### Assembly
 
-负责装配 plan、确认 gate、零件关系、contacts、clearances、constraints 和 backend-neutral assembly config。
+负责装配 plan、确认 gate、零件关系、contacts、clearances、轻量 placement/constraint intent 和 backend-neutral assembly config。当前 assembly 是初版 planning/config/validation workflow scaffold，不是成熟几何约束求解器或工业装配系统。
 
 ### Reviewer
 
@@ -91,7 +92,7 @@ V0/V1 聚焦自然语言参数化建模：
 
 ### L2 Engineering
 
-预留：装配间隙、材料、制造方式、公差和基础工程约束。
+预留：装配间隙、材料、制造方式、公差和基础工程约束。预留不代表当前工程放行。
 
 ### L3 Industrial
 
@@ -117,6 +118,7 @@ V0/V1 聚焦自然语言参数化建模：
 - 完整工业 CAD 替代。
 - 复杂自由曲面建模。
 - 完整装配设计自动化。
+- 成熟几何装配约束求解、任意 CAD mating 自动推断、完整 tolerance stack-up、工业 DFA 和运动仿真。
 - 正式工程图自动标注。
 - 完整 GD&T。
 - FEA。
@@ -129,6 +131,7 @@ V0/V1 聚焦自然语言参数化建模：
 - `examples/parts/mounting_plate/model.py` 可运行。
 - `examples/parts/circular_button/model.py` 可运行，并保留开关触点/线束出口。
 - workflow 可输出 `input.md`、`requirement.json`、`plan.md`、`model.py`、`review.md`、`exports/`、`logs/`。
+- `python examples/workflow/mounting_plate_demo.py` 可一键运行 workflow demo。
 - 至少 STEP/STL 可导出。
 - 现有示例和测试不被破坏。
 - 文档、PRD、架构、roadmap 和 philosophy 指向同一产品方向。
