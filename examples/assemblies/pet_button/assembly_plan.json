@@ -1,0 +1,123 @@
+{
+  "name": "pet_button_assembly",
+  "check_level": "L0",
+  "status": "ready_for_assembly_config",
+  "confirmation_gate": {
+    "policy": "pause_only_for_high_risk_topology",
+    "needs_user_confirmation": false,
+    "high_risk_topics": [
+      "switch",
+      "wire_exit"
+    ],
+    "unresolved_questions": []
+  },
+  "manufactured_parts": [
+    {
+      "name": "pet_button_base",
+      "kind": "manufactured",
+      "assembly_role": "base",
+      "datum": "bottom_z",
+      "mating_faces": [],
+      "placement_intent": "Fixed base with electronics cavity, actuator window, and side wire outlet."
+    },
+    {
+      "name": "pet_button_switch_plate",
+      "kind": "manufactured",
+      "assembly_role": "carrier",
+      "datum": "bottom_z",
+      "mating_faces": [],
+      "placement_intent": "Switch carrier sits in the underside cavity and locates the tactile switch."
+    },
+    {
+      "name": "pet_button_cap",
+      "kind": "manufactured",
+      "assembly_role": "moving_actuator",
+      "datum": "bottom_z",
+      "mating_faces": [],
+      "placement_intent": "Moving cap enters the base recess and presses the switch stem through the actuator window."
+    }
+  ],
+  "reference_components": [
+    {
+      "name": "pet_button_tactile_switch",
+      "kind": "reference",
+      "assembly_role": "switch_reference",
+      "datum": "bottom_z",
+      "mating_faces": [],
+      "placement_intent": "Reference envelope for a 6x6 mm tactile switch and terminals."
+    }
+  ],
+  "placement_intent": [
+    {
+      "part": "pet_button_base",
+      "role": "base",
+      "datum": "bottom_z",
+      "intent": "Fixed base with electronics cavity, actuator window, and side wire outlet."
+    },
+    {
+      "part": "pet_button_switch_plate",
+      "role": "carrier",
+      "datum": "bottom_z",
+      "intent": "Switch carrier sits in the underside cavity and locates the tactile switch."
+    },
+    {
+      "part": "pet_button_tactile_switch",
+      "role": "switch_reference",
+      "datum": "bottom_z",
+      "intent": "Reference envelope for a 6x6 mm tactile switch and terminals."
+    },
+    {
+      "part": "pet_button_cap",
+      "role": "moving_actuator",
+      "datum": "bottom_z",
+      "intent": "Moving cap enters the base recess and presses the switch stem through the actuator window."
+    }
+  ],
+  "required_contacts": [
+    {
+      "part1": "pet_button_switch_plate",
+      "part2": "pet_button_tactile_switch",
+      "axis": "z",
+      "intent": "tactile switch body is seated on the switch carrier"
+    }
+  ],
+  "required_clearances": [
+    {
+      "part1": "pet_button_base",
+      "part2": "wire_harness",
+      "clearance_mm": 0.5,
+      "intent": "wire outlet keeps routing clearance"
+    }
+  ],
+  "allowed_overlaps": [
+    {
+      "part1": "pet_button_base",
+      "part2": "pet_button_cap",
+      "reason": "cap skirt and actuator stem intentionally enter the base recess and switch window"
+    },
+    {
+      "part1": "pet_button_base",
+      "part2": "pet_button_switch_plate",
+      "reason": "switch carrier sits inside the underside electronics cavity"
+    },
+    {
+      "part1": "pet_button_switch_plate",
+      "part2": "pet_button_tactile_switch",
+      "reason": "switch reference body sits in the carrier pocket"
+    },
+    {
+      "part1": "pet_button_base",
+      "part2": "pet_button_tactile_switch",
+      "reason": "switch is mounted inside the base below the actuator window"
+    }
+  ],
+  "serviceability": [
+    "Keep the tactile switch reachable until the design explicitly chooses a sealed assembly.",
+    "Keep the wire exit direction and bend relief traceable in the assembly plan."
+  ],
+  "assumptions": [
+    "Uses a generic 6x6 mm tactile switch reference envelope.",
+    "The current assembly is an L0 concept, not a sealed or chew-proof product."
+  ],
+  "risk_level": "low"
+}

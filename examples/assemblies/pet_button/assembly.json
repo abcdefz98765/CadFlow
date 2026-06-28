@@ -1,0 +1,45 @@
+{
+  "name": "pet_button_assembly",
+  "output_dir": "examples/assemblies/pet_button",
+  "validation": {
+    "anchors": ["pet_button_base"],
+    "contact_tolerance": 0.2,
+    "min_clearance": 0.5,
+    "allowed_bbox_overlaps": [
+      {
+        "part1": "pet_button_base",
+        "part2": "pet_button_cap",
+        "reason": "cap skirt and actuator stem intentionally enter the base recess and switch window"
+      },
+      {
+        "part1": "pet_button_base",
+        "part2": "pet_button_switch_plate",
+        "reason": "switch carrier sits inside the underside electronics cavity"
+      },
+      {
+        "part1": "pet_button_switch_plate",
+        "part2": "pet_button_tactile_switch",
+        "reason": "switch reference body sits in the carrier pocket"
+      },
+      {
+        "part1": "pet_button_base",
+        "part2": "pet_button_tactile_switch",
+        "reason": "switch is mounted inside the base below the actuator window"
+      }
+    ],
+    "required_contacts": [
+      {
+        "part1": "pet_button_switch_plate",
+        "part2": "pet_button_tactile_switch",
+        "axis": "z",
+        "intent": "tactile switch body is seated on the switch carrier"
+      }
+    ]
+  },
+  "parts": [
+    {"step": "examples/assemblies/pet_button/parts/pet_button_base/model.step", "name": "pet_button_base", "position": [0, 0, 0], "rotation": [0, 0, 0]},
+    {"step": "examples/assemblies/pet_button/parts/pet_button_switch_plate/model.step", "name": "pet_button_switch_plate", "position": [0, 0, 2.0], "rotation": [0, 0, 0]},
+    {"step": "examples/assemblies/pet_button/parts/pet_button_tactile_switch/model.step", "name": "pet_button_tactile_switch", "position": [0, 0, 4.0], "rotation": [0, 0, 0]},
+    {"step": "examples/assemblies/pet_button/parts/pet_button_cap/model.step", "name": "pet_button_cap", "position": [0, 0, 16.0], "rotation": [0, 0, 0]}
+  ]
+}

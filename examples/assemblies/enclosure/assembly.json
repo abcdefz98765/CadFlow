@@ -1,0 +1,33 @@
+{
+    "name": "enclosure_assembly",
+    "output_dir": "examples/assemblies/enclosure",
+    "validation": {
+        "anchors": ["enclosure_base"],
+        "contact_tolerance": 0.15,
+        "min_clearance": 0.5,
+        "allowed_bbox_overlaps": [
+            {"part1": "enclosure_base", "part2": "spacer_*", "reason": "spacers sit inside the enclosure cavity and on top of bosses"},
+            {"part1": "enclosure_base", "part2": "enclosure_lid", "reason": "lid touches the top rim; STEP/bbox tolerances can create tiny overlap"},
+            {"part1": "enclosure_base", "part2": "wall_bracket_*", "reason": "brackets mount to the outer side wall"}
+        ],
+        "allowed_close_clearances": [
+            {"part1": "enclosure_base", "part2": "enclosure_lid", "reason": "nominal 0.5mm lid/base gap can report as 0.495mm after STEP/bbox tolerance"}
+        ],
+        "required_contacts": [
+            {"part1": "enclosure_lid", "part2": "spacer_a", "axis": "z", "intent": "lid is supported by spacer_a"},
+            {"part1": "enclosure_lid", "part2": "spacer_b", "axis": "z", "intent": "lid is supported by spacer_b"},
+            {"part1": "enclosure_lid", "part2": "spacer_c", "axis": "z", "intent": "lid is supported by spacer_c"},
+            {"part1": "enclosure_lid", "part2": "spacer_d", "axis": "z", "intent": "lid is supported by spacer_d"}
+        ]
+    },
+    "parts": [
+        {"step": "examples/assemblies/enclosure/parts/enclosure_base/model.step", "name": "enclosure_base", "position": [0, 0, 0], "rotation": [0, 0, 0]},
+        {"step": "examples/assemblies/enclosure/parts/spacer/model.step", "name": "spacer_a", "position": [40, 20, 5.5], "rotation": [0, 0, 0]},
+        {"step": "examples/assemblies/enclosure/parts/spacer/model.step", "name": "spacer_b", "position": [-40, 20, 5.5], "rotation": [0, 0, 0]},
+        {"step": "examples/assemblies/enclosure/parts/spacer/model.step", "name": "spacer_c", "position": [-40, -20, 5.5], "rotation": [0, 0, 0]},
+        {"step": "examples/assemblies/enclosure/parts/spacer/model.step", "name": "spacer_d", "position": [40, -20, 5.5], "rotation": [0, 0, 0]},
+        {"step": "examples/assemblies/enclosure/parts/enclosure_lid/model.step", "name": "enclosure_lid", "position": [0, 0, 25.5], "rotation": [0, 0, 0]},
+        {"step": "examples/assemblies/enclosure/parts/wall_bracket_left/model.step", "name": "wall_bracket_left", "position": [-50, 0, 0], "rotation": [0, 0, 0]},
+        {"step": "examples/assemblies/enclosure/parts/wall_bracket_right/model.step", "name": "wall_bracket_right", "position": [50, 0, 0], "rotation": [0, 0, 0]}
+    ]
+}

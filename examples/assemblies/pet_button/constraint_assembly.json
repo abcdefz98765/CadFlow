@@ -1,0 +1,17 @@
+{
+  "name": "pet_button_constraint_assembly",
+  "output_dir": "examples/assemblies/pet_button/constraint_assembly",
+  "check_interference": false,
+  "parts": [
+    {"step": "examples/assemblies/pet_button/parts/pet_button_base/model.step", "name": "pet_button_base"},
+    {"step": "examples/assemblies/pet_button/parts/pet_button_switch_plate/model.step", "name": "pet_button_switch_plate"},
+    {"step": "examples/assemblies/pet_button/parts/pet_button_tactile_switch/model.step", "name": "pet_button_tactile_switch"},
+    {"step": "examples/assemblies/pet_button/parts/pet_button_cap/model.step", "name": "pet_button_cap"}
+  ],
+  "constraints": [
+    {"name": "fix_base", "type": "fixed", "part1": "pet_button_base", "position": [0, 0, 0], "rotation": [0, 0, 0]},
+    {"name": "switch_plate_in_cavity", "type": "fixed", "part1": "pet_button_switch_plate", "position": [0, 0, 2.0], "rotation": [0, 0, 0]},
+    {"name": "tactile_switch_on_plate", "type": "fixed", "part1": "pet_button_tactile_switch", "position": [0, 0, 4.0], "rotation": [0, 0, 0]},
+    {"name": "cap_in_recess", "type": "fixed", "part1": "pet_button_cap", "position": [0, 0, 16.0], "rotation": [0, 0, 0]}
+  ]
+}

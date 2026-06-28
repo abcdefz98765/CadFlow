@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build/package metadata
+*.egg-info/
+build/
+dist/
+src/*.egg-info/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.crt
+secrets.*
+credentials.*
+local_config.*
+config.local.*
+
+# Logs / cache / temp
+*.log
+*.cache
+.cache/
+tmp/
+temp/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Project generated outputs
+outputs/
+runs/
+tmp_outputs/
+generated/
+exports/
+
+# Generated CAD/example artifacts
+# Keep source examples/configs in the repo; regenerate models locally.
+examples/**/*.step
+examples/**/*.stl
+examples/**/*.FCStd
+examples/**/report.json
+examples/**/report.md
+examples/**/assembly_report.json
+examples/**/assembly_validation.json
+examples/**/assembly_validation.md
+examples/**/bom.csv

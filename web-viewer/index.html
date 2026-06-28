@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Native CAD — STL 预览</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+
+  #toolbar {
+    position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 8px; z-index: 10;
+    background: rgba(30,30,50,0.9); border-radius: 10px;
+    padding: 8px 16px; backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  #toolbar button {
+    background: rgba(255,255,255,0.08); color: #ccc;
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+    padding: 6px 14px; font-size: 13px; cursor: pointer;
+    transition: background 0.15s;
+  }
+  #toolbar button:hover { background: rgba(255,255,255,0.18); }
+  #toolbar button.active { background: #4fc3f7; color: #111; border-color: #4fc3f7; }
+
+  #info {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    z-index: 10; color: #888; font-size: 12px;
+    background: rgba(30,30,50,0.85); border-radius: 8px;
+    padding: 6px 16px; backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.08);
+    pointer-events: none;
+  }
+
+  #drop-zone {
+    position: fixed; inset: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none; opacity: 0; transition: opacity 0.2s;
+    background: rgba(79,195,247,0.12);
+    border: 2px dashed rgba(79,195,247,0.4); margin: 20px; border-radius: 16px;
+  }
+  #drop-zone.visible { opacity: 1; }
+  #drop-zone span {
+    color: #4fc3f7; font-size: 20px; font-weight: 600;
+  }
+
+  #loading {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    z-index: 15; color: #888; font-size: 16px; display: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="btn-wireframe" title="线框模式">线框</button>
+  <button id="btn-grid" class="active" title="参考网格">网格</button>
+  <button id="btn-reset" title="重置视角">重置</button>
+</div>
+
+<div id="drop-zone"><span>拖放 STL 文件到此处</span></div>
+<div id="loading">加载中…</div>
+<div id="info">AI Native CAD Skill — STL 预览</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+
+// ── Scene setup ──────────────────────────────────────────────────────
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a2e);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.5, 2000);
+camera.position.set(120, 80, 120);
+camera.lookAt(0, 20, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// ── Controls ─────────────────────────────────────────────────────────
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 20, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.update();
+
+// ── Lights ───────────────────────────────────────────────────────────
+
+const ambient = new THREE.AmbientLight(0x404060, 1.5);
+scene.add(ambient);
+
+const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
+keyLight.position.set(100, 200, 100);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(1024, 1024);
+scene.add(keyLight);
+
+const fillLight = new THREE.DirectionalLight(0x8090c0, 1.0);
+fillLight.position.set(-60, 40, -40);
+scene.add(fillLight);
+
+const rimLight = new THREE.DirectionalLight(0xffffff, 0.8);
+rimLight.position.set(0, 10, -100);
+scene.add(rimLight);
+
+// ── Grid ─────────────────────────────────────────────────────────────
+
+const grid = new THREE.GridHelper(200, 40, 0x444466, 0x2a2a3a);
+grid.position.y = 0;
+let gridVisible = true;
+scene.add(grid);
+
+// ── Model container ──────────────────────────────────────────────────
+
+let modelMesh = null;
+const material = new THREE.MeshPhongMaterial({
+  color: 0x4fc3f7,
+  specular: 0x222222,
+  shininess: 25,
+  flatShading: false,
+});
+const wireframeMaterial = new THREE.MeshPhongMaterial({
+  color: 0x4fc3f7,
+  wireframe: true,
+});
+let wireframeMode = false;
+
+function loadSTL(url) {
+  const loadingEl = document.getElementById('loading');
+  loadingEl.style.display = 'block';
+
+  const loader = new STLLoader();
+  loader.load(url, (geometry) => {
+    if (modelMesh) {
+      scene.remove(modelMesh);
+      if (modelMesh.geometry) modelMesh.geometry.dispose();
+    }
+
+    geometry.computeVertexNormals();
+    geometry.center();
+
+    // Rotate from CAD Z-up to three.js Y-up
+    geometry.rotateX(-Math.PI / 2);
+    geometry.computeBoundingBox();
+    const bbox = geometry.boundingBox;
+
+    // Place model base on grid (Y=0)
+    geometry.translate(0, -bbox.min.y, 0);
+
+    modelMesh = new THREE.Mesh(geometry, wireframeMode ? wireframeMaterial : material);
+    modelMesh.castShadow = true;
+    modelMesh.receiveShadow = true;
+    scene.add(modelMesh);
+
+    // Auto-fit camera (Y = vertical after rotation)
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const dist = maxDim * 1.8;
+    camera.position.set(dist * 0.7, dist * 0.4, dist * 0.7);
+    controls.target.set(0, size.y / 2, 0);
+    controls.update();
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('info').textContent =
+      `尺寸: ${size.x.toFixed(1)} × ${size.z.toFixed(1)} × ${size.y.toFixed(1)} mm (L×W×H)`;
+  }, undefined, () => {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('info').textContent = '加载失败 — 请检查文件路径或格式';
+  });
+}
+
+// ── Toolbar buttons ──────────────────────────────────────────────────
+
+document.getElementById('btn-wireframe').addEventListener('click', function() {
+  wireframeMode = !wireframeMode;
+  this.classList.toggle('active', wireframeMode);
+  if (modelMesh) {
+    modelMesh.material = wireframeMode ? wireframeMaterial : material;
+  }
+});
+
+document.getElementById('btn-grid').addEventListener('click', function() {
+  gridVisible = !gridVisible;
+  this.classList.toggle('active', gridVisible);
+  grid.visible = gridVisible;
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  if (modelMesh && modelMesh.geometry.boundingBox) {
+    const size = new THREE.Vector3();
+    modelMesh.geometry.boundingBox.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const dist = maxDim * 2;
+    camera.position.set(dist * 0.7, dist * 0.4, dist * 0.7);
+    controls.target.set(0, size.y / 2, 0);
+    controls.update();
+  }
+});
+
+// ── Drag & drop ──────────────────────────────────────────────────────
+
+const dropZone = document.getElementById('drop-zone');
+document.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('visible'); });
+document.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.classList.remove('visible'); });
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('visible');
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.toLowerCase().endsWith('.stl')) {
+    const url = URL.createObjectURL(file);
+    loadSTL(url);
+  }
+});
+
+// ── URL parameter ────────────────────────────────────────────────────
+
+const params = new URLSearchParams(window.location.search);
+const fileParam = params.get('file');
+if (fileParam) {
+  loadSTL(fileParam);
+}
+
+// ── Keyboard ─────────────────────────────────────────────────────────
+
+document.addEventListener('keydown', (e) => {
+  switch (e.key.toLowerCase()) {
+    case 'w': document.getElementById('btn-wireframe').click(); break;
+    case 'g': document.getElementById('btn-grid').click(); break;
+    case 'r': document.getElementById('btn-reset').click(); break;
+  }
+});
+
+// ── Render loop ──────────────────────────────────────────────────────
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ── Resize ───────────────────────────────────────────────────────────
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
