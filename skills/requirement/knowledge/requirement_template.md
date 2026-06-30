@@ -34,3 +34,19 @@ Minimum structure for `requirement.json`:
 - Functional features: holes, pockets, caps, wire exits, fastener interfaces, switch/sensor envelopes, and other design-driving features.
 - Manufacturing context: process, material family, printability, machining, or sheet/laser constraints.
 - Engineering constraints: tolerances, surface finish by functional face, loads, environment, inspection, and standards.
+
+## Phase 2 Deterministic Parser Coverage
+
+The natural-language parser may fill CAD IR fields only through conservative
+rules. It currently extracts:
+
+- mounting plate length/width/thickness and simple hole specs, including four
+  corner M-size holes
+- spacer or washer outer diameter, inner diameter, and thickness
+- simple L-bracket base length, base width, height, thickness, and basic holes
+- enclosure base outer length, outer width, outer height, wall thickness, and
+  requested STEP/STL outputs
+
+Unsupported or incomplete fields must remain explicit in `missing_information`.
+L0 may keep template defaults for exploratory generation, but the parser must
+record which dimensions were extracted from text and which were not.

@@ -1,0 +1,88 @@
+from ai_native_cad.cad_ir import ir_from_text, validate_ir
+from ai_native_cad.requirements import RequirementAgent
+
+
+def test_parser_extracts_mounting_plate_dimensions_and_four_corner_holes():
+    requirement = RequirementAgent().parse(
+        "Generate an 80x40x5 mm mounting plate with four M4 holes in the corners."
+    )
+
+    assert requirement["part_type"] == "mounting_plate"
+    assert requirement["dimensions"] == {"length": 80.0, "width": 40.0, "thickness": 5.0}
+    assert requirement["features"]["holes"]["count"] == 4
+    assert requirement["features"]["holes"]["diameter"] == 4.5
+    assert requirement["features"]["holes"]["positions"] == "corner_4"
+    assert requirement["missing_information"] == []
+    assert validate_ir(ir_from_text("Generate an 80x40x5 mm mounting plate with four M4 holes in the corners."))["valid"]
+
+
+def test_parser_extracts_spacer_od_id_thickness():
+    requirement = RequirementAgent().parse("Make a spacer washer with OD 12 mm, ID 6.5 mm, thickness 20 mm.")
+
+    assert requirement["part_type"] == "spacer"
+    assert requirement["dimensions"] == {"outer_diameter": 12.0, "inner_diameter": 6.5, "thickness": 20.0}
+    assert requirement["missing_information"] == []
+    assert validate_ir(ir_from_text("Make a spacer washer with OD 12 mm, ID 6.5 mm, thickness 20 mm."))["valid"]
+
+
+def test_parser_extracts_simple_l_bracket_dimensions():
+    requirement = RequirementAgent().parse(
+        "Create a simple L-bracket with base length 60 mm, base width 30 mm, height 45 mm, thickness 4 mm."
+    )
+
+    assert requirement["part_type"] == "simple_bracket"
+    assert requirement["dimensions"] == {
+        "base_length": 60.0,
+        "base_width": 30.0,
+        "height": 45.0,
+        "thickness": 4.0,
+    }
+    assert requirement["missing_information"] == []
+    assert validate_ir(ir_from_text(
+        "Create a simple L-bracket with base length 60 mm, base width 30 mm, height 45 mm, thickness 4 mm."
+    ))["valid"]
+
+
+def test_parser_extracts_enclosure_base_dimensions_and_wall_thickness():
+    requirement = RequirementAgent().parse(
+        "Build an enclosure base 100x60x25 mm with wall thickness 2 mm and STEP output."
+    )
+
+    assert requirement["part_type"] == "enclosure_base"
+    assert requirement["dimensions"] == {
+        "outer_length": 100.0,
+        "outer_width": 60.0,
+        "outer_height": 25.0,
+        "wall_thickness": 2.0,
+    }
+    assert requirement["outputs"] == ["step"]
+    assert requirement["missing_information"] == []
+    assert validate_ir(ir_from_text("Build an enclosure base 100x60x25 mm with wall thickness 2 mm."))["valid"]
+
+
+def test_parser_reports_missing_dimensions_without_blocking_l0_template_generation():
+    requirement = RequirementAgent().parse("Make a mounting plate.")
+
+    missing_fields = {item["field"] for item in requirement["missing_information"]}
+    assert missing_fields == {"dimensions.length", "dimensions.thickness", "dimensions.width"}
+    assert requirement["follow_up_questions"] == []
+    assert requirement["requirement_status"] == {
+        "complete_for_generation": True,
+        "needs_user_input": False,
+        "blocking_fields": [],
+    }
+    assert requirement["assumptions"]
+    assert validate_ir(ir_from_text("Make a mounting plate."))["valid"]
+
+
+def test_parser_marks_missing_dimensions_blocking_for_l1():
+    requirement = RequirementAgent().parse("Make a mounting plate.", {"check_level": "L1"})
+
+    assert requirement["requirement_status"]["complete_for_generation"] is False
+    assert requirement["requirement_status"]["needs_user_input"] is True
+    assert set(requirement["requirement_status"]["blocking_fields"]) == {
+        "dimensions.length",
+        "dimensions.thickness",
+        "dimensions.width",
+    }
+    assert len(requirement["follow_up_questions"]) == 4

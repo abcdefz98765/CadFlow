@@ -14,6 +14,7 @@ _PART_TYPES = (
     "enclosure_base",
     "enclosure_lid",
     "spacer",
+    "simple_bracket",
     "wall_bracket",
 )
 
@@ -201,6 +202,15 @@ def get_part_spec(part_type: str) -> dict:
             "part_type": "spacer",
             "dimensions": {"outer_diameter": 12.0, "inner_diameter": 6.5, "thickness": 20.0},
             "features": {},
+            "outputs": ["step", "stl"],
+        },
+        "simple_bracket": {
+            "part_type": "simple_bracket",
+            "dimensions": {"base_length": 60.0, "base_width": 30.0, "height": 40.0, "thickness": 4.0},
+            "features": {
+                "base_holes": {"diameter": 4.0, "count": 2, "offset_from_edge": 15.0},
+                "fillet": {"radius": 1.5},
+            },
             "outputs": ["step", "stl"],
         },
         "wall_bracket": {

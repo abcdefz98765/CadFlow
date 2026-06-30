@@ -28,6 +28,8 @@ Examples:
 - L0 size defaults from a known part template.
 - L0 material is unspecified.
 - L0 surface finish is unspecified.
+- L0 supported part templates may still generate from defaults when dimensions
+  are absent, but `missing_information` must list the absent dimension fields.
 
 ## Defer
 

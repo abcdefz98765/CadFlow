@@ -152,10 +152,12 @@
 - 新增 `src/ai_native_cad/requirements.py`，把需求层从 workflow 中拆出为 Requirement Agent。
 - 新增 `skills/requirement/`，沉淀需求模板、字段等级和缺失信息策略。
 - `requirement.json` 开始记录 `intent`、`field_policy`、`missing_information`、`follow_up_questions`、`requirement_status`。
+- 当前 parser 已能用确定性规则抽取 mounting_plate、spacer/washer、simple L-bracket、enclosure_base 的关键尺寸、部分孔规格、单位和 STEP/STL 输出请求。
+- 对未从文本或 overrides 明确给出的必需尺寸，`missing_information` 会记录具体 `dimensions.*` 字段；L0 可保留模板默认值探索生成，L1+ 会要求用户补全关键尺寸。
 
 后续任务：
 
-- 更可靠地抽取尺寸、孔位、厚度、单位和输出格式。
+- 扩展确定性抽取覆盖更多尺寸表达、孔位表达、厚度表达、单位和输出格式组合。
 - 为复杂输入增加 CAD Brief：记录建模意图、坐标约定、假设、冲突和验证目标，再落到 CAD IR。
 - 将自然语言稳定转为 CAD IR，而不是直接生成 CadQuery 代码。
 - 对关键缺失信息进入多轮用户补全。
