@@ -18,11 +18,17 @@ Minimum structure for `requirement.json`:
   "field_policy": {},
   "missing_information": [],
   "follow_up_questions": [],
+  "follow_up_requests": [],
   "assumptions": [],
   "requirement_status": {
     "complete_for_generation": true,
     "needs_user_input": false,
-    "blocking_fields": []
+    "blocking_fields": [],
+    "missing_count": 0,
+    "follow_up_count": 0,
+    "blocking_count": 0,
+    "missing_fields": [],
+    "non_blocking_fields": []
   }
 }
 ```
@@ -54,3 +60,7 @@ record which dimensions were extracted from text and which were not.
 Parser diagnostics must record high-risk ambiguity, such as unsupported inch
 units or conflicting dimension statements. These diagnostics should become
 missing information instead of silently changing CAD IR values.
+
+`follow_up_questions` remains a compatibility list of question strings.
+`follow_up_requests` is the machine-readable form and must include field,
+category, code, question, severity, reason, and source.

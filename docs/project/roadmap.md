@@ -151,10 +151,11 @@
 
 - 新增 `src/ai_native_cad/requirements.py`，把需求层从 workflow 中拆出为 Requirement Agent。
 - 新增 `skills/requirement/`，沉淀需求模板、字段等级和缺失信息策略。
-- `requirement.json` 开始记录 `intent`、`field_policy`、`missing_information`、`follow_up_questions`、`requirement_status`。
+- `requirement.json` 开始记录 `intent`、`field_policy`、`missing_information`、`follow_up_questions`、`follow_up_requests`、`requirement_status`。
 - 当前 parser 已能用确定性规则抽取 mounting_plate、spacer/washer、simple L-bracket、enclosure_base 的关键尺寸、部分孔规格、单位和 STEP/STL 输出请求。
 - 对未从文本或 overrides 明确给出的必需尺寸，`missing_information` 会记录具体 `dimensions.*` 字段；L0 可保留模板默认值探索生成，L1+ 会要求用户补全关键尺寸。
 - 当前 parser 会把 unsupported inch units 和冲突尺寸记录为 diagnostics，并转入 missing information，而不是猜测 CAD IR。
+- `follow_up_questions` 保持字符串兼容字段，`follow_up_requests` 提供 field/category/code/source/reason 等机器可读补全请求。
 
 后续任务：
 

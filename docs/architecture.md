@@ -181,6 +181,7 @@ examples/ir_pipeline/<part_name>/outputs/
 - `field_policy`
 - `missing_information`
 - `follow_up_questions`
+- `follow_up_requests`
 - `requirement_status`
 - `assumptions`
 
@@ -350,14 +351,25 @@ industrial DFA, motion simulation, or production-ready assembly release.
   "field_policy": {},
   "missing_information": [],
   "follow_up_questions": [],
+  "follow_up_requests": [],
   "assumptions": [],
   "requirement_status": {
     "complete_for_generation": true,
     "needs_user_input": false,
-    "blocking_fields": []
+    "blocking_fields": [],
+    "missing_count": 0,
+    "follow_up_count": 0,
+    "blocking_count": 0,
+    "missing_fields": [],
+    "non_blocking_fields": []
   }
 }
 ```
+
+`follow_up_questions` is kept as a compatibility list of strings.
+`follow_up_requests` is the structured clarification contract for agents and
+UIs; each item carries `field`, `category`, `code`, `question`, `severity`,
+`reason`, and `source`.
 
 ### input_ir.json
 

@@ -65,12 +65,15 @@ def test_parser_reports_missing_dimensions_without_blocking_l0_template_generati
 
     missing_fields = {item["field"] for item in requirement["missing_information"]}
     assert missing_fields == {"dimensions.length", "dimensions.thickness", "dimensions.width"}
+    assert {item["category"] for item in requirement["missing_information"]} == {"primary_dimensions"}
+    assert all(item["default_used"] is True for item in requirement["missing_information"])
     assert requirement["follow_up_questions"] == []
-    assert requirement["requirement_status"] == {
-        "complete_for_generation": True,
-        "needs_user_input": False,
-        "blocking_fields": [],
-    }
+    assert requirement["follow_up_requests"] == []
+    assert requirement["requirement_status"]["complete_for_generation"] is True
+    assert requirement["requirement_status"]["needs_user_input"] is False
+    assert requirement["requirement_status"]["blocking_fields"] == []
+    assert requirement["requirement_status"]["missing_count"] == 3
+    assert requirement["requirement_status"]["follow_up_count"] == 0
     assert requirement["assumptions"]
     assert validate_ir(ir_from_text("Make a mounting plate."))["valid"]
 
@@ -86,6 +89,17 @@ def test_parser_marks_missing_dimensions_blocking_for_l1():
         "dimensions.width",
     }
     assert len(requirement["follow_up_questions"]) == 4
+    assert len(requirement["follow_up_requests"]) == 4
+    dimension_requests = [
+        item for item in requirement["follow_up_requests"] if item["category"] == "primary_dimensions"
+    ]
+    assert {item["field"] for item in dimension_requests} == {
+        "dimensions.length",
+        "dimensions.thickness",
+        "dimensions.width",
+    }
+    assert requirement["requirement_status"]["blocking_count"] == 3
+    assert requirement["requirement_status"]["follow_up_count"] == 4
 
 
 def test_parser_extracts_named_dimensions_symbolic_hole_and_edge_offset():
@@ -109,6 +123,8 @@ def test_parser_reports_conflicting_dimensions_as_missing_information():
     diagnostics = requirement["source"]["parser"]["diagnostics"]
     assert diagnostics[0]["code"] == "conflicting_dimension"
     assert diagnostics[0]["field"] == "dimensions.length"
+    assert requirement["missing_information"][0]["category"] == "parser_diagnostic"
+    assert requirement["follow_up_requests"][0]["code"] == "conflicting_dimension"
     assert "dimensions.length" in requirement["requirement_status"]["blocking_fields"]
     assert requirement["requirement_status"]["complete_for_generation"] is False
 
@@ -119,5 +135,7 @@ def test_parser_reports_unsupported_inch_units_without_converting():
     diagnostics = requirement["source"]["parser"]["diagnostics"]
     assert diagnostics[0]["code"] == "unsupported_unit_in_text"
     assert requirement["source"]["parser"]["extracted_dimensions"] == []
+    assert requirement["follow_up_requests"][0]["field"] == "unit"
+    assert requirement["follow_up_requests"][0]["category"] == "parser_diagnostic"
     assert "unit" in requirement["requirement_status"]["blocking_fields"]
     assert requirement["requirement_status"]["complete_for_generation"] is False

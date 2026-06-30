@@ -137,6 +137,9 @@ class RequirementAgent:
         requirement["follow_up_questions"] = [
             item["question"] for item in requirement["missing_information"] if item.get("ask_user")
         ]
+        requirement["follow_up_requests"] = [
+            _follow_up_request(item) for item in requirement["missing_information"] if item.get("ask_user")
+        ]
         requirement["requirement_status"] = self._status(requirement)
         return requirement
 
@@ -203,6 +206,9 @@ class RequirementAgent:
                     "critical",
                     True,
                     diagnostic["message"],
+                    category="parser_diagnostic",
+                    source="parser",
+                    code=diagnostic["code"],
                 ))
         parsed_dimensions = set(requirement.get("source", {}).get("parser", {}).get("extracted_dimensions", []))
         for dimension in sorted(REQUIRED_REQUIREMENT_DIMENSIONS.get(requirement["part_type"], set())):
@@ -215,6 +221,11 @@ class RequirementAgent:
                 "critical",
                 level in {"L1", "L2", "L3", "L4"},
                 "Template defaults can support L0 exploration, but this dimension controls scale or fit.",
+                category="primary_dimensions",
+                source="parser",
+                code="missing_dimension",
+                default_used=dimension in requirement.get("dimensions", {}),
+                default_value=requirement.get("dimensions", {}).get(dimension),
             ))
         if not _has_dimension_hint(text) and "dimensions" not in overrides and not missing:
             missing.append(_question(
@@ -223,6 +234,9 @@ class RequirementAgent:
                 "critical",
                 level in {"L1", "L2", "L3", "L4"},
                 "Topology may stay valid, but scale and fit depend on these values.",
+                category="primary_dimensions",
+                source="parser",
+                code="missing_primary_dimensions",
             ))
         if level in {"L1", "L2", "L3", "L4"} and "manufacturing_process" not in requirement:
             missing.append(_question(
@@ -231,6 +245,9 @@ class RequirementAgent:
                 "important",
                 True,
                 "Manufacturing process changes wall thickness, clearances, and review checks.",
+                category="manufacturing_context",
+                source="field_policy",
+                code="missing_manufacturing_process",
             ))
         if level in {"L2", "L3", "L4"} and "material" not in requirement:
             missing.append(_question(
@@ -239,6 +256,9 @@ class RequirementAgent:
                 "important",
                 True,
                 "Material affects strength, process limits, tolerances, and surface expectations.",
+                category="manufacturing_context",
+                source="field_policy",
+                code="missing_material",
             ))
         if level in {"L2", "L3", "L4"} and "functional_tolerances" not in requirement:
             missing.append(_question(
@@ -247,6 +267,9 @@ class RequirementAgent:
                 "important",
                 True,
                 "Engineering-level models need tolerances only where they affect function.",
+                category="engineering_constraints",
+                source="field_policy",
+                code="missing_functional_tolerances",
             ))
         if level == "L4":
             missing.append(_question(
@@ -255,6 +278,9 @@ class RequirementAgent:
                 "critical",
                 True,
                 "Safety-critical workflows require explicit human approval and standards context.",
+                category="safety_review",
+                source="field_policy",
+                code="missing_human_signoff",
             ))
         return missing
 
@@ -268,6 +294,15 @@ class RequirementAgent:
             "complete_for_generation": not blocking or requirement["check_level"] == "L0",
             "needs_user_input": any(item.get("ask_user") for item in requirement["missing_information"]),
             "blocking_fields": blocking,
+            "missing_count": len(requirement["missing_information"]),
+            "follow_up_count": sum(1 for item in requirement["missing_information"] if item.get("ask_user")),
+            "blocking_count": len(blocking),
+            "missing_fields": [item["field"] for item in requirement["missing_information"]],
+            "non_blocking_fields": [
+                item["field"]
+                for item in requirement["missing_information"]
+                if not (item.get("ask_user") and item.get("severity") == "critical")
+            ],
         }
 
 
@@ -574,11 +609,41 @@ def _has_dimension_hint(text: str) -> bool:
     return any(token in lowered or token in text for token in ("mm", "cm", "diameter", "length", "width", "height", "直径", "长度", "宽度", "高度", "厚度", "尺寸"))
 
 
-def _question(field: str, question: str, severity: str, ask_user: bool, reason: str) -> dict[str, Any]:
-    return {
+def _question(
+    field: str,
+    question: str,
+    severity: str,
+    ask_user: bool,
+    reason: str,
+    category: str = "general",
+    source: str = "field_policy",
+    code: str = "missing_information",
+    default_used: bool = False,
+    default_value: Any | None = None,
+) -> dict[str, Any]:
+    item = {
         "field": field,
+        "category": category,
+        "code": code,
         "question": question,
         "severity": severity,
         "ask_user": ask_user,
         "reason": reason,
+        "source": source,
+        "default_used": default_used,
+    }
+    if default_used:
+        item["default_value"] = default_value
+    return item
+
+
+def _follow_up_request(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "field": item["field"],
+        "category": item["category"],
+        "code": item["code"],
+        "question": item["question"],
+        "severity": item["severity"],
+        "reason": item["reason"],
+        "source": item["source"],
     }
