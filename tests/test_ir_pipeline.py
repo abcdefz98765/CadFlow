@@ -141,3 +141,30 @@ def test_ir_pipeline_report_includes_mounting_plate_hole_inspection():
     assert holes["spacing"]["measured"]["y"] == 24.0
     assert "Holes: verified" in report_md
     assert "Hole spacing: verified" in report_md
+
+
+def test_ir_pipeline_report_includes_mounting_plate_chamfer_inspection():
+    ir = {
+        "part_type": "mounting_plate",
+        "part_name": "pytest_mounting_plate_chamfer_report",
+        "unit": "mm",
+        "dimensions": {"length": 80, "width": 40, "thickness": 5},
+        "features": {"chamfer": 1.0},
+        "outputs": ["step", "stl"],
+    }
+
+    result = run_ir_pipeline(ir, output_root=Path.cwd() / "outputs")
+    part_dir = Path(result["output_dir"])
+    report = json.loads((part_dir / "report.json").read_text(encoding="utf-8"))
+    report_md = (part_dir / "report.md").read_text(encoding="utf-8")
+
+    chamfers = report["inspection"]["features"]["chamfers"]
+    targets = {target["target"]: target for target in report["measured_validation_targets"]}
+    assert result["status"] == "success"
+    assert chamfers["status"] == "verified"
+    assert chamfers["measured"]["count"] == 4
+    assert chamfers["measured"]["size"] == 1.0
+    assert targets["chamfer_count"]["actual"] == 4
+    assert targets["chamfer_size"]["actual"] == 1.0
+    assert "Chamfers: verified" in report_md
+    assert "size 1.000 mm" in report_md
