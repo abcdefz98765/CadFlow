@@ -11,6 +11,7 @@ from ai_native_cad.cad_ir.schema import CADIR
 
 
 BOUNDING_BOX_TOLERANCE_MM = 0.2
+EXTREME_DIMENSION_DEVIATION_RATIO = 0.2
 
 
 def validate_pipeline_outputs(
@@ -67,6 +68,7 @@ def validate_pipeline_outputs(
         shape = model.val()
         bbox = shape.BoundingBox()
         volume = shape.Volume()
+        solids = shape.Solids()
     except Exception as exc:
         result["errors"].append({"code": "geometry_measurement_failed", "message": str(exc)})
         result["valid"] = False
@@ -82,11 +84,22 @@ def validate_pipeline_outputs(
     if volume <= 0:
         result["errors"].append({"code": "non_positive_volume", "message": "Generated model volume must be greater than zero"})
 
+    solid_count = len(solids)
+    _check(result, "invalid_solids", solid_count == 1, solid_count=solid_count)
+    if solid_count != 1:
+        result["errors"].append({
+            "code": "invalid_solid",
+            "message": "Generated geometry must resolve to exactly one solid",
+            "solid_count": solid_count,
+        })
+
     for dimension, axis, expected in _expected_bbox_dimensions(cad_ir):
         actual = result["bounding_box"][axis]
         passed = abs(actual - expected) <= BOUNDING_BOX_TOLERANCE_MM
         _check(result, "bounding_box_dimension", passed, dimension=dimension, axis=axis, expected=expected, actual=actual)
         if not passed:
+            deviation = abs(actual - expected)
+            ratio = deviation / expected if expected else 0
             result["errors"].append({
                 "code": "bounding_box_mismatch",
                 "message": f"Bounding box {axis} dimension does not match IR dimension {dimension}",
@@ -95,6 +108,17 @@ def validate_pipeline_outputs(
                 "expected": expected,
                 "actual": actual,
             })
+            if ratio > EXTREME_DIMENSION_DEVIATION_RATIO:
+                result["errors"].append({
+                    "code": "extreme_dimension_deviation",
+                    "message": f"Bounding box {axis} deviates from IR dimension {dimension} by more than 20%",
+                    "dimension": dimension,
+                    "axis": axis,
+                    "expected": expected,
+                    "actual": actual,
+                })
+
+    _validate_features(result, cad_ir)
 
     return _finalize(result)
 
@@ -135,6 +159,61 @@ def _expected_bbox_dimensions(cad_ir: CADIR) -> list[tuple[str, str, float]]:
 
 def _check(result: dict[str, Any], name: str, passed: bool, **extra: Any) -> None:
     result["checks"].append({"check": name, "pass": passed, **extra})
+
+
+def _validate_features(result: dict[str, Any], cad_ir: CADIR) -> None:
+    features = cad_ir.features
+    holes = features.get("holes") or features.get("mounting_holes") or features.get("base_holes")
+    if holes:
+        hole_items = holes if isinstance(holes, list) else [holes]
+        for item in hole_items:
+            diameter = float(item.get("diameter", 0) or 0)
+            if diameter <= 0:
+                _check(result, "feature_present", False, feature="holes")
+                result["errors"].append({"code": "missing_feature", "message": "Hole feature is missing a usable diameter", "feature": "holes"})
+                continue
+            span = min(_hole_spans(cad_ir) or [0])
+            offset = float(item.get("offset_from_edge", max(diameter, span * 0.2)) or 0)
+            has_clearance = span <= 0 or (diameter < span and offset >= diameter * 0.5 and offset <= span / 2)
+            _check(result, "feature_present", has_clearance, feature="holes", diameter=diameter, offset_from_edge=offset)
+            if not has_clearance:
+                result["errors"].append({
+                    "code": "missing_feature",
+                    "message": "Hole feature cannot be reliably realized within IR dimensions",
+                    "feature": "holes",
+                })
+
+    for key, size_key in (("chamfer", "size"), ("fillet", "radius")):
+        value = features.get(key)
+        if not value:
+            continue
+        size = float(value.get(size_key, 0) if isinstance(value, dict) else value)
+        smallest_dim = min((dim for dim in cad_ir.dimensions.values() if dim > 0), default=0)
+        valid_relief = smallest_dim <= 0 or size <= smallest_dim / 2
+        _check(result, "boolean_artifact_absent", valid_relief, feature=key, size=size)
+        if not valid_relief:
+            result["errors"].append({
+                "code": "boolean_failure_artifact",
+                "message": f"{key} size is too large for the available geometry",
+                "feature": key,
+            })
+
+    if cad_ir.part_type in {"mounting_plate", "enclosure_lid", "spacer", "circular_button"}:
+        bbox = result.get("bounding_box", {})
+        symmetric = bool(bbox) and abs(bbox.get("x", 0) - bbox.get("y", 0)) <= max(bbox.get("x", 0), bbox.get("y", 0), 1) * 0.01
+        should_be_symmetric = cad_ir.part_type in {"spacer", "circular_button"}
+        _check(result, "symmetry_correctness", (not should_be_symmetric) or symmetric)
+
+
+def _hole_spans(cad_ir: CADIR) -> list[float]:
+    dims = cad_ir.dimensions
+    if cad_ir.part_type in {"mounting_plate", "enclosure_lid"}:
+        return [dims.get("length", 0), dims.get("width", 0)]
+    if cad_ir.part_type == "simple_bracket":
+        return [dims.get("base_length", 0), dims.get("base_width", 0)]
+    if cad_ir.part_type == "wall_bracket":
+        return [dims.get("base_depth", 0), dims.get("base_width", 0), dims.get("wall_height", 0)]
+    return [value for value in dims.values() if value > 0]
 
 
 def _finalize(result: dict[str, Any]) -> dict[str, Any]:

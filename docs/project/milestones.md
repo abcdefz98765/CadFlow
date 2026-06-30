@@ -35,12 +35,44 @@ Done in this refactor.
 - IR examples for mounting_plate, spacer, and simple_bracket.
 - Pipeline tests covering IR validation, deterministic generation, and output contract.
 
+## M1.75: CAD Agent Loop
+
+Done in current v0.3 work.
+
+- Stateful CAD Agent Loop with max 3 attempts.
+- Candidate CadQuery generation and candidate scoring.
+- Structured failure analysis from execution logs, validation errors, and missing outputs.
+- IR repair engine that preserves `part_type` and only changes targeted fields.
+- Enhanced validation for invalid solids, feature clearance risks, dimension deviation, boolean artifacts, and symmetry.
+- Required `agent_trace.json` output with attempt history, candidate scores, repair changes, and final selected candidate.
+- Regression test proving one failed geometry case can be repaired and regenerated successfully.
+
+## M1.8: STEP-first Inspection And Trace Quality
+
+Next.
+
+- Treat `model.step` as the primary CAD artifact and STL as a derived mesh exchange.
+- Replace placeholder `preview.png` with a real rendered snapshot from generated geometry.
+- Add a geometry inspector that measures STEP/model facts beyond bounding box and volume.
+- Verify actual feature realization for holes, slots, chamfers, fillets, and simple pockets.
+- Add repair diff checks so the system can confirm that IR repair changed only the intended geometry.
+- Improve `agent_trace.json` with measured validation targets and repair-before/after summaries.
+
+## M1.9: CAD Benchmarks
+
+Next.
+
+- Create benchmark prompts, expected IR, expected checks, and golden reports.
+- Start with mounting plate, spacer, L-bracket, flange, and simple enclosure base.
+- Score benchmark success by valid STEP output, required features, key dimensions, trace completeness, and repair behavior.
+
 ## M2: Parser Quality
 
 Next.
 
 - Extract dimensions and hole intent from more natural-language variants.
 - Record assumptions and unknowns more precisely.
+- Add an internal CAD brief layer for ambiguous or multi-source input before final CAD IR.
 - Keep CAD IR and `requirement.json` stable.
 
 ## M3: L1 Maker Checks
@@ -63,6 +95,8 @@ Future.
 ## Deferred
 
 - AI Engineering OS.
+- Robotics URDF/SDF expansion.
+- G-code, slicer, and printer handoff.
 - Industrial DFM/DFA.
 - Full GD&T.
 - FEA.

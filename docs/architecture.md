@@ -6,24 +6,26 @@ CadFlow 架构以 workflow 为主线，而不是以某个 CAD 工具为中心。
 input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
 ```
 
-当前单零件生成的主线是 IR-first：
+当前单零件生成的主线是 IR-first CAD Agent Loop：
 
 ```text
 text/input_ir.json
   ↓
 CAD IR
   ↓
-CadQuery source generator
+validate_ir
   ↓
-model.py saved to workspace
+CAD Agent Loop
+  ├─ candidate CadQuery source generation
+  ├─ isolated execution inside the selected project output directory
+  ├─ geometry/output validation
+  ├─ failure analysis
+  ├─ structured IR repair
+  └─ retry, max 3 attempts
   ↓
-isolated execution inside the selected project output directory
+model.py + model.step + model.stl + preview.png
   ↓
-model.step + model.stl
-  ↓
-validation
-  ↓
-report.json + report.md
+report.json + report.md + agent_trace.json
 ```
 
 ```text
@@ -127,15 +129,19 @@ logs/
 - `schema.py` 定义 JSON-serializable `CADIR`。
 - `parser.py` 支持 text -> requirement -> IR，以及 file -> IR。
 - `validator.py` 校验单位、part type、必需尺寸和输出格式。
+- `repair.py` 根据结构化失败分析修复 IR，同时保持 `part_type` 和用户意图。
 
 `src/ai_native_cad/cadquery/`
 
-- `generator.py` 将 CAD IR 确定性生成 CadQuery `model.py`。
+- `generator.py` 将 CAD IR 确定性生成 CadQuery `model.py`，并在候选模式下生成最多 3 个候选实现。
 - `executor.py` 先保存生成代码，再在仓库内指定输出目录执行，并写入 `logs/runtime.json` 和错误日志。
 
 `src/ai_native_cad/pipeline/`
 
-- `runner.py` 编排 `Text/IR -> CAD IR -> CadQuery -> STEP/STL -> validation -> report`。
+- `runner.py` 编排 `Text/IR -> CAD IR -> CAD Agent Loop -> validation -> report`。
+- `agent_loop.py` 负责最多 3 次尝试、候选执行、失败转移、IR 修复和 trace。
+- `failure_analyzer.py` 将执行日志、验证错误和缺失文件转换为结构化根因。
+- `scorer.py` 按几何有效性、尺寸准确性、可制造简洁性、boolean 风险和对称性为候选打分。
 - `report.py` 生成 `report.json` 和 `report.md`。
 
 IR pipeline 默认输出：
@@ -149,6 +155,7 @@ outputs/<part_name>/
   report.json
   report.md
   preview.png
+  agent_trace.json
   logs/runtime.json
 ```
 
@@ -163,6 +170,7 @@ examples/ir_pipeline/<part_name>/outputs/
   report.json
   report.md
   preview.png
+  agent_trace.json
   logs/runtime.json
 ```
 
@@ -201,22 +209,45 @@ Planning 不做用户需求澄清，不参数化具体零件模板，也不写 b
 
 当前实现是 `CadQueryBackend`，复用现有 `examples/<part>/model.py`、`exporter.py` 和 `validator.py`。未来 build123d、FreeCAD API、JSCAD/replicad 应作为并行 backend 接入。
 
-### Part Generation Loop
+### CAD Agent Loop
 
-零件生成不是单次 “prompt to code”，而是局部闭环。新主路径为：
+零件生成不是单次 “prompt to code”，而是局部闭环。v0.3 主路径为：
 
 ```text
+Text / input_ir.json
+  ↓
 CAD IR
   ↓
 validate_ir
   ↓
-generate_cadquery_code
+generate_cadquery_candidates
   ↓
-execute_model
+execute candidate model.py
   ↓
-validate_output
-  ↓
-report.json + report.md
+validate_pipeline_outputs
+  ├─ success → score/select candidate → final output
+  └─ fail → failure_analyzer → repair_ir → retry
+```
+
+约束：
+
+- IR 是 CAD 生成的 source of truth。
+- 不允许 Text -> Code 绕过 IR。
+- 最大重试次数为 3。
+- IR repair 不改变 `part_type`，不删除必需 feature，除非失败分析明确要求，否则不简化几何。
+- 最终输出必须包含 `agent_trace.json`，记录每次 attempt、失败原因、IR 修复和最终候选。
+
+`agent_trace.json` 示例：
+
+```json
+{
+  "total_attempts": 2,
+  "steps": [
+    {"attempt": 1, "status": "failed", "reason": "feature_not_realized"},
+    {"attempt": 2, "status": "success", "selected_candidate": "A"}
+  ],
+  "final_selected_candidate": "A"
+}
 ```
 
 兼容 workflow 的旧闭环仍保留：

@@ -10,6 +10,11 @@ from ai_native_cad.cad_ir.schema import CADIR
 
 def generate_cadquery_code(ir: CADIR | dict[str, Any]) -> str:
     """Generate deterministic CadQuery Python source from CAD IR."""
+    return generate_cadquery_candidates(ir, max_candidates=1)[0]["code"]
+
+
+def generate_cadquery_candidates(ir: CADIR | dict[str, Any], max_candidates: int = 3) -> list[dict[str, str]]:
+    """Generate deterministic CadQuery implementation candidates from CAD IR."""
     cad_ir = CADIR.from_dict(ir) if isinstance(ir, dict) else ir
     data = cad_ir.to_dict()
     builder = {
@@ -24,8 +29,20 @@ def generate_cadquery_code(ir: CADIR | dict[str, Any]) -> str:
     if builder is None:
         raise ValueError(f"Unsupported part_type for CadQuery generation: {cad_ir.part_type}")
 
+    profiles = _candidate_profiles(cad_ir, max_candidates)
+    return [
+        {
+            "candidate": label,
+            "strategy": strategy,
+            "code": _render_source(data, builder, label, strategy),
+        }
+        for label, strategy in profiles
+    ]
+
+
+def _render_source(data: dict[str, Any], builder: Any, candidate: str, strategy: str) -> str:
     return "\n".join([
-        '"""Generated CadQuery model from CAD IR. Do not edit by hand."""',
+        f'"""Generated CadQuery model from CAD IR. Candidate {candidate}: {strategy}."""',
         "",
         "from __future__ import annotations",
         "",
@@ -35,10 +52,12 @@ def generate_cadquery_code(ir: CADIR | dict[str, Any]) -> str:
         "import cadquery as cq",
         "",
         f"CAD_IR = json.loads({json.dumps(json.dumps(data, indent=2, sort_keys=True))})",
+        f"CANDIDATE_ID = {candidate!r}",
+        f"CANDIDATE_STRATEGY = {strategy!r}",
         "",
         _common_helpers(),
         "",
-        builder(),
+        builder(strategy),
         "",
         "def main() -> None:",
         "    model = build_model(CAD_IR)",
@@ -51,6 +70,24 @@ def generate_cadquery_code(ir: CADIR | dict[str, Any]) -> str:
         "    main()",
         "",
     ])
+
+
+def _candidate_profiles(cad_ir: CADIR, max_candidates: int) -> list[tuple[str, str]]:
+    profiles = [("A", "conservative")]
+    if max_candidates <= 1 or not _needs_candidate_mode(cad_ir):
+        return profiles[:max_candidates]
+    profiles.extend([("B", "optimized"), ("C", "fallback_simplified")])
+    return profiles[:max(1, min(max_candidates, 3))]
+
+
+def _needs_candidate_mode(cad_ir: CADIR) -> bool:
+    features = cad_ir.features
+    if cad_ir.part_type in {"mounting_plate", "enclosure_lid"} and (features.get("holes") or features.get("mounting_holes")):
+        return True
+    if any(name in features for name in ("chamfer", "fillet")):
+        return True
+    source = cad_ir.source
+    return bool(source.get("candidate_mode") or source.get("ambiguous"))
 
 
 def _common_helpers() -> str:
@@ -69,7 +106,7 @@ def _preview_png_bytes() -> bytes:
 """
 
 
-def _mounting_plate_builder() -> str:
+def _mounting_plate_builder(strategy: str = "conservative") -> str:
     return """def build_model(params: dict) -> cq.Workplane:
     dims = params['dimensions']
     features = params.get('features', {})
@@ -100,7 +137,7 @@ def _mounting_plate_builder() -> str:
 """
 
 
-def _spacer_builder() -> str:
+def _spacer_builder(strategy: str = "conservative") -> str:
     return """def build_model(params: dict) -> cq.Workplane:
     dims = params['dimensions']
     outer = cq.Workplane('XY').circle(dims['outer_diameter'] / 2).extrude(dims['thickness'])
@@ -109,7 +146,8 @@ def _spacer_builder() -> str:
 """
 
 
-def _simple_bracket_builder() -> str:
+def _simple_bracket_builder(strategy: str = "conservative") -> str:
+    fallback = strategy == "fallback_simplified"
     return """def build_model(params: dict) -> cq.Workplane:
     dims = params['dimensions']
     features = params.get('features', {})
@@ -131,13 +169,13 @@ def _simple_bracket_builder() -> str:
     fillet = features.get('fillet', 0)
     if isinstance(fillet, dict):
         fillet = fillet.get('radius', 0)
-    if fillet:
+    if fillet and not """ + repr(fallback) + """:
         model = model.edges('|Y').fillet(float(fillet))
     return model
 """
 
 
-def _wall_bracket_builder() -> str:
+def _wall_bracket_builder(strategy: str = "conservative") -> str:
     return """def build_model(params: dict) -> cq.Workplane:
     dims = params['dimensions']
     normalized = {
@@ -160,7 +198,7 @@ def _build_simple_bracket(params: dict) -> cq.Workplane:
 """
 
 
-def _circular_button_builder() -> str:
+def _circular_button_builder(strategy: str = "conservative") -> str:
     return """def build_model(params: dict) -> cq.Workplane:
     dims = params['dimensions']
     body = cq.Workplane('XY').circle(dims['body_diameter'] / 2).extrude(dims['body_height'])
@@ -174,7 +212,7 @@ def _circular_button_builder() -> str:
 """
 
 
-def _enclosure_base_builder() -> str:
+def _enclosure_base_builder(strategy: str = "conservative") -> str:
     return """def build_model(params: dict) -> cq.Workplane:
     dims = params['dimensions']
     length = dims['outer_length']
@@ -191,7 +229,8 @@ def _enclosure_base_builder() -> str:
 """
 
 
-def _enclosure_lid_builder() -> str:
+def _enclosure_lid_builder(strategy: str = "conservative") -> str:
+    fallback = strategy == "fallback_simplified"
     return """def build_model(params: dict) -> cq.Workplane:
     dims = params['dimensions']
     features = params.get('features', {})
@@ -207,7 +246,7 @@ def _enclosure_lid_builder() -> str:
     chamfer = features.get('chamfer', 0)
     if isinstance(chamfer, dict):
         chamfer = chamfer.get('size', 0)
-    if chamfer:
+    if chamfer and not """ + repr(fallback) + """:
         model = model.edges('|Z').chamfer(float(chamfer))
     return model
 """

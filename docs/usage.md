@@ -12,15 +12,23 @@ input -> requirement -> planning -> part_modeling -> assembly -> review -> outpu
 
 Requirement 阶段负责澄清需求、识别候选零件/参考组件和缺失信息。Planning 阶段负责设计分析、workflow routing、接口/基准、风险和确认 gate。Part Modeling 再进入模板选择、参数化和单零件生成闭环。
 
-当前推荐的新单零件路径是 IR-first：
+当前推荐的新单零件路径是 CAD Agent Loop：
 
 ```text
-text/input_ir.json -> CAD IR -> CadQuery generator -> STEP/STL -> validation -> report
+text/input_ir.json
+  -> CAD IR
+  -> validate IR
+  -> candidate CadQuery generation
+  -> execution
+  -> validation
+  -> failure analysis + IR repair + retry, max 3
+  -> STEP/STL
+  -> report + agent_trace
 ```
 
 Assembly 在当前开源初版中表示 assembly intent planning、manufactured/reference parts 列表、backend-neutral assembly config、基础放置和 bounding-box validation、以及 assembly review/report。它不是成熟几何约束求解器，不自动推断任意 CAD 文件的 mating，也不提供完整 tolerance stack-up、工业 DFA、运动仿真或生产级装配放行。
 
-## Run the IR-first Pipeline
+## Run the CAD Agent Loop Pipeline
 
 Generate the tracked examples:
 
@@ -39,6 +47,7 @@ examples/ir_pipeline/<part_name>/outputs/
   report.json
   report.md
   preview.png
+  agent_trace.json
   logs/runtime.json
 ```
 
@@ -73,10 +82,16 @@ outputs/<part_name>/
   report.json
   report.md
   preview.png
+  agent_trace.json
   logs/runtime.json
 ```
 
-The generated `model.py` is saved before execution. Execution runs from the selected output directory inside the project workspace and logs runtime failures for regeneration/retry. For example-local generation, pass `output_dir="examples/ir_pipeline/<part_name>/outputs"` to `run_ir_pipeline`.
+The generated `model.py` is saved before execution. Execution runs from the
+selected output directory inside the project workspace and logs runtime failures
+for analysis, IR repair, and retry. `agent_trace.json` records attempt history,
+candidate scores, failure analysis, repair changes, and the final selected
+candidate. For example-local generation, pass
+`output_dir="examples/ir_pipeline/<part_name>/outputs"` to `run_ir_pipeline`.
 
 ## Run the Legacy Workflow
 
@@ -224,6 +239,7 @@ IR-first pipeline 应输出或保留：
 - Mesh exchange：`model.stl`
 - 验证报告：`report.json`、`report.md`
 - 预览占位图：`preview.png`
+- agent loop 追踪：`agent_trace.json`
 - 执行日志：`logs/runtime.json`
 
 ## Check Levels

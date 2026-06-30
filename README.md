@@ -10,10 +10,21 @@ Python package: `ai_native_cad`
 input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
 ```
 
-零件生成阶段内部现在走 CAD IR 优先的小闭环：
+零件生成阶段内部现在走 CAD IR 优先的 CAD Agent Loop：
 
 ```text
-text/input_ir.json -> CAD IR -> CadQuery generator -> STEP/STL -> validation -> report
+text/input_ir.json
+  -> CAD IR
+  -> validate IR
+  -> CAD Agent Loop
+       -> candidate CadQuery generation
+       -> execution
+       -> geometry validation
+       -> failure analysis
+       -> IR repair
+       -> retry, max 3 attempts
+  -> STEP/STL
+  -> report + agent_trace
 ```
 
 装配阶段也按闭环推进：
@@ -159,7 +170,7 @@ spec = get_part_spec("mounting_plate")
 result = run_part("mounting_plate", spec)
 ```
 
-### 5. IR-first pipeline
+### 5. CAD Agent Loop pipeline
 
 ```python
 from ai_native_cad.pipeline import run_ir_pipeline
@@ -185,8 +196,14 @@ outputs/<part_name>/
   report.json
   report.md
   preview.png
+  agent_trace.json
   logs/runtime.json
 ```
+
+`agent_trace.json` records every generation attempt, candidate scores, failure
+analysis, IR repair changes, and the final selected candidate. The IR remains
+the source of truth; the system does not bypass IR by generating CAD code
+directly from text.
 
 Tracked IR examples use local output folders instead:
 
@@ -199,6 +216,7 @@ examples/ir_pipeline/<part_name>/outputs/
   report.json
   report.md
   preview.png
+  agent_trace.json
   logs/runtime.json
 ```
 

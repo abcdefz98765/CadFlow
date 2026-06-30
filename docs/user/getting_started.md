@@ -16,7 +16,7 @@ CadFlow 现在以 IR-driven、workflow-first 自然语言参数化 CAD 为主线
 pip install -e .
 ```
 
-## Run the IR-first Pipeline
+## Run the CAD Agent Loop Pipeline
 
 Generate the tracked IR examples:
 
@@ -52,6 +52,7 @@ outputs/<part_name>/
   report.json
   report.md
   preview.png
+  agent_trace.json
   logs/runtime.json
 ```
 

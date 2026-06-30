@@ -2,9 +2,9 @@
 
 ## 1. 产品定位
 
-CadFlow 是一个开源的 IR-driven、workflow-first 自然语言参数化 CAD 建模工具。用户通过自然语言或结构化输入描述机械零件，系统先生成 JSON CAD IR，再由确定性的 CadQuery generator 生成参数化代码、STEP/STL、验证报告和可打开的模型导出文件。
+CadFlow 是一个开源的 IR-driven、workflow-first 自然语言参数化 CAD agent。用户通过自然语言或结构化输入描述机械零件，系统先生成 JSON CAD IR，再进入 CAD Agent Loop：生成候选实现、执行、验证、分析失败、修复 IR、重试，并最终输出 STEP-first CAD artifact、派生 STL、验证报告和 agent trace。
 
-项目不是单纯的 Prompt to CAD，也不是 Prompt to STL，更不是宏大的 AI Engineering OS。当前阶段聚焦一个可运行、可追踪、可扩展后端的 IR-first engineering CAD MVP。
+项目不是单纯的 Prompt to CAD，也不是 Prompt to STL，更不是宏大的 AI Engineering OS。当前阶段聚焦一个可运行、可追踪、可扩展后端、可自修复的 IR-first engineering CAD MVP。
 
 ## 2. 核心 Workflow
 
@@ -15,7 +15,18 @@ input -> requirement -> planning -> part_modeling -> assembly -> review -> outpu
 单零件生成的主路径为：
 
 ```text
-text/input_ir.json -> CAD IR -> CadQuery generator -> model.py -> STEP/STL -> validation -> report
+text/input_ir.json
+  -> CAD IR
+  -> validate IR
+  -> CAD Agent Loop
+       -> candidate CadQuery generation
+       -> execution
+       -> geometry validation
+       -> failure analysis
+       -> IR repair
+       -> retry, max 3
+  -> model.py + STEP primary artifact + STL derived artifact
+  -> report + agent_trace
 ```
 
 IR-first pipeline 的标准输出目录为：
@@ -29,6 +40,7 @@ outputs/<part_name>/
   report.json
   report.md
   preview.png
+  agent_trace.json
   logs/runtime.json
 ```
 
@@ -52,11 +64,11 @@ project/
 
 ## 3. 当前版本目标
 
-V0/V1 聚焦自然语言参数化建模：
+V0/V1 聚焦自然语言参数化建模和可追踪 CAD agent loop：
 
 - 保留现有 CadQuery MVP。
 - 新增 CAD IR 层，所有新生成路径先生成 IR，再生成 CadQuery 代码。
-- 新增 workflow/pipeline 层，沉淀 traceable outputs。
+- 新增 CAD Agent Loop，沉淀 traceable attempts、failure analysis、IR repair 和 candidate scoring。
 - 抽象 CAD Backend，不让上层 workflow 绑定具体 CAD 工具。
 - 至少提供 `mounting_plate`、`spacer`、`simple_bracket` 三个 IR pipeline 示例并保证可运行。
 - 建立 `knowledge/` 与 `policies/` 目录，但不过度实现。
@@ -73,11 +85,23 @@ V0/V1 聚焦自然语言参数化建模：
 
 ### Part Modeling
 
-负责模板选择、参数化、单零件生成闭环、几何检查和零件级意图一致性。新主路径通过 CAD IR 驱动确定性 CadQuery generator；旧路径仍可通过 CAD Backend 兼容现有 examples。当前默认 backend 是 CadQuery。
+负责模板选择、参数化、单零件生成闭环、几何检查和零件级意图一致性。新主路径通过 CAD IR 驱动 CAD Agent Loop；旧路径仍可通过 CAD Backend 兼容现有 examples。当前默认 backend 是 CadQuery。
 
 ### CAD IR
 
 负责表达后端无关的零件意图，包括 `part_type`、`unit`、`dimensions`、`features`、`outputs` 和 `check_level`。IR 必须可 JSON 序列化、可验证、可作为重试和再生成的稳定输入。新生成流程不得把自然语言直接作为主要代码生成输入。
+
+### CAD Agent Loop
+
+负责从 CAD IR 生成候选 CadQuery 代码、执行、验证、分析失败、修复 IR 并重试。最大尝试次数为 3。失败必须转化为结构化 root cause 和 suggested IR fix。IR repair 不改变 `part_type`，不删除必需 feature，除非失败分析明确要求，否则不简化用户意图。
+
+### CAD Brief
+
+后续用于承接复杂自然语言、参考图、技术图纸或多源输入。CAD Brief 是面向审查的建模意图记录，位于 Requirement 和 CAD IR 之间；它记录单位、尺寸、feature、坐标约定、假设、冲突和验证目标。CAD Brief 不替代 CAD IR，最终生成仍以 IR 为 source of truth。
+
+### Geometry Inspector
+
+后续从 STEP/model 中抽取事实并做真实测量：孔数量、孔径、孔距、槽、倒角、关键尺寸、solid count、bbox、volume、repair diff。当前 validator 已覆盖基础 L0 检查，后续需要从参数风险判断升级到实际几何事实验证。
 
 ### Assembly
 
@@ -89,7 +113,7 @@ V0/V1 聚焦自然语言参数化建模：
 
 ### Output / Export Utility
 
-负责把模型导出为 STEP/STL，当前 IR pipeline 直接写入 `outputs/<part_name>/model.step` 和 `model.stl`；旧 workflow 仍写入 `exports/`。输出路径和导出规则属于 `policies/output_contract.md`，不是独立设计 skill。
+负责把模型导出为 STEP/STL，当前 CAD Agent Loop 直接写入 `outputs/<part_name>/model.step` 和 `model.stl`；旧 workflow 仍写入 `exports/`。`model.step` 是主 CAD artifact，`model.stl` 是派生 mesh exchange。输出路径和导出规则属于 `policies/output_contract.md`，不是独立设计 skill。
 
 ### CAD Backend
 
@@ -159,7 +183,9 @@ V0/V1 聚焦自然语言参数化建模：
 - `examples/ir_pipeline/generate_examples.py` 可生成 mounting_plate、spacer、simple_bracket。
 - `examples/parts/circular_button/model.py` 可运行，并保留开关触点/线束出口。
 - workflow 可输出 `input.md`、`requirement.json`、`plan.md`、`model.py`、`review.md`、`exports/`、`logs/`。
-- IR pipeline 可输出 `input_ir.json`、`model.py`、`model.step`、`model.stl`、`report.json`、`report.md`、`preview.png`、`logs/runtime.json`。
+- CAD Agent Loop 可输出 `input_ir.json`、`model.py`、`model.step`、`model.stl`、`report.json`、`report.md`、`preview.png`、`agent_trace.json`、`logs/runtime.json`。
+- CAD Agent Loop 可输出 `agent_trace.json`，并记录 attempt、failure analysis、IR repair 和 final selected candidate。
+- 至少一个失败几何案例可通过 IR repair 自动恢复。
 - `python examples/workflow/mounting_plate_demo.py` 可一键运行 workflow demo。
 - 至少 STEP/STL 可导出。
 - 现有示例和测试不被破坏。

@@ -58,6 +58,85 @@
 - runtime errors 进入日志，便于失败后重试或再生成。
 - validation 自动检查 STEP/STL、bounding box、volume、single solid 和 shape validity/watertight。
 
+## Phase 1.75: CAD Agent Loop System
+
+状态：基础实现已完成。
+
+目标：把 IR-first 单次 pipeline 升级为带失败分析、IR 修复、候选评分和多轮重试的 CAD engineering agent。
+
+交付：
+
+- `src/ai_native_cad/pipeline/agent_loop.py`
+- `src/ai_native_cad/pipeline/failure_analyzer.py`
+- `src/ai_native_cad/pipeline/scorer.py`
+- `src/ai_native_cad/cad_ir/repair.py`
+- `cadquery/generator.py` 支持 deterministic single candidate 和最多 3 个候选实现。
+- `pipeline/runner.py` 改为通过 CAD Agent Loop 执行。
+- 标准输出增加 `agent_trace.json`。
+
+验收：
+
+- 每次运行保留 `input_ir.json`、`model.py`、`model.step`、`model.stl`、`preview.png`、`report.json`、`report.md`、`agent_trace.json`。
+- 失败时生成结构化 failure analysis。
+- IR repair 保留 `part_type` 和用户意图，只改必要字段。
+- 最大尝试次数固定为 3。
+- 至少一个失败几何案例可以通过 IR repair 自动恢复。
+- 多候选生成和评分可以参与最终候选选择。
+
+后续任务：
+
+- 把 failure taxonomy 扩展到更多 CadQuery/OpenCascade 失败类型。
+- 用真实几何检查验证孔、槽、倒角等 feature 是否实际存在，而不是只做参数风险判断。
+- 让候选 B/C 产生更有差异的实现策略，同时不删除必需 feature。
+
+## Phase 1.8: STEP-first Inspection And Trace Quality
+
+状态：下一阶段。
+
+目标：吸收成熟 text-to-cad/CAD agent 项目的 STEP-first、inspection、snapshot review 思路，把验证从“生成了文件和 bbox 大致正确”推进到“真实 CAD artifact 可测量、可审查、可对比”。
+
+交付：
+
+- 明确 `model.step` 是 primary CAD artifact，`model.stl` 是 derived mesh exchange。
+- 真实 `preview.png`，由生成几何渲染，而不是占位图。
+- `pipeline/geometry_inspector.py` 或等价模块，读取 model/STEP facts。
+- 验证孔数量、孔径、孔距、槽、倒角、关键尺寸和 repair diff。
+- `agent_trace.json` 增加 measured validation targets、repair before/after summary。
+
+验收：
+
+- 至少 mounting_plate 的孔数量、孔径、孔距能被实际验证。
+- 至少一个 repair case 能证明修复只改变目标 feature。
+- 失败报告能区分 bbox mismatch、missing feature、export failure 和 boolean artifact。
+
+## Phase 1.9: CAD Benchmark Suite
+
+状态：下一阶段。
+
+目标：用固定 benchmark 衡量架构进步，避免每次只验证 happy path。
+
+交付：
+
+- `benchmarks/` 目录。
+- benchmark prompts。
+- expected IR 或 expected check targets。
+- golden reports / trace samples。
+- benchmark runner。
+
+首批 benchmark：
+
+- mounting plate with four holes。
+- spacer / washer。
+- simple L-bracket。
+- circular flange。
+- simple enclosure base。
+
+验收：
+
+- benchmark 可在 CI/本地一键运行。
+- 每个 benchmark 检查 STEP 输出、关键尺寸、必需 feature、trace 完整性。
+- 至少包含一个需要 IR repair 才能成功的 case。
+
 ## Phase 2: Natural-language Requirement Parser
 
 目标：增强 Requirement Parser，但保持 CAD IR 输出 contract 不变。
@@ -71,6 +150,7 @@
 后续任务：
 
 - 更可靠地抽取尺寸、孔位、厚度、单位和输出格式。
+- 为复杂输入增加 CAD Brief：记录建模意图、坐标约定、假设、冲突和验证目标，再落到 CAD IR。
 - 将自然语言稳定转为 CAD IR，而不是直接生成 CadQuery 代码。
 - 对关键缺失信息进入多轮用户补全。
 - 在 Requirement Skill 内完成早期产品拆解：识别制造件、参考组件、关键接口和会改变拓扑的缺失信息。
@@ -138,6 +218,8 @@
 
 - AI Engineering OS。
 - 多 agent 平台化调度。
+- Robotics URDF/SDF workflow。
+- G-code、slicer、printer handoff。
 - 工业级 DFM/DFA。
 - 成熟工业装配约束求解、任意 CAD mating 自动推断和运动仿真。
 - 完整 GD&T。
