@@ -139,6 +139,26 @@ def test_agent_loop_successful_first_attempt_has_no_repair_diff():
     assert trace["final_flow_decision"]["action"] == "proceed"
 
 
+def test_agent_loop_trace_summary_records_chamfer_status():
+    ir = {
+        "part_type": "mounting_plate",
+        "part_name": "pytest_agent_loop_chamfer_summary",
+        "unit": "mm",
+        "dimensions": {"length": 80, "width": 40, "thickness": 5},
+        "features": {"chamfer": 1.0},
+        "outputs": ["step", "stl"],
+    }
+
+    result = run_ir_pipeline(ir, output_root=Path.cwd() / "outputs")
+    output_dir = Path(result["output_dir"])
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "success"
+    assert trace["steps"][0]["inspection_summary"]["chamfer_status"] == "verified"
+    assert trace["final_inspection_summary"]["chamfer_status"] == "verified"
+    assert trace["final_inspection_summary"]["features"]["chamfers"]["measured"]["count"] == 4
+
+
 def test_agent_loop_converts_generator_unsupported_error_to_planning_rework():
     ir = {
         "part_type": "unsupported_widget",
