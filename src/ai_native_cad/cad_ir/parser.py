@@ -19,7 +19,12 @@ from ai_native_cad.requirements import RequirementAgent
 
 
 def ir_from_text(text: str, overrides: dict[str, Any] | None = None) -> CADIR:
-    """Convert natural language to CAD IR through the deterministic parser."""
+    """Legacy/debug text-to-IR conversion.
+
+    The formal prompt pipeline uses Requirement -> Planning -> CAD IR via
+    ``run_text_pipeline``. This helper is kept for compatibility with older
+    demos and parser-focused tests.
+    """
     requirement = RequirementAgent().parse(text, overrides)
     return CADIR.from_dict(requirement)
 

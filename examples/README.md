@@ -52,7 +52,7 @@ Prompt pipeline examples live in `examples/prompt_pipeline/`. They are manual
 debug runs for the full deterministic path:
 
 ```text
-prompt -> requirement.json + CAD IR -> model.step/model.stl -> report/trace
+prompt -> requirement.json -> planning_artifact.json -> input_ir.json -> model.step/model.stl -> report/trace
 ```
 
 ```bash
@@ -61,10 +61,12 @@ python examples/prompt_pipeline/run_prompt_examples.py mounting_plate_by_holes
 ```
 
 Generated artifacts are written to `outputs/prompt_pipeline/<case_id>/` and are
-not tracked. Each run also writes `prompt_summary.json` and `prompt_summary.md`
-for quick inspection of requirement status, CAD Brief targets, measured report
-targets, agent attempts, and file paths. Benchmarks remain IR-first under
-`benchmarks/`.
+not tracked. If Requirement or Planning returns a `return` gate decision, the
+run stops before `input_ir.json` and model artifacts, but still writes a short
+report and trace for review. Each run also writes `prompt_summary.json` and
+`prompt_summary.md` for quick inspection of requirement status, CAD Brief
+targets, measured report targets, agent attempts, and file paths. Benchmarks
+remain IR-first under `benchmarks/`.
 
 ## Assemblies
 

@@ -12,10 +12,28 @@ input -> requirement -> planning -> part_modeling -> assembly -> review -> outpu
 
 Requirement 阶段负责澄清需求、识别候选零件/参考组件和缺失信息。Planning 阶段负责设计分析、workflow routing、接口/基准、风险和确认 gate。Part Modeling 再进入模板选择、参数化和单零件生成闭环。
 
-当前推荐的新单零件路径是 CAD Agent Loop：
+当前推荐的新单零件 prompt 路径先经过结构化 handoff gates：
 
 ```text
-text/input_ir.json
+prompt
+  -> requirement.json
+  -> Requirement gate
+  -> planning_artifact.json
+  -> Planning -> CAD IR gate
+  -> input_ir.json
+  -> CAD Agent Loop
+  -> report + agent_trace
+```
+
+Requirement 或 Planning gate 返回 `return` 时，流程停止在该 gate：不会写
+`input_ir.json`，也不会进入 Part Modeling。输出目录保留已经生成的
+`requirement.json` / `planning_artifact.json`、`report.json` / `report.md` 和
+`agent_trace.json` 供复核。
+
+CAD Agent Loop 本身仍是 IR-first：
+
+```text
+input_ir.json
   -> CAD IR
   -> validate IR
   -> candidate CadQuery generation
@@ -93,6 +111,46 @@ candidate scores, measured validation targets, inspection summaries, failure
 analysis, repair changes, and the final selected candidate. `model.step` is the
 primary CAD artifact; `model.stl` is a derived mesh output. For example-local generation, pass
 `output_dir="examples/ir_pipeline/<part_name>/outputs"` to `run_ir_pipeline`.
+
+## Run the Prompt Pipeline
+
+Prompt examples use the formal structured path:
+
+```bash
+python examples/prompt_pipeline/run_prompt_examples.py
+python examples/prompt_pipeline/run_prompt_examples.py mounting_plate_by_holes
+```
+
+Python API:
+
+```python
+from ai_native_cad.pipeline import run_text_pipeline
+
+result = run_text_pipeline(
+    "Generate an 80x40x5 mm mounting plate with four M4 holes.",
+    output_dir="outputs/prompt_pipeline/mounting_plate_by_holes",
+)
+print(result["status"])
+```
+
+Successful output:
+
+```text
+outputs/prompt_pipeline/<case_id>/
+  prompt.txt
+  requirement.json
+  planning_artifact.json
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  agent_trace.json
+```
+
+Benchmarks remain IR-first and continue to consume benchmark `input_ir.json`
+cases directly.
 
 ## Run the Legacy Workflow
 
@@ -242,6 +300,13 @@ IR-first pipeline 应输出或保留：
 - 预览占位图：`preview.png`，真实几何渲染 deferred
 - agent loop 追踪：`agent_trace.json`，包含 measured validation targets 和 inspection summary
 - 执行日志：`logs/runtime.json`
+
+Prompt pipeline 还应输出或保留：
+
+- 原始 prompt：`prompt.txt`
+- 结构化需求：`requirement.json`
+- 规划交接物：`planning_artifact.json`
+- CAD IR：`input_ir.json`，其 `source.planning_handoff` 记录 Planning -> CAD IR trace
 
 ## Check Levels
 

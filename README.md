@@ -10,10 +10,24 @@ Python package: `ai_native_cad`
 input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
 ```
 
-零件生成阶段内部现在走 CAD IR 优先的 CAD Agent Loop：
+自然语言 prompt 现在先走结构化 handoff：
 
 ```text
-text/input_ir.json
+prompt
+  -> requirement.json
+  -> Requirement gate
+  -> planning_artifact.json
+  -> Planning -> CAD IR gate
+  -> input_ir.json
+  -> CAD Agent Loop
+```
+
+Requirement 或 Planning gate 返回 `return` 时，流程停止在该 gate：不会写
+`input_ir.json`，也不会进入 Part Modeling，但会保留可审查的 artifact、
+report 和 trace。CAD Agent Loop 和 benchmark 仍保持 IR-first：
+
+```text
+input_ir.json
   -> CAD IR
   -> validate IR
   -> CAD Agent Loop
@@ -206,6 +220,22 @@ and the final selected candidate. `model.step` is the primary CAD artifact and
 `model.stl` is a derived mesh output. `preview.png` is still a placeholder until
 a lightweight real geometry renderer is added. The IR remains the source of
 truth; the system does not bypass IR by generating CAD code directly from text.
+
+Prompt/text input should use the structured pipeline:
+
+```python
+from ai_native_cad.pipeline import run_text_pipeline
+
+result = run_text_pipeline(
+    "Generate an 80x40x5 mounting plate with four M4 holes.",
+    output_dir="outputs/prompt_pipeline/mounting_plate_by_holes",
+)
+```
+
+This writes `requirement.json`, `planning_artifact.json`, `input_ir.json`,
+`report.json` / `report.md`, and `agent_trace.json` on successful runs.
+`input_ir.json` is produced only after the Planning -> CAD IR gate proceeds, and
+its `source.planning_handoff` records the consumed structured planning fields.
 
 Tracked IR examples use local output folders instead:
 

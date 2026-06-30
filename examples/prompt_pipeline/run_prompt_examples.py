@@ -9,9 +9,7 @@ import sys
 PROJECT_ROOT = next(path for path in Path(__file__).resolve().parents if (path / "pyproject.toml").exists())
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from ai_native_cad.cad_ir import CADIR
-from ai_native_cad.pipeline import run_ir_pipeline
-from ai_native_cad.requirements import RequirementAgent
+from ai_native_cad.pipeline import run_text_pipeline
 
 PROMPT_CASES = {
     "mounting_plate_by_holes": (
@@ -32,19 +30,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Available cases: {', '.join(sorted(PROMPT_CASES))}")
         return 2
 
-    agent = RequirementAgent()
     failed = False
     for case_id in selected:
         output_dir = PROJECT_ROOT / "outputs" / "prompt_pipeline" / case_id
-        output_dir.mkdir(parents=True, exist_ok=True)
         prompt = PROMPT_CASES[case_id]
-        requirement = agent.parse(prompt)
-        (output_dir / "prompt.txt").write_text(prompt + "\n", encoding="utf-8")
-        (output_dir / "requirement.json").write_text(
-            json.dumps(requirement, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        result = run_ir_pipeline(CADIR.from_dict(requirement), output_dir=output_dir)
+        result = run_text_pipeline(prompt, output_dir=output_dir)
+        requirement = result["requirement"]
         summary = _prompt_summary(case_id, prompt, requirement, result)
         (output_dir / "prompt_summary.json").write_text(
             json.dumps(summary, indent=2, sort_keys=True) + "\n",
