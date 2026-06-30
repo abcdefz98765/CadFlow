@@ -112,6 +112,9 @@ def test_ir_pipeline_writes_required_output_contract():
     assert report["volume"] > 0
     assert report["warnings"] == []
     assert report["errors"] == []
+    assert report["flow_decision"]["action"] == "proceed"
+    assert report["flow_decision"]["from_stage"] == "review"
+    assert report["flow_decision"]["to_stage"] == "outputs"
 
 
 def test_ir_pipeline_report_includes_mounting_plate_hole_inspection():

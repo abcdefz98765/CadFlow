@@ -13,6 +13,7 @@ from copy import deepcopy
 from typing import Any
 
 from ai_native_cad.generator import get_part_spec, merge_params
+from ai_native_cad.workflow_control import requirement_to_planning_decision
 
 CHECK_LEVELS = {
     "L0": "Playground",
@@ -141,6 +142,7 @@ class RequirementAgent:
             _follow_up_request(item) for item in requirement["missing_information"] if item.get("ask_user")
         ]
         requirement["requirement_status"] = self._status(requirement)
+        requirement["requirement_status"]["flow_decision"] = requirement_to_planning_decision(requirement["requirement_status"])
         requirement["cad_brief"] = _cad_brief(requirement)
         return requirement
 

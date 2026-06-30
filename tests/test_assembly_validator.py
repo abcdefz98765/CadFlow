@@ -53,6 +53,9 @@ def test_validate_stacked_contact_passes(tmp_path):
     assert result["stages"]["validate_placement_relationships"]["status"] == "success"
     assert result["stages"]["validate_constraints"]["status"] == "success"
     assert result["stages"]["validate_assembly_exports"]["status"] == "success"
+    assert result["flow_decision"]["action"] == "proceed"
+    assert result["flow_decision"]["from_stage"] == "assembly"
+    assert result["flow_decision"]["to_stage"] == "review"
     assert (tmp_path / "outputs" / "stacked" / "assembly_validation.json").exists()
     assert (tmp_path / "outputs" / "stacked" / "assembly_validation.md").exists()
     assert (tmp_path / "outputs" / "stacked" / "assembly_review.md").exists()
@@ -72,6 +75,9 @@ def test_missing_report_fails(tmp_path):
 
     assert result["status"] == "failed"
     assert result["errors"][0]["code"] == "missing_report"
+    assert result["flow_decision"]["action"] == "return"
+    assert result["flow_decision"]["to_stage"] == "part_modeling"
+    assert result["flow_decision"]["reasons"][0]["owner_stage"] == "part_modeling"
 
 
 def test_floating_part_fails(tmp_path):
@@ -91,6 +97,8 @@ def test_floating_part_fails(tmp_path):
 
     assert result["status"] == "failed"
     assert any(error["code"] == "floating_part" for error in result["errors"])
+    assert result["flow_decision"]["action"] == "return"
+    assert result["flow_decision"]["to_stage"] == "planning"
 
 
 def test_required_contact_fails_when_gap_is_wrong(tmp_path):
@@ -189,6 +197,9 @@ def test_pet_button_assembly_plan_needs_confirmation_for_missing_high_risk_field
 
     assert plan["status"] == "confirmation_needed"
     assert plan["confirmation_gate"]["needs_user_confirmation"] is True
+    assert plan["flow_decision"]["action"] == "return"
+    assert plan["flow_decision"]["from_stage"] == "assembly"
+    assert plan["flow_decision"]["to_stage"] == "planning"
     assert "switch" in plan["confirmation_gate"]["high_risk_topics"]
     assert any("switch_envelope" in q for q in plan["confirmation_gate"]["unresolved_questions"])
     assert Path(files["assembly_plan_json"]).exists()
@@ -226,6 +237,8 @@ def test_pet_button_assembly_plan_generates_backend_neutral_configs(tmp_path):
 
     assert plan["status"] == "ready_for_assembly_config"
     assert plan["confirmation_gate"]["needs_user_confirmation"] is False
+    assert plan["flow_decision"]["action"] == "proceed"
+    assert plan["flow_decision"]["to_stage"] == "assembly_config"
     assert (tmp_path / "assembly.json").exists()
     assert (tmp_path / "constraint_assembly.json").exists()
     assert configs["assembly"]["validation"]["required_contacts"][0]["part1"] == "pet_button_switch_plate"

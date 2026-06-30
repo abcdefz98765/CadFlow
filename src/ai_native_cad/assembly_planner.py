@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ai_native_cad.workflow_control import assembly_plan_decision
+
 
 HIGH_RISK_TOPICS = {
     "switch": ["switch", "tactile", "button"],
@@ -48,7 +50,7 @@ def create_assembly_plan(
     required_clearances = _required_clearances(high_risk, planned_parts)
     allowed_overlaps = _allowed_overlaps(planned_parts)
 
-    return {
+    plan = {
         "name": name,
         "check_level": level,
         "status": status,
@@ -76,6 +78,8 @@ def create_assembly_plan(
         "assumptions": requirement.get("assumptions", []),
         "risk_level": "high" if unresolved else "low",
     }
+    plan["flow_decision"] = assembly_plan_decision(plan)
+    return plan
 
 
 def write_assembly_plan(plan: dict[str, Any], output_dir: str | Path) -> dict[str, str]:

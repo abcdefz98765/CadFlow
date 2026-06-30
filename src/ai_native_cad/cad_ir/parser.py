@@ -14,6 +14,7 @@ from typing import Any
 
 from ai_native_cad.cad_ir.schema import CADIR
 from ai_native_cad.generator import merge_params
+from ai_native_cad.planning import resolved_part_decision
 from ai_native_cad.requirements import RequirementAgent
 
 
@@ -30,6 +31,41 @@ def ir_from_file(path: str | Path, overrides: dict[str, Any] | None = None) -> C
     if overrides:
         data = merge_params(data, overrides)
     return CADIR.from_dict(data)
+
+
+def ir_from_planning_artifact(planning_artifact: dict[str, Any], part_name: str | None = None) -> CADIR:
+    """Convert resolved Planning decisions into CAD IR.
+
+    This function intentionally consumes only
+    ``selected_parts[].resolved_decisions``. Free-form planning notes, design
+    analysis, risks, and review text are gate inputs or trace metadata, not
+    geometry authority.
+    """
+
+    decisions = resolved_part_decision(planning_artifact, part_name=part_name)
+    source = dict(decisions.get("source", {}))
+    source["planning_handoff"] = {
+        "artifact_version": planning_artifact.get("version"),
+        "route": planning_artifact.get("route", {}).get("selected"),
+        "part_name": decisions.get("part_name"),
+        "consumed_fields": [
+            "part_type",
+            "part_name",
+            "unit",
+            "dimensions",
+            "features",
+            "outputs",
+            "check_level",
+        ],
+        "ignored_planning_fields": [
+            "risk_notes",
+            "review_targets",
+            "design_analysis",
+            "open_analysis_notes",
+        ],
+    }
+    decisions["source"] = source
+    return CADIR.from_dict(decisions)
 
 
 def _load_structured_file(path: Path) -> dict[str, Any]:

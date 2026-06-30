@@ -83,6 +83,10 @@ def test_agent_loop_repairs_failed_hole_clearance_and_writes_trace():
     assert trace["steps"][0]["status"] == "failed"
     assert trace["steps"][0]["reason"] == "feature_not_realized"
     assert trace["steps"][0]["failure_analysis"]["root_cause"] == "feature_not_realized"
+    assert trace["steps"][0]["rework_decision"]["action"] == "retry"
+    assert trace["steps"][0]["rework_decision"]["from_stage"] == "part_modeling"
+    assert trace["steps"][0]["rework_decision"]["to_stage"] == "part_modeling"
+    assert trace["steps"][0]["rework_decision"]["preserves_design_intent"] is True
     repair_diff = trace["steps"][0]["ir_repair"]["diff"]
     offset_diff = next(item for item in repair_diff if item["path"] == "features.holes.offset_from_edge")
     assert offset_diff["before"] == 1
@@ -102,6 +106,8 @@ def test_agent_loop_repairs_failed_hole_clearance_and_writes_trace():
     assert trace["final_inspection_summary"]["features"]["holes"]["status"] == "verified"
     assert trace["final_inspection_summary"]["hole_spacing_status"] == "verified"
     assert trace["final_measured_validation_targets"]
+    assert trace["final_flow_decision"]["action"] == "proceed"
+    assert trace["final_flow_decision"]["from_stage"] == "part_modeling"
     assert (output_dir / "model.py").exists()
     assert (output_dir / "model.step").exists()
     assert (output_dir / "model.stl").exists()
@@ -129,3 +135,4 @@ def test_agent_loop_successful_first_attempt_has_no_repair_diff():
     assert trace["steps"][0]["status"] == "success"
     assert "failure_analysis" not in trace["steps"][0]
     assert "ir_repair" not in trace["steps"][0]
+    assert trace["final_flow_decision"]["action"] == "proceed"

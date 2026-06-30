@@ -122,6 +122,15 @@ def test_parser_marks_missing_dimensions_blocking_for_l1():
     }
     assert requirement["requirement_status"]["blocking_count"] == 3
     assert requirement["requirement_status"]["follow_up_count"] == 4
+    decision = requirement["requirement_status"]["flow_decision"]
+    assert decision["action"] == "return"
+    assert decision["from_stage"] == "requirement"
+    assert decision["to_stage"] == "requirement"
+    assert {reason["field"] for reason in decision["reasons"]} >= {
+        "dimensions.length",
+        "dimensions.thickness",
+        "dimensions.width",
+    }
 
 
 def test_parser_extracts_named_dimensions_symbolic_hole_and_edge_offset():

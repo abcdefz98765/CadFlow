@@ -11,6 +11,7 @@ from ai_native_cad.cad_ir.schema import CADIR
 from ai_native_cad.cad_ir.validator import validate_ir
 from ai_native_cad.pipeline.agent_loop import run_agent_loop
 from ai_native_cad.pipeline.report import write_pipeline_report
+from ai_native_cad.workflow_control import cad_ir_to_part_modeling_decision
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -39,6 +40,7 @@ def run_ir_pipeline(
     (output_dir / "input_ir.json").write_text(json.dumps(ir_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     ir_validation = validate_ir(cad_ir)
+    flow_decision = cad_ir_to_part_modeling_decision(ir_validation)
     if not ir_validation["valid"]:
         files = _collect_files(output_dir)
         validation = {
@@ -59,10 +61,29 @@ def run_ir_pipeline(
             "total_attempts": 0,
             "steps": [{"attempt": 0, "status": "failed", "reason": "ir_invalid"}],
             "final_selected_candidate": None,
+            "flow_decision": flow_decision,
+            "rework_decision": flow_decision,
+            "part_modeling_contract": {
+                "geometry_source": "cad_ir",
+                "allowed_knowledge": ["template_candidates", "feature_library", "backend_capabilities"],
+                "does_not_own": [
+                    "product_requirement_changes",
+                    "part_structure_redesign",
+                    "assembly_placement_decisions",
+                ],
+            },
         }, indent=2) + "\n", encoding="utf-8")
         report = write_pipeline_report(output_dir, ir_data, {"status": "not_run"}, validation, files, ir_validation=ir_validation)
         files = _collect_files(output_dir)
-        return {"status": "failed", "ir": ir_data, "output_dir": str(output_dir), "validation": ir_validation, "files": files, **report}
+        return {
+            "status": "failed",
+            "ir": ir_data,
+            "output_dir": str(output_dir),
+            "validation": ir_validation,
+            "flow_decision": flow_decision,
+            "files": files,
+            **report,
+        }
 
     loop_result = run_agent_loop(cad_ir, output_dir)
     execution = loop_result["execution"]
@@ -79,6 +100,7 @@ def run_ir_pipeline(
         "execution": execution,
         "validation": validation,
         "agent_trace": loop_result["agent_trace"],
+        "flow_decision": flow_decision,
         "files": files,
         **report,
     }

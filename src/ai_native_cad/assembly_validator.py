@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ai_native_cad.workflow_control import assembly_validation_decision
+
 
 DEFAULT_CONTACT_TOLERANCE = 0.1
 DEFAULT_MIN_CLEARANCE = 0.5
@@ -131,6 +133,7 @@ def validate_assembly(config: dict, project_root: str | Path = ".") -> dict:
         result["status"] = "failed"
     elif result["warnings"] or result["possible_interferences"]:
         result["status"] = "warning"
+    result["flow_decision"] = assembly_validation_decision(result)
 
     json_path = output_dir / "assembly_validation.json"
     md_path = output_dir / "assembly_validation.md"

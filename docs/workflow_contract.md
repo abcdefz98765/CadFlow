@@ -14,6 +14,18 @@ Each stage owns one decision layer and hands off structured data to the next
 stage. Natural language is accepted at the edge of the system, but downstream
 CAD generation consumes `requirement.json` and `input_ir.json`.
 
+Every stage starts with an input-sufficiency gate before doing its main work.
+The gate answers three questions:
+
+- Is the upstream package complete enough for this stage's declared
+  responsibilities?
+- If not, which stage owns the missing decision?
+- Can the current stage safely continue with a recorded assumption or internal
+  retry, or must it return the package upstream?
+
+Stages must not fill missing upstream-owned decisions by re-reading free-form
+text, design notes, or earlier prompts.
+
 ## Entry Points
 
 ### prompt_pipeline
@@ -77,6 +89,47 @@ must not re-parse it to override structured fields.
 Each transition passes a named package and has an explicit proceed condition.
 When the condition is not met, the stage must either return to the owning stage
 or record the limitation instead of silently inventing missing decisions.
+
+### Rework Decision Model
+
+Each stage boundary may record a structured `flow_decision` or
+`rework_decision`:
+
+- `action: proceed` means the package satisfies the next stage's entry
+  condition.
+- `action: return` means the current stage cannot own the missing decision and
+  must route the package back to the owning stage.
+- `action: retry` means the same stage can make an implementation-level repair
+  without changing product intent or planning decisions.
+
+The decision records `from_stage`, `to_stage`, `owner_stage`, and structured
+`reasons`. Current single-part handoff ownership is:
+
+- Requirement returns to the user / Requirement when structured requirement
+  fields are incomplete for the requested check level.
+- Planning returns to Requirement when topology, interface, motion, fit,
+  manufacturing, assembly, or safety decisions need user confirmation.
+- CAD IR returns to Planning when explicit part-level fields are missing,
+  unsupported, or ambiguous.
+- Part Modeling retries internally for implementation-level IR or mapping
+  repairs that preserve the resolved design intent.
+- Part Modeling returns to Planning when retries cannot realize the selected
+  CAD IR or when a template/backend gap would require redesign.
+- Assembly returns to Part Modeling for missing/invalid part artifacts and to
+  Planning or Requirement for unresolved placement, interface, or high-risk
+  assembly decisions.
+
+Current gate artifacts:
+
+- Requirement writes `requirement_status.flow_decision`.
+- Planning writes `planning_artifact.flow_gate_status.rework_decision`.
+- CAD IR validation writes pipeline `flow_decision` and, on failure,
+  `agent_trace.rework_decision`.
+- Part Modeling writes per-attempt `rework_decision` for retries and
+  `agent_trace.final_flow_decision`.
+- Assembly planning writes `assembly_plan.flow_decision`.
+- Assembly validation writes `assembly_validation.flow_decision`.
+- Review writes `report.flow_decision`.
 
 ### Requirement -> Planning
 

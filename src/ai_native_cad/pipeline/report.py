@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ai_native_cad.workflow_control import review_to_outputs_decision
+
 
 def write_pipeline_report(
     output_dir: str | Path,
@@ -42,6 +44,7 @@ def write_pipeline_report(
         "validation": validation,
         "files": files,
     }
+    report["flow_decision"] = review_to_outputs_decision(report)
     json_path = output_path / "report.json"
     json_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 

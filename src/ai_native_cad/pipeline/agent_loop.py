@@ -14,6 +14,7 @@ from ai_native_cad.cadquery.generator import generate_cadquery_candidates
 from ai_native_cad.pipeline.failure_analyzer import analyze_failure
 from ai_native_cad.pipeline.scorer import score_candidate
 from ai_native_cad.pipeline.validator import validate_pipeline_outputs
+from ai_native_cad.workflow_control import part_modeling_final_decision, part_modeling_retry_decision
 
 MAX_ATTEMPTS = 3
 
@@ -27,6 +28,15 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
         "steps": [],
         "final_selected_candidate": None,
         "max_attempts": max_attempts,
+        "part_modeling_contract": {
+            "geometry_source": "cad_ir",
+            "allowed_knowledge": ["template_candidates", "feature_library", "backend_capabilities"],
+            "does_not_own": [
+                "product_requirement_changes",
+                "part_structure_redesign",
+                "assembly_placement_decisions",
+            ],
+        },
     }
     last_execution: dict[str, Any] = {"status": "not_run"}
     last_validation: dict[str, Any] = {"valid": False, "errors": []}
@@ -78,6 +88,10 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
             trace["final_execution_status"] = final_execution.get("status")
             trace["final_measured_validation_targets"] = final_validation.get("measured_validation_targets", [])
             trace["final_inspection_summary"] = _inspection_summary(final_validation.get("inspection", {}))
+            trace["final_flow_decision"] = part_modeling_final_decision(
+                status="success" if final_execution.get("status") == "success" and final_validation.get("valid") else "failed",
+                validation=final_validation,
+            )
             _write_trace(output_path, trace)
             return {
                 "status": "success" if final_execution.get("status") == "success" and final_validation.get("valid") else "failed",
@@ -96,12 +110,14 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
             "diff": repaired.get("diff", []),
             "repaired_ir": repaired["repaired_ir"],
         }
+        step["rework_decision"] = part_modeling_retry_decision(failure, repaired)
         trace["steps"].append(step)
         current_ir = CADIR.from_dict(repaired["repaired_ir"])
 
     trace["final_selected_candidate"] = best["candidate"] if selected_code else None
     trace["final_measured_validation_targets"] = last_validation.get("measured_validation_targets", [])
     trace["final_inspection_summary"] = _inspection_summary(last_validation.get("inspection", {}))
+    trace["final_flow_decision"] = part_modeling_final_decision(status="failed", validation=last_validation)
     _write_trace(output_path, trace)
     return {
         "status": "failed",

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_native_cad.backends import CADBackend, CadQueryBackend, ModelArtifact
+from ai_native_cad.planning import create_planning_artifact
 from ai_native_cad.requirements import CHECK_LEVELS, RequirementAgent, normalize_check_level
 from ai_native_cad.validator import preflight_design_intent
 
@@ -212,6 +213,7 @@ class CADWorkflow:
         plan = self.planner.create_plan(requirement)
         plan_path = root / "plan.md"
         plan_path.write_text(plan, encoding="utf-8")
+        _write_json(root / "planning_artifact.json", create_planning_artifact(requirement))
         preflight = preflight_design_intent(requirement)
 
         try:
