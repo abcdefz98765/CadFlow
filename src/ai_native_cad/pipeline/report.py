@@ -81,6 +81,7 @@ def write_pipeline_report(
         holes = inspection.get("features", {}).get("holes", {})
         if holes:
             measured = holes.get("measured") or {}
+            spacing = holes.get("spacing") or {}
             detail = ""
             if measured.get("count") is not None:
                 detail = f" ({measured.get('count')} measured"
@@ -88,6 +89,12 @@ def write_pipeline_report(
                     detail += f", diameter {measured.get('diameter'):.3f} mm"
                 detail += ")"
             lines.append(f"- Holes: {holes.get('status', 'unknown')}{detail}")
+            if spacing:
+                spacing_detail = ""
+                spacing_measured = spacing.get("measured") or {}
+                if spacing_measured.get("x") is not None and spacing_measured.get("y") is not None:
+                    spacing_detail = f" ({spacing_measured.get('x'):.3f} x {spacing_measured.get('y'):.3f} mm)"
+                lines.append(f"- Hole spacing: {spacing.get('status', 'unknown')}{spacing_detail}")
     if validation.get("errors"):
         lines.extend(["", "## Errors", ""])
         for error in validation["errors"]:

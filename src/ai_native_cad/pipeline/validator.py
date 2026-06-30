@@ -234,10 +234,12 @@ def _validate_hole_inspection(result: dict[str, Any], inspection: dict[str, Any]
             "actual": measured.get("diameter"),
             "pass": diameter_pass,
         })
+        _add_hole_spacing_targets(result, hole_inspection)
         return
 
     if status == "failed":
         _check(result, "hole_topology_inspection", False, feature="holes", status=status)
+        _add_hole_spacing_targets(result, hole_inspection)
         result["errors"].append({
             "code": "missing_feature",
             "message": "Expected mounting plate through holes were not realized in generated geometry",
@@ -252,6 +254,50 @@ def _validate_hole_inspection(result: dict[str, Any], inspection: dict[str, Any]
         "feature": "holes",
         "inspection": hole_inspection,
     })
+
+
+def _add_hole_spacing_targets(result: dict[str, Any], hole_inspection: dict[str, Any]) -> None:
+    spacing = hole_inspection.get("spacing") or {}
+    status = spacing.get("status")
+    if status == "verified":
+        expected = spacing.get("expected", {})
+        measured = spacing.get("measured", {})
+        for axis in ("x", "y"):
+            result["measured_validation_targets"].append({
+                "target": f"hole_spacing_{axis}",
+                "expected": expected.get(axis),
+                "actual": measured.get(axis),
+                "pass": True,
+            })
+        return
+
+    if status == "failed":
+        expected = spacing.get("expected", {})
+        measured = spacing.get("measured", {})
+        checks = spacing.get("checks", {})
+        for axis in ("x", "y"):
+            passed = bool(checks.get(axis))
+            result["measured_validation_targets"].append({
+                "target": f"hole_spacing_{axis}",
+                "expected": expected.get(axis),
+                "actual": measured.get(axis),
+                "pass": passed,
+            })
+        result["errors"].append({
+            "code": "hole_spacing_mismatch",
+            "message": "Measured mounting plate hole spacing does not match IR expectation",
+            "feature": "holes",
+            "inspection": spacing,
+        })
+        return
+
+    if status == "unverified":
+        result["warnings"].append({
+            "code": "feature_unverified",
+            "message": "Hole spacing could not be reliably verified",
+            "feature": "holes",
+            "inspection": spacing,
+        })
 
 
 def _hole_spans(cad_ir: CADIR) -> list[float]:

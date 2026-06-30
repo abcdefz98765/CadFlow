@@ -113,4 +113,8 @@ def test_ir_pipeline_report_includes_mounting_plate_hole_inspection():
     assert holes["status"] == "verified"
     assert holes["measured"]["count"] == 4
     assert holes["measured"]["diameter"] == 5.0
+    assert holes["spacing"]["status"] == "verified"
+    assert holes["spacing"]["measured"]["x"] == 64.0
+    assert holes["spacing"]["measured"]["y"] == 24.0
     assert "Holes: verified" in report_md
+    assert "Hole spacing: verified" in report_md

@@ -10,6 +10,8 @@ import cadquery as cq
 
 from ai_native_cad.cad_ir.schema import CADIR
 
+HOLE_TOLERANCE_MM = 0.2
+
 
 def inspect_geometry(
     model: cq.Workplane | None,
@@ -75,7 +77,7 @@ def _feature_scaffold(cad_ir: CADIR | None) -> dict[str, Any]:
             "status": "scaffold",
             "expected": _expected_feature(features, "holes", aliases=("mounting_holes", "base_holes")),
             "measured": None,
-            "note": "Hole count/diameter measurement is available for simple mounting_plate through-hole topology.",
+            "note": "Hole count, diameter, and spacing measurement is available for simple mounting_plate through-hole topology.",
         },
         "chamfers": {
             "status": "scaffold",
@@ -137,16 +139,23 @@ def _inspect_holes(cad_ir: CADIR | None, faces: list[Any]) -> dict[str, Any]:
             "reason": measured["reason"],
         }
 
+    spacing = _inspect_mounting_plate_hole_spacing(cad_ir, measured)
+    if spacing.get("expected"):
+        expected["centers"] = spacing["expected"].get("centers")
+        expected["spacing_x"] = spacing["expected"].get("x")
+        expected["spacing_y"] = spacing["expected"].get("y")
     count_matches = measured["count"] == expected["count"]
     diameter_matches = (
         measured["diameter"] is not None
-        and isclose(measured["diameter"], expected["diameter"], abs_tol=0.2)
+        and isclose(measured["diameter"], expected["diameter"], abs_tol=HOLE_TOLERANCE_MM)
     )
-    status = "verified" if count_matches and diameter_matches else "failed"
+    spacing_status = spacing.get("status")
+    status = "verified" if count_matches and diameter_matches and spacing_status != "failed" else "failed"
     result: dict[str, Any] = {
         "status": status,
         "expected": expected,
         "measured": measured,
+        "spacing": spacing,
     }
     if status == "failed":
         result["reason"] = "Measured through-hole topology does not match IR expectation."
@@ -161,6 +170,8 @@ def _hole_expectation(feature: Any) -> dict[str, Any]:
 
     counts: list[int] = []
     diameters: list[float] = []
+    expected_centers: list[list[float]] | None = None
+    spacing: dict[str, float] | None = None
     for item in items:
         diameter = float(item.get("diameter", 0) or 0)
         if diameter <= 0:
@@ -170,18 +181,24 @@ def _hole_expectation(feature: Any) -> dict[str, Any]:
             return {"status": "unknown", "expected": item, "reason": "Hole count could not be inferred from positions or pattern."}
         counts.append(count)
         diameters.append(diameter)
+        centers = _expected_hole_centers(item)
+        if centers is not None:
+            expected_centers = centers
+            spacing = _spacing_from_centers(centers)
 
     unique_diameters = {round(value, 3) for value in diameters}
     if len(unique_diameters) != 1:
         return {"status": "unknown", "expected": feature, "reason": "Multiple hole diameters are not inspected yet."}
 
-    return {
-        "status": "known",
-        "expected": {
-            "count": sum(counts),
-            "diameter": round(diameters[0], 3),
-        },
+    expected = {
+        "count": sum(counts),
+        "diameter": round(diameters[0], 3),
     }
+    if len(items) == 1 and expected_centers is not None:
+        expected["centers"] = expected_centers
+    if len(items) == 1 and spacing is not None:
+        expected.update(spacing)
+    return {"status": "known", "expected": expected}
 
 
 def _expected_hole_count(item: dict[str, Any]) -> int | None:
@@ -193,6 +210,33 @@ def _expected_hole_count(item: dict[str, Any]) -> int | None:
     if isinstance(positions, list):
         return len(positions)
     return None
+
+
+def _expected_hole_centers(item: dict[str, Any]) -> list[list[float]] | None:
+    positions = item.get("positions")
+    if isinstance(positions, list):
+        centers = []
+        for point in positions:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                return None
+            centers.append([round(float(point[0]), 3), round(float(point[1]), 3)])
+        return _sort_xy_centers(centers)
+    return None
+
+
+def _expected_corner_centers(cad_ir: CADIR, item: dict[str, Any]) -> list[list[float]] | None:
+    dims = cad_ir.dimensions
+    length = dims.get("length", 0)
+    width = dims.get("width", 0)
+    if length <= 0 or width <= 0:
+        return None
+    diameter = float(item.get("diameter", 0) or 0)
+    offset = float(item.get("offset_from_edge", max(diameter, min(length, width) * 0.2)) or 0)
+    if offset <= 0:
+        return None
+    x = length / 2 - offset
+    y = width / 2 - offset
+    return _sort_xy_centers([[-x, -y], [-x, y], [x, -y], [x, y]])
 
 
 def _measure_mounting_plate_through_holes(faces: list[Any], thickness: float) -> dict[str, Any]:
@@ -230,5 +274,127 @@ def _measure_mounting_plate_through_holes(faces: list[Any], thickness: float) ->
         "count": len(cylinders),
         "diameter": diameter,
         "diameters": diameters,
-        "centers": [item["center"] for item in cylinders],
+        "centers": _sort_centers([item["center"] for item in cylinders]),
     }
+
+
+def _inspect_mounting_plate_hole_spacing(
+    cad_ir: CADIR,
+    measured: dict[str, Any],
+) -> dict[str, Any]:
+    expected_spacing = _expected_spacing(cad_ir)
+    if expected_spacing.get("status") != "known":
+        return {
+            "status": "unverified",
+            "expected": None,
+            "measured": None,
+            "reason": expected_spacing.get("reason", "Expected hole spacing could not be inferred from IR."),
+        }
+
+    measured_spacing = _measured_spacing(measured)
+    if measured_spacing.get("status") != "known":
+        return {
+            "status": "unverified",
+            "expected": expected_spacing["expected"],
+            "measured": measured_spacing.get("measured"),
+            "reason": measured_spacing.get("reason", "Measured hole spacing could not be inferred from topology."),
+        }
+
+    expected_value = expected_spacing["expected"]
+    measured_value = measured_spacing["measured"]
+    x_pass = isclose(measured_value["x"], expected_value["x"], abs_tol=HOLE_TOLERANCE_MM)
+    y_pass = isclose(measured_value["y"], expected_value["y"], abs_tol=HOLE_TOLERANCE_MM)
+    return {
+        "status": "verified" if x_pass and y_pass else "failed",
+        "expected": expected_value,
+        "measured": measured_value,
+        "tolerance": HOLE_TOLERANCE_MM,
+        "checks": {
+            "x": x_pass,
+            "y": y_pass,
+        },
+    }
+
+
+def _expected_spacing(cad_ir: CADIR) -> dict[str, Any]:
+    features = cad_ir.features
+    feature = _expected_feature(features, "holes", aliases=("mounting_holes", "base_holes"))
+    items = feature if isinstance(feature, list) else [feature]
+    items = [item for item in items if isinstance(item, dict)]
+    if len(items) != 1:
+        return {"status": "unknown", "reason": "Hole spacing inspection requires one mounting_plate hole feature."}
+
+    item = items[0]
+    positions = item.get("positions")
+    if positions == "corner_4" or (item.get("pattern") == "corner" and int(item.get("count", 0) or 0) == 4):
+        centers = _expected_corner_centers(cad_ir, item)
+    elif isinstance(positions, list):
+        centers = _expected_hole_centers(item)
+    else:
+        centers = None
+
+    if centers is None:
+        return {"status": "unknown", "reason": "Expected hole center positions could not be inferred from IR."}
+
+    spacing = _spacing_from_centers(centers)
+    if spacing is None:
+        return {"status": "unknown", "reason": "Expected centers do not form a four-corner spacing pattern."}
+
+    return {
+        "status": "known",
+        "expected": {
+            "centers": centers,
+            "x": spacing["spacing_x"],
+            "y": spacing["spacing_y"],
+        },
+    }
+
+
+def _measured_spacing(measured: dict[str, Any]) -> dict[str, Any]:
+    centers = measured.get("centers") or []
+    spacing = _spacing_from_centers([[center[0], center[1]] for center in centers if len(center) >= 2])
+    if spacing is None:
+        return {
+            "status": "unknown",
+            "measured": {"centers": centers},
+            "reason": "Measured centers do not form a four-corner spacing pattern.",
+        }
+    return {
+        "status": "known",
+        "measured": {
+            "centers": _sort_centers(centers),
+            "x": spacing["spacing_x"],
+            "y": spacing["spacing_y"],
+        },
+    }
+
+
+def _spacing_from_centers(centers: list[list[float]]) -> dict[str, float] | None:
+    if len(centers) != 4:
+        return None
+    xs = _cluster_axis([center[0] for center in centers])
+    ys = _cluster_axis([center[1] for center in centers])
+    if len(xs) != 2 or len(ys) != 2:
+        return None
+    return {
+        "spacing_x": round(xs[1] - xs[0], 3),
+        "spacing_y": round(ys[1] - ys[0], 3),
+    }
+
+
+def _cluster_axis(values: list[float]) -> list[float]:
+    clusters: list[list[float]] = []
+    for value in sorted(values):
+        if not clusters or abs(value - clusters[-1][-1]) > HOLE_TOLERANCE_MM:
+            clusters.append([value])
+        else:
+            clusters[-1].append(value)
+    return [round(sum(cluster) / len(cluster), 3) for cluster in clusters]
+
+
+def _sort_centers(centers: list[list[float]]) -> list[list[float]]:
+    return sorted(([round(float(value), 3) for value in center] for center in centers), key=lambda center: (center[0], center[1], center[2] if len(center) > 2 else 0))
+
+
+def _sort_xy_centers(centers: list[list[float]]) -> list[list[float]]:
+    return sorted(([round(float(center[0]), 3), round(float(center[1]), 3)] for center in centers), key=lambda center: (center[0], center[1]))

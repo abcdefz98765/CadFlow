@@ -79,10 +79,12 @@ def test_agent_loop_repairs_failed_hole_clearance_and_writes_trace():
     assert trace["steps"][1]["inspection_summary"]["step_file"]["present"] is True
     assert trace["steps"][1]["inspection_summary"]["solid_count"] == 1
     assert trace["steps"][1]["inspection_summary"]["features"]["holes"]["status"] == "verified"
+    assert trace["steps"][1]["inspection_summary"]["hole_spacing_status"] == "verified"
     assert trace["steps"][1]["measured_validation_targets"]
     assert trace["final_inspection_summary"]["step_file"]["present"] is True
     assert trace["final_inspection_summary"]["stl_file"]["present"] is True
     assert trace["final_inspection_summary"]["features"]["holes"]["status"] == "verified"
+    assert trace["final_inspection_summary"]["hole_spacing_status"] == "verified"
     assert trace["final_measured_validation_targets"]
     assert (output_dir / "model.py").exists()
     assert (output_dir / "model.step").exists()
