@@ -61,14 +61,11 @@ fields.
 The IR is the source of truth for generated CAD. Text-to-code bypass is outside
 the supported output contract.
 
-`requirement.json` is the Requirement Agent handoff artifact before CAD IR
-normalization. Once it exists, downstream stages must consume its structured
-fields and must not re-parse `source.input_text` to infer CAD geometry.
-
-Requirement parsing may emit `cad_brief` as planning metadata. It can summarize
-intent, parsed dimensions/features, conservative validation targets, assumptions,
-and clarification state, but it must be derived from requirement/CAD IR fields
-and must not replace `input_ir.json` or drive backend code generation directly.
+Workflow responsibilities and handoff boundaries are defined in
+`docs/workflow_contract.md`. `requirement.json` remains the Requirement Agent
+handoff artifact and `input_ir.json` remains the CAD generation source of truth;
+this policy only defines output directories, artifact expectations, trace
+requirements, and path behavior.
 
 Legacy workflow output shape:
 

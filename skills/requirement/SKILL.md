@@ -57,6 +57,8 @@ prompt.
 
 See also:
 
+- `../../docs/workflow_contract.md`
+- `../../policies/requirement_contract.md`
 - `knowledge/requirement_template.md`
 - `knowledge/fields_by_check_level.md`
 - `knowledge/missing_info_policy.md`

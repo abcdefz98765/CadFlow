@@ -7,6 +7,10 @@ structured, reviewable requirement package. It may use natural-language parsing,
 rules, clarification questions, structured overrides, or future LLM assistance,
 but its output is always `requirement.json`.
 
+The full end-to-end workflow responsibility map lives in
+`docs/workflow_contract.md`; this policy is limited to the Requirement Agent
+handoff contract.
+
 Downstream workflow stages must consume structured fields from
 `requirement.json`. They must not re-parse `source.input_text` to infer geometry
 or features.

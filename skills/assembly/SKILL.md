@@ -45,6 +45,7 @@ in part generation and review; this skill owns how parts relate to one another.
 
 See:
 
+- `../../docs/workflow_contract.md`
 - `knowledge/assembly_rules.md`
 - `knowledge/constraints.md`
 - `knowledge/clearances.md`

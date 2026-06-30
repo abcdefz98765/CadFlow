@@ -3,13 +3,36 @@
 CadFlow 架构以 workflow 为主线，而不是以某个 CAD 工具为中心。
 
 ```text
-input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
+user input -> requirement -> planning -> CAD IR -> part modeling -> assembly -> review -> outputs
 ```
 
-当前单零件生成的主线是 IR-first CAD Agent Loop：
+各环节的职责、输入、输出产物和边界以
+[`docs/workflow_contract.md`](workflow_contract.md) 为权威说明。本文只保留
+总体架构、代码层分布和入口关系。
+
+## Artifact Levels
+
+Workflow artifacts have different authority levels:
+
+- `requirement.json`: Requirement Agent 的正式交接物。它把用户自然语言、
+  overrides、澄清回答、缺失信息和假设整理成结构化需求包。
+- `input_ir.json` / `CADIR`: CAD 生成的 source of truth。它比
+  `requirement.json` 和 `plan.md` 更窄，只承载已选定单零件方案所需的规范化
+  几何字段；它不负责设计取舍、结构合理性分析或风险 gate。
+- `report.json` / `report.md`: 结果说明，区分 verified、assumed 和
+  unverified。
+- `agent_trace.json`: 生成闭环记录，包含 attempt、失败、修复、inspection
+  summary 和最终候选。
+
+`source.input_text` 只用于 trace/debug。`requirement.json` 产生后，下游阶段
+不得重新解析原始 prompt 来推断几何。
+
+## Current Mainline
+
+当前单零件生成主线是 IR-first CAD Agent Loop：
 
 ```text
-text/input_ir.json
+input_ir.json
   ↓
 CAD IR
   ↓
@@ -28,33 +51,9 @@ model.py + model.step + model.stl + preview.png
 report.json + report.md + agent_trace.json
 ```
 
-```text
-input.md
-  ↓
-Requirement Agent
-  ↓
-requirement.json
-  ↓
-Design Planner
-  ↓
-plan.md
-  ↓
-Part Generation Loop
-  ↓
-model.py / backend-native model
-  ↓
-Assembly Planning Loop
-  ↓
-Reviewer
-  ↓
-review.md
-  ↓
-Exporter
-  ↓
-exports/ + logs/
-```
-
-## Layers
+Prompt pipeline 是调试入口，从自然语言经过 Requirement Agent 到 CAD IR 和
+outputs。Legacy `CADWorkflow` 保留为兼容旧 demo 和旧输出结构的入口，后续可
+收敛到同一套 artifact contract。
 
 ## Example Layout
 
@@ -106,16 +105,15 @@ STEP/STL, report, and trace. They write generated artifacts to ignored
 - `review/`：按 check_level 审查。
 
 `requirement/knowledge/product_decomposition.md` 负责早期产品拆解，因为判断“需要哪些零件/参考件”本质上属于需求澄清。`policies/` 保存跨 skill 的全局策略，例如 check level 和输出契约。`knowledge/` 保存跨 skill 索引，具体知识优先放到所属 skill 的 `knowledge/` 下。
-`policies/requirement_contract.md` 定义 Requirement Agent 的正式交接物：
-用户可以自然语言输入，但第一环必须产出结构化、可审查的
-`requirement.json`；下游 workflow 阶段不得重新解析 `source.input_text`
-来推断几何。
+`policies/requirement_contract.md` 定义 Requirement Agent 的正式交接物。
+完整 workflow 职责和产物边界见
+[`docs/workflow_contract.md`](workflow_contract.md)。
 
 ### Workflow Layer
 
 `src/ai_native_cad/workflow.py`
 
-负责端到端编排，写出标准项目目录：
+负责 legacy 端到端编排，写出兼容旧 demo 的项目目录：
 
 ```text
 input.md
@@ -185,7 +183,11 @@ examples/ir_pipeline/<part_name>/outputs/
   logs/runtime.json
 ```
 
-`src/ai_native_cad/requirements.py` 提供第一版 `RequirementAgent`。当前实现仍是保守的确定性解析：识别内置示例，支持 overrides，并默认落到 `mounting_plate`。它会额外写入：
+### Requirement Layer
+
+`src/ai_native_cad/requirements.py` 提供第一版 `RequirementAgent`。当前实现仍是
+保守的确定性解析：识别内置示例，支持 overrides，并默认落到
+`mounting_plate`。它会额外写入：
 
 - `intent`
 - `field_policy`
@@ -198,23 +200,10 @@ examples/ir_pipeline/<part_name>/outputs/
 
 后续可以替换为 LLM parser 或多轮交互，但输出 contract 不变。
 
-Requirement 层也负责早期产品意图分析：判断请求是单零件、装配还是未知；识别候选制造件、参考组件、用户可见功能、关键接口和会改变拓扑的缺失信息。它不生成几何，也不决定 backend 操作。
 Requirement Agent 的价值不是把自然语言直接推给后续正则，而是通过分析、
 追问、补全和记录假设，确认一个规范 `requirement.json`。从这个文件开始，
 Planning、CAD IR 和 Review 只消费结构化字段；`source.input_text` 仅用于
-trace/debug。
-
-`cad_brief` 是 Requirement/Planning 元数据，汇总 part type、intent、坐标约定、已解析尺寸和 feature、保守 validation targets、假设策略和澄清状态。它从 requirement/CAD IR 字段派生，不替代 `input_ir.json`，也不允许绕过 IR 直接生成 CadQuery 或 backend 代码。
-
-### Planning Layer
-
-`plan.md` 不只是步骤列表。Design Planner 负责把需求包转成工程方案：
-
-- workflow route：单零件、多个零件、装配 loop，或需要用户确认。
-- design strategy：功能基准、接口、模板候选、建模顺序和检查目标。
-- risk and gate：哪些假设可以 L0 继续，哪些会改变拓扑并需要回问。
-
-Planning 不做用户需求澄清，不参数化具体零件模板，也不写 backend CAD 代码。
+trace/debug。Requirement、Planning、CAD IR 的详细边界见 workflow contract。
 
 ### Backend Layer
 
@@ -307,7 +296,7 @@ L0 默认软失败继续：只要 backend 能生成模型就继续导出，但 `
 
 ### Assembly Planning Loop
 
-装配不是直接从零件 STEP 跳到 FreeCAD。当前 contract 是：
+装配不是直接从零件 STEP 跳到 FreeCAD。当前路径是：
 
 ```text
 requirement.json + part_spec.json + part reports
@@ -348,68 +337,14 @@ industrial DFA, motion simulation, or production-ready assembly release.
 
 ## Data Contracts
 
-### requirement.json
+Detailed workflow contracts live in:
 
-最小字段：
+- [`docs/workflow_contract.md`](workflow_contract.md)
+- [`policies/requirement_contract.md`](../policies/requirement_contract.md)
+- [`policies/output_contract.md`](../policies/output_contract.md)
+- [`policies/check_levels.md`](../policies/check_levels.md)
 
-```json
-{
-  "part_type": "mounting_plate",
-  "unit": "mm",
-  "intent": {
-    "object_goal": "mounting_plate",
-    "scope": "part",
-    "use_case": "mounting"
-  },
-  "dimensions": {},
-  "features": {},
-  "outputs": ["step", "stl"],
-  "check_level": "L0",
-  "field_policy": {},
-  "missing_information": [],
-  "follow_up_questions": [],
-  "follow_up_requests": [],
-  "cad_brief": {
-    "part_type": "mounting_plate",
-    "intent": {},
-    "coordinate_convention": {},
-    "dimension_fields": [],
-    "feature_fields": [],
-    "validation_targets": [],
-    "assumption_policy": {},
-    "clarification_summary": {}
-  },
-  "assumptions": [],
-  "requirement_status": {
-    "complete_for_generation": true,
-    "needs_user_input": false,
-    "blocking_fields": [],
-    "missing_count": 0,
-    "follow_up_count": 0,
-    "blocking_count": 0,
-    "missing_fields": [],
-    "non_blocking_fields": []
-  }
-}
-```
-
-`follow_up_questions` is kept as a compatibility list of strings.
-`follow_up_requests` is the structured clarification contract for agents and
-UIs; each item carries `field`, `category`, `code`, `question`, `severity`,
-`reason`, and `source`.
-
-`cad_brief` is a lightweight planning aid. It records conservative targets such
-as bounding dimensions and requested hole count or diameter when those values
-already exist in requirement/CAD IR fields. It is not a geometry source of
-truth.
-
-`source.input_text` is trace data only after `requirement.json` has been
-created. Downstream stages must not re-parse it to override structured
-requirement fields.
-
-### input_ir.json
-
-最小字段：
+Minimal `input_ir.json` shape:
 
 ```json
 {

@@ -18,3 +18,5 @@ mark the review clearly. Do not report feature-level intent as verified unless
 there is an explicit measurement or recognition rule.
 
 The global check-level definitions live in `policies/check_levels.md`.
+Workflow handoff boundaries and artifact responsibilities live in
+`docs/workflow_contract.md`.
