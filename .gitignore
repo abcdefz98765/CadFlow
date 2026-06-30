@@ -52,6 +52,9 @@ tmp_outputs/
 generated/
 exports/
 
+# IR pipeline example-local generated outputs
+examples/ir_pipeline/*/outputs/
+
 # Generated CAD/example artifacts
 # Keep source examples/configs in the repo; regenerate models locally.
 examples/**/*.step
