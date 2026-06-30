@@ -1,0 +1,45 @@
+{
+  "id": "mounting_plate_four_holes",
+  "description": "Mounting plate with four verified corner through holes.",
+  "prompt": "Generate an 80 x 40 x 5 mm mounting plate with four 5 mm corner holes.",
+  "ir": {
+    "part_type": "mounting_plate",
+    "unit": "mm",
+    "dimensions": {
+      "length": 80,
+      "width": 40,
+      "thickness": 5
+    },
+    "features": {
+      "holes": {
+        "diameter": 5,
+        "positions": "corner_4"
+      }
+    },
+    "outputs": ["step", "stl"]
+  },
+  "expect": {
+    "status": "success",
+    "artifacts": true,
+    "bounding_box": {
+      "x": 80,
+      "y": 40,
+      "z": 5,
+      "tolerance": 0.2
+    },
+    "features": {
+      "holes": {
+        "status": "verified",
+        "count": 4,
+        "diameter": 5.0
+      }
+    },
+    "measured_targets": ["bounding_box_dimension", "hole_count", "hole_diameter", "hole_spacing_x", "hole_spacing_y"],
+    "trace": {
+      "max_attempts": 3,
+      "total_attempts": 1,
+      "no_repair_diff": true,
+      "final_inspection_summary": true
+    }
+  }
+}

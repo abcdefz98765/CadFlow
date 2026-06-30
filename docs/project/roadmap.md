@@ -112,7 +112,7 @@
 
 ## Phase 1.9: CAD Benchmark Suite
 
-状态：下一阶段。
+状态：已启动。当前实现已落地 IR-first benchmark manifests、benchmark runner、summary 输出，以及覆盖 mounting_plate、spacer、simple_bracket、enclosure_base 和 repair case 的首批固定用例。
 
 目标：用固定 benchmark 衡量架构进步，避免每次只验证 happy path。
 
@@ -121,7 +121,7 @@
 - `benchmarks/` 目录。
 - benchmark prompts。
 - expected IR 或 expected check targets。
-- golden reports / trace samples。
+- benchmark summary report。
 - benchmark runner。
 
 首批 benchmark：
@@ -129,8 +129,13 @@
 - mounting plate with four holes。
 - spacer / washer。
 - simple L-bracket。
-- circular flange。
 - simple enclosure base。
+- repair-required mounting plate。
+
+后续 benchmark 扩展：
+
+- circular flange：需先补齐受支持的 IR part_type、CadQuery generator 和 validation contract。
+- golden report / trace samples：在 benchmark output schema 稳定后固化。
 
 验收：
 

@@ -1,0 +1,39 @@
+{
+  "id": "simple_l_bracket",
+  "description": "Simple L-bracket baseline with base holes.",
+  "prompt": "Generate a 50 x 25 mm base L-bracket, 28 mm high, 4 mm thick, with two 4 mm base holes.",
+  "ir": {
+    "part_type": "simple_bracket",
+    "unit": "mm",
+    "dimensions": {
+      "base_length": 50,
+      "base_width": 25,
+      "height": 28,
+      "thickness": 4
+    },
+    "features": {
+      "base_holes": {
+        "diameter": 4,
+        "positions": [[-12, 0], [12, 0]]
+      }
+    },
+    "outputs": ["step", "stl"]
+  },
+  "expect": {
+    "status": "success",
+    "artifacts": true,
+    "bounding_box": {
+      "x": 50,
+      "y": 25,
+      "z": 28,
+      "tolerance": 0.2
+    },
+    "measured_targets": ["bounding_box_dimension"],
+    "trace": {
+      "max_attempts": 3,
+      "total_attempts": 1,
+      "no_repair_diff": true,
+      "final_inspection_summary": true
+    }
+  }
+}

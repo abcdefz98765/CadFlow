@@ -1,0 +1,47 @@
+{
+  "id": "mounting_plate_repair_clearance",
+  "description": "Mounting plate with unsafe hole offset that must be repaired before success.",
+  "prompt": "Generate a compact 30 x 20 x 4 mm mounting plate with four 8 mm corner holes too close to the edge.",
+  "ir": {
+    "part_type": "mounting_plate",
+    "unit": "mm",
+    "dimensions": {
+      "length": 30,
+      "width": 20,
+      "thickness": 4
+    },
+    "features": {
+      "holes": {
+        "diameter": 8,
+        "positions": "corner_4",
+        "offset_from_edge": 1
+      }
+    },
+    "outputs": ["step", "stl"]
+  },
+  "expect": {
+    "status": "success",
+    "artifacts": true,
+    "bounding_box": {
+      "x": 30,
+      "y": 20,
+      "z": 4,
+      "tolerance": 0.2
+    },
+    "features": {
+      "holes": {
+        "status": "verified",
+        "count": 4,
+        "diameter": 5.0
+      }
+    },
+    "measured_targets": ["bounding_box_dimension", "hole_count", "hole_diameter", "hole_spacing_x", "hole_spacing_y"],
+    "trace": {
+      "max_attempts": 3,
+      "total_attempts": 2,
+      "requires_repair_diff": true,
+      "repair_diff_path": "features.holes.offset_from_edge",
+      "final_inspection_summary": true
+    }
+  }
+}

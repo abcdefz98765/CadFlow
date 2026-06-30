@@ -80,6 +80,27 @@ logs/
 For assemblies, outputs may also include BOM, assembly reports,
 backend-neutral assembly configs, and backend-native assembly files.
 
+Benchmark suite output shape:
+
+```text
+outputs/benchmarks/
+  benchmark_summary.json
+  <benchmark_case_id>/
+    input_ir.json
+    model.py
+    model.step
+    model.stl
+    report.json
+    report.md
+    preview.png
+    agent_trace.json
+```
+
+Benchmark cases must remain IR-first and deterministic. Benchmark expectations
+may check artifacts, bounding boxes, measured validation targets, feature
+inspection, attempt counts, and repair diffs, but they must not parse natural
+language into generated code.
+
 Path policy:
 
 - User workflow runs should receive an explicit `output_dir`.
