@@ -86,3 +86,38 @@ def test_parser_marks_missing_dimensions_blocking_for_l1():
         "dimensions.width",
     }
     assert len(requirement["follow_up_questions"]) == 4
+
+
+def test_parser_extracts_named_dimensions_symbolic_hole_and_edge_offset():
+    requirement = RequirementAgent().parse(
+        "Make a mounting plate 80 mm long by 40 mm wide and 5 mm thick with four Ø5 holes 8 mm from edge."
+    )
+
+    assert requirement["dimensions"] == {"length": 80.0, "width": 40.0, "thickness": 5.0}
+    assert requirement["features"]["holes"]["count"] == 4
+    assert requirement["features"]["holes"]["diameter"] == 5.0
+    assert requirement["features"]["holes"]["offset_from_edge"] == 8.0
+    assert requirement["missing_information"] == []
+    assert validate_ir(ir_from_text(
+        "Make a mounting plate 80 mm long by 40 mm wide and 5 mm thick with four Ø5 holes 8 mm from edge."
+    ))["valid"]
+
+
+def test_parser_reports_conflicting_dimensions_as_missing_information():
+    requirement = RequirementAgent().parse("Make an 80x40x5 mm mounting plate with length 90 mm.", {"check_level": "L1"})
+
+    diagnostics = requirement["source"]["parser"]["diagnostics"]
+    assert diagnostics[0]["code"] == "conflicting_dimension"
+    assert diagnostics[0]["field"] == "dimensions.length"
+    assert "dimensions.length" in requirement["requirement_status"]["blocking_fields"]
+    assert requirement["requirement_status"]["complete_for_generation"] is False
+
+
+def test_parser_reports_unsupported_inch_units_without_converting():
+    requirement = RequirementAgent().parse('Make a 3x2x0.25 inch mounting plate with four holes.', {"check_level": "L1"})
+
+    diagnostics = requirement["source"]["parser"]["diagnostics"]
+    assert diagnostics[0]["code"] == "unsupported_unit_in_text"
+    assert requirement["source"]["parser"]["extracted_dimensions"] == []
+    assert "unit" in requirement["requirement_status"]["blocking_fields"]
+    assert requirement["requirement_status"]["complete_for_generation"] is False

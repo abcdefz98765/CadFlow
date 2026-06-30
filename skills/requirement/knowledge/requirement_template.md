@@ -50,3 +50,7 @@ rules. It currently extracts:
 Unsupported or incomplete fields must remain explicit in `missing_information`.
 L0 may keep template defaults for exploratory generation, but the parser must
 record which dimensions were extracted from text and which were not.
+
+Parser diagnostics must record high-risk ambiguity, such as unsupported inch
+units or conflicting dimension statements. These diagnostics should become
+missing information instead of silently changing CAD IR values.

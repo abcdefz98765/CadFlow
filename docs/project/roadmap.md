@@ -154,6 +154,7 @@
 - `requirement.json` 开始记录 `intent`、`field_policy`、`missing_information`、`follow_up_questions`、`requirement_status`。
 - 当前 parser 已能用确定性规则抽取 mounting_plate、spacer/washer、simple L-bracket、enclosure_base 的关键尺寸、部分孔规格、单位和 STEP/STL 输出请求。
 - 对未从文本或 overrides 明确给出的必需尺寸，`missing_information` 会记录具体 `dimensions.*` 字段；L0 可保留模板默认值探索生成，L1+ 会要求用户补全关键尺寸。
+- 当前 parser 会把 unsupported inch units 和冲突尺寸记录为 diagnostics，并转入 missing information，而不是猜测 CAD IR。
 
 后续任务：
 
@@ -184,6 +185,7 @@
 - 常用零件模板和参考组件知识放在 Part Modeling Skill 的 `knowledge/` 下。
 - 全局 check level 仍由 `policies/check_levels.md` 定义。
 - 输出目录和导出路径是 policy/utility，不作为单独 skill。
+- Workflow 仍是编排代码和 pipeline 入口，不新增独立 Workflow Skill；routing 决策归 Planning，需求补全归 Requirement。
 
 ## Phase 3: Maker L1 Checks
 

@@ -124,6 +124,7 @@ class RequirementAgent:
             "version": "deterministic-requirements-v0.2",
             "extracted_dimensions": sorted(extracted.get("dimensions", {})),
             "extracted_features": sorted(extracted.get("features", {})),
+            "diagnostics": _parser_diagnostics(text, part_type, extracted),
         }
         requirement["intent"] = self._infer_intent(text, requirement)
         requirement["field_policy"] = {
@@ -194,6 +195,15 @@ class RequirementAgent:
     ) -> list[dict[str, Any]]:
         level = requirement["check_level"]
         missing: list[dict[str, Any]] = []
+        for diagnostic in requirement.get("source", {}).get("parser", {}).get("diagnostics", []):
+            if diagnostic["severity"] == "critical":
+                missing.append(_question(
+                    diagnostic["field"],
+                    diagnostic["question"],
+                    "critical",
+                    True,
+                    diagnostic["message"],
+                ))
         parsed_dimensions = set(requirement.get("source", {}).get("parser", {}).get("extracted_dimensions", []))
         for dimension in sorted(REQUIRED_REQUIREMENT_DIMENSIONS.get(requirement["part_type"], set())):
             override_dimensions = overrides.get("dimensions", {})
@@ -298,6 +308,92 @@ def _detect_outputs(text: str, default: list[str]) -> list[str]:
     return outputs or list(default)
 
 
+def _parser_diagnostics(text: str, part_type: str, extracted: dict[str, Any]) -> list[dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
+    if _has_unsupported_unit(text):
+        diagnostics.append({
+            "code": "unsupported_unit_in_text",
+            "field": "unit",
+            "severity": "critical",
+            "message": "The parser detected inch units, but the CAD IR currently supports millimeters only.",
+            "question": "Please provide all dimensions in millimeters.",
+        })
+    diagnostics.extend(_dimension_conflict_diagnostics(text, part_type, extracted.get("dimensions", {})))
+    return diagnostics
+
+
+def _has_unsupported_unit(text: str) -> bool:
+    return bool(re.search(r"\d+(?:\.\d+)?\s*(?:in|inch|inches|\")\b", text, flags=re.IGNORECASE))
+
+
+def _dimension_conflict_diagnostics(
+    text: str,
+    part_type: str,
+    extracted_dimensions: dict[str, float],
+) -> list[dict[str, Any]]:
+    values = _dimension_triplet(text)
+    if not values:
+        return []
+    triplet_fields = {
+        "mounting_plate": ("length", "width", "thickness"),
+        "spacer": ("outer_diameter", "inner_diameter", "thickness"),
+        "simple_bracket": ("base_length", "base_width", "height"),
+        "enclosure_base": ("outer_length", "outer_width", "outer_height"),
+    }.get(part_type)
+    if not triplet_fields:
+        return []
+
+    named = _named_dimensions(text, _dimension_aliases_for_part(part_type))
+    diagnostics = []
+    for field, triplet_value in zip(triplet_fields, values):
+        named_value = named.get(field)
+        if named_value is None:
+            continue
+        if abs(named_value - triplet_value) > 0.001:
+            diagnostics.append({
+                "code": "conflicting_dimension",
+                "field": f"dimensions.{field}",
+                "severity": "critical",
+                "message": (
+                    f"Conflicting values for {field.replace('_', ' ')}: "
+                    f"{triplet_value:g} mm from the size tuple and {named_value:g} mm from the named dimension."
+                ),
+                "question": f"Which {field.replace('_', ' ')} value should be used?",
+                "tuple_value": triplet_value,
+                "named_value": named_value,
+                "selected_value": extracted_dimensions.get(field),
+            })
+    return diagnostics
+
+
+def _dimension_aliases_for_part(part_type: str) -> dict[str, tuple[str, ...]]:
+    aliases = {
+        "mounting_plate": {
+            "length": ("length", "long"),
+            "width": ("width", "wide"),
+            "thickness": ("thickness", "thick"),
+        },
+        "spacer": {
+            "outer_diameter": ("outer diameter", "outside diameter", "od"),
+            "inner_diameter": ("inner diameter", "inside diameter", "id", "hole diameter"),
+            "thickness": ("thickness", "thick", "height", "tall", "long"),
+        },
+        "simple_bracket": {
+            "base_length": ("base length", "length", "long"),
+            "base_width": ("base width", "width", "wide"),
+            "height": ("height", "tall"),
+            "thickness": ("thickness", "thick", "material thickness"),
+        },
+        "enclosure_base": {
+            "outer_length": ("outer length", "length", "long"),
+            "outer_width": ("outer width", "width", "wide"),
+            "outer_height": ("outer height", "height", "tall"),
+            "wall_thickness": ("wall thickness", "wall"),
+        },
+    }
+    return aliases.get(part_type, {})
+
+
 def _extract_dimensions(text: str, part_type: str) -> dict[str, float]:
     extractors = {
         "mounting_plate": _extract_mounting_plate_dimensions,
@@ -311,13 +407,12 @@ def _extract_dimensions(text: str, part_type: str) -> dict[str, float]:
 
 def _extract_mounting_plate_dimensions(text: str) -> dict[str, float]:
     values = _dimension_triplet(text)
+    named = _named_dimensions(text, _dimension_aliases_for_part("mounting_plate"))
     if values:
-        return {"length": values[0], "width": values[1], "thickness": values[2]}
-    return _named_dimensions(text, {
-        "length": ("length", "long"),
-        "width": ("width", "wide"),
-        "thickness": ("thickness", "thick"),
-    })
+        dims = {"length": values[0], "width": values[1], "thickness": values[2]}
+        dims.update({key: value for key, value in named.items() if key not in dims})
+        return dims
+    return named
 
 
 def _extract_spacer_dimensions(text: str) -> dict[str, float]:
@@ -326,14 +421,16 @@ def _extract_spacer_dimensions(text: str) -> dict[str, float]:
         return {"outer_diameter": values[0], "inner_diameter": values[1], "thickness": values[2]}
     dims = {}
     patterns = {
-        "outer_diameter": r"(?:od|outer\s+diameter|outside\s+diameter)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(mm|cm)?",
-        "inner_diameter": r"(?:id|inner\s+diameter|inside\s+diameter|hole\s+diameter)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(mm|cm)?",
-        "thickness": r"(?:thickness|thick|height|tall|long)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(mm|cm)?",
+        "outer_diameter": r"(?:od|outer\s+diameter|outside\s+diameter)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*([a-z\"]+)?",
+        "inner_diameter": r"(?:id|inner\s+diameter|inside\s+diameter|hole\s+diameter)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*([a-z\"]+)?",
+        "thickness": r"(?:thickness|thick|height|tall|long)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*([a-z\"]+)?",
     }
     for name, pattern in patterns.items():
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
-            dims[name] = _to_mm(float(match.group(1)), match.group(2))
+            value = _to_mm(float(match.group(1)), match.group(2))
+            if value is not None:
+                dims[name] = value
     return dims
 
 
@@ -341,15 +438,7 @@ def _extract_simple_bracket_dimensions(text: str) -> dict[str, float]:
     values = _dimension_triplet(text)
     if values:
         return {"base_length": values[0], "base_width": values[1], "height": values[2]}
-    dims = _named_dimensions(text, {
-        "base_length": ("base length", "length", "long"),
-        "base_width": ("base width", "width", "wide"),
-        "height": ("height", "tall"),
-        "thickness": ("thickness", "thick"),
-    })
-    material = _named_dimensions(text, {"thickness": ("material thickness",)})
-    dims.update(material)
-    return dims
+    return _named_dimensions(text, _dimension_aliases_for_part("simple_bracket"))
 
 
 def _extract_enclosure_base_dimensions(text: str) -> dict[str, float]:
@@ -357,12 +446,7 @@ def _extract_enclosure_base_dimensions(text: str) -> dict[str, float]:
     dims = {}
     if values:
         dims.update({"outer_length": values[0], "outer_width": values[1], "outer_height": values[2]})
-    dims.update(_named_dimensions(text, {
-        "outer_length": ("outer length", "length", "long"),
-        "outer_width": ("outer width", "width", "wide"),
-        "outer_height": ("outer height", "height", "tall"),
-        "wall_thickness": ("wall thickness", "wall"),
-    }))
+    dims.update(_named_dimensions(text, _dimension_aliases_for_part("enclosure_base")))
     return dims
 
 
@@ -395,31 +479,45 @@ def _extract_holes(text: str) -> dict[str, Any]:
     if metric:
         holes["fastener"] = f"M{metric.group(1).rstrip('0').rstrip('.')}"
         holes["diameter"] = round(float(metric.group(1)) + 0.5, 3)
-    diameter = re.search(r"(?:hole|holes|diameter|dia)\D{0,12}(\d+(?:\.\d+)?)\s*(mm|cm)?", text, flags=re.IGNORECASE)
+    diameter = re.search(
+        r"(?:hole|holes|diameter|dia|ø|Ø)\D{0,12}(\d+(?:\.\d+)?)\s*([a-z\"]+)?",
+        text,
+        flags=re.IGNORECASE,
+    )
     if diameter:
-        holes["diameter"] = _to_mm(float(diameter.group(1)), diameter.group(2))
+        value = _to_mm(float(diameter.group(1)), diameter.group(2))
+        if value is not None:
+            holes["diameter"] = value
     if "corner" in lowered or "corners" in lowered:
         holes["pattern"] = "corner"
         if holes.get("count") == 4:
             holes["positions"] = "corner_4"
-    offset = re.search(r"(?:offset|inset|from edge)\D{0,12}(\d+(?:\.\d+)?)\s*(mm|cm)?", text, flags=re.IGNORECASE)
+    offset = re.search(r"(?:offset|inset|from edge)\D{0,12}(\d+(?:\.\d+)?)\s*([a-z\"]+)?", text, flags=re.IGNORECASE)
+    if not offset:
+        offset = re.search(r"(\d+(?:\.\d+)?)\s*([a-z\"]+)?\s*(?:from|off)\s+(?:the\s+)?edge", text, flags=re.IGNORECASE)
     if offset:
-        holes["offset_from_edge"] = _to_mm(float(offset.group(1)), offset.group(2))
+        value = _to_mm(float(offset.group(1)), offset.group(2))
+        if value is not None:
+            holes["offset_from_edge"] = value
     return holes
 
 
 def _dimension_triplet(text: str) -> tuple[float, float, float] | None:
     match = re.search(
-        r"(\d+(?:\.\d+)?)\s*(?:mm|cm)?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(?:mm|cm)?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(mm|cm)?",
+        r"(\d+(?:\.\d+)?)\s*(?:mm|cm|millimeters?|millimetres?|centimeters?|centimetres?|in|inch|inches|\")?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(?:mm|cm|millimeters?|millimetres?|centimeters?|centimetres?|in|inch|inches|\")?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(mm|cm|millimeters?|millimetres?|centimeters?|centimetres?|in|inch|inches|\")?",
         text,
+        flags=re.IGNORECASE,
     )
     if not match:
         return None
     unit = match.group(4)
+    converted = [_to_mm(float(match.group(index)), unit) for index in (1, 2, 3)]
+    if any(value is None for value in converted):
+        return None
     return (
-        _to_mm(float(match.group(1)), unit),
-        _to_mm(float(match.group(2)), unit),
-        _to_mm(float(match.group(3)), unit),
+        converted[0],
+        converted[1],
+        converted[2],
     )
 
 
@@ -427,15 +525,19 @@ def _named_dimensions(text: str, aliases: dict[str, tuple[str, ...]]) -> dict[st
     dimensions = {}
     for field, names in aliases.items():
         for name in names:
-            pattern = rf"(?:{re.escape(name)})\s*[:=]?\s*(?:of\s*)?(\d+(?:\.\d+)?)\s*(mm|cm)?"
+            pattern = rf"(?:{re.escape(name)})\s*[:=]?\s*(?:of\s*)?(\d+(?:\.\d+)?)\s*([a-z\"]+)?"
             match = re.search(pattern, text, flags=re.IGNORECASE)
             if match:
-                dimensions[field] = _to_mm(float(match.group(1)), match.group(2))
+                value = _to_mm(float(match.group(1)), match.group(2))
+                if value is not None:
+                    dimensions[field] = value
                 break
-            reverse = rf"(\d+(?:\.\d+)?)\s*(mm|cm)?\s*(?:{re.escape(name)})"
+            reverse = rf"(\d+(?:\.\d+)?)\s*([a-z\"]+)?\s*(?:{re.escape(name)})"
             match = re.search(reverse, text, flags=re.IGNORECASE)
             if match:
-                dimensions[field] = _to_mm(float(match.group(1)), match.group(2))
+                value = _to_mm(float(match.group(1)), match.group(2))
+                if value is not None:
+                    dimensions[field] = value
                 break
     return dimensions
 
@@ -452,8 +554,17 @@ def _extract_count(text: str) -> int | None:
     return None
 
 
-def _to_mm(value: float, unit: str | None) -> float:
-    return value * 10 if unit and unit.lower() == "cm" else value
+def _to_mm(value: float, unit: str | None) -> float | None:
+    if not unit:
+        return value
+    normalized = unit.lower().strip()
+    if normalized in {"mm", "millimeter", "millimeters", "millimetre", "millimetres"}:
+        return value
+    if normalized in {"cm", "centimeter", "centimeters", "centimetre", "centimetres"}:
+        return value * 10
+    if normalized in {"in", "inch", "inches", '"'}:
+        return None
+    return value
 
 
 def _has_dimension_hint(text: str) -> bool:
