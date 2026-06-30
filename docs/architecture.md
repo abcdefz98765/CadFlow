@@ -106,6 +106,10 @@ STEP/STL, report, and trace. They write generated artifacts to ignored
 - `review/`：按 check_level 审查。
 
 `requirement/knowledge/product_decomposition.md` 负责早期产品拆解，因为判断“需要哪些零件/参考件”本质上属于需求澄清。`policies/` 保存跨 skill 的全局策略，例如 check level 和输出契约。`knowledge/` 保存跨 skill 索引，具体知识优先放到所属 skill 的 `knowledge/` 下。
+`policies/requirement_contract.md` 定义 Requirement Agent 的正式交接物：
+用户可以自然语言输入，但第一环必须产出结构化、可审查的
+`requirement.json`；下游 workflow 阶段不得重新解析 `source.input_text`
+来推断几何。
 
 ### Workflow Layer
 
@@ -195,6 +199,10 @@ examples/ir_pipeline/<part_name>/outputs/
 后续可以替换为 LLM parser 或多轮交互，但输出 contract 不变。
 
 Requirement 层也负责早期产品意图分析：判断请求是单零件、装配还是未知；识别候选制造件、参考组件、用户可见功能、关键接口和会改变拓扑的缺失信息。它不生成几何，也不决定 backend 操作。
+Requirement Agent 的价值不是把自然语言直接推给后续正则，而是通过分析、
+追问、补全和记录假设，确认一个规范 `requirement.json`。从这个文件开始，
+Planning、CAD IR 和 Review 只消费结构化字段；`source.input_text` 仅用于
+trace/debug。
 
 `cad_brief` 是 Requirement/Planning 元数据，汇总 part type、intent、坐标约定、已解析尺寸和 feature、保守 validation targets、假设策略和澄清状态。它从 requirement/CAD IR 字段派生，不替代 `input_ir.json`，也不允许绕过 IR 直接生成 CadQuery 或 backend 代码。
 
@@ -394,6 +402,10 @@ UIs; each item carries `field`, `category`, `code`, `question`, `severity`,
 as bounding dimensions and requested hole count or diameter when those values
 already exist in requirement/CAD IR fields. It is not a geometry source of
 truth.
+
+`source.input_text` is trace data only after `requirement.json` has been
+created. Downstream stages must not re-parse it to override structured
+requirement fields.
 
 ### input_ir.json
 

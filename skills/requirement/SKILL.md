@@ -7,6 +7,11 @@ This skill owns requirement elicitation, product intent, early decomposition,
 and missing-information questions. It must not generate CAD geometry and must
 not choose backend-specific modeling operations.
 
+The handoff artifact is `requirement.json`. Natural-language parsing is only an
+input-understanding mechanism inside this skill; downstream workflow steps must
+consume the structured requirement fields instead of re-parsing the original
+prompt.
+
 ## Inputs
 
 - Natural-language user request.
@@ -47,6 +52,8 @@ not choose backend-specific modeling operations.
   intent, coordinate convention, parsed fields, conservative validation targets,
   assumptions, and clarification state, but CAD IR remains the source of truth
   for generated geometry.
+- Treat `source.input_text` as trace/debug data after `requirement.json` has
+  been authored. It must not override structured fields in later stages.
 
 See also:
 

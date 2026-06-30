@@ -158,9 +158,11 @@
 - `follow_up_questions` 保持字符串兼容字段，`follow_up_requests` 提供 field/category/code/source/reason 等机器可读补全请求。
 - 当前 parser 会输出轻量 `cad_brief`，作为 Requirement/Planning 元数据记录 part type、intent、坐标约定、尺寸/feature 字段、保守 validation targets、假设策略和澄清状态；它不替代 CAD IR，也不参与 Text -> Code 绕过。
 - 新增 `examples/prompt_pipeline/` 作为手工全链路调试入口，从 prompt 写出 `requirement.json`，再经 CAD IR 进入现有 CAD Agent Loop；benchmark 仍保持 IR-first。
+- Phase 2 的核心边界明确为：用户可以自然语言输入，但 Requirement Agent 必须通过分析、追问、补全和记录假设产出规范 `requirement.json`；下游 Planning/CAD IR/Review 只消费结构化字段，不再解析 `source.input_text`。
 
 后续任务：
 
+- 增加 requirement-only contract/golden cases，验证规范 `requirement.json` 的字段完整性、缺失信息和追问请求。
 - 扩展确定性抽取覆盖更多尺寸表达、孔位表达、厚度表达、单位和输出格式组合。
 - 扩展 CAD Brief 对复杂输入的覆盖：记录建模意图、坐标约定、假设、冲突和验证目标，并持续保持 CAD IR 为生成 source of truth。
 - 将自然语言稳定转为 CAD IR，而不是直接生成 CadQuery 代码。

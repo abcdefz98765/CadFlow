@@ -38,6 +38,26 @@ def test_text_parser_returns_cad_ir():
     assert ir.dimensions["length"] == 80.0
 
 
+def test_cad_ir_from_requirement_ignores_conflicting_source_prompt():
+    requirement = {
+        "part_type": "spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
+        "features": {},
+        "outputs": ["step", "stl"],
+        "source": {
+            "input_text": "Generate an 80x40x5 mounting plate with four M4 holes.",
+        },
+    }
+
+    ir = CADIR.from_dict(requirement)
+
+    assert ir.part_type == "spacer"
+    assert ir.dimensions == {"outer_diameter": 12.0, "inner_diameter": 6.5, "thickness": 20.0}
+    assert ir.features == {}
+    assert ir.source["input_text"].startswith("Generate an 80x40x5")
+
+
 def test_cadquery_generation_is_deterministic():
     ir = CADIR.from_dict({
         "part_type": "spacer",

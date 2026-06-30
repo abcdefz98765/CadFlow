@@ -43,6 +43,23 @@ Minimum structure for `requirement.json`:
 }
 ```
 
+## Contract Boundary
+
+The Requirement Agent owns natural-language understanding, clarification,
+assumption recording, and structured requirement authoring. Downstream stages
+consume `requirement.json`; they must not re-parse the original prompt from
+`source.input_text` to infer geometry.
+
+The requirement file is therefore the first confirmed engineering artifact:
+
+```text
+user request -> Requirement Agent -> requirement.json -> Planning / CAD IR / Review
+```
+
+If a user decision is unclear, do not hide it in prose. Put it in
+`missing_information`, and when user input is needed mirror it into
+`follow_up_questions` and `follow_up_requests`.
+
 ## Field Groups
 
 - Intent: what the user is trying to make and whether it is a part, assembly, or assembly-owned part.
