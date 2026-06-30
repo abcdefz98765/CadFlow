@@ -8,6 +8,7 @@ from typing import Any
 import cadquery as cq
 
 from ai_native_cad.cad_ir.schema import CADIR
+from ai_native_cad.pipeline.geometry_inspector import inspect_geometry
 
 
 BOUNDING_BOX_TOLERANCE_MM = 0.2
@@ -31,10 +32,14 @@ def validate_pipeline_outputs(
         "report_generated": False,
         "bounding_box": {},
         "volume": 0.0,
+        "inspection": {},
+        "measured_validation_targets": [],
         "checks": [],
         "warnings": [],
         "errors": [],
     }
+    inspection = inspect_geometry(model, output_path, cad_ir)
+    result["inspection"] = inspection
 
     _check(result, "model_execution_success", result["execution_success"])
     if not result["execution_success"]:
@@ -43,16 +48,18 @@ def validate_pipeline_outputs(
             "message": execution.get("stderr") or execution.get("stdout") or "Generated model execution failed",
         })
 
-    for filename, key in (("model.step", "step_generated"), ("model.stl", "stl_generated")):
-        path = output_path / filename
-        exists = path.exists() and path.stat().st_size > 0
-        result[key] = exists
-        _check(result, f"{filename}_exists", exists, file=str(path))
-        if not exists:
+    artifact_checks = (
+        ("model.step", "step_generated", inspection["step_file"]),
+        ("model.stl", "stl_generated", inspection["stl_file"]),
+    )
+    for filename, key, fact in artifact_checks:
+        result[key] = fact["present"]
+        _check(result, f"{filename}_exists", fact["present"], file=fact["path"], size_bytes=fact["size_bytes"], role=fact["role"])
+        if not fact["present"]:
             result["errors"].append({
                 "code": "required_output_missing",
                 "message": f"Required output file was not generated: {filename}",
-                "file": str(path),
+                "file": fact["path"],
             })
 
     report_path = output_path / "report.json"
@@ -64,27 +71,19 @@ def validate_pipeline_outputs(
         result["errors"].append({"code": "model_missing", "message": "No model object was available for validation"})
         return _finalize(result)
 
-    try:
-        shape = model.val()
-        bbox = shape.BoundingBox()
-        volume = shape.Volume()
-        solids = shape.Solids()
-    except Exception as exc:
-        result["errors"].append({"code": "geometry_measurement_failed", "message": str(exc)})
+    if inspection["errors"]:
+        result["errors"].extend(inspection["errors"])
         result["valid"] = False
         return _finalize(result)
 
-    result["bounding_box"] = {
-        "x": round(bbox.xlen, 3),
-        "y": round(bbox.ylen, 3),
-        "z": round(bbox.zlen, 3),
-    }
-    result["volume"] = round(volume, 3)
+    result["bounding_box"] = inspection["bounding_box"]
+    result["volume"] = inspection["volume"]
+    volume = result["volume"]
     _check(result, "volume_positive", volume > 0)
     if volume <= 0:
         result["errors"].append({"code": "non_positive_volume", "message": "Generated model volume must be greater than zero"})
 
-    solid_count = len(solids)
+    solid_count = inspection["solid_count"]
     _check(result, "invalid_solids", solid_count == 1, solid_count=solid_count)
     if solid_count != 1:
         result["errors"].append({
@@ -97,6 +96,14 @@ def validate_pipeline_outputs(
         actual = result["bounding_box"][axis]
         passed = abs(actual - expected) <= BOUNDING_BOX_TOLERANCE_MM
         _check(result, "bounding_box_dimension", passed, dimension=dimension, axis=axis, expected=expected, actual=actual)
+        result["measured_validation_targets"].append({
+            "target": "bounding_box_dimension",
+            "dimension": dimension,
+            "axis": axis,
+            "expected": expected,
+            "actual": actual,
+            "pass": passed,
+        })
         if not passed:
             deviation = abs(actual - expected)
             ratio = deviation / expected if expected else 0

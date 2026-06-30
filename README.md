@@ -19,11 +19,11 @@ text/input_ir.json
   -> CAD Agent Loop
        -> candidate CadQuery generation
        -> execution
-       -> geometry validation
+       -> STEP-first inspection + geometry validation
        -> failure analysis
        -> IR repair
        -> retry, max 3 attempts
-  -> STEP/STL
+  -> primary STEP + derived STL
   -> report + agent_trace
 ```
 
@@ -201,9 +201,11 @@ outputs/<part_name>/
 ```
 
 `agent_trace.json` records every generation attempt, candidate scores, failure
-analysis, IR repair changes, and the final selected candidate. The IR remains
-the source of truth; the system does not bypass IR by generating CAD code
-directly from text.
+analysis, IR repair changes, measured validation targets, inspection summaries,
+and the final selected candidate. `model.step` is the primary CAD artifact and
+`model.stl` is a derived mesh output. `preview.png` is still a placeholder until
+a lightweight real geometry renderer is added. The IR remains the source of
+truth; the system does not bypass IR by generating CAD code directly from text.
 
 Tracked IR examples use local output folders instead:
 

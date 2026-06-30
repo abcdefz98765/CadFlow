@@ -18,7 +18,7 @@ validate_ir
 CAD Agent Loop
   ├─ candidate CadQuery source generation
   ├─ isolated execution inside the selected project output directory
-  ├─ geometry/output validation
+  ├─ STEP-first geometry inspection and output validation
   ├─ failure analysis
   ├─ structured IR repair
   └─ retry, max 3 attempts
@@ -141,6 +141,7 @@ logs/
 - `runner.py` 编排 `Text/IR -> CAD IR -> CAD Agent Loop -> validation -> report`。
 - `agent_loop.py` 负责最多 3 次尝试、候选执行、失败转移、IR 修复和 trace。
 - `failure_analyzer.py` 将执行日志、验证错误和缺失文件转换为结构化根因。
+- `geometry_inspector.py` 记录 `model.step` / `model.stl` artifact facts、solid count、bounding box、volume，以及 holes/chamfers/fillets inspection scaffold。
 - `scorer.py` 按几何有效性、尺寸准确性、可制造简洁性、boolean 风险和对称性为候选打分。
 - `report.py` 生成 `report.json` 和 `report.md`。
 
@@ -235,7 +236,9 @@ validate_pipeline_outputs
 - 不允许 Text -> Code 绕过 IR。
 - 最大重试次数为 3。
 - IR repair 不改变 `part_type`，不删除必需 feature，除非失败分析明确要求，否则不简化几何。
-- 最终输出必须包含 `agent_trace.json`，记录每次 attempt、失败原因、IR 修复和最终候选。
+- `model.step` 是 primary CAD artifact，`model.stl` 是 derived mesh output。
+- `preview.png` 当前仍是 placeholder；真实几何渲染在不引入 Blender/FreeCAD automation 或重依赖前保持 deferred。
+- 最终输出必须包含 `agent_trace.json`，记录每次 attempt、失败原因、IR 修复、measured validation targets、inspection summary 和最终候选。
 
 `agent_trace.json` 示例：
 
@@ -243,10 +246,22 @@ validate_pipeline_outputs
 {
   "total_attempts": 2,
   "steps": [
-    {"attempt": 1, "status": "failed", "reason": "feature_not_realized"},
-    {"attempt": 2, "status": "success", "selected_candidate": "A"}
+    {
+      "attempt": 1,
+      "status": "failed",
+      "reason": "feature_not_realized",
+      "inspection_summary": {"primary_artifact": "model.step"}
+    },
+    {
+      "attempt": 2,
+      "status": "success",
+      "selected_candidate": "A",
+      "measured_validation_targets": [],
+      "inspection_summary": {"solid_count": 1}
+    }
   ],
-  "final_selected_candidate": "A"
+  "final_selected_candidate": "A",
+  "final_inspection_summary": {"primary_artifact": "model.step"}
 }
 ```
 

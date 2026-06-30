@@ -20,7 +20,7 @@ text/input_ir.json
   -> CAD Agent Loop
        -> candidate generation
        -> execution
-       -> validation
+       -> STEP-first inspection + validation
        -> failure analysis
        -> IR repair
        -> retry, max 3
@@ -67,7 +67,7 @@ logs/
 - Design Planner：需求到设计分析、workflow routing、接口/基准、风险和确认 gate。
 - CAD Agent Loop：从 IR 生成候选实现、执行、验证、失败分析、IR 修复、最多 3 次重试和候选选择。
 - Part Modeling：模板选择、参数化、IR 到 CAD agent loop、单零件生成闭环和 backend-neutral CAD 调用。
-- Geometry Inspector：后续从 STEP/model 中真实测量孔、槽、倒角、关键尺寸和 repair diff。
+- Geometry Inspector：记录 STEP/STL artifact facts、solid count、bbox、volume，并逐步推进孔、槽、倒角、关键尺寸和 repair diff 的真实测量。
 - CAD Brief：后续在复杂输入时记录建模意图、假设、坐标、验证目标，再落到 CAD IR。
 - Assembly：装配 plan、contacts、clearances、轻量 placement/constraint intent 和 backend-neutral assembly config。当前是初版 planning/config/validation scaffold，不是成熟工业装配求解器。
 - Reviewer：按 check_level 审查生成结果。
@@ -96,8 +96,8 @@ logs/
 
 ## Near-term Roadmap
 
-- v0.3.1：STEP-first output contract、真实 preview/snapshot、trace quality、benchmark scaffold。
-- v0.4：Geometry Inspector，真实 feature-level validation 和 repair diff checks。
+- v0.3.1：STEP-first output contract、geometry inspection facts、trace quality、benchmark scaffold。
+- v0.4：真实 feature-level validation、repair diff checks 和轻量 preview/viewer 评估。
 - v0.5：backend abstraction hardening，评估 build123d backend，但不替换当前 CadQuery 主线。
 
 暂不扩展到 URDF/SDF、G-code、slicer/printer handoff、机器人工作流或多技能平台化。

@@ -77,8 +77,17 @@ def test_ir_pipeline_writes_required_output_contract():
     assert report["success"] is True
     assert report["ir_valid"] is True
     assert report["execution_success"] is True
+    assert result["validation"]["inspection"]["step_file"]["present"] is True
+    assert result["validation"]["inspection"]["stl_file"]["present"] is True
+    assert result["validation"]["inspection"]["solid_count"] == 1
     assert report["step_generated"] is True
     assert report["stl_generated"] is True
+    assert report["inspection"]["artifact_roles"]["primary"] == "model.step"
+    assert report["inspection"]["step_file"]["present"] is True
+    assert report["inspection"]["step_file"]["size_bytes"] > 0
+    assert report["inspection"]["stl_file"]["present"] is True
+    assert report["inspection"]["solid_count"] == 1
+    assert report["measured_validation_targets"]
     assert report["bounding_box"] == {"x": 12.0, "y": 12.0, "z": 20.0}
     assert report["volume"] > 0
     assert report["warnings"] == []

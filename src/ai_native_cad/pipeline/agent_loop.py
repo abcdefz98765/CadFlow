@@ -67,6 +67,8 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
                 for item in attempt_results
             ],
             "selected_candidate": best["candidate"],
+            "measured_validation_targets": best["validation"].get("measured_validation_targets", []),
+            "inspection_summary": _inspection_summary(best["validation"].get("inspection", {})),
         }
 
         if step["status"] == "success":
@@ -74,6 +76,8 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
             trace["steps"].append(step)
             final_execution, final_validation = _materialize_selected(output_path, selected_code, selected_ir)
             trace["final_execution_status"] = final_execution.get("status")
+            trace["final_measured_validation_targets"] = final_validation.get("measured_validation_targets", [])
+            trace["final_inspection_summary"] = _inspection_summary(final_validation.get("inspection", {}))
             _write_trace(output_path, trace)
             return {
                 "status": "success" if final_execution.get("status") == "success" and final_validation.get("valid") else "failed",
@@ -92,6 +96,8 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
         current_ir = CADIR.from_dict(repaired["repaired_ir"])
 
     trace["final_selected_candidate"] = best["candidate"] if selected_code else None
+    trace["final_measured_validation_targets"] = last_validation.get("measured_validation_targets", [])
+    trace["final_inspection_summary"] = _inspection_summary(last_validation.get("inspection", {}))
     _write_trace(output_path, trace)
     return {
         "status": "failed",
@@ -125,3 +131,23 @@ def _load_generated_model(model_path: Path, ir_data: dict[str, Any]) -> Any:
 
 def _write_trace(output_path: Path, trace: dict[str, Any]) -> None:
     (output_path / "agent_trace.json").write_text(json.dumps(trace, indent=2) + "\n", encoding="utf-8")
+
+
+def _inspection_summary(inspection: dict[str, Any]) -> dict[str, Any]:
+    step_file = inspection.get("step_file", {})
+    stl_file = inspection.get("stl_file", {})
+    return {
+        "primary_artifact": inspection.get("artifact_roles", {}).get("primary", "model.step"),
+        "solid_count": inspection.get("solid_count"),
+        "bounding_box": inspection.get("bounding_box", {}),
+        "volume": inspection.get("volume", 0.0),
+        "step_file": {
+            "present": bool(step_file.get("present")),
+            "size_bytes": int(step_file.get("size_bytes", 0) or 0),
+        },
+        "stl_file": {
+            "present": bool(stl_file.get("present")),
+            "size_bytes": int(stl_file.get("size_bytes", 0) or 0),
+        },
+        "features": inspection.get("features", {}),
+    }

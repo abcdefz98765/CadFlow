@@ -16,7 +16,7 @@ text/input_ir.json
   -> CAD Agent Loop
        -> candidate code generation
        -> execution
-       -> validation
+       -> STEP-first inspection + validation
        -> failure analysis
        -> IR repair
        -> retry, max 3
@@ -39,8 +39,8 @@ text/input_ir.json
 
 下一阶段重点：
 
-- STEP-first inspection：以 `model.step` 为主验证对象，STL 作为派生 mesh 输出。
+- STEP-first inspection：以 `model.step` 为主验证对象，STL 作为派生 mesh 输出；当前已记录 artifact facts、solid count、bbox 和 volume。
 - CAD brief：在复杂自然语言或多源输入时，先形成可审查的建模 brief，再落到 CAD IR。
-- Geometry inspector：真实测量孔、槽、倒角、关键距离和 repair diff，而不是只依赖 bbox/volume。
-- Real preview/viewer：用真实生成几何渲染 `preview.png` 或 viewer snapshot。
+- Geometry inspector：继续推进孔、槽、倒角、关键距离和 repair diff 的真实拓扑验证。
+- Real preview/viewer：当前 `preview.png` 仍是 placeholder；后续在不引入重依赖的前提下实现真实几何渲染或 viewer snapshot。
 - Benchmark suite：用固定 prompts、expected IR 和 expected checks 衡量架构进步。

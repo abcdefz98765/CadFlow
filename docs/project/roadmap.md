@@ -91,17 +91,17 @@
 
 ## Phase 1.8: STEP-first Inspection And Trace Quality
 
-状态：下一阶段。
+状态：已启动。当前实现先落地 STEP/STL artifact facts、模型 bbox/volume/solid_count inspection、trace summary；真实 feature topology 检查和 preview 渲染继续分步推进。
 
 目标：吸收成熟 text-to-cad/CAD agent 项目的 STEP-first、inspection、snapshot review 思路，把验证从“生成了文件和 bbox 大致正确”推进到“真实 CAD artifact 可测量、可审查、可对比”。
 
 交付：
 
 - 明确 `model.step` 是 primary CAD artifact，`model.stl` 是 derived mesh exchange。
-- 真实 `preview.png`，由生成几何渲染，而不是占位图。
+- 当前 `preview.png` 保持 placeholder，并记录真实 geometry-rendered preview 的 TODO；不在本阶段引入 Blender、FreeCAD automation 或重依赖。
 - `pipeline/geometry_inspector.py` 或等价模块，读取 model/STEP facts。
 - 验证孔数量、孔径、孔距、槽、倒角、关键尺寸和 repair diff。
-- `agent_trace.json` 增加 measured validation targets、repair before/after summary。
+- `agent_trace.json` 增加 measured validation targets、inspection summary；repair before/after summary 后续补齐。
 
 验收：
 

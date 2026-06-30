@@ -49,14 +49,15 @@ Done in current v0.3 work.
 
 ## M1.8: STEP-first Inspection And Trace Quality
 
-Next.
+Started.
 
 - Treat `model.step` as the primary CAD artifact and STL as a derived mesh exchange.
-- Replace placeholder `preview.png` with a real rendered snapshot from generated geometry.
-- Add a geometry inspector that measures STEP/model facts beyond bounding box and volume.
-- Verify actual feature realization for holes, slots, chamfers, fillets, and simple pockets.
+- Add a geometry inspector that records STEP/STL artifact facts, solid count, bounding box, and volume.
+- Add feature inspection scaffolds for holes, chamfers, and fillets without speculative topology inference.
+- Keep placeholder `preview.png` for now and document real rendering as a deferred follow-up unless a lightweight renderer is available.
+- Later verify actual feature realization for holes, slots, chamfers, fillets, and simple pockets.
 - Add repair diff checks so the system can confirm that IR repair changed only the intended geometry.
-- Improve `agent_trace.json` with measured validation targets and repair-before/after summaries.
+- Improve `agent_trace.json` with measured validation targets and inspection summaries.
 
 ## M1.9: CAD Benchmarks
 

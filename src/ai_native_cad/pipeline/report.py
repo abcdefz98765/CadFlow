@@ -28,6 +28,8 @@ def write_pipeline_report(
         "stl_generated": bool(validation.get("stl_generated")),
         "bounding_box": validation.get("bounding_box", {}),
         "volume": validation.get("volume", validation.get("volume_mm3", 0)),
+        "inspection": validation.get("inspection", {}),
+        "measured_validation_targets": validation.get("measured_validation_targets", []),
         "warnings": list((ir_validation or {}).get("warnings", [])) + list(validation.get("warnings", [])),
         "errors": list((ir_validation or {}).get("errors", [])) + list(validation.get("errors", [])),
         "part_type": ir["part_type"],
@@ -63,6 +65,19 @@ def write_pipeline_report(
         status = "PASS" if check.get("pass") else "FAIL"
         label = check.get("dimension") or check.get("check") or check.get("file") or "check"
         lines.append(f"- [{status}] {label}")
+    inspection = validation.get("inspection", {})
+    if inspection:
+        step_file = inspection.get("step_file", {})
+        stl_file = inspection.get("stl_file", {})
+        lines.extend([
+            "",
+            "## Inspection",
+            "",
+            f"- Primary artifact: `{inspection.get('artifact_roles', {}).get('primary', 'model.step')}`",
+            f"- STEP file: {'present' if step_file.get('present') else 'missing'} ({step_file.get('size_bytes', 0)} bytes)",
+            f"- STL file: {'present' if stl_file.get('present') else 'missing'} ({stl_file.get('size_bytes', 0)} bytes)",
+            f"- Solid count: {inspection.get('solid_count')}",
+        ])
     if validation.get("errors"):
         lines.extend(["", "## Errors", ""])
         for error in validation["errors"]:

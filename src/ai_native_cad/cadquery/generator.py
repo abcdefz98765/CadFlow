@@ -98,6 +98,8 @@ def _common_helpers() -> str:
 
 
 def _preview_png_bytes() -> bytes:
+    # TODO Phase 1.8: replace this placeholder with a real geometry-rendered
+    # snapshot without introducing Blender or FreeCAD automation.
     return bytes.fromhex(
         '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489'
         '0000000a49444154789c6360000002000100ffff03000006000557bfabd400000000'

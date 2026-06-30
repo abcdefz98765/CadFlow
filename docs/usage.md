@@ -20,9 +20,9 @@ text/input_ir.json
   -> validate IR
   -> candidate CadQuery generation
   -> execution
-  -> validation
+  -> STEP-first inspection + validation
   -> failure analysis + IR repair + retry, max 3
-  -> STEP/STL
+  -> primary STEP + derived STL
   -> report + agent_trace
 ```
 
@@ -89,8 +89,9 @@ outputs/<part_name>/
 The generated `model.py` is saved before execution. Execution runs from the
 selected output directory inside the project workspace and logs runtime failures
 for analysis, IR repair, and retry. `agent_trace.json` records attempt history,
-candidate scores, failure analysis, repair changes, and the final selected
-candidate. For example-local generation, pass
+candidate scores, measured validation targets, inspection summaries, failure
+analysis, repair changes, and the final selected candidate. `model.step` is the
+primary CAD artifact; `model.stl` is a derived mesh output. For example-local generation, pass
 `output_dir="examples/ir_pipeline/<part_name>/outputs"` to `run_ir_pipeline`.
 
 ## Run the Legacy Workflow
@@ -235,11 +236,11 @@ IR-first pipeline 应输出或保留：
 
 - CAD IR：`input_ir.json`
 - 生成代码：`model.py`
-- FreeCAD-compatible exchange：`model.step`
-- Mesh exchange：`model.stl`
+- Primary CAD artifact / FreeCAD-compatible exchange：`model.step`
+- Derived mesh exchange：`model.stl`
 - 验证报告：`report.json`、`report.md`
-- 预览占位图：`preview.png`
-- agent loop 追踪：`agent_trace.json`
+- 预览占位图：`preview.png`，真实几何渲染 deferred
+- agent loop 追踪：`agent_trace.json`，包含 measured validation targets 和 inspection summary
 - 执行日志：`logs/runtime.json`
 
 ## Check Levels

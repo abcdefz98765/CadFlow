@@ -21,7 +21,7 @@ text/input_ir.json
   -> CAD Agent Loop
        -> candidate CadQuery generation
        -> execution
-       -> geometry validation
+       -> STEP-first inspection + geometry validation
        -> failure analysis
        -> IR repair
        -> retry, max 3
@@ -101,7 +101,7 @@ V0/V1 聚焦自然语言参数化建模和可追踪 CAD agent loop：
 
 ### Geometry Inspector
 
-后续从 STEP/model 中抽取事实并做真实测量：孔数量、孔径、孔距、槽、倒角、关键尺寸、solid count、bbox、volume、repair diff。当前 validator 已覆盖基础 L0 检查，后续需要从参数风险判断升级到实际几何事实验证。
+从 STEP/model 输出路径记录可测事实。当前已覆盖 STEP/STL artifact facts、solid count、bbox、volume，并为 holes/chamfers/fillets 保留 inspection scaffold；后续继续推进孔数量、孔径、孔距、槽、倒角、关键尺寸和 repair diff 的真实拓扑验证。
 
 ### Assembly
 
@@ -184,7 +184,7 @@ V0/V1 聚焦自然语言参数化建模和可追踪 CAD agent loop：
 - `examples/parts/circular_button/model.py` 可运行，并保留开关触点/线束出口。
 - workflow 可输出 `input.md`、`requirement.json`、`plan.md`、`model.py`、`review.md`、`exports/`、`logs/`。
 - CAD Agent Loop 可输出 `input_ir.json`、`model.py`、`model.step`、`model.stl`、`report.json`、`report.md`、`preview.png`、`agent_trace.json`、`logs/runtime.json`。
-- CAD Agent Loop 可输出 `agent_trace.json`，并记录 attempt、failure analysis、IR repair 和 final selected candidate。
+- CAD Agent Loop 可输出 `agent_trace.json`，并记录 attempt、measured validation targets、inspection summary、failure analysis、IR repair 和 final selected candidate。
 - 至少一个失败几何案例可通过 IR repair 自动恢复。
 - `python examples/workflow/mounting_plate_demo.py` 可一键运行 workflow demo。
 - 至少 STEP/STL 可导出。

@@ -49,6 +49,8 @@ def run_ir_pipeline(
             "report_generated": False,
             "bounding_box": {},
             "volume": 0.0,
+            "inspection": {},
+            "measured_validation_targets": [],
             "checks": [],
             "warnings": [],
             "errors": [{"code": "ir_invalid", "message": "CAD IR validation failed"}],

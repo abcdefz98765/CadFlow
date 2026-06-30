@@ -27,11 +27,21 @@ outputs/<part_name>/
 output directory inside the project workspace. Runtime errors must be logged so
 the same IR can be analyzed, repaired, retried, or regenerated.
 
+`model.step` is the primary CAD artifact. `model.stl` is a derived mesh output
+for downstream exchange and preview use. Validation and trace summaries should
+prefer measured CAD facts over mesh-only facts.
+
+`preview.png` is still a placeholder snapshot in Phase 1.8 unless a lightweight
+geometry renderer is available. Real preview rendering is intentionally deferred
+from this slice because Blender and FreeCAD automation are out of scope.
+
 `agent_trace.json` must record the loop history:
 
 - total attempts, capped at 3
 - per-attempt status
 - selected candidate and candidate scores when candidate mode is used
+- measured validation targets
+- inspection summary for generated geometry and STEP/STL artifacts
 - structured failure analysis for failed attempts
 - IR repair changes
 - final selected candidate
