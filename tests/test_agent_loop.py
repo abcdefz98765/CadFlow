@@ -47,6 +47,14 @@ def test_repair_ir_preserves_part_type_and_repairs_hole_spacing():
     assert result["repaired_ir"]["part_type"] == "mounting_plate"
     assert result["repaired_ir"]["features"]["holes"]["offset_from_edge"] > 1
     assert "adjusted hole spacing" in result["changes"]
+    offset_diff = next(item for item in result["diff"] if item["path"] == "features.holes.offset_from_edge")
+    assert offset_diff == {
+        "path": "features.holes.offset_from_edge",
+        "before": 1,
+        "after": 3.75,
+        "reason": "unknown",
+        "affected_feature": "holes",
+    }
 
 
 def test_score_candidate_prefers_valid_geometry():
@@ -74,7 +82,15 @@ def test_agent_loop_repairs_failed_hole_clearance_and_writes_trace():
     assert trace["total_attempts"] == 2
     assert trace["steps"][0]["status"] == "failed"
     assert trace["steps"][0]["reason"] == "feature_not_realized"
+    assert trace["steps"][0]["failure_analysis"]["root_cause"] == "feature_not_realized"
+    repair_diff = trace["steps"][0]["ir_repair"]["diff"]
+    offset_diff = next(item for item in repair_diff if item["path"] == "features.holes.offset_from_edge")
+    assert offset_diff["before"] == 1
+    assert offset_diff["after"] == 3.75
+    assert offset_diff["reason"] == "feature_not_realized"
+    assert offset_diff["affected_feature"] == "holes"
     assert trace["steps"][1]["status"] == "success"
+    assert "ir_repair" not in trace["steps"][1]
     assert trace["final_selected_candidate"] in {"A", "B"}
     assert trace["steps"][1]["inspection_summary"]["step_file"]["present"] is True
     assert trace["steps"][1]["inspection_summary"]["solid_count"] == 1
@@ -92,3 +108,24 @@ def test_agent_loop_repairs_failed_hole_clearance_and_writes_trace():
     assert (output_dir / "preview.png").exists()
     assert (output_dir / "report.json").exists()
     assert (output_dir / "report.md").exists()
+
+
+def test_agent_loop_successful_first_attempt_has_no_repair_diff():
+    ir = {
+        "part_type": "spacer",
+        "part_name": "pytest_agent_loop_no_repair",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
+        "features": {},
+        "outputs": ["step", "stl"],
+    }
+
+    result = run_ir_pipeline(ir, output_root=Path.cwd() / "outputs")
+    output_dir = Path(result["output_dir"])
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "success"
+    assert trace["total_attempts"] == 1
+    assert trace["steps"][0]["status"] == "success"
+    assert "failure_analysis" not in trace["steps"][0]
+    assert "ir_repair" not in trace["steps"][0]

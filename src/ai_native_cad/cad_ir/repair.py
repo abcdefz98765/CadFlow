@@ -38,7 +38,68 @@ def repair_ir(ir: CADIR | dict[str, Any], failure_analysis: dict[str, Any]) -> d
         changes.append("no IR fields changed; failure requires code-level handling")
 
     repaired["part_type"] = original["part_type"]
-    return {"original_ir": original, "repaired_ir": repaired, "changes": changes}
+    return {
+        "original_ir": original,
+        "repaired_ir": repaired,
+        "changes": changes,
+        "diff": _repair_diff(original, repaired, failure_analysis),
+    }
+
+
+def _repair_diff(original: dict[str, Any], repaired: dict[str, Any], failure_analysis: dict[str, Any]) -> list[dict[str, Any]]:
+    root_cause = str(failure_analysis.get("root_cause") or "unknown")
+    affected_feature = failure_analysis.get("affected_feature")
+    diff = []
+    for item in _diff_values(original, repaired):
+        feature = affected_feature or _feature_from_path(item["path"])
+        entry = {
+            "path": item["path"],
+            "before": item["before"],
+            "after": item["after"],
+            "reason": root_cause,
+        }
+        if feature:
+            entry["affected_feature"] = str(feature)
+        diff.append(entry)
+    return diff
+
+
+def _diff_values(before: Any, after: Any, path: str = "") -> list[dict[str, Any]]:
+    if isinstance(before, dict) and isinstance(after, dict):
+        diff = []
+        for key in sorted(set(before) | set(after)):
+            child_path = f"{path}.{key}" if path else str(key)
+            if key not in before:
+                diff.append({"path": child_path, "before": None, "after": after[key]})
+            elif key not in after:
+                diff.append({"path": child_path, "before": before[key], "after": None})
+            else:
+                diff.extend(_diff_values(before[key], after[key], child_path))
+        return diff
+
+    if isinstance(before, list) and isinstance(after, list):
+        diff = []
+        for index in range(max(len(before), len(after))):
+            child_path = f"{path}[{index}]"
+            if index >= len(before):
+                diff.append({"path": child_path, "before": None, "after": after[index]})
+            elif index >= len(after):
+                diff.append({"path": child_path, "before": before[index], "after": None})
+            else:
+                diff.extend(_diff_values(before[index], after[index], child_path))
+        return diff
+
+    if before != after:
+        return [{"path": path, "before": before, "after": after}]
+    return []
+
+
+def _feature_from_path(path: str) -> str | None:
+    if not path.startswith("features."):
+        return None
+    feature_path = path.removeprefix("features.")
+    feature = feature_path.split(".", 1)[0].split("[", 1)[0]
+    return feature or None
 
 
 def _repair_holes(ir: dict[str, Any]) -> list[str]:

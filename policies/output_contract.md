@@ -49,8 +49,14 @@ from this slice because Blender and FreeCAD automation are out of scope.
 - inspection summary for generated geometry and STEP/STL artifacts
 - feature inspection status, including mounting_plate hole inspection when available
 - structured failure analysis for failed attempts
-- IR repair changes
+- IR repair changes and structured before/after diffs for repaired attempts
 - final selected candidate
+
+When an attempt triggers IR repair, `ir_repair.diff` records concise changed
+IR paths alongside the existing repair metadata. Each diff item includes
+`path`, `before`, `after`, `reason`, and `affected_feature` when a feature is
+known. Successful attempts that do not invoke repair should omit repair diff
+fields.
 
 The IR is the source of truth for generated CAD. Text-to-code bypass is outside
 the supported output contract.

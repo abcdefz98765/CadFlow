@@ -100,14 +100,15 @@
 - 明确 `model.step` 是 primary CAD artifact，`model.stl` 是 derived mesh exchange。
 - 当前 `preview.png` 保持 placeholder，并记录真实 geometry-rendered preview 的 TODO；不在本阶段引入 Blender、FreeCAD automation 或重依赖。
 - `pipeline/geometry_inspector.py` 或等价模块，读取 model/STEP facts。
-- topology 可靠时验证 mounting_plate 孔数量、孔径和孔距；槽、倒角、关键尺寸和 repair diff 后续继续推进。
-- `agent_trace.json` 增加 measured validation targets、inspection summary；repair before/after summary 后续补齐。
+- topology 可靠时验证 mounting_plate 孔数量、孔径和孔距；槽、倒角和关键尺寸后续继续推进。
+- `agent_trace.json` 增加 measured validation targets、inspection summary，以及 IR repair 的结构化 before/after diff。
 
 验收：
 
 - 至少 mounting_plate 的孔数量、孔径和孔距能在 simple through-hole topology 可靠时被实际验证。
 - 至少一个 repair case 能证明修复只改变目标 feature。
 - 失败报告能区分 bbox mismatch、missing feature、export failure 和 boolean artifact。
+- repair attempt 的 trace 能记录 changed IR path、before/after value、root cause 和 affected feature。
 
 ## Phase 1.9: CAD Benchmark Suite
 

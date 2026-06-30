@@ -91,7 +91,11 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
         repaired = repair_ir(current_ir, failure)
         step["reason"] = failure["root_cause"]
         step["failure_analysis"] = failure
-        step["ir_repair"] = {"changes": repaired["changes"], "repaired_ir": repaired["repaired_ir"]}
+        step["ir_repair"] = {
+            "changes": repaired["changes"],
+            "diff": repaired.get("diff", []),
+            "repaired_ir": repaired["repaired_ir"],
+        }
         trace["steps"].append(step)
         current_ir = CADIR.from_dict(repaired["repaired_ir"])
 
