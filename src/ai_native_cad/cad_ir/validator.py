@@ -17,6 +17,16 @@ SUPPORTED_PART_TYPES = {
 }
 SUPPORTED_OUTPUTS = {"step", "stl"}
 
+SUPPORTED_FEATURES_BY_PART_TYPE = {
+    "mounting_plate": {"holes", "mounting_holes", "chamfer"},
+    "spacer": set(),
+    "simple_bracket": {"holes", "base_holes", "fillet"},
+    "wall_bracket": set(),
+    "circular_button": set(),
+    "enclosure_base": set(),
+    "enclosure_lid": {"holes", "chamfer"},
+}
+
 REQUIRED_DIMENSIONS = {
     "mounting_plate": {"length", "width", "thickness"},
     "spacer": {"outer_diameter", "inner_diameter", "thickness"},
@@ -57,9 +67,91 @@ def validate_ir(ir: CADIR | dict[str, Any]) -> dict[str, Any]:
         if not supported:
             result["errors"].append({"code": "unsupported_output", "message": f"Unsupported output format: {output}"})
 
+    _validate_supported_features(result, cad_ir)
+
     result["valid"] = not result["errors"]
     return result
 
 
 def _check(result: dict[str, Any], name: str, passed: bool, **extra: Any) -> None:
     result["checks"].append({"check": name, "pass": passed, **extra})
+
+
+def _validate_supported_features(result: dict[str, Any], cad_ir: CADIR) -> None:
+    supported_features = SUPPORTED_FEATURES_BY_PART_TYPE.get(cad_ir.part_type, set())
+    for feature_name, feature_value in cad_ir.features.items():
+        supported = feature_name in supported_features
+        _check(
+            result,
+            "supported_feature",
+            supported,
+            part_type=cad_ir.part_type,
+            feature=feature_name,
+        )
+        if not supported:
+            result["errors"].append({
+                "code": "unsupported_feature",
+                "message": (
+                    f"Feature '{feature_name}' is not supported by the current "
+                    f"Part Modeling backend for part_type '{cad_ir.part_type}'"
+                ),
+                "feature": feature_name,
+                "part_type": cad_ir.part_type,
+                "owner_stage": "planning",
+            })
+            continue
+        _validate_feature_semantics(result, cad_ir, feature_name, feature_value)
+
+
+def _validate_feature_semantics(
+    result: dict[str, Any],
+    cad_ir: CADIR,
+    feature_name: str,
+    feature_value: Any,
+) -> None:
+    if feature_name not in {"holes", "mounting_holes", "base_holes"}:
+        return
+    holes = feature_value[0] if isinstance(feature_value, list) and feature_value else feature_value
+    if not isinstance(holes, dict):
+        _feature_semantic_error(result, cad_ir, feature_name, "Hole feature must be a dictionary or non-empty list of dictionaries")
+        return
+    positions = holes.get("positions")
+    pattern = holes.get("pattern")
+    count = holes.get("count")
+    if positions is None:
+        return
+    if positions == "corner_4" or (pattern == "corner" and count == 4):
+        return
+    if isinstance(positions, list) and all(_is_xy_point(point) for point in positions):
+        return
+    _feature_semantic_error(
+        result,
+        cad_ir,
+        feature_name,
+        "Hole positions must be 'corner_4' or explicit [x, y] point coordinates",
+    )
+
+
+def _feature_semantic_error(result: dict[str, Any], cad_ir: CADIR, feature_name: str, message: str) -> None:
+    _check(
+        result,
+        "supported_feature_semantics",
+        False,
+        part_type=cad_ir.part_type,
+        feature=feature_name,
+    )
+    result["errors"].append({
+        "code": "unsupported_feature_semantics",
+        "message": message,
+        "feature": feature_name,
+        "part_type": cad_ir.part_type,
+        "owner_stage": "planning",
+    })
+
+
+def _is_xy_point(value: Any) -> bool:
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) == 2
+        and all(isinstance(item, (int, float)) for item in value)
+    )

@@ -239,6 +239,77 @@ def test_invalid_cad_ir_returns_to_planning_before_part_modeling():
     assert trace["rework_decision"] == decision
 
 
+def test_unsupported_part_type_returns_to_planning_before_candidate_generation(monkeypatch):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("candidate generation should not run for unsupported part_type")
+
+    monkeypatch.setattr("ai_native_cad.pipeline.agent_loop.generate_cadquery_candidates", fail_if_called)
+    output_dir = Path.cwd() / "outputs" / "pytest_unsupported_part_type_rework"
+
+    result = run_ir_pipeline(
+        {
+            "part_type": "circular_flange",
+            "part_name": "pytest_unsupported_part_type_rework",
+            "unit": "mm",
+            "dimensions": {"outer_diameter": 40, "thickness": 5},
+            "features": {},
+            "outputs": ["step", "stl"],
+        },
+        output_dir=output_dir,
+    )
+
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "failed"
+    assert not (output_dir / "model.py").exists()
+    assert trace["total_attempts"] == 0
+    assert trace["rework_decision"]["action"] == "return"
+    assert trace["rework_decision"]["to_stage"] == "planning"
+    assert trace["rework_decision"]["owner_stage"] == "planning"
+    assert trace["part_modeling_contract"]["geometry_source"] == "cad_ir"
+    assert "part_structure_redesign" in trace["part_modeling_contract"]["does_not_own"]
+    assert any(reason["code"] == "unsupported_part_type" for reason in trace["rework_decision"]["reasons"])
+    assert report["status"] == "blocked"
+    assert report["blocked_owner_stage"] == "planning"
+    assert report["rework_decision"]["action"] == "return"
+
+
+def test_unsupported_feature_returns_to_planning_without_fallback_simplified(monkeypatch):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("candidate generation should not ignore unsupported features")
+
+    monkeypatch.setattr("ai_native_cad.pipeline.agent_loop.generate_cadquery_candidates", fail_if_called)
+    output_dir = Path.cwd() / "outputs" / "pytest_unsupported_feature_rework"
+
+    result = run_ir_pipeline(
+        {
+            "part_type": "mounting_plate",
+            "part_name": "pytest_unsupported_feature_rework",
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5},
+            "features": {
+                "holes": {"diameter": 5, "positions": "corner_4"},
+                "snap_tabs": {"count": 2},
+            },
+            "outputs": ["step", "stl"],
+        },
+        output_dir=output_dir,
+    )
+
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    report_md = (output_dir / "report.md").read_text(encoding="utf-8")
+
+    assert result["status"] == "failed"
+    assert not (output_dir / "model.py").exists()
+    assert trace["total_attempts"] == 0
+    assert trace["rework_decision"]["owner_stage"] == "planning"
+    assert any(reason["code"] == "unsupported_feature" and reason["feature"] == "snap_tabs" for reason in trace["rework_decision"]["reasons"])
+    assert "fallback_simplified" not in json.dumps(trace)
+    assert "**Rework owner:** planning" in report_md
+    assert "unsupported_feature" in report_md
+
+
 def test_legacy_workflow_writes_planning_artifact_without_removing_old_entries(tmp_output_dir):
     result = run_workflow(
         "Generate an 80x40x5 mounting plate with four M4 holes.",

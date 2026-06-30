@@ -17,6 +17,7 @@ def write_pipeline_report(
     validation: dict[str, Any],
     files: dict[str, str],
     ir_validation: dict[str, Any] | None = None,
+    rework_decision: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     output_path = Path(output_dir)
     ir_valid = True if ir_validation is None else bool(ir_validation.get("valid"))
@@ -44,6 +45,11 @@ def write_pipeline_report(
         "validation": validation,
         "files": files,
     }
+    if rework_decision is not None:
+        report["rework_decision"] = rework_decision
+        report["blocked_owner_stage"] = rework_decision.get("owner_stage")
+        if rework_decision.get("action") == "return":
+            report["status"] = "blocked"
     report["flow_decision"] = review_to_outputs_decision(report)
     json_path = output_path / "report.json"
     json_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -54,10 +60,14 @@ def write_pipeline_report(
         f"**Status:** {report['status']}",
         f"**Part type:** {report['part_type']}",
         f"**Unit:** {ir.get('unit', 'mm')}",
-        "",
-        "## Validation",
-        "",
     ]
+    if rework_decision is not None:
+        lines.extend([
+            f"**Rework action:** {rework_decision.get('action')}",
+            f"**Rework owner:** {rework_decision.get('owner_stage')}",
+            f"**Return to:** {rework_decision.get('to_stage')}",
+        ])
+    lines.extend(["", "## Validation", ""])
     bbox = report["bounding_box"]
     if bbox:
         lines.extend([
@@ -102,6 +112,11 @@ def write_pipeline_report(
         lines.extend(["", "## Errors", ""])
         for error in validation["errors"]:
             lines.append(f"- {error.get('code', 'error')}: {error.get('message', error)}")
+    if rework_decision is not None and rework_decision.get("reasons"):
+        lines.extend(["", "## Rework Decision", ""])
+        for reason in rework_decision["reasons"]:
+            owner = reason.get("owner_stage") or rework_decision.get("owner_stage")
+            lines.append(f"- {reason.get('code', 'return_to_planning')}: {reason.get('message', reason)} (owner: {owner})")
     lines.extend(["", "## Files", ""])
     for label, path in files.items():
         lines.append(f"- {label}: `{path}`")

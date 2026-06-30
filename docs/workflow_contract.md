@@ -199,6 +199,28 @@ Proceed when:
 - Part failures that affect placement, interfaces, or clearances are routed
   back to Part Modeling or Planning before assembly claims success.
 
+### Part Modeling Rework Boundary
+
+Part Modeling owns implementation-level failures only. It may retry or repair
+when the selected CAD IR can still be realized without changing design intent:
+backend execution errors, boolean/export failures, conservative mapping fixes,
+or feature parameter repairs that preserve the requested topology, interfaces,
+and dimensions.
+
+Part Modeling must return to Planning for design/planning-level failures. This
+includes unsupported `part_type`, unsupported feature names, unsupported
+template/backend capability, feature parameter semantics the current generator
+cannot map, or any recovery that would require changing topology, interfaces,
+part structure, or resolved dimensions. In these cases the pipeline writes
+`agent_trace.rework_decision` and report `rework_decision` with
+`action: return`, `owner_stage: planning`, and `to_stage: planning`; candidate
+generation and `fallback_simplified` redesign are not used.
+
+CAD IR conversion remains narrow: it consumes only
+`planning_artifact.selected_parts[].resolved_decisions` as geometry authority.
+`planning_artifact.part_modeling_context` may be copied into trace context, but
+Part Modeling cannot use it to override CAD IR geometry fields.
+
 ### Assembly -> Review
 
 Package:

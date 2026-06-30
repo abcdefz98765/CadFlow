@@ -5,6 +5,7 @@ from ai_native_cad.cad_ir.repair import repair_ir
 from ai_native_cad.cadquery.generator import generate_cadquery_candidates
 from ai_native_cad.pipeline import run_ir_pipeline
 from ai_native_cad.pipeline.failure_analyzer import analyze_failure
+from ai_native_cad.pipeline.agent_loop import run_agent_loop
 from ai_native_cad.pipeline.scorer import score_candidate
 
 
@@ -136,3 +137,25 @@ def test_agent_loop_successful_first_attempt_has_no_repair_diff():
     assert "failure_analysis" not in trace["steps"][0]
     assert "ir_repair" not in trace["steps"][0]
     assert trace["final_flow_decision"]["action"] == "proceed"
+
+
+def test_agent_loop_converts_generator_unsupported_error_to_planning_rework():
+    ir = {
+        "part_type": "unsupported_widget",
+        "part_name": "pytest_agent_loop_generator_boundary",
+        "unit": "mm",
+        "dimensions": {"length": 10, "width": 10, "thickness": 2},
+        "features": {},
+        "outputs": ["step", "stl"],
+    }
+
+    result = run_agent_loop(ir, Path.cwd() / "outputs" / "pytest_agent_loop_generator_boundary")
+    trace = result["agent_trace"]
+
+    assert result["status"] == "failed"
+    assert trace["total_attempts"] == 0
+    assert trace["rework_decision"]["action"] == "return"
+    assert trace["rework_decision"]["to_stage"] == "planning"
+    assert trace["rework_decision"]["owner_stage"] == "planning"
+    assert trace["steps"][0]["failure_analysis"]["failure_type"] == "planning_level_failure"
+    assert trace["steps"][0]["rework_decision"]["reasons"][0]["code"] == "unsupported_template_capability"

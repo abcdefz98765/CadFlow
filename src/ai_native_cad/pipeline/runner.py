@@ -109,6 +109,7 @@ def run_ir_pipeline(
     flow_decision = cad_ir_to_part_modeling_decision(ir_validation)
     if not ir_validation["valid"]:
         files = _collect_files(output_dir)
+        reasons = flow_decision.get("reasons", [])
         validation = {
             "valid": False,
             "execution_success": False,
@@ -121,17 +122,24 @@ def run_ir_pipeline(
             "measured_validation_targets": [],
             "checks": [],
             "warnings": [],
-            "errors": [{"code": "ir_invalid", "message": "CAD IR validation failed"}],
+            "errors": reasons or [{"code": "ir_invalid", "message": "CAD IR validation failed"}],
         }
         (output_dir / "agent_trace.json").write_text(json.dumps({
             "total_attempts": 0,
-            "steps": [{"attempt": 0, "status": "failed", "reason": "ir_invalid"}],
+            "steps": [{
+                "attempt": 0,
+                "status": "blocked",
+                "reason": "cad_ir_not_implementable_by_part_modeling",
+                "rework_decision": flow_decision,
+            }],
             "final_selected_candidate": None,
             "flow_decision": flow_decision,
             "rework_decision": flow_decision,
+            "final_flow_decision": flow_decision,
             "part_modeling_contract": {
                 "geometry_source": "cad_ir",
                 "allowed_knowledge": ["template_candidates", "feature_library", "backend_capabilities"],
+                "planning_context": _planning_context(cad_ir),
                 "does_not_own": [
                     "product_requirement_changes",
                     "part_structure_redesign",
@@ -139,7 +147,15 @@ def run_ir_pipeline(
                 ],
             },
         }, indent=2) + "\n", encoding="utf-8")
-        report = write_pipeline_report(output_dir, ir_data, {"status": "not_run"}, validation, files, ir_validation=ir_validation)
+        report = write_pipeline_report(
+            output_dir,
+            ir_data,
+            {"status": "not_run"},
+            validation,
+            files,
+            ir_validation=ir_validation,
+            rework_decision=flow_decision,
+        )
         files = _collect_files(output_dir)
         return {
             "status": "failed",
@@ -156,7 +172,16 @@ def run_ir_pipeline(
     validation = loop_result["validation"]
     final_ir = loop_result.get("ir", ir_data)
     files = _collect_files(output_dir)
-    report = write_pipeline_report(output_dir, final_ir, execution, validation, files, ir_validation=ir_validation)
+    rework_decision = loop_result["agent_trace"].get("rework_decision")
+    report = write_pipeline_report(
+        output_dir,
+        final_ir,
+        execution,
+        validation,
+        files,
+        ir_validation=ir_validation,
+        rework_decision=rework_decision,
+    )
     files = _collect_files(output_dir)
     status = "success" if execution["status"] == "success" and validation.get("valid") else "failed"
     return {
@@ -214,6 +239,27 @@ def _require_repo_path(path: Path) -> Path:
     except ValueError as exc:
         raise ValueError(f"pipeline outputs must be written inside project root: {repo_root}") from exc
     return path
+
+
+def _planning_context(cad_ir: CADIR) -> dict[str, Any]:
+    handoff = cad_ir.source.get("planning_handoff", {})
+    context = handoff.get("part_modeling_context", {})
+    if not isinstance(context, dict):
+        return {}
+    part_name = cad_ir.part_name or cad_ir.part_type
+    parts = context.get("parts", [])
+    if isinstance(parts, list):
+        matched = [part for part in parts if isinstance(part, dict) and part.get("part_name") == part_name]
+        if matched:
+            return {
+                "geometry_authority": context.get("geometry_authority"),
+                "allowed_context_fields": context.get("allowed_context_fields", []),
+                "part": matched[0],
+            }
+    return {
+        "geometry_authority": context.get("geometry_authority"),
+        "allowed_context_fields": context.get("allowed_context_fields", []),
+    }
 
 
 def _write_blocked_text_pipeline_result(

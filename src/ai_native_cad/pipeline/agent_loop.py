@@ -14,7 +14,7 @@ from ai_native_cad.cadquery.generator import generate_cadquery_candidates
 from ai_native_cad.pipeline.failure_analyzer import analyze_failure
 from ai_native_cad.pipeline.scorer import score_candidate
 from ai_native_cad.pipeline.validator import validate_pipeline_outputs
-from ai_native_cad.workflow_control import part_modeling_final_decision, part_modeling_retry_decision
+from ai_native_cad.workflow_control import make_flow_decision, part_modeling_final_decision, part_modeling_retry_decision
 
 MAX_ATTEMPTS = 3
 
@@ -23,6 +23,7 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
     """Run IR -> candidate code -> execution -> validation -> repair retries."""
     current_ir = CADIR.from_dict(ir) if isinstance(ir, dict) else ir
     output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
     trace: dict[str, Any] = {
         "total_attempts": 0,
         "steps": [],
@@ -46,7 +47,30 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
 
     for attempt in range(1, max_attempts + 1):
         trace["total_attempts"] = attempt
-        candidates = generate_cadquery_candidates(current_ir, max_candidates=3)
+        try:
+            candidates = generate_cadquery_candidates(current_ir, max_candidates=3)
+        except ValueError as exc:
+            if "unsupported" not in str(exc).lower():
+                raise
+            failure = _planning_level_generation_failure(current_ir, exc)
+            trace["total_attempts"] = attempt - 1
+            trace["steps"].append({
+                "attempt": attempt - 1,
+                "status": "blocked",
+                "reason": failure["root_cause"],
+                "failure_analysis": failure,
+                "rework_decision": failure["rework_decision"],
+            })
+            trace["rework_decision"] = failure["rework_decision"]
+            trace["final_flow_decision"] = failure["rework_decision"]
+            _write_trace(output_path, trace)
+            return {
+                "status": "failed",
+                "ir": current_ir.to_dict(),
+                "execution": {"status": "not_run"},
+                "validation": _planning_level_validation(failure["rework_decision"]),
+                "agent_trace": trace,
+            }
         attempt_results = []
 
         for candidate in candidates:
@@ -152,6 +176,48 @@ def _load_generated_model(model_path: Path, ir_data: dict[str, Any]) -> Any:
 
 def _write_trace(output_path: Path, trace: dict[str, Any]) -> None:
     (output_path / "agent_trace.json").write_text(json.dumps(trace, indent=2) + "\n", encoding="utf-8")
+
+
+def _planning_level_generation_failure(cad_ir: CADIR, exc: ValueError) -> dict[str, Any]:
+    reason = {
+        "code": "unsupported_template_capability",
+        "message": str(exc),
+        "part_type": cad_ir.part_type,
+        "owner_stage": "planning",
+    }
+    decision = make_flow_decision(
+        from_stage="part_modeling",
+        proceed_to="assembly_or_review",
+        return_to="planning",
+        blocking_reasons=[reason],
+    )
+    return {
+        "failure_type": "planning_level_failure",
+        "root_cause": reason["code"],
+        "affected_feature": "part_type",
+        "severity": "high",
+        "owner_stage": "planning",
+        "action": "return",
+        "return_to": "planning",
+        "rework_decision": decision,
+    }
+
+
+def _planning_level_validation(decision: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "valid": False,
+        "execution_success": False,
+        "step_generated": False,
+        "stl_generated": False,
+        "report_generated": False,
+        "bounding_box": {},
+        "volume": 0.0,
+        "inspection": {},
+        "measured_validation_targets": [],
+        "checks": [],
+        "warnings": [],
+        "errors": list(decision.get("reasons", [])),
+    }
 
 
 def _planning_context(cad_ir: CADIR) -> dict[str, Any]:
