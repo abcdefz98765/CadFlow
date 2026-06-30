@@ -520,6 +520,12 @@ def _extract_holes(text: str) -> dict[str, Any]:
         text,
         flags=re.IGNORECASE,
     )
+    if not diameter:
+        diameter = re.search(
+            r"\b(\d+(?:\.\d+)?)\s*([a-z\"]+)?\s*(?:diameter\s*)?(?:hole|holes)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
     if diameter:
         value = _to_mm(float(diameter.group(1)), diameter.group(2))
         if value is not None:
@@ -540,7 +546,7 @@ def _extract_holes(text: str) -> dict[str, Any]:
 
 def _dimension_triplet(text: str) -> tuple[float, float, float] | None:
     match = re.search(
-        r"(\d+(?:\.\d+)?)\s*(?:mm|cm|millimeters?|millimetres?|centimeters?|centimetres?|in|inch|inches|\")?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(?:mm|cm|millimeters?|millimetres?|centimeters?|centimetres?|in|inch|inches|\")?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*(mm|cm|millimeters?|millimetres?|centimeters?|centimetres?|in|inch|inches|\")?",
+        r"(\d+(?:\.\d+)?)\s*(?:mm|cm|millimeters?|millimetres?|centimeters?|centimetres?|in|inch|inches|\")?\s*(?:[xX×]|\bby\b)\s*(\d+(?:\.\d+)?)\s*(?:mm|cm|millimeters?|millimetres?|centimeters?|centimetres?|in|inch|inches|\")?\s*(?:[xX×]|\bby\b)\s*(\d+(?:\.\d+)?)\s*(mm|cm|millimeters?|millimetres?|centimeters?|centimetres?|in|inch|inches|\")?",
         text,
         flags=re.IGNORECASE,
     )
@@ -584,6 +590,9 @@ def _extract_count(text: str) -> int | None:
     for word, value in words.items():
         if re.search(rf"\b{word}\b", lowered):
             return value
+    match = re.search(r"\b(\d+)\s*x\s*(?:m\d+(?:\.\d+)?\s*)?(?:mounting\s*)?holes?\b", lowered)
+    if match:
+        return int(match.group(1))
     match = re.search(r"\b(\d+)\s*(?:x\s*)?(?:mounting\s*)?holes?\b", lowered)
     if match:
         return int(match.group(1))

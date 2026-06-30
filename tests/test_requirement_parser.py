@@ -139,6 +139,29 @@ def test_parser_extracts_named_dimensions_symbolic_hole_and_edge_offset():
     ))["valid"]
 
 
+def test_parser_extracts_by_separated_dimensions_and_postfixed_hole_diameter():
+    requirement = RequirementAgent().parse(
+        "Generate a mounting plate 80 by 40 by 5 mm with four 5 mm holes in the corners."
+    )
+
+    assert requirement["dimensions"] == {"length": 80.0, "width": 40.0, "thickness": 5.0}
+    assert requirement["features"]["holes"]["count"] == 4
+    assert requirement["features"]["holes"]["diameter"] == 5.0
+    assert requirement["features"]["holes"]["positions"] == "corner_4"
+    assert requirement["missing_information"] == []
+    assert validate_ir(ir_from_text(
+        "Generate a mounting plate 80 by 40 by 5 mm with four 5 mm holes in the corners."
+    ))["valid"]
+
+
+def test_parser_extracts_numeric_x_metric_hole_count_without_overwriting_clearance():
+    requirement = RequirementAgent().parse("Generate an 80x40x5 mm mounting plate with 4x M3 holes in the corners.")
+
+    assert requirement["features"]["holes"]["count"] == 4
+    assert requirement["features"]["holes"]["fastener"] == "M3"
+    assert requirement["features"]["holes"]["diameter"] == 3.5
+
+
 def test_parser_reports_conflicting_dimensions_as_missing_information():
     requirement = RequirementAgent().parse("Make an 80x40x5 mm mounting plate with length 90 mm.", {"check_level": "L1"})
 

@@ -62,6 +62,8 @@ Examples are split by scope:
 
 ```text
 examples/
+  prompt_pipeline/
+    run_prompt_examples.py
   ir_pipeline/
     mounting_plate/input_ir.json
     spacer/input_ir.json
@@ -86,6 +88,10 @@ examples/
 
 Standalone parts live under `examples/parts/`. Assembly-owned parts, assembly placement, and constraints live together under `examples/assemblies/<assembly>/`.
 IR-first examples live under `examples/ir_pipeline/` and regenerate artifacts into each example's local `outputs/` directory.
+Prompt pipeline examples live under `examples/prompt_pipeline/` and are manual
+debug runs from natural language prompt to `requirement.json`, CAD IR, generated
+STEP/STL, report, and trace. They write generated artifacts to ignored
+`outputs/prompt_pipeline/` directories and do not replace IR-first benchmarks.
 
 ### Skill Layer
 

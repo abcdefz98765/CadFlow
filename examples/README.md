@@ -7,6 +7,8 @@ examples/
   parts/
     mounting_plate/
     circular_button/
+  prompt_pipeline/
+    run_prompt_examples.py
   assemblies/
     pet_button/
       parts/
@@ -43,6 +45,23 @@ python examples/parts/circular_button/model.py
 press surface, tactile-switch pocket, terminal clearance slots, anti-slip pad
 recesses, and a wire outlet. For a realistic multi-part design, prefer the
 `examples/assemblies/pet_button/` assembly.
+
+## Prompt Pipeline
+
+Prompt pipeline examples live in `examples/prompt_pipeline/`. They are manual
+debug runs for the full deterministic path:
+
+```text
+prompt -> requirement.json + CAD IR -> model.step/model.stl -> report/trace
+```
+
+```bash
+python examples/prompt_pipeline/run_prompt_examples.py
+python examples/prompt_pipeline/run_prompt_examples.py mounting_plate_by_holes
+```
+
+Generated artifacts are written to `outputs/prompt_pipeline/<case_id>/` and are
+not tracked. Benchmarks remain IR-first under `benchmarks/`.
 
 ## Assemblies
 

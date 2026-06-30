@@ -157,6 +157,7 @@
 - 当前 parser 会把 unsupported inch units 和冲突尺寸记录为 diagnostics，并转入 missing information，而不是猜测 CAD IR。
 - `follow_up_questions` 保持字符串兼容字段，`follow_up_requests` 提供 field/category/code/source/reason 等机器可读补全请求。
 - 当前 parser 会输出轻量 `cad_brief`，作为 Requirement/Planning 元数据记录 part type、intent、坐标约定、尺寸/feature 字段、保守 validation targets、假设策略和澄清状态；它不替代 CAD IR，也不参与 Text -> Code 绕过。
+- 新增 `examples/prompt_pipeline/` 作为手工全链路调试入口，从 prompt 写出 `requirement.json`，再经 CAD IR 进入现有 CAD Agent Loop；benchmark 仍保持 IR-first。
 
 后续任务：
 
