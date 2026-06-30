@@ -148,6 +148,7 @@ def test_parser_extracts_by_separated_dimensions_and_postfixed_hole_diameter():
     assert requirement["features"]["holes"]["count"] == 4
     assert requirement["features"]["holes"]["diameter"] == 5.0
     assert requirement["features"]["holes"]["positions"] == "corner_4"
+    assert requirement["features"]["holes"]["offset_from_edge"] == 8.0
     assert requirement["missing_information"] == []
     assert validate_ir(ir_from_text(
         "Generate a mounting plate 80 by 40 by 5 mm with four 5 mm holes in the corners."
@@ -160,6 +161,26 @@ def test_parser_extracts_numeric_x_metric_hole_count_without_overwriting_clearan
     assert requirement["features"]["holes"]["count"] == 4
     assert requirement["features"]["holes"]["fastener"] == "M3"
     assert requirement["features"]["holes"]["diameter"] == 3.5
+
+
+def test_parser_infers_four_corner_holes_from_corner_hole_hint():
+    requirement = RequirementAgent().parse("Make an 80x40x5 mm mounting plate with corner holes for M4 screws.")
+
+    assert requirement["features"]["holes"]["count"] == 4
+    assert requirement["features"]["holes"]["fastener"] == "M4"
+    assert requirement["features"]["holes"]["diameter"] == 4.5
+    assert requirement["features"]["holes"]["positions"] == "corner_4"
+    assert requirement["features"]["holes"]["pattern"] == "corner"
+
+
+def test_parser_extracts_hole_offset_from_each_edge():
+    requirement = RequirementAgent().parse(
+        "Make a mounting plate 80 mm long by 40 mm wide and 5 mm thick with four 5 mm holes 8 mm from each edge."
+    )
+
+    assert requirement["features"]["holes"]["count"] == 4
+    assert requirement["features"]["holes"]["diameter"] == 5.0
+    assert requirement["features"]["holes"]["offset_from_edge"] == 8.0
 
 
 def test_parser_reports_conflicting_dimensions_as_missing_information():

@@ -31,8 +31,14 @@ report.json
 report.md
 preview.png
 agent_trace.json
+prompt_summary.json
+prompt_summary.md
 logs/runtime.json
 ```
 
 This directory is intentionally ignored by git. Benchmark cases remain
 IR-first and deterministic under `benchmarks/`.
+
+The prompt summary files are debugging aids. They collect requirement status,
+CAD Brief validation targets, pipeline status, attempt count, measured targets,
+hole inspection, and file paths from existing artifacts.

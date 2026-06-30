@@ -490,11 +490,12 @@ def _extract_features(text: str, part_type: str, dimensions: dict[str, float]) -
     if part_type == "mounting_plate":
         holes = _extract_holes(text)
         if holes:
-            if holes.get("count") == 4 and ("corner" in text.lower() or "four" in text.lower() or "4" in text):
+            if holes.get("count") == 4 and _has_corner_hole_hint(text):
                 holes.setdefault("positions", "corner_4")
                 holes.setdefault("pattern", "corner")
-                if dimensions:
-                    holes.setdefault("offset_from_edge", min(dimensions.values()) * 0.2)
+                offset = _default_corner_hole_offset(part_type, dimensions)
+                if offset is not None:
+                    holes.setdefault("offset_from_edge", offset)
             return {"holes": holes}
     if part_type == "simple_bracket":
         holes = _extract_holes(text)
@@ -511,18 +512,26 @@ def _extract_holes(text: str) -> dict[str, Any]:
     count = _extract_count(text)
     if count:
         holes["count"] = count
+    elif _has_corner_hole_hint(text):
+        holes["count"] = 4
     metric = re.search(r"\bM(\d+(?:\.\d+)?)\b", text, flags=re.IGNORECASE)
     if metric:
         holes["fastener"] = f"M{metric.group(1).rstrip('0').rstrip('.')}"
         holes["diameter"] = round(float(metric.group(1)) + 0.5, 3)
     diameter = re.search(
-        r"(?:hole|holes|diameter|dia|ø|Ø)\D{0,12}(\d+(?:\.\d+)?)\s*([a-z\"]+)?",
+        r"\b(\d+(?:\.\d+)?)\s*([a-z\"]+)?\s*(?:diameter\s*)?(?:hole|holes)\b",
         text,
         flags=re.IGNORECASE,
     )
     if not diameter:
         diameter = re.search(
-            r"\b(\d+(?:\.\d+)?)\s*([a-z\"]+)?\s*(?:diameter\s*)?(?:hole|holes)\b",
+            r"(?:diameter|dia|ø|Ø)\D{0,12}(?<![A-Za-z])(\d+(?:\.\d+)?)\s*([a-z\"]+)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+    if not diameter:
+        diameter = re.search(
+            r"(?:hole|holes)\s*(?:diameter|dia)\D{0,12}(?<![A-Za-z])(\d+(?:\.\d+)?)\s*([a-z\"]+)?",
             text,
             flags=re.IGNORECASE,
         )
@@ -530,13 +539,17 @@ def _extract_holes(text: str) -> dict[str, Any]:
         value = _to_mm(float(diameter.group(1)), diameter.group(2))
         if value is not None:
             holes["diameter"] = value
-    if "corner" in lowered or "corners" in lowered:
+    if _has_corner_hole_hint(text):
         holes["pattern"] = "corner"
         if holes.get("count") == 4:
             holes["positions"] = "corner_4"
     offset = re.search(r"(?:offset|inset|from edge)\D{0,12}(\d+(?:\.\d+)?)\s*([a-z\"]+)?", text, flags=re.IGNORECASE)
     if not offset:
-        offset = re.search(r"(\d+(?:\.\d+)?)\s*([a-z\"]+)?\s*(?:from|off)\s+(?:the\s+)?edge", text, flags=re.IGNORECASE)
+        offset = re.search(
+            r"(\d+(?:\.\d+)?)\s*([a-z\"]+)?\s*(?:from|off)\s+(?:the\s+|each\s+|all\s+)?edges?",
+            text,
+            flags=re.IGNORECASE,
+        )
     if offset:
         value = _to_mm(float(offset.group(1)), offset.group(2))
         if value is not None:
@@ -597,6 +610,25 @@ def _extract_count(text: str) -> int | None:
     if match:
         return int(match.group(1))
     return None
+
+
+def _default_corner_hole_offset(part_type: str, dimensions: dict[str, float]) -> float | None:
+    planar_fields = {
+        "mounting_plate": ("length", "width"),
+        "simple_bracket": ("base_length", "base_width"),
+    }.get(part_type)
+    if not planar_fields or not all(field in dimensions for field in planar_fields):
+        return None
+    return min(dimensions[field] for field in planar_fields) * 0.2
+
+
+def _has_corner_hole_hint(text: str) -> bool:
+    lowered = text.lower()
+    return bool(
+        re.search(r"\b(?:corner|corners)\b", lowered)
+        or re.search(r"\beach\s+corner\b", lowered)
+        or "四角" in text
+    )
 
 
 def _to_mm(value: float, unit: str | None) -> float | None:

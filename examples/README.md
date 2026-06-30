@@ -61,7 +61,10 @@ python examples/prompt_pipeline/run_prompt_examples.py mounting_plate_by_holes
 ```
 
 Generated artifacts are written to `outputs/prompt_pipeline/<case_id>/` and are
-not tracked. Benchmarks remain IR-first under `benchmarks/`.
+not tracked. Each run also writes `prompt_summary.json` and `prompt_summary.md`
+for quick inspection of requirement status, CAD Brief targets, measured report
+targets, agent attempts, and file paths. Benchmarks remain IR-first under
+`benchmarks/`.
 
 ## Assemblies
 

@@ -45,9 +45,97 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8",
         )
         result = run_ir_pipeline(CADIR.from_dict(requirement), output_dir=output_dir)
+        summary = _prompt_summary(case_id, prompt, requirement, result)
+        (output_dir / "prompt_summary.json").write_text(
+            json.dumps(summary, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (output_dir / "prompt_summary.md").write_text(_prompt_summary_markdown(summary), encoding="utf-8")
         failed = failed or result["status"] != "success"
-        print(f"{case_id}: {result['status']} -> {result['output_dir']}")
+        print(
+            f"{case_id}: {result['status']} "
+            f"attempts={summary['pipeline']['attempts']} "
+            f"targets={summary['requirement']['cad_brief_validation_target_count']} "
+            f"-> {result['output_dir']}"
+        )
     return 1 if failed else 0
+
+
+def _prompt_summary(
+    case_id: str,
+    prompt: str,
+    requirement: dict[str, object],
+    result: dict[str, object],
+) -> dict[str, object]:
+    validation = result.get("validation", {}) if isinstance(result.get("validation"), dict) else {}
+    inspection = validation.get("inspection", {}) if isinstance(validation.get("inspection"), dict) else {}
+    holes = inspection.get("features", {}).get("holes", {}) if isinstance(inspection.get("features"), dict) else {}
+    agent_trace = result.get("agent_trace", {}) if isinstance(result.get("agent_trace"), dict) else {}
+    cad_brief = requirement.get("cad_brief", {}) if isinstance(requirement.get("cad_brief"), dict) else {}
+    requirement_status = (
+        requirement.get("requirement_status", {}) if isinstance(requirement.get("requirement_status"), dict) else {}
+    )
+    return {
+        "case_id": case_id,
+        "prompt": prompt,
+        "requirement": {
+            "part_type": requirement.get("part_type"),
+            "outputs": requirement.get("outputs"),
+            "complete_for_generation": requirement_status.get("complete_for_generation"),
+            "needs_user_input": requirement_status.get("needs_user_input"),
+            "missing_fields": requirement_status.get("missing_fields", []),
+            "cad_brief_validation_target_count": len(cad_brief.get("validation_targets", [])),
+            "cad_brief_validation_targets": cad_brief.get("validation_targets", []),
+        },
+        "pipeline": {
+            "status": result.get("status"),
+            "attempts": agent_trace.get("total_attempts"),
+            "final_selected_candidate": agent_trace.get("final_selected_candidate"),
+            "bounding_box": validation.get("bounding_box", {}),
+            "measured_validation_targets": validation.get("measured_validation_targets", []),
+            "hole_inspection": holes,
+        },
+        "files": result.get("files", {}),
+        "output_dir": result.get("output_dir"),
+    }
+
+
+def _prompt_summary_markdown(summary: dict[str, object]) -> str:
+    requirement = summary["requirement"]
+    pipeline = summary["pipeline"]
+    files = summary["files"]
+    assert isinstance(requirement, dict)
+    assert isinstance(pipeline, dict)
+    assert isinstance(files, dict)
+    lines = [
+        f"# Prompt Pipeline Summary: {summary['case_id']}",
+        "",
+        f"**Status:** {pipeline.get('status')}",
+        f"**Part type:** {requirement.get('part_type')}",
+        f"**Attempts:** {pipeline.get('attempts')}",
+        f"**CAD Brief targets:** {requirement.get('cad_brief_validation_target_count')}",
+        f"**Needs user input:** {requirement.get('needs_user_input')}",
+        "",
+        "## Prompt",
+        "",
+        str(summary["prompt"]),
+        "",
+        "## Validation",
+        "",
+        f"- Bounding box: `{pipeline.get('bounding_box', {})}`",
+        f"- Measured targets: {len(pipeline.get('measured_validation_targets', []))}",
+    ]
+    hole_inspection = pipeline.get("hole_inspection") or {}
+    if isinstance(hole_inspection, dict) and hole_inspection:
+        lines.append(f"- Holes: {hole_inspection.get('status', 'unknown')}")
+    missing_fields = requirement.get("missing_fields") or []
+    if missing_fields:
+        lines.extend(["", "## Missing Fields", ""])
+        lines.extend(f"- `{field}`" for field in missing_fields)
+    lines.extend(["", "## Files", ""])
+    for label, path in sorted(files.items()):
+        lines.append(f"- {label}: `{path}`")
+    return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":
