@@ -61,6 +61,11 @@ fields.
 The IR is the source of truth for generated CAD. Text-to-code bypass is outside
 the supported output contract.
 
+Requirement parsing may emit `cad_brief` as planning metadata. It can summarize
+intent, parsed dimensions/features, conservative validation targets, assumptions,
+and clarification state, but it must be derived from requirement/CAD IR fields
+and must not replace `input_ir.json` or drive backend code generation directly.
+
 Legacy workflow output shape:
 
 ```text

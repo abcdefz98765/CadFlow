@@ -156,11 +156,12 @@
 - 对未从文本或 overrides 明确给出的必需尺寸，`missing_information` 会记录具体 `dimensions.*` 字段；L0 可保留模板默认值探索生成，L1+ 会要求用户补全关键尺寸。
 - 当前 parser 会把 unsupported inch units 和冲突尺寸记录为 diagnostics，并转入 missing information，而不是猜测 CAD IR。
 - `follow_up_questions` 保持字符串兼容字段，`follow_up_requests` 提供 field/category/code/source/reason 等机器可读补全请求。
+- 当前 parser 会输出轻量 `cad_brief`，作为 Requirement/Planning 元数据记录 part type、intent、坐标约定、尺寸/feature 字段、保守 validation targets、假设策略和澄清状态；它不替代 CAD IR，也不参与 Text -> Code 绕过。
 
 后续任务：
 
 - 扩展确定性抽取覆盖更多尺寸表达、孔位表达、厚度表达、单位和输出格式组合。
-- 为复杂输入增加 CAD Brief：记录建模意图、坐标约定、假设、冲突和验证目标，再落到 CAD IR。
+- 扩展 CAD Brief 对复杂输入的覆盖：记录建模意图、坐标约定、假设、冲突和验证目标，并持续保持 CAD IR 为生成 source of truth。
 - 将自然语言稳定转为 CAD IR，而不是直接生成 CadQuery 代码。
 - 对关键缺失信息进入多轮用户补全。
 - 在 Requirement Skill 内完成早期产品拆解：识别制造件、参考组件、关键接口和会改变拓扑的缺失信息。

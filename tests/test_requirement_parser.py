@@ -12,6 +12,19 @@ def test_parser_extracts_mounting_plate_dimensions_and_four_corner_holes():
     assert requirement["features"]["holes"]["count"] == 4
     assert requirement["features"]["holes"]["diameter"] == 4.5
     assert requirement["features"]["holes"]["positions"] == "corner_4"
+    brief = requirement["cad_brief"]
+    assert brief["part_type"] == "mounting_plate"
+    assert brief["intent"] == requirement["intent"]
+    assert brief["coordinate_convention"]["axes"] == {"x": "length", "y": "width", "z": "thickness"}
+    assert brief["validation_targets"][0] == {
+        "kind": "bounding_box",
+        "expected": {"x": 80.0, "y": 40.0, "z": 5.0},
+        "dimension_fields": {"x": "length", "y": "width", "z": "thickness"},
+        "unit": "mm",
+        "source": "cad_ir_dimensions",
+    }
+    assert {"kind": "feature", "feature": "holes", "field": "count", "expected": 4, "unit": None, "source": "cad_ir_features"} in brief["validation_targets"]
+    assert {"kind": "feature", "feature": "holes", "field": "diameter", "expected": 4.5, "unit": "mm", "source": "cad_ir_features"} in brief["validation_targets"]
     assert requirement["missing_information"] == []
     assert validate_ir(ir_from_text("Generate an 80x40x5 mm mounting plate with four M4 holes in the corners."))["valid"]
 
@@ -75,6 +88,15 @@ def test_parser_reports_missing_dimensions_without_blocking_l0_template_generati
     assert requirement["requirement_status"]["missing_count"] == 3
     assert requirement["requirement_status"]["follow_up_count"] == 0
     assert requirement["assumptions"]
+    brief_dimensions = {item["field"]: item for item in requirement["cad_brief"]["dimension_fields"]}
+    assert brief_dimensions["length"]["source"] == "template_or_override"
+    assert brief_dimensions["length"]["missing_or_ambiguous"] is True
+    assert requirement["cad_brief"]["assumption_policy"]["defaults_allowed_for_generation"] is True
+    assert requirement["cad_brief"]["clarification_summary"]["missing_fields"] == [
+        "dimensions.length",
+        "dimensions.thickness",
+        "dimensions.width",
+    ]
     assert validate_ir(ir_from_text("Make a mounting plate."))["valid"]
 
 
@@ -139,3 +161,5 @@ def test_parser_reports_unsupported_inch_units_without_converting():
     assert requirement["follow_up_requests"][0]["category"] == "parser_diagnostic"
     assert "unit" in requirement["requirement_status"]["blocking_fields"]
     assert requirement["requirement_status"]["complete_for_generation"] is False
+    assert requirement["cad_brief"]["clarification_summary"]["diagnostics"] == diagnostics
+    assert requirement["cad_brief"]["clarification_summary"]["needs_user_input"] is True

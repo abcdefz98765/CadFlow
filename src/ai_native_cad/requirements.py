@@ -141,6 +141,7 @@ class RequirementAgent:
             _follow_up_request(item) for item in requirement["missing_information"] if item.get("ask_user")
         ]
         requirement["requirement_status"] = self._status(requirement)
+        requirement["cad_brief"] = _cad_brief(requirement)
         return requirement
 
     def _detect_part_type(self, text: str) -> str:
@@ -646,4 +647,141 @@ def _follow_up_request(item: dict[str, Any]) -> dict[str, Any]:
         "severity": item["severity"],
         "reason": item["reason"],
         "source": item["source"],
+    }
+
+
+def _cad_brief(requirement: dict[str, Any]) -> dict[str, Any]:
+    parser = requirement.get("source", {}).get("parser", {})
+    extracted_dimensions = set(parser.get("extracted_dimensions", []))
+    extracted_features = set(parser.get("extracted_features", []))
+    return {
+        "part_type": requirement["part_type"],
+        "intent": deepcopy(requirement.get("intent", {})),
+        "coordinate_convention": _coordinate_convention(requirement),
+        "dimension_fields": _brief_dimension_fields(requirement, extracted_dimensions),
+        "feature_fields": _brief_feature_fields(requirement, extracted_features),
+        "validation_targets": _brief_validation_targets(requirement),
+        "assumption_policy": _brief_assumption_policy(requirement),
+        "clarification_summary": _brief_clarification_summary(requirement),
+    }
+
+
+def _coordinate_convention(requirement: dict[str, Any]) -> dict[str, Any]:
+    axes = {
+        "mounting_plate": {"x": "length", "y": "width", "z": "thickness"},
+        "spacer": {"x": "outer_diameter", "y": "outer_diameter", "z": "thickness"},
+        "simple_bracket": {"x": "base_length", "y": "base_width", "z": "height"},
+        "enclosure_base": {"x": "outer_length", "y": "outer_width", "z": "outer_height"},
+    }
+    return {
+        "unit": requirement.get("unit", "mm"),
+        "origin": "part_local_centered_or_template_defined",
+        "axes": axes.get(requirement["part_type"], {}),
+        "source": "cad_ir_generator_convention",
+    }
+
+
+def _brief_dimension_fields(requirement: dict[str, Any], extracted_dimensions: set[str]) -> list[dict[str, Any]]:
+    dimensions = requirement.get("dimensions", {})
+    missing_fields = {
+        item["field"].removeprefix("dimensions.")
+        for item in requirement.get("missing_information", [])
+        if item.get("field", "").startswith("dimensions.")
+    }
+    fields = []
+    for name in sorted(dimensions):
+        fields.append({
+            "field": name,
+            "value": dimensions[name],
+            "unit": requirement.get("unit", "mm"),
+            "source": "parsed_text" if name in extracted_dimensions else "template_or_override",
+            "missing_or_ambiguous": name in missing_fields,
+        })
+    for name in sorted(missing_fields - set(dimensions)):
+        fields.append({
+            "field": name,
+            "value": None,
+            "unit": requirement.get("unit", "mm"),
+            "source": "missing_information",
+            "missing_or_ambiguous": True,
+        })
+    return fields
+
+
+def _brief_feature_fields(requirement: dict[str, Any], extracted_features: set[str]) -> list[dict[str, Any]]:
+    fields = []
+    for name, value in sorted(requirement.get("features", {}).items()):
+        fields.append({
+            "field": name,
+            "value": deepcopy(value),
+            "source": "parsed_text" if name in extracted_features else "template_or_override",
+        })
+    return fields
+
+
+def _brief_validation_targets(requirement: dict[str, Any]) -> list[dict[str, Any]]:
+    targets = []
+    bbox = _brief_bounding_box_target(requirement)
+    if bbox:
+        targets.append(bbox)
+    targets.extend(_brief_hole_targets(requirement))
+    return targets
+
+
+def _brief_bounding_box_target(requirement: dict[str, Any]) -> dict[str, Any] | None:
+    dimensions = requirement.get("dimensions", {})
+    mappings = {
+        "mounting_plate": {"x": "length", "y": "width", "z": "thickness"},
+        "spacer": {"x": "outer_diameter", "y": "outer_diameter", "z": "thickness"},
+        "simple_bracket": {"x": "base_length", "y": "base_width", "z": "height"},
+        "enclosure_base": {"x": "outer_length", "y": "outer_width", "z": "outer_height"},
+    }
+    mapping = mappings.get(requirement["part_type"])
+    if not mapping or not all(field in dimensions for field in mapping.values()):
+        return None
+    return {
+        "kind": "bounding_box",
+        "expected": {axis: dimensions[field] for axis, field in mapping.items()},
+        "dimension_fields": mapping,
+        "unit": requirement.get("unit", "mm"),
+        "source": "cad_ir_dimensions",
+    }
+
+
+def _brief_hole_targets(requirement: dict[str, Any]) -> list[dict[str, Any]]:
+    targets = []
+    for feature_name in ("holes", "base_holes"):
+        holes = requirement.get("features", {}).get(feature_name)
+        if not isinstance(holes, dict):
+            continue
+        for field in ("count", "diameter"):
+            if field in holes:
+                targets.append({
+                    "kind": "feature",
+                    "feature": feature_name,
+                    "field": field,
+                    "expected": holes[field],
+                    "unit": requirement.get("unit", "mm") if field == "diameter" else None,
+                    "source": "cad_ir_features",
+                })
+    return targets
+
+
+def _brief_assumption_policy(requirement: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "check_level": requirement.get("check_level", "L0"),
+        "defaults_allowed_for_generation": requirement.get("check_level") == "L0",
+        "assumptions": list(requirement.get("assumptions", [])),
+        "missing_information_policy": "ask_user_when_topology_fit_manufacturing_or_safety_changes",
+    }
+
+
+def _brief_clarification_summary(requirement: dict[str, Any]) -> dict[str, Any]:
+    parser = requirement.get("source", {}).get("parser", {})
+    return {
+        "missing_fields": [item["field"] for item in requirement.get("missing_information", [])],
+        "follow_up_fields": [item["field"] for item in requirement.get("follow_up_requests", [])],
+        "blocking_fields": list(requirement.get("requirement_status", {}).get("blocking_fields", [])),
+        "needs_user_input": requirement.get("requirement_status", {}).get("needs_user_input", False),
+        "diagnostics": deepcopy(parser.get("diagnostics", [])),
     }

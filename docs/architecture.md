@@ -182,12 +182,15 @@ examples/ir_pipeline/<part_name>/outputs/
 - `missing_information`
 - `follow_up_questions`
 - `follow_up_requests`
+- `cad_brief`
 - `requirement_status`
 - `assumptions`
 
 后续可以替换为 LLM parser 或多轮交互，但输出 contract 不变。
 
 Requirement 层也负责早期产品意图分析：判断请求是单零件、装配还是未知；识别候选制造件、参考组件、用户可见功能、关键接口和会改变拓扑的缺失信息。它不生成几何，也不决定 backend 操作。
+
+`cad_brief` 是 Requirement/Planning 元数据，汇总 part type、intent、坐标约定、已解析尺寸和 feature、保守 validation targets、假设策略和澄清状态。它从 requirement/CAD IR 字段派生，不替代 `input_ir.json`，也不允许绕过 IR 直接生成 CadQuery 或 backend 代码。
 
 ### Planning Layer
 
@@ -352,6 +355,16 @@ industrial DFA, motion simulation, or production-ready assembly release.
   "missing_information": [],
   "follow_up_questions": [],
   "follow_up_requests": [],
+  "cad_brief": {
+    "part_type": "mounting_plate",
+    "intent": {},
+    "coordinate_convention": {},
+    "dimension_fields": [],
+    "feature_fields": [],
+    "validation_targets": [],
+    "assumption_policy": {},
+    "clarification_summary": {}
+  },
   "assumptions": [],
   "requirement_status": {
     "complete_for_generation": true,
@@ -370,6 +383,11 @@ industrial DFA, motion simulation, or production-ready assembly release.
 `follow_up_requests` is the structured clarification contract for agents and
 UIs; each item carries `field`, `category`, `code`, `question`, `severity`,
 `reason`, and `source`.
+
+`cad_brief` is a lightweight planning aid. It records conservative targets such
+as bounding dimensions and requested hole count or diameter when those values
+already exist in requirement/CAD IR fields. It is not a geometry source of
+truth.
 
 ### input_ir.json
 

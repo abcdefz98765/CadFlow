@@ -19,6 +19,16 @@ Minimum structure for `requirement.json`:
   "missing_information": [],
   "follow_up_questions": [],
   "follow_up_requests": [],
+  "cad_brief": {
+    "part_type": "mounting_plate",
+    "intent": {},
+    "coordinate_convention": {},
+    "dimension_fields": [],
+    "feature_fields": [],
+    "validation_targets": [],
+    "assumption_policy": {},
+    "clarification_summary": {}
+  },
   "assumptions": [],
   "requirement_status": {
     "complete_for_generation": true,
@@ -64,3 +74,9 @@ missing information instead of silently changing CAD IR values.
 `follow_up_questions` remains a compatibility list of question strings.
 `follow_up_requests` is the machine-readable form and must include field,
 category, code, question, severity, reason, and source.
+
+`cad_brief` is a lightweight requirement/planning summary. It must be derived
+from requirement fields and CAD IR fields, and it must not replace CAD IR or
+drive backend-specific code generation. Conservative validation targets may
+include bounding dimensions and requested hole count or diameter when those
+values are already represented in the parsed requirement.

@@ -22,6 +22,7 @@ not choose backend-specific modeling operations.
 - functional interfaces and required user-facing behavior
 - `missing_information`
 - `follow_up_questions`
+- `cad_brief`
 - `assumptions`
 - `field_policy`
 - `requirement_status`
@@ -42,6 +43,10 @@ not choose backend-specific modeling operations.
   vague global fields.
 - Return unresolved decisions to the user when an assumption would change the
   product architecture.
+- Emit `cad_brief` as requirement/planning metadata only. It may summarize
+  intent, coordinate convention, parsed fields, conservative validation targets,
+  assumptions, and clarification state, but CAD IR remains the source of truth
+  for generated geometry.
 
 See also:
 
