@@ -195,6 +195,8 @@ def _validate_features(result: dict[str, Any], cad_ir: CADIR, inspection: dict[s
         value = features.get(key)
         if not value:
             continue
+        if key == "chamfer":
+            _validate_chamfer_inspection(result, inspection)
         size = float(value.get(size_key, 0) if isinstance(value, dict) else value)
         smallest_dim = min((dim for dim in cad_ir.dimensions.values() if dim > 0), default=0)
         valid_relief = smallest_dim <= 0 or size <= smallest_dim / 2
@@ -298,6 +300,61 @@ def _add_hole_spacing_targets(result: dict[str, Any], hole_inspection: dict[str,
             "feature": "holes",
             "inspection": spacing,
         })
+
+
+def _validate_chamfer_inspection(result: dict[str, Any], inspection: dict[str, Any]) -> None:
+    chamfer_inspection = inspection.get("features", {}).get("chamfers", {})
+    status = chamfer_inspection.get("status")
+
+    if status == "verified":
+        expected = chamfer_inspection.get("expected", {})
+        measured = chamfer_inspection.get("measured", {})
+        _check(result, "chamfer_topology_inspection", True, feature="chamfer", status=status)
+        result["measured_validation_targets"].append({
+            "target": "chamfer_count",
+            "expected": expected.get("count"),
+            "actual": measured.get("count"),
+            "pass": measured.get("count") == expected.get("count"),
+        })
+        size_pass = abs(float(measured.get("size", 0) or 0) - float(expected.get("size", 0) or 0)) <= 0.2
+        result["measured_validation_targets"].append({
+            "target": "chamfer_size",
+            "expected": expected.get("size"),
+            "actual": measured.get("size"),
+            "pass": size_pass,
+        })
+        return
+
+    if status == "failed":
+        _check(result, "chamfer_topology_inspection", False, feature="chamfer", status=status)
+        expected = chamfer_inspection.get("expected", {})
+        measured = chamfer_inspection.get("measured", {})
+        result["measured_validation_targets"].append({
+            "target": "chamfer_count",
+            "expected": expected.get("count"),
+            "actual": measured.get("count"),
+            "pass": measured.get("count") == expected.get("count"),
+        })
+        result["measured_validation_targets"].append({
+            "target": "chamfer_size",
+            "expected": expected.get("size"),
+            "actual": measured.get("size"),
+            "pass": False,
+        })
+        result["errors"].append({
+            "code": "missing_feature",
+            "message": "Expected vertical edge chamfer was not realized in generated geometry",
+            "feature": "chamfer",
+            "inspection": chamfer_inspection,
+        })
+        return
+
+    result["warnings"].append({
+        "code": "feature_unverified",
+        "message": "Chamfer feature topology could not be reliably verified",
+        "feature": "chamfer",
+        "inspection": chamfer_inspection,
+    })
 
 
 def _hole_spans(cad_ir: CADIR) -> list[float]:

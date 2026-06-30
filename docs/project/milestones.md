@@ -53,7 +53,8 @@ Started.
 
 - Treat `model.step` as the primary CAD artifact and STL as a derived mesh exchange.
 - Add a geometry inspector that records STEP/STL artifact facts, solid count, bounding box, volume, and mounting_plate through-hole count/diameter when topology is reliable.
-- Keep feature inspection scaffolds for chamfers and fillets without speculative topology inference.
+- Verify simple vertical edge chamfers on plate-like parts when the topology is reliable.
+- Keep feature inspection scaffolds for fillets and unsupported chamfer topology without speculative inference.
 - Keep placeholder `preview.png` for now and document real rendering as a deferred follow-up unless a lightweight renderer is available.
 - Later verify actual feature realization for hole spacing, slots, chamfers, fillets, and simple pockets.
 - Add repair diff checks so the system can confirm that IR repair changed only the intended geometry.

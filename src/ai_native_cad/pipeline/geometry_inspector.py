@@ -11,6 +11,7 @@ import cadquery as cq
 from ai_native_cad.cad_ir.schema import CADIR
 
 HOLE_TOLERANCE_MM = 0.2
+CHAMFER_TOLERANCE_MM = 0.2
 
 
 def inspect_geometry(
@@ -57,6 +58,7 @@ def inspect_geometry(
     }
     inspection["volume"] = round(volume, 3)
     inspection["features"]["holes"] = _inspect_holes(cad_ir, faces)
+    inspection["features"]["chamfers"] = _inspect_chamfers(cad_ir, faces)
     return inspection
 
 
@@ -83,7 +85,7 @@ def _feature_scaffold(cad_ir: CADIR | None) -> dict[str, Any]:
             "status": "scaffold",
             "expected": _expected_feature(features, "chamfer"),
             "measured": None,
-            "note": "Chamfer measurement is not inferred yet.",
+            "note": "Chamfer measurement is available for simple vertical edge chamfers on plate-like parts.",
         },
         "fillets": {
             "status": "scaffold",
@@ -162,6 +164,52 @@ def _inspect_holes(cad_ir: CADIR | None, faces: list[Any]) -> dict[str, Any]:
     return result
 
 
+def _inspect_chamfers(cad_ir: CADIR | None, faces: list[Any]) -> dict[str, Any]:
+    features = cad_ir.features if cad_ir else {}
+    expected_feature = _expected_feature(features, "chamfer")
+    if not expected_feature:
+        return {
+            "status": "scaffold",
+            "expected": None,
+            "measured": None,
+            "note": "No chamfer feature was requested in IR.",
+        }
+
+    expectation = _chamfer_expectation(expected_feature)
+    if expectation.get("status") != "known":
+        return {
+            "status": "unverified",
+            "expected": expectation.get("expected", expected_feature),
+            "measured": None,
+            "reason": expectation.get("reason", "Chamfer expectation could not be inferred from IR."),
+        }
+
+    if cad_ir is None or cad_ir.part_type not in {"mounting_plate", "enclosure_lid"}:
+        return {
+            "status": "unverified",
+            "expected": expectation["expected"],
+            "measured": None,
+            "reason": "Chamfer topology inspection is currently limited to plate-like vertical edge chamfers.",
+        }
+
+    thickness = cad_ir.dimensions.get("thickness", 0)
+    measured = _measure_vertical_edge_chamfers(faces, thickness, expectation["expected"]["size"])
+    count_matches = measured["count"] == expectation["expected"]["count"]
+    size_matches = (
+        measured["size"] is not None
+        and isclose(measured["size"], expectation["expected"]["size"], abs_tol=CHAMFER_TOLERANCE_MM)
+    )
+    status = "verified" if count_matches and size_matches else "failed"
+    result: dict[str, Any] = {
+        "status": status,
+        "expected": expectation["expected"],
+        "measured": measured,
+    }
+    if status == "failed":
+        result["reason"] = "Measured chamfer topology does not match IR expectation."
+    return result
+
+
 def _hole_expectation(feature: Any) -> dict[str, Any]:
     items = feature if isinstance(feature, list) else [feature]
     items = [item for item in items if isinstance(item, dict)]
@@ -199,6 +247,23 @@ def _hole_expectation(feature: Any) -> dict[str, Any]:
     if len(items) == 1 and spacing is not None:
         expected.update(spacing)
     return {"status": "known", "expected": expected}
+
+
+def _chamfer_expectation(feature: Any) -> dict[str, Any]:
+    if isinstance(feature, dict):
+        size = float(feature.get("size", 0) or 0)
+    else:
+        size = float(feature or 0)
+    if size <= 0:
+        return {"status": "unknown", "expected": feature, "reason": "Chamfer feature is missing a usable size."}
+    return {
+        "status": "known",
+        "expected": {
+            "count": 4,
+            "size": round(size, 3),
+            "edge_set": "vertical_edges",
+        },
+    }
 
 
 def _expected_hole_count(item: dict[str, Any]) -> int | None:
@@ -275,6 +340,41 @@ def _measure_mounting_plate_through_holes(faces: list[Any], thickness: float) ->
         "diameter": diameter,
         "diameters": diameters,
         "centers": _sort_centers([item["center"] for item in cylinders]),
+    }
+
+
+def _measure_vertical_edge_chamfers(faces: list[Any], thickness: float, expected_size: float) -> dict[str, Any]:
+    if thickness <= 0:
+        return {"reliable": False, "count": 0, "size": None, "sizes": [], "reason": "Part thickness is missing or non-positive."}
+
+    candidates = []
+    for face in faces:
+        try:
+            if face.geomType() != "PLANE":
+                continue
+            bbox = face.BoundingBox()
+        except Exception:
+            continue
+        if not isclose(bbox.zlen, thickness, abs_tol=CHAMFER_TOLERANCE_MM):
+            continue
+        spans = sorted([round(bbox.xlen, 3), round(bbox.ylen, 3)])
+        if not isclose(spans[0], expected_size, abs_tol=CHAMFER_TOLERANCE_MM):
+            continue
+        if not isclose(spans[1], expected_size, abs_tol=CHAMFER_TOLERANCE_MM):
+            continue
+        candidates.append({
+            "size": round((bbox.xlen + bbox.ylen) / 2, 3),
+            "center": [round(value, 3) for value in face.Center().toTuple()],
+        })
+
+    sizes = [item["size"] for item in candidates]
+    size = round(sum(sizes) / len(sizes), 3) if sizes else None
+    return {
+        "reliable": True,
+        "count": len(candidates),
+        "size": size,
+        "sizes": sizes,
+        "centers": _sort_centers([item["center"] for item in candidates]),
     }
 
 

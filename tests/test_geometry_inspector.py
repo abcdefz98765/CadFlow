@@ -88,6 +88,50 @@ def test_validator_adds_verified_hole_targets_for_mounting_plate(tmp_output_dir)
     assert targets["hole_spacing_y"]["pass"] is True
 
 
+def test_inspector_verifies_mounting_plate_vertical_edge_chamfer(tmp_output_dir):
+    ir = {
+        "part_type": "mounting_plate",
+        "unit": "mm",
+        "dimensions": {"length": 80, "width": 40, "thickness": 5},
+        "features": {"chamfer": 1.0},
+    }
+    model = _build_generated_model(ir)
+    export_model(model, tmp_output_dir, ["step", "stl"])
+
+    result = inspect_geometry(model, tmp_output_dir, ir)
+
+    chamfers = result["features"]["chamfers"]
+    assert chamfers["status"] == "verified"
+    assert chamfers["expected"]["count"] == 4
+    assert chamfers["expected"]["size"] == 1.0
+    assert chamfers["measured"]["count"] == 4
+    assert chamfers["measured"]["size"] == pytest.approx(1.0, abs=0.01)
+
+
+def test_validator_fails_when_expected_chamfer_is_missing(tmp_output_dir):
+    expected_ir = {
+        "part_type": "mounting_plate",
+        "unit": "mm",
+        "dimensions": {"length": 80, "width": 40, "thickness": 5},
+        "features": {"chamfer": 1.0},
+    }
+    model = _build_generated_model({**expected_ir, "features": {}})
+    export_model(model, tmp_output_dir, ["step", "stl"])
+    (tmp_output_dir / "report.json").write_text("{}\n", encoding="utf-8")
+
+    result = validate_pipeline_outputs(model, tmp_output_dir, expected_ir, {"status": "success"})
+
+    chamfers = result["inspection"]["features"]["chamfers"]
+    targets = {target["target"]: target for target in result["measured_validation_targets"]}
+    assert result["valid"] is False
+    assert chamfers["status"] == "failed"
+    assert chamfers["measured"]["count"] == 0
+    assert targets["chamfer_count"]["expected"] == 4
+    assert targets["chamfer_count"]["actual"] == 0
+    assert targets["chamfer_count"]["pass"] is False
+    assert any(error["code"] == "missing_feature" and error.get("feature") == "chamfer" for error in result["errors"])
+
+
 def test_validator_fails_when_expected_mounting_plate_holes_are_missing(tmp_output_dir):
     ir = {
         "part_type": "mounting_plate",
