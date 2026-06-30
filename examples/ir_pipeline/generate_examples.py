@@ -12,7 +12,7 @@ from ai_native_cad.pipeline import run_ir_pipeline
 
 def main() -> None:
     for input_path in sorted(Path(__file__).parent.glob("*/input_ir.json")):
-        result = run_ir_pipeline(ir_from_file(input_path))
+        result = run_ir_pipeline(ir_from_file(input_path), output_dir=input_path.parent / "outputs")
         print(f"{input_path.parent.name}: {result['status']} -> {result['output_dir']}")
 
 

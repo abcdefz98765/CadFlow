@@ -17,7 +17,7 @@ CadQuery source generator
   ↓
 model.py saved to workspace
   ↓
-isolated execution in outputs/<part_name>/
+isolated execution inside the selected project output directory
   ↓
 model.step + model.stl
   ↓
@@ -83,7 +83,7 @@ examples/
 ```
 
 Standalone parts live under `examples/parts/`. Assembly-owned parts, assembly placement, and constraints live together under `examples/assemblies/<assembly>/`.
-IR-first examples live under `examples/ir_pipeline/` and regenerate artifacts into `outputs/<part_name>/`.
+IR-first examples live under `examples/ir_pipeline/` and regenerate artifacts into each example's local `outputs/` directory.
 
 ### Skill Layer
 
@@ -131,7 +131,7 @@ logs/
 `src/ai_native_cad/cadquery/`
 
 - `generator.py` 将 CAD IR 确定性生成 CadQuery `model.py`。
-- `executor.py` 先保存生成代码，再在项目内 `outputs/<part_name>/` 执行，并写入 `logs/runtime.json` 和错误日志。
+- `executor.py` 先保存生成代码，再在仓库内指定输出目录执行，并写入 `logs/runtime.json` 和错误日志。
 
 `src/ai_native_cad/pipeline/`
 
@@ -142,6 +142,20 @@ IR pipeline 默认输出：
 
 ```text
 outputs/<part_name>/
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  preview.png
+  logs/runtime.json
+```
+
+IR example 自测输出：
+
+```text
+examples/ir_pipeline/<part_name>/outputs/
   input_ir.json
   model.py
   model.step

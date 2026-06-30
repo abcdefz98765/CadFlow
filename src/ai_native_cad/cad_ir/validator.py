@@ -6,7 +6,15 @@ from typing import Any
 
 from ai_native_cad.cad_ir.schema import CADIR
 
-SUPPORTED_PART_TYPES = {"mounting_plate", "spacer", "simple_bracket", "wall_bracket"}
+SUPPORTED_PART_TYPES = {
+    "mounting_plate",
+    "spacer",
+    "simple_bracket",
+    "wall_bracket",
+    "circular_button",
+    "enclosure_base",
+    "enclosure_lid",
+}
 SUPPORTED_OUTPUTS = {"step", "stl"}
 
 REQUIRED_DIMENSIONS = {
@@ -14,6 +22,9 @@ REQUIRED_DIMENSIONS = {
     "spacer": {"outer_diameter", "inner_diameter", "thickness"},
     "simple_bracket": {"base_length", "base_width", "height", "thickness"},
     "wall_bracket": {"base_width", "base_depth", "wall_height", "material_thickness"},
+    "circular_button": {"body_diameter", "body_height", "button_diameter", "button_height"},
+    "enclosure_base": {"outer_length", "outer_width", "outer_height", "wall_thickness"},
+    "enclosure_lid": {"length", "width", "thickness"},
 }
 
 

@@ -25,27 +25,38 @@ def execute_model(code: str, output_dir: str | Path, timeout_seconds: int = 60) 
     start = time.perf_counter()
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PROJECT_ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
-    proc = subprocess.run(
-        [sys.executable, str(model_path)],
-        cwd=output_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-        check=False,
-    )
-    elapsed = round(time.perf_counter() - start, 3)
-    log = {
-        "status": "success" if proc.returncode == 0 else "error",
-        "returncode": proc.returncode,
-        "elapsed_seconds": elapsed,
-        "stdout": proc.stdout,
-        "stderr": proc.stderr,
-        "model_path": str(model_path),
-    }
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(model_path)],
+            cwd=output_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        elapsed = round(time.perf_counter() - start, 3)
+        log = {
+            "status": "success" if proc.returncode == 0 else "error",
+            "returncode": proc.returncode,
+            "elapsed_seconds": elapsed,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "model_path": str(model_path),
+        }
+    except subprocess.TimeoutExpired as exc:
+        elapsed = round(time.perf_counter() - start, 3)
+        log = {
+            "status": "error",
+            "returncode": None,
+            "elapsed_seconds": elapsed,
+            "stdout": _decode_timeout_stream(exc.stdout),
+            "stderr": _decode_timeout_stream(exc.stderr) or f"CadQuery execution timed out after {timeout_seconds} seconds",
+            "model_path": str(model_path),
+        }
     (logs_dir / "runtime.json").write_text(json.dumps(log, indent=2) + "\n", encoding="utf-8")
-    if proc.returncode != 0:
-        (logs_dir / "error.log").write_text(proc.stderr or proc.stdout, encoding="utf-8")
+    if log["status"] != "success":
+        (logs_dir / "error.log").write_text(log["stderr"] or log["stdout"], encoding="utf-8")
     return log
 
 
@@ -57,3 +68,11 @@ def _safe_output_dir(output_dir: str | Path) -> Path:
     except ValueError as exc:
         raise ValueError(f"output_dir must be inside project root: {root}") from exc
     return output_path
+
+
+def _decode_timeout_stream(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value

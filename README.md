@@ -188,6 +188,20 @@ outputs/<part_name>/
   logs/runtime.json
 ```
 
+Tracked IR examples use local output folders instead:
+
+```text
+examples/ir_pipeline/<part_name>/outputs/
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  preview.png
+  logs/runtime.json
+```
+
 ### 6. FreeCAD/装配辅助
 
 FreeCAD handoff、TechDraw 和装配脚本仍在 `scripts/` 中，属于工程承接层，不是主 workflow 的强依赖。当前 assembly 是初版 workflow scaffold：记录装配意图、生成 backend-neutral config、执行基础放置和包围盒验证，并输出 review/report；它不是成熟工业装配求解器。

@@ -1,4 +1,4 @@
-"""Script runner — loads and executes a model-building function."""
+"""Compatibility runner routed through the IR-first CAD pipeline."""
 
 import importlib.util
 import json
@@ -44,44 +44,30 @@ def _find_example_model(part_type: str) -> Path:
 
 
 def run_part(part_type: str, params: dict) -> dict:
-    """Run a part pipeline: build → export → report.
+    """Run a part pipeline through CAD IR.
 
-    Returns a dict with status, model, files, elapsed, and errors.
+    Legacy callers still pass ``part_type`` and params, but generation is now:
+    part spec -> CAD IR -> deterministic CadQuery code -> STEP/STL -> validation.
     """
     start = time.perf_counter()
     result = {"part_type": part_type, "params": params}
 
     try:
-        module_path = _find_example_model(part_type)
-        builder = load_builder(part_type)
-        model = builder(params)
-        result["model"] = model
+        from .cad_ir.schema import CADIR
+        from .cad_ir.validator import SUPPORTED_PART_TYPES
+        from .pipeline.runner import run_ir_pipeline
 
-        # Export
-        from .exporter import export_model
+        if part_type not in SUPPORTED_PART_TYPES:
+            raise ValueError(f"Unsupported IR part_type: {part_type}")
 
-        configured_output_root = params.get("output_dir")
-        output_root = PROJECT_ROOT / configured_output_root if configured_output_root else None
-        instance_name = params.get("instance_name", part_type)
-        output_dir = _output_dir_for_example(module_path, output_root, instance_name)
-        result["output_dir"] = str(output_dir)
-        files = export_model(model, output_dir, params.get("outputs", ["step", "stl"]))
-        result["files"] = files
-
-        # Validate
-        from .validator import validate_output
-
-        validation = validate_output(model, output_dir, params)
-        result["validation"] = validation
-
-        # Report
-        from .report import generate_report
-
-        report = generate_report(model, params, files, validation, time.perf_counter() - start, output_dir)
-        result["report"] = report["report_json"]
-        result["report_md"] = report["report_md"]
-
-        result["status"] = "success" if validation.get("valid") else "failed"
+        ir = dict(params)
+        ir["part_type"] = part_type
+        ir.setdefault("part_name", params.get("instance_name", part_type))
+        ir.setdefault("unit", "mm")
+        ir.setdefault("features", {})
+        ir.setdefault("outputs", ["step", "stl"])
+        pipeline_result = run_ir_pipeline(CADIR.from_dict(ir), output_root=PROJECT_ROOT / "outputs")
+        result.update(pipeline_result)
 
     except Exception as e:
         result["status"] = "error"
@@ -92,10 +78,11 @@ def run_part(part_type: str, params: dict) -> dict:
 
 
 def output_dir_for_part(part_type: str, output_root: str | Path | None = None, instance_name: str | None = None) -> Path:
-    """Return the default output directory that mirrors the example path."""
-    root = None if output_root is None else Path(output_root)
-    module_path = _find_example_model(part_type)
-    return _output_dir_for_example(module_path, root, instance_name or part_type)
+    """Return the IR pipeline output directory for a part."""
+    root = PROJECT_ROOT / "outputs" if output_root is None else Path(output_root)
+    if not root.is_absolute():
+        root = PROJECT_ROOT / root
+    return root / (instance_name or part_type)
 
 
 def _output_dir_for_example(module_path: Path, output_root: Path | None, instance_name: str) -> Path:

@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from ai_native_cad.runner import load_builder, run_part
 
@@ -83,7 +84,7 @@ class TestRunPart:
         spec = get_part_spec("enclosure_lid")
         result = run_part("enclosure_lid", spec)
         part_dir = Path(result["output_dir"])
-        assert part_dir == Path.cwd() / "examples" / "assemblies" / "enclosure" / "parts" / "enclosure_lid"
+        assert part_dir == Path.cwd() / "outputs" / "enclosure_lid"
         assert (part_dir / "model.step").exists()
         assert (part_dir / "model.stl").exists()
         assert (part_dir / "report.json").exists()
@@ -93,7 +94,7 @@ class TestRunPart:
 
         spec = dict(get_part_spec("spacer"), output_dir=str(tmp_output_dir))
         result = run_part("spacer", spec)
-        part_dir = tmp_output_dir / "assemblies" / "enclosure" / "parts" / "spacer"
+        part_dir = Path.cwd() / "outputs" / "spacer"
         assert result["status"] == "success"
         assert (part_dir / "model.step").exists()
         assert (part_dir / "model.stl").exists()
@@ -104,7 +105,7 @@ class TestRunPart:
 
         spec = dict(get_part_spec("wall_bracket"), output_dir=str(tmp_output_dir), instance_name="wall_bracket_left")
         result = run_part("wall_bracket", spec)
-        part_dir = tmp_output_dir / "assemblies" / "enclosure" / "parts" / "wall_bracket_left"
+        part_dir = Path.cwd() / "outputs" / "wall_bracket_left"
         assert result["status"] == "success"
         assert (part_dir / "model.step").exists()
         assert (part_dir / "report.json").exists()

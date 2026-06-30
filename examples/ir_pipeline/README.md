@@ -12,4 +12,16 @@ Regenerate all examples:
 python examples/ir_pipeline/generate_examples.py
 ```
 
-Generated artifacts are written to `outputs/<part_name>/`.
+Generated artifacts are written next to each example:
+
+```text
+examples/ir_pipeline/<part_name>/outputs/
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  preview.png
+  logs/runtime.json
+```

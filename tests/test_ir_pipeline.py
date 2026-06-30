@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from ai_native_cad.cad_ir import CADIR, ir_from_text, validate_ir
 from ai_native_cad.cadquery.generator import generate_cadquery_code
@@ -71,3 +72,14 @@ def test_ir_pipeline_writes_required_output_contract():
     assert (part_dir / "report.json").exists()
     assert (part_dir / "report.md").exists()
     assert (part_dir / "preview.png").exists()
+
+    report = json.loads((part_dir / "report.json").read_text(encoding="utf-8"))
+    assert report["success"] is True
+    assert report["ir_valid"] is True
+    assert report["execution_success"] is True
+    assert report["step_generated"] is True
+    assert report["stl_generated"] is True
+    assert report["bounding_box"] == {"x": 12.0, "y": 12.0, "z": 20.0}
+    assert report["volume"] > 0
+    assert report["warnings"] == []
+    assert report["errors"] == []

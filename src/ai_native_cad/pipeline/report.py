@@ -14,14 +14,28 @@ def write_pipeline_report(
     execution: dict[str, Any],
     validation: dict[str, Any],
     files: dict[str, str],
+    ir_validation: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     output_path = Path(output_dir)
+    ir_valid = True if ir_validation is None else bool(ir_validation.get("valid"))
+    execution_success = execution.get("status") == "success"
+    success = ir_valid and execution_success and validation.get("valid", False)
     report = {
+        "success": success,
+        "ir_valid": ir_valid,
+        "execution_success": execution_success,
+        "step_generated": bool(validation.get("step_generated")),
+        "stl_generated": bool(validation.get("stl_generated")),
+        "bounding_box": validation.get("bounding_box", {}),
+        "volume": validation.get("volume", validation.get("volume_mm3", 0)),
+        "warnings": list((ir_validation or {}).get("warnings", [])) + list(validation.get("warnings", [])),
+        "errors": list((ir_validation or {}).get("errors", [])) + list(validation.get("errors", [])),
         "part_type": ir["part_type"],
         "part_name": ir.get("part_name", ir["part_type"]),
         "timestamp": datetime.now().isoformat(),
-        "status": "success" if execution.get("status") == "success" and validation.get("valid") else "failed",
+        "status": "success" if success else "failed",
         "ir": ir,
+        "ir_validation": ir_validation or {"valid": True, "checks": [], "warnings": [], "errors": []},
         "execution": execution,
         "validation": validation,
         "files": files,
@@ -39,11 +53,11 @@ def write_pipeline_report(
         "## Validation",
         "",
     ]
-    bbox = validation.get("bounding_box", {})
+    bbox = report["bounding_box"]
     if bbox:
         lines.extend([
             f"- Bounding box: {bbox['x']:.3f} x {bbox['y']:.3f} x {bbox['z']:.3f} mm",
-            f"- Volume: {validation.get('volume_mm3', 0):.3f} mm^3",
+            f"- Volume: {report['volume']:.3f} mm^3",
         ])
     for check in validation.get("checks", []):
         status = "PASS" if check.get("pass") else "FAIL"

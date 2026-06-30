@@ -28,6 +28,20 @@ Generate the tracked examples:
 python examples/ir_pipeline/generate_examples.py
 ```
 
+Each tracked example writes artifacts beside its own `input_ir.json`:
+
+```text
+examples/ir_pipeline/<part_name>/outputs/
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  preview.png
+  logs/runtime.json
+```
+
 Python API:
 
 ```python
@@ -62,7 +76,7 @@ outputs/<part_name>/
   logs/runtime.json
 ```
 
-The generated `model.py` is saved before execution. Execution runs from the part output directory inside the project workspace and logs runtime failures for regeneration/retry.
+The generated `model.py` is saved before execution. Execution runs from the selected output directory inside the project workspace and logs runtime failures for regeneration/retry. For example-local generation, pass `output_dir="examples/ir_pipeline/<part_name>/outputs"` to `run_ir_pipeline`.
 
 ## Run the Legacy Workflow
 
