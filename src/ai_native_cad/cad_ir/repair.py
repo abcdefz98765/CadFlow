@@ -55,6 +55,10 @@ def _repair_holes(ir: dict[str, Any]) -> list[str]:
             min_span = min(_dimension_values_for_holes(ir["part_type"], dims) or [0])
             if min_span <= 0:
                 continue
+            if diameter > min_span * 0.3:
+                item["diameter"] = round(min_span * 0.25, 3)
+                diameter = float(item["diameter"])
+                changes.append("reduced oversized hole diameter")
             min_offset = diameter * 0.75
             max_offset = max(min_span / 2 - diameter * 0.75, min_offset)
             current = float(item.get("offset_from_edge", min_offset) or min_offset)
@@ -62,9 +66,6 @@ def _repair_holes(ir: dict[str, Any]) -> list[str]:
             if repaired_offset != current:
                 item["offset_from_edge"] = round(repaired_offset, 3)
                 changes.append("adjusted hole spacing")
-            if diameter >= min_span:
-                item["diameter"] = round(min_span * 0.45, 3)
-                changes.append("reduced oversized hole diameter")
     return changes
 
 

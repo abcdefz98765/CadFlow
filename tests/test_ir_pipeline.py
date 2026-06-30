@@ -92,3 +92,25 @@ def test_ir_pipeline_writes_required_output_contract():
     assert report["volume"] > 0
     assert report["warnings"] == []
     assert report["errors"] == []
+
+
+def test_ir_pipeline_report_includes_mounting_plate_hole_inspection():
+    ir = {
+        "part_type": "mounting_plate",
+        "part_name": "pytest_mounting_plate_hole_report",
+        "unit": "mm",
+        "dimensions": {"length": 80, "width": 40, "thickness": 5},
+        "features": {"holes": {"diameter": 5, "positions": "corner_4"}},
+        "outputs": ["step", "stl"],
+    }
+
+    result = run_ir_pipeline(ir, output_root=Path.cwd() / "outputs")
+    part_dir = Path(result["output_dir"])
+    report = json.loads((part_dir / "report.json").read_text(encoding="utf-8"))
+    report_md = (part_dir / "report.md").read_text(encoding="utf-8")
+
+    holes = report["inspection"]["features"]["holes"]
+    assert holes["status"] == "verified"
+    assert holes["measured"]["count"] == 4
+    assert holes["measured"]["diameter"] == 5.0
+    assert "Holes: verified" in report_md

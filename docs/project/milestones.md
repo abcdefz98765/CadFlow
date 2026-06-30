@@ -52,10 +52,10 @@ Done in current v0.3 work.
 Started.
 
 - Treat `model.step` as the primary CAD artifact and STL as a derived mesh exchange.
-- Add a geometry inspector that records STEP/STL artifact facts, solid count, bounding box, and volume.
-- Add feature inspection scaffolds for holes, chamfers, and fillets without speculative topology inference.
+- Add a geometry inspector that records STEP/STL artifact facts, solid count, bounding box, volume, and mounting_plate through-hole count/diameter when topology is reliable.
+- Keep feature inspection scaffolds for chamfers and fillets without speculative topology inference.
 - Keep placeholder `preview.png` for now and document real rendering as a deferred follow-up unless a lightweight renderer is available.
-- Later verify actual feature realization for holes, slots, chamfers, fillets, and simple pockets.
+- Later verify actual feature realization for hole spacing, slots, chamfers, fillets, and simple pockets.
 - Add repair diff checks so the system can confirm that IR repair changed only the intended geometry.
 - Improve `agent_trace.json` with measured validation targets and inspection summaries.
 

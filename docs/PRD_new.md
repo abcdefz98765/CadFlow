@@ -101,7 +101,7 @@ V0/V1 聚焦自然语言参数化建模和可追踪 CAD agent loop：
 
 ### Geometry Inspector
 
-从 STEP/model 输出路径记录可测事实。当前已覆盖 STEP/STL artifact facts、solid count、bbox、volume，并为 holes/chamfers/fillets 保留 inspection scaffold；后续继续推进孔数量、孔径、孔距、槽、倒角、关键尺寸和 repair diff 的真实拓扑验证。
+从 STEP/model 输出路径记录可测事实。当前已覆盖 STEP/STL artifact facts、solid count、bbox、volume，并在 topology 可靠时验证 mounting_plate through-hole 数量和孔径；chamfers/fillets 仍为 inspection scaffold，孔距、槽、倒角、关键尺寸和 repair diff 后续继续推进。
 
 ### Assembly
 

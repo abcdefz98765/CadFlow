@@ -125,7 +125,7 @@ def validate_pipeline_outputs(
                     "actual": actual,
                 })
 
-    _validate_features(result, cad_ir)
+    _validate_features(result, cad_ir, inspection)
 
     return _finalize(result)
 
@@ -168,21 +168,22 @@ def _check(result: dict[str, Any], name: str, passed: bool, **extra: Any) -> Non
     result["checks"].append({"check": name, "pass": passed, **extra})
 
 
-def _validate_features(result: dict[str, Any], cad_ir: CADIR) -> None:
+def _validate_features(result: dict[str, Any], cad_ir: CADIR, inspection: dict[str, Any]) -> None:
     features = cad_ir.features
     holes = features.get("holes") or features.get("mounting_holes") or features.get("base_holes")
     if holes:
+        _validate_hole_inspection(result, inspection)
         hole_items = holes if isinstance(holes, list) else [holes]
         for item in hole_items:
             diameter = float(item.get("diameter", 0) or 0)
             if diameter <= 0:
-                _check(result, "feature_present", False, feature="holes")
+                _check(result, "feature_clearance_feasible", False, feature="holes")
                 result["errors"].append({"code": "missing_feature", "message": "Hole feature is missing a usable diameter", "feature": "holes"})
                 continue
             span = min(_hole_spans(cad_ir) or [0])
             offset = float(item.get("offset_from_edge", max(diameter, span * 0.2)) or 0)
             has_clearance = span <= 0 or (diameter < span and offset >= diameter * 0.5 and offset <= span / 2)
-            _check(result, "feature_present", has_clearance, feature="holes", diameter=diameter, offset_from_edge=offset)
+            _check(result, "feature_clearance_feasible", has_clearance, feature="holes", diameter=diameter, offset_from_edge=offset)
             if not has_clearance:
                 result["errors"].append({
                     "code": "missing_feature",
@@ -210,6 +211,47 @@ def _validate_features(result: dict[str, Any], cad_ir: CADIR) -> None:
         symmetric = bool(bbox) and abs(bbox.get("x", 0) - bbox.get("y", 0)) <= max(bbox.get("x", 0), bbox.get("y", 0), 1) * 0.01
         should_be_symmetric = cad_ir.part_type in {"spacer", "circular_button"}
         _check(result, "symmetry_correctness", (not should_be_symmetric) or symmetric)
+
+
+def _validate_hole_inspection(result: dict[str, Any], inspection: dict[str, Any]) -> None:
+    hole_inspection = inspection.get("features", {}).get("holes", {})
+    status = hole_inspection.get("status")
+
+    if status == "verified":
+        expected = hole_inspection.get("expected", {})
+        measured = hole_inspection.get("measured", {})
+        _check(result, "hole_topology_inspection", True, feature="holes", status=status)
+        result["measured_validation_targets"].append({
+            "target": "hole_count",
+            "expected": expected.get("count"),
+            "actual": measured.get("count"),
+            "pass": measured.get("count") == expected.get("count"),
+        })
+        diameter_pass = abs(float(measured.get("diameter", 0) or 0) - float(expected.get("diameter", 0) or 0)) <= 0.2
+        result["measured_validation_targets"].append({
+            "target": "hole_diameter",
+            "expected": expected.get("diameter"),
+            "actual": measured.get("diameter"),
+            "pass": diameter_pass,
+        })
+        return
+
+    if status == "failed":
+        _check(result, "hole_topology_inspection", False, feature="holes", status=status)
+        result["errors"].append({
+            "code": "missing_feature",
+            "message": "Expected mounting plate through holes were not realized in generated geometry",
+            "feature": "holes",
+            "inspection": hole_inspection,
+        })
+        return
+
+    result["warnings"].append({
+        "code": "feature_unverified",
+        "message": "Hole feature topology could not be reliably verified",
+        "feature": "holes",
+        "inspection": hole_inspection,
+    })
 
 
 def _hole_spans(cad_ir: CADIR) -> list[float]:

@@ -78,6 +78,16 @@ def write_pipeline_report(
             f"- STL file: {'present' if stl_file.get('present') else 'missing'} ({stl_file.get('size_bytes', 0)} bytes)",
             f"- Solid count: {inspection.get('solid_count')}",
         ])
+        holes = inspection.get("features", {}).get("holes", {})
+        if holes:
+            measured = holes.get("measured") or {}
+            detail = ""
+            if measured.get("count") is not None:
+                detail = f" ({measured.get('count')} measured"
+                if measured.get("diameter") is not None:
+                    detail += f", diameter {measured.get('diameter'):.3f} mm"
+                detail += ")"
+            lines.append(f"- Holes: {holes.get('status', 'unknown')}{detail}")
     if validation.get("errors"):
         lines.extend(["", "## Errors", ""])
         for error in validation["errors"]:

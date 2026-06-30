@@ -31,6 +31,11 @@ the same IR can be analyzed, repaired, retried, or regenerated.
 for downstream exchange and preview use. Validation and trace summaries should
 prefer measured CAD facts over mesh-only facts.
 
+Phase 1.8 inspection records STEP/STL artifact facts, solid count, bounding
+box, volume, and mounting_plate through-hole count/diameter when the CadQuery
+topology is reliable. Unreliable feature topology must be recorded as
+unverified instead of guessed.
+
 `preview.png` is still a placeholder snapshot in Phase 1.8 unless a lightweight
 geometry renderer is available. Real preview rendering is intentionally deferred
 from this slice because Blender and FreeCAD automation are out of scope.
@@ -42,6 +47,7 @@ from this slice because Blender and FreeCAD automation are out of scope.
 - selected candidate and candidate scores when candidate mode is used
 - measured validation targets
 - inspection summary for generated geometry and STEP/STL artifacts
+- feature inspection status, including mounting_plate hole inspection when available
 - structured failure analysis for failed attempts
 - IR repair changes
 - final selected candidate

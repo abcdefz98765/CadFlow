@@ -39,8 +39,8 @@ text/input_ir.json
 
 下一阶段重点：
 
-- STEP-first inspection：以 `model.step` 为主验证对象，STL 作为派生 mesh 输出；当前已记录 artifact facts、solid count、bbox 和 volume。
+- STEP-first inspection：以 `model.step` 为主验证对象，STL 作为派生 mesh 输出；当前已记录 artifact facts、solid count、bbox、volume，并在 topology 可靠时验证 mounting_plate through-hole 数量和孔径。
 - CAD brief：在复杂自然语言或多源输入时，先形成可审查的建模 brief，再落到 CAD IR。
-- Geometry inspector：继续推进孔、槽、倒角、关键距离和 repair diff 的真实拓扑验证。
+- Geometry inspector：继续推进孔距、槽、倒角、关键距离和 repair diff 的真实拓扑验证。
 - Real preview/viewer：当前 `preview.png` 仍是 placeholder；后续在不引入重依赖的前提下实现真实几何渲染或 viewer snapshot。
 - Benchmark suite：用固定 prompts、expected IR 和 expected checks 衡量架构进步。
