@@ -62,6 +62,15 @@ def ir_from_planning_artifact(planning_artifact: dict[str, Any], part_name: str 
             "outputs",
             "check_level",
         ],
+        "trace_fields": [
+            "modeling_order",
+            "template_candidates",
+            "functional_datums",
+            "interfaces",
+            "review_targets",
+            "part_modeling_context",
+        ],
+        "part_modeling_context": planning_artifact.get("part_modeling_context", {}),
         "ignored_planning_fields": [
             "risk_notes",
             "review_targets",

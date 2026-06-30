@@ -31,6 +31,7 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
         "part_modeling_contract": {
             "geometry_source": "cad_ir",
             "allowed_knowledge": ["template_candidates", "feature_library", "backend_capabilities"],
+            "planning_context": _planning_context(current_ir),
             "does_not_own": [
                 "product_requirement_changes",
                 "part_structure_redesign",
@@ -151,6 +152,27 @@ def _load_generated_model(model_path: Path, ir_data: dict[str, Any]) -> Any:
 
 def _write_trace(output_path: Path, trace: dict[str, Any]) -> None:
     (output_path / "agent_trace.json").write_text(json.dumps(trace, indent=2) + "\n", encoding="utf-8")
+
+
+def _planning_context(cad_ir: CADIR) -> dict[str, Any]:
+    handoff = cad_ir.source.get("planning_handoff", {})
+    context = handoff.get("part_modeling_context", {})
+    if not isinstance(context, dict):
+        return {}
+    part_name = cad_ir.part_name or cad_ir.part_type
+    parts = context.get("parts", [])
+    if isinstance(parts, list):
+        matched = [part for part in parts if isinstance(part, dict) and part.get("part_name") == part_name]
+        if matched:
+            return {
+                "geometry_authority": context.get("geometry_authority"),
+                "allowed_context_fields": context.get("allowed_context_fields", []),
+                "part": matched[0],
+            }
+    return {
+        "geometry_authority": context.get("geometry_authority"),
+        "allowed_context_fields": context.get("allowed_context_fields", []),
+    }
 
 
 def _inspection_summary(inspection: dict[str, Any]) -> dict[str, Any]:

@@ -152,7 +152,7 @@ Proceed when:
 Package:
 
 - `requirement.json`
-- `plan.md` or future structured planning artifact
+- `plan.md` and/or `planning_artifact.json`
 - selected part intent, route, functional datums, template candidates,
   interfaces, conservative generation targets, and risk notes
 
@@ -312,11 +312,13 @@ assumed, or unresolved.
 ### Outputs
 
 - `plan.md`
-- Future structured planning artifact when introduced.
+- `planning_artifact.json`
 - Workflow route.
 - Design strategy.
 - Part list and generation order.
 - Interface map.
+- Part Modeling context: template candidates, functional datums, interfaces,
+  and review targets for the selected part.
 - Risk list and confirmation gates.
 - Design-reasonableness notes, including structural, motion, degree-of-freedom,
   fit, clearance, and serviceability concerns.
@@ -336,8 +338,10 @@ assumed, or unresolved.
 
 CAD IR conversion consumes only the selected part-level decisions needed to
 encode geometry fields: part type, units, dimensions, features, interfaces, and
-conservative generation targets. It does not consume open-ended design analysis
-as authority to invent geometry.
+conservative generation targets. `planning_artifact.part_modeling_context` may
+be copied into CAD IR source trace for Part Modeling template/review context,
+but it is not geometry authority. CAD IR conversion does not consume open-ended
+design analysis as authority to invent geometry.
 
 Part Modeling consumes part order, template candidates, reference envelopes,
 and per-part review targets.

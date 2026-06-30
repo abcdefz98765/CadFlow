@@ -13,7 +13,7 @@ from typing import Any
 from ai_native_cad.workflow_control import make_flow_decision
 
 
-PLANNING_ARTIFACT_VERSION = "planning-artifact-v0.1"
+PLANNING_ARTIFACT_VERSION = "planning-artifact-v0.2"
 READY_FOR_CAD_IR = "ready_for_cad_ir"
 RETURN_TO_REQUIREMENT = "return_to_requirement"
 
@@ -45,15 +45,25 @@ def create_planning_artifact(requirement: dict[str, Any]) -> dict[str, Any]:
     interfaces = _interfaces(requirement)
     template_candidates = _template_candidates(requirement)
     review_targets = _review_targets(requirement)
+    modeling_order = _modeling_order(selected_parts)
+    part_modeling_context = _part_modeling_context(
+        selected_parts=selected_parts,
+        functional_datums=functional_datums,
+        interfaces=interfaces,
+        template_candidates=template_candidates,
+        review_targets=review_targets,
+    )
 
     return {
         "artifact_type": "planning",
         "version": PLANNING_ARTIFACT_VERSION,
         "route": route,
         "selected_parts": selected_parts,
+        "modeling_order": modeling_order,
         "functional_datums": functional_datums,
         "interfaces": interfaces,
         "template_candidates": template_candidates,
+        "part_modeling_context": part_modeling_context,
         "risk_notes": risk_notes,
         "review_targets": review_targets,
         "flow_gate_status": _flow_gate_status(gate_status, blocking_reasons),
@@ -210,6 +220,49 @@ def _template_candidates(requirement: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _review_targets(requirement: dict[str, Any]) -> list[dict[str, Any]]:
     return deepcopy(requirement.get("cad_brief", {}).get("validation_targets", []))
+
+
+def _modeling_order(selected_parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "part_name": part.get("part_name"),
+            "generation_order": part.get("generation_order", index),
+            "depends_on": [],
+            "reason": "single resolved part can enter Part Modeling directly",
+        }
+        for index, part in enumerate(selected_parts, start=1)
+    ]
+
+
+def _part_modeling_context(
+    *,
+    selected_parts: list[dict[str, Any]],
+    functional_datums: list[dict[str, Any]],
+    interfaces: list[dict[str, Any]],
+    template_candidates: list[dict[str, Any]],
+    review_targets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "geometry_authority": "selected_parts.resolved_decisions",
+        "allowed_context_fields": [
+            "modeling_order",
+            "template_candidates",
+            "functional_datums",
+            "interfaces",
+            "review_targets",
+        ],
+        "parts": [
+            {
+                "part_name": part.get("part_name"),
+                "generation_order": part.get("generation_order"),
+                "template_candidates": deepcopy(part.get("template_candidates", template_candidates)),
+                "functional_datums": deepcopy(part.get("functional_datums", functional_datums)),
+                "interfaces": deepcopy(part.get("interfaces", interfaces)),
+                "review_targets": deepcopy(part.get("review_targets", review_targets)),
+            }
+            for part in selected_parts
+        ],
+    }
 
 
 def _risk_notes(requirement: dict[str, Any]) -> list[dict[str, Any]]:

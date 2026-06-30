@@ -27,6 +27,9 @@ def test_requirement_to_planning_artifact_field_handoff():
     assert artifact["interfaces"][0]["name"] == "holes"
     assert artifact["template_candidates"][0]["template"] == "mounting_plate"
     assert artifact["review_targets"] == requirement["cad_brief"]["validation_targets"]
+    assert artifact["modeling_order"][0]["part_name"] == "mounting_plate"
+    assert artifact["part_modeling_context"]["geometry_authority"] == "selected_parts.resolved_decisions"
+    assert artifact["part_modeling_context"]["parts"][0]["template_candidates"][0]["template"] == "mounting_plate"
 
     part = artifact["selected_parts"][0]
     assert part["part_name"] == "mounting_plate"
@@ -59,6 +62,8 @@ def test_planning_artifact_to_input_ir_consumes_resolved_decisions_only():
     assert ir.dimensions == {"outer_diameter": 12.0, "inner_diameter": 6.5, "thickness": 20.0}
     assert validate_ir(ir)["valid"] is True
     handoff = ir.source["planning_handoff"]
+    assert handoff["part_modeling_context"]["geometry_authority"] == "selected_parts.resolved_decisions"
+    assert "template_candidates" in handoff["trace_fields"]
     assert handoff["consumed_fields"] == [
         "part_type",
         "part_name",
@@ -203,6 +208,8 @@ def test_part_modeling_uses_cad_ir_not_open_planning_notes(tmp_output_dir):
     )
     trace = json.loads((Path(result["output_dir"]) / "agent_trace.json").read_text(encoding="utf-8"))
     assert trace["part_modeling_contract"]["geometry_source"] == "cad_ir"
+    assert trace["part_modeling_contract"]["planning_context"]["geometry_authority"] == "selected_parts.resolved_decisions"
+    assert trace["part_modeling_contract"]["planning_context"]["part"]["template_candidates"][0]["template"] == "spacer"
     assert "part_structure_redesign" in trace["part_modeling_contract"]["does_not_own"]
     assert result["ir"]["dimensions"]["outer_diameter"] == 12.0
 
