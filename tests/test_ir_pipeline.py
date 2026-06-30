@@ -3,7 +3,10 @@ import json
 
 from ai_native_cad.cad_ir import CADIR, ir_from_text, validate_ir
 from ai_native_cad.cadquery.generator import generate_cadquery_code
+from ai_native_cad.exporter import export_model
 from ai_native_cad.pipeline import run_ir_pipeline
+from ai_native_cad.pipeline.report import write_pipeline_report
+from ai_native_cad.pipeline.validator import validate_pipeline_outputs
 
 
 def test_validate_ir_accepts_mounting_plate():
@@ -165,6 +168,69 @@ def test_ir_pipeline_report_includes_mounting_plate_chamfer_inspection():
     assert chamfers["measured"]["count"] == 4
     assert chamfers["measured"]["size"] == 1.0
     assert targets["chamfer_count"]["actual"] == 4
+    assert targets["chamfer_count"]["feature"] == "chamfer"
+    assert targets["chamfer_count"]["metric"] == "count"
+    assert targets["chamfer_count"]["source"] == "geometry_inspector"
     assert targets["chamfer_size"]["actual"] == 1.0
+    assert targets["chamfer_size"]["feature"] == "chamfer"
+    assert targets["chamfer_size"]["metric"] == "size"
+    assert targets["chamfer_size"]["source"] == "geometry_inspector"
     assert "Chamfers: verified" in report_md
     assert "size 1.000 mm" in report_md
+
+
+def test_ir_pipeline_report_marks_requested_fillet_unverified():
+    ir = {
+        "part_type": "simple_bracket",
+        "part_name": "pytest_simple_bracket_fillet_report",
+        "unit": "mm",
+        "dimensions": {"base_length": 60, "base_width": 30, "height": 45, "thickness": 4},
+        "features": {"fillet": 1.5},
+        "outputs": ["step", "stl"],
+    }
+
+    result = run_ir_pipeline(ir, output_root=Path.cwd() / "outputs")
+    part_dir = Path(result["output_dir"])
+    report = json.loads((part_dir / "report.json").read_text(encoding="utf-8"))
+    report_md = (part_dir / "report.md").read_text(encoding="utf-8")
+
+    fillets = report["inspection"]["features"]["fillets"]
+    assert fillets["status"] == "unverified"
+    assert any(
+        warning["code"] == "feature_unverified" and warning.get("feature") == "fillet"
+        for warning in report["warnings"]
+    )
+    assert "Fillets: unverified" in report_md
+
+
+def test_report_marks_unsupported_chamfer_topology_unverified(tmp_path):
+    ir = {
+        "part_type": "simple_bracket",
+        "part_name": "pytest_simple_bracket_unsupported_chamfer_report",
+        "unit": "mm",
+        "dimensions": {"base_length": 60, "base_width": 30, "height": 45, "thickness": 4},
+        "features": {"chamfer": 1.0},
+        "outputs": ["step", "stl"],
+    }
+    namespace = {}
+    exec(generate_cadquery_code({**ir, "features": {}}), namespace)
+    model = namespace["build_model"]({**ir, "features": {}})
+    export_model(model, tmp_path, ["step", "stl"])
+    (tmp_path / "report.json").write_text("{}\n", encoding="utf-8")
+    validation = validate_pipeline_outputs(model, tmp_path, ir, {"status": "success"})
+
+    write_pipeline_report(
+        tmp_path,
+        ir,
+        {"status": "success"},
+        validation,
+        {"step": str(tmp_path / "model.step"), "stl": str(tmp_path / "model.stl")},
+    )
+    report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
+    report_md = (tmp_path / "report.md").read_text(encoding="utf-8")
+
+    chamfers = report["inspection"]["features"]["chamfers"]
+    assert chamfers["status"] == "unverified"
+    assert "plate-like vertical edge chamfers" in chamfers["reason"]
+    assert "Chamfers: unverified" in report_md
+    assert "plate-like vertical edge chamfers" in report_md

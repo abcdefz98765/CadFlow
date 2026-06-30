@@ -247,6 +247,7 @@ def _inspection_summary(inspection: dict[str, Any]) -> dict[str, Any]:
     holes = inspection.get("features", {}).get("holes", {})
     spacing = holes.get("spacing", {}) if isinstance(holes, dict) else {}
     chamfers = inspection.get("features", {}).get("chamfers", {})
+    fillets = inspection.get("features", {}).get("fillets", {})
     return {
         "primary_artifact": inspection.get("artifact_roles", {}).get("primary", "model.step"),
         "solid_count": inspection.get("solid_count"),
@@ -262,5 +263,6 @@ def _inspection_summary(inspection: dict[str, Any]) -> dict[str, Any]:
         },
         "hole_spacing_status": spacing.get("status"),
         "chamfer_status": chamfers.get("status") if isinstance(chamfers, dict) else None,
+        "fillet_status": fillets.get("status") if isinstance(fillets, dict) else None,
         "features": inspection.get("features", {}),
     }

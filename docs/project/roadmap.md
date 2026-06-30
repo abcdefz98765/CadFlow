@@ -91,7 +91,7 @@
 
 ## Phase 1.8: STEP-first Inspection And Trace Quality
 
-状态：已启动。当前实现已落地 STEP/STL artifact facts、模型 bbox/volume/solid_count inspection、trace summary，并在 topology 可靠时验证 mounting_plate corner through-hole 数量、孔径、孔距，以及简单板类竖边 chamfer；preview 渲染继续保持 deferred。
+状态：收尾中。当前 verified 范围包括 STEP/STL artifact facts、模型 bbox/volume/solid_count inspection、trace summary、mounting_plate corner through-hole 数量/孔径/孔距，以及 mounting_plate/enclosure_lid 等简单板类竖边 chamfer。fillet、slots、general chamfer topology 和真实 rendered preview 明确保持 unverified/deferred。
 
 目标：吸收成熟 text-to-cad/CAD agent 项目的 STEP-first、inspection、snapshot review 思路，把验证从“生成了文件和 bbox 大致正确”推进到“真实 CAD artifact 可测量、可审查、可对比”。
 
@@ -100,7 +100,7 @@
 - 明确 `model.step` 是 primary CAD artifact，`model.stl` 是 derived mesh exchange。
 - 当前 `preview.png` 保持 placeholder，并记录真实 geometry-rendered preview 的 TODO；不在本阶段引入 Blender、FreeCAD automation 或重依赖。
 - `pipeline/geometry_inspector.py` 或等价模块，读取 model/STEP facts。
-- topology 可靠时验证 mounting_plate 孔数量、孔径和孔距；简单板类竖边 chamfer 已进入实际测量；槽、fillet 和关键距离后续继续推进。
+- topology 可靠时验证 mounting_plate 孔数量、孔径和孔距；简单板类竖边 chamfer 已进入实际测量；fillet、槽和 general chamfer topology 只在 inspection/report/trace 中标记 unverified，不做 speculative pass。
 - `agent_trace.json` 增加 measured validation targets、inspection summary，以及 IR repair 的结构化 before/after diff。
 
 验收：

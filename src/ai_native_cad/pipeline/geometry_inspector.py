@@ -87,12 +87,7 @@ def _feature_scaffold(cad_ir: CADIR | None) -> dict[str, Any]:
             "measured": None,
             "note": "Chamfer measurement is available for simple vertical edge chamfers on plate-like parts.",
         },
-        "fillets": {
-            "status": "scaffold",
-            "expected": _expected_feature(features, "fillet"),
-            "measured": None,
-            "note": "Fillet measurement is not inferred yet.",
-        },
+        "fillets": _fillet_scaffold(features),
     }
 
 
@@ -101,6 +96,23 @@ def _expected_feature(features: dict[str, Any], key: str, aliases: tuple[str, ..
         if name in features:
             return features[name]
     return None
+
+
+def _fillet_scaffold(features: dict[str, Any]) -> dict[str, Any]:
+    expected = _expected_feature(features, "fillet")
+    if not expected:
+        return {
+            "status": "scaffold",
+            "expected": None,
+            "measured": None,
+            "note": "No fillet feature was requested in IR.",
+        }
+    return {
+        "status": "unverified",
+        "expected": expected,
+        "measured": None,
+        "reason": "Fillet topology measurement is not implemented yet.",
+    }
 
 
 def _inspect_holes(cad_ir: CADIR | None, faces: list[Any]) -> dict[str, Any]:

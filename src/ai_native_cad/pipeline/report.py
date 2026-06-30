@@ -117,7 +117,15 @@ def write_pipeline_report(
                 if measured.get("size") is not None:
                     detail += f", size {measured.get('size'):.3f} mm"
                 detail += ")"
+            if chamfers.get("reason"):
+                detail += f" - {chamfers.get('reason')}"
             lines.append(f"- Chamfers: {chamfers.get('status', 'unknown')}{detail}")
+        fillets = inspection.get("features", {}).get("fillets", {})
+        if fillets and (fillets.get("expected") is not None or fillets.get("status") != "scaffold"):
+            detail = ""
+            if fillets.get("reason"):
+                detail = f" - {fillets.get('reason')}"
+            lines.append(f"- Fillets: {fillets.get('status', 'unknown')}{detail}")
     if validation.get("errors"):
         lines.extend(["", "## Errors", ""])
         for error in validation["errors"]:

@@ -49,14 +49,14 @@ Done in current v0.3 work.
 
 ## M1.8: STEP-first Inspection And Trace Quality
 
-Started.
+Cleanup in progress.
 
 - Treat `model.step` as the primary CAD artifact and STL as a derived mesh exchange.
-- Add a geometry inspector that records STEP/STL artifact facts, solid count, bounding box, volume, and mounting_plate through-hole count/diameter when topology is reliable.
-- Verify simple vertical edge chamfers on plate-like parts when the topology is reliable.
-- Keep feature inspection scaffolds for fillets and unsupported chamfer topology without speculative inference.
+- Add a geometry inspector that records STEP/STL artifact facts, solid count, bounding box, volume, and mounting_plate through-hole count/diameter/spacing when topology is reliable.
+- Verify simple vertical edge chamfers on plate-like mounting_plate/enclosure_lid parts when the topology is reliable.
+- Mark requested fillets, slots, and unsupported/general chamfer topology as unverified in inspection/report/trace without speculative inference.
 - Keep placeholder `preview.png` for now and document real rendering as a deferred follow-up unless a lightweight renderer is available.
-- Later verify actual feature realization for hole spacing, slots, chamfers, fillets, and simple pockets.
+- Later verify actual feature realization for slots, general chamfers, fillets, simple pockets, and real rendered previews.
 - Add repair diff checks so the system can confirm that IR repair changed only the intended geometry.
 - Improve `agent_trace.json` with measured validation targets and inspection summaries.
 

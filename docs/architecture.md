@@ -149,7 +149,7 @@ logs/
 - `runner.py` 编排 `Text/IR -> CAD IR -> CAD Agent Loop -> validation -> report`。
 - `agent_loop.py` 负责最多 3 次尝试、候选执行、失败转移、IR 修复和 trace。
 - `failure_analyzer.py` 将执行日志、验证错误和缺失文件转换为结构化根因。
-- `geometry_inspector.py` 记录 `model.step` / `model.stl` artifact facts、solid count、bounding box、volume；在 topology 可靠时验证 mounting_plate through-hole 数量和孔径，并继续保留 chamfers/fillets inspection scaffold。
+- `geometry_inspector.py` 记录 `model.step` / `model.stl` artifact facts、solid count、bounding box、volume；在 topology 可靠时验证 mounting_plate through-hole 数量/孔径/孔距和简单板类竖边 chamfer。requested fillet、slots 和 unsupported/general chamfer topology 会显式标记为 unverified，而不是推断为 pass。
 - `scorer.py` 按几何有效性、尺寸准确性、可制造简洁性、boolean 风险和对称性为候选打分。
 - `report.py` 生成 `report.json` 和 `report.md`。
 

@@ -159,6 +159,26 @@ def test_agent_loop_trace_summary_records_chamfer_status():
     assert trace["final_inspection_summary"]["features"]["chamfers"]["measured"]["count"] == 4
 
 
+def test_agent_loop_trace_summary_records_fillet_unverified_status():
+    ir = {
+        "part_type": "simple_bracket",
+        "part_name": "pytest_agent_loop_fillet_summary",
+        "unit": "mm",
+        "dimensions": {"base_length": 60, "base_width": 30, "height": 45, "thickness": 4},
+        "features": {"fillet": 1.5},
+        "outputs": ["step", "stl"],
+    }
+
+    result = run_ir_pipeline(ir, output_root=Path.cwd() / "outputs")
+    output_dir = Path(result["output_dir"])
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "success"
+    assert trace["steps"][0]["inspection_summary"]["fillet_status"] == "unverified"
+    assert trace["final_inspection_summary"]["fillet_status"] == "unverified"
+    assert trace["final_inspection_summary"]["features"]["fillets"]["status"] == "unverified"
+
+
 def test_agent_loop_converts_generator_unsupported_error_to_planning_rework():
     ir = {
         "part_type": "unsupported_widget",

@@ -197,6 +197,8 @@ def _validate_features(result: dict[str, Any], cad_ir: CADIR, inspection: dict[s
             continue
         if key == "chamfer":
             _validate_chamfer_inspection(result, inspection)
+        if key == "fillet":
+            _validate_fillet_inspection(result, inspection)
         size = float(value.get(size_key, 0) if isinstance(value, dict) else value)
         smallest_dim = min((dim for dim in cad_ir.dimensions.values() if dim > 0), default=0)
         valid_relief = smallest_dim <= 0 or size <= smallest_dim / 2
@@ -225,6 +227,9 @@ def _validate_hole_inspection(result: dict[str, Any], inspection: dict[str, Any]
         _check(result, "hole_topology_inspection", True, feature="holes", status=status)
         result["measured_validation_targets"].append({
             "target": "hole_count",
+            "feature": "holes",
+            "metric": "count",
+            "source": "geometry_inspector",
             "expected": expected.get("count"),
             "actual": measured.get("count"),
             "pass": measured.get("count") == expected.get("count"),
@@ -232,6 +237,9 @@ def _validate_hole_inspection(result: dict[str, Any], inspection: dict[str, Any]
         diameter_pass = abs(float(measured.get("diameter", 0) or 0) - float(expected.get("diameter", 0) or 0)) <= 0.2
         result["measured_validation_targets"].append({
             "target": "hole_diameter",
+            "feature": "holes",
+            "metric": "diameter",
+            "source": "geometry_inspector",
             "expected": expected.get("diameter"),
             "actual": measured.get("diameter"),
             "pass": diameter_pass,
@@ -267,6 +275,9 @@ def _add_hole_spacing_targets(result: dict[str, Any], hole_inspection: dict[str,
         for axis in ("x", "y"):
             result["measured_validation_targets"].append({
                 "target": f"hole_spacing_{axis}",
+                "feature": "holes",
+                "metric": f"spacing_{axis}",
+                "source": "geometry_inspector",
                 "expected": expected.get(axis),
                 "actual": measured.get(axis),
                 "pass": True,
@@ -281,6 +292,9 @@ def _add_hole_spacing_targets(result: dict[str, Any], hole_inspection: dict[str,
             passed = bool(checks.get(axis))
             result["measured_validation_targets"].append({
                 "target": f"hole_spacing_{axis}",
+                "feature": "holes",
+                "metric": f"spacing_{axis}",
+                "source": "geometry_inspector",
                 "expected": expected.get(axis),
                 "actual": measured.get(axis),
                 "pass": passed,
@@ -312,6 +326,9 @@ def _validate_chamfer_inspection(result: dict[str, Any], inspection: dict[str, A
         _check(result, "chamfer_topology_inspection", True, feature="chamfer", status=status)
         result["measured_validation_targets"].append({
             "target": "chamfer_count",
+            "feature": "chamfer",
+            "metric": "count",
+            "source": "geometry_inspector",
             "expected": expected.get("count"),
             "actual": measured.get("count"),
             "pass": measured.get("count") == expected.get("count"),
@@ -319,6 +336,9 @@ def _validate_chamfer_inspection(result: dict[str, Any], inspection: dict[str, A
         size_pass = abs(float(measured.get("size", 0) or 0) - float(expected.get("size", 0) or 0)) <= 0.2
         result["measured_validation_targets"].append({
             "target": "chamfer_size",
+            "feature": "chamfer",
+            "metric": "size",
+            "source": "geometry_inspector",
             "expected": expected.get("size"),
             "actual": measured.get("size"),
             "pass": size_pass,
@@ -331,12 +351,18 @@ def _validate_chamfer_inspection(result: dict[str, Any], inspection: dict[str, A
         measured = chamfer_inspection.get("measured", {})
         result["measured_validation_targets"].append({
             "target": "chamfer_count",
+            "feature": "chamfer",
+            "metric": "count",
+            "source": "geometry_inspector",
             "expected": expected.get("count"),
             "actual": measured.get("count"),
             "pass": measured.get("count") == expected.get("count"),
         })
         result["measured_validation_targets"].append({
             "target": "chamfer_size",
+            "feature": "chamfer",
+            "metric": "size",
+            "source": "geometry_inspector",
             "expected": expected.get("size"),
             "actual": measured.get("size"),
             "pass": False,
@@ -354,6 +380,19 @@ def _validate_chamfer_inspection(result: dict[str, Any], inspection: dict[str, A
         "message": "Chamfer feature topology could not be reliably verified",
         "feature": "chamfer",
         "inspection": chamfer_inspection,
+    })
+
+
+def _validate_fillet_inspection(result: dict[str, Any], inspection: dict[str, Any]) -> None:
+    fillet_inspection = inspection.get("features", {}).get("fillets", {})
+    status = fillet_inspection.get("status")
+    if status == "verified":
+        return
+    result["warnings"].append({
+        "code": "feature_unverified",
+        "message": "Fillet feature topology could not be reliably verified",
+        "feature": "fillet",
+        "inspection": fillet_inspection,
     })
 
 
