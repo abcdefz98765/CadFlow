@@ -1,6 +1,6 @@
 # Getting Started
 
-CadFlow 现在以 workflow-first 自然语言参数化 CAD 为主线。
+CadFlow 现在以 IR-driven、workflow-first 自然语言参数化 CAD 为主线。
 
 推荐先读：
 
@@ -16,7 +16,46 @@ CadFlow 现在以 workflow-first 自然语言参数化 CAD 为主线。
 pip install -e .
 ```
 
-## Run the Workflow
+## Run the IR-first Pipeline
+
+Generate the tracked IR examples:
+
+```bash
+python examples/ir_pipeline/generate_examples.py
+```
+
+Python API:
+
+```python
+from ai_native_cad.pipeline import run_ir_pipeline
+
+result = run_ir_pipeline({
+    "part_type": "mounting_plate",
+    "part_name": "mounting_plate",
+    "unit": "mm",
+    "dimensions": {"length": 80, "width": 40, "thickness": 5},
+    "features": {"holes": {"diameter": 5, "positions": "corner_4"}, "chamfer": 1},
+    "outputs": ["step", "stl"],
+})
+print(result["status"])
+print(result["output_dir"])
+```
+
+输出：
+
+```text
+outputs/<part_name>/
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  preview.png
+  logs/runtime.json
+```
+
+## Run the Legacy Workflow
 
 One-command demo:
 
@@ -52,7 +91,7 @@ runs/mounting_plate_demo/
     generation.json
 ```
 
-## Run the Demo
+## Run the Legacy Demo
 
 ```bash
 python examples/workflow/mounting_plate_demo.py

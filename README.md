@@ -10,10 +10,10 @@ Python package: `ai_native_cad`
 input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
 ```
 
-零件生成阶段内部是一个小闭环：
+零件生成阶段内部现在走 CAD IR 优先的小闭环：
 
 ```text
-part_spec -> preflight -> generate -> geometry check -> intent match -> export/report
+text/input_ir.json -> CAD IR -> CadQuery generator -> STEP/STL -> validation -> report
 ```
 
 装配阶段也按闭环推进：
@@ -159,7 +159,36 @@ spec = get_part_spec("mounting_plate")
 result = run_part("mounting_plate", spec)
 ```
 
-### 5. FreeCAD/装配辅助
+### 5. IR-first pipeline
+
+```python
+from ai_native_cad.pipeline import run_ir_pipeline
+
+result = run_ir_pipeline({
+    "part_type": "mounting_plate",
+    "part_name": "mounting_plate",
+    "unit": "mm",
+    "dimensions": {"length": 80, "width": 40, "thickness": 5},
+    "features": {"holes": {"diameter": 5, "positions": "corner_4"}, "chamfer": 1},
+    "outputs": ["step", "stl"],
+})
+```
+
+Default output contract:
+
+```text
+outputs/<part_name>/
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  preview.png
+  logs/runtime.json
+```
+
+### 6. FreeCAD/装配辅助
 
 FreeCAD handoff、TechDraw 和装配脚本仍在 `scripts/` 中，属于工程承接层，不是主 workflow 的强依赖。当前 assembly 是初版 workflow scaffold：记录装配意图、生成 backend-neutral config、执行基础放置和包围盒验证，并输出 review/report；它不是成熟工业装配求解器。
 

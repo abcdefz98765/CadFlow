@@ -21,13 +21,27 @@ Done in this refactor.
 - `knowledge/` and `policies/` directories established.
 - PRD, architecture, usage, roadmap, philosophy updated.
 
+## M1.5: IR-first CAD Pipeline
+
+Done in this refactor.
+
+- `CADIR` JSON schema object.
+- Text/file to CAD IR parser.
+- CAD IR validator.
+- Deterministic IR to CadQuery source generator.
+- Executor that saves `model.py` before running it in the project output workspace.
+- Runtime logging for success/failure.
+- Required output contract under `outputs/<part_name>/`.
+- IR examples for mounting_plate, spacer, and simple_bracket.
+- Pipeline tests covering IR validation, deterministic generation, and output contract.
+
 ## M2: Parser Quality
 
 Next.
 
 - Extract dimensions and hole intent from more natural-language variants.
 - Record assumptions and unknowns more precisely.
-- Keep `requirement.json` stable.
+- Keep CAD IR and `requirement.json` stable.
 
 ## M3: L1 Maker Checks
 

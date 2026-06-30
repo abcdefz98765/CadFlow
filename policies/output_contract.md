@@ -7,7 +7,26 @@ Export is a utility capability. It writes exchange files and reports requested
 by workflow steps, but it must not make requirement, planning, modeling,
 assembly, or review decisions.
 
-Standard output shape:
+IR-first single-part output shape:
+
+```text
+outputs/<part_name>/
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  preview.png
+  logs/
+    runtime.json
+```
+
+`model.py` must be written before execution. Execution must run from the part
+output directory inside the project workspace. Runtime errors must be logged so
+the same IR can be retried or regenerated.
+
+Legacy workflow output shape:
 
 ```text
 input.md
@@ -30,6 +49,8 @@ Path policy:
 
 - User workflow runs should receive an explicit `output_dir`.
 - Missing workflow `output_dir` falls back to `runs/<instance_name>/`.
+- Missing IR pipeline output root falls back to `outputs/`.
 - Example scripts write generated artifacts next to their own `model.py`.
 - `examples/` is not the default destination for arbitrary user projects.
-- `outputs/` is not the primary path for new generated artifacts.
+- `outputs/` is the primary path for IR-first generated artifacts.
+- Generated code and exchange files must stay inside the project workspace unless the user explicitly chooses another approved location.

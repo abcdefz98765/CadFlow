@@ -102,7 +102,11 @@ def validate_generated_geometry(model: cq.Workplane, params: dict[str, Any]) -> 
             result["valid"] = False
 
         expected = params.get("dimensions", {})
-        for key, axis in DIMENSION_AXIS_MAP.items():
+        dimension_axis_map = dict(DIMENSION_AXIS_MAP)
+        if params.get("part_type") == "simple_bracket":
+            dimension_axis_map.pop("thickness", None)
+            dimension_axis_map.update({"base_length": "x", "base_width": "y", "height": "z"})
+        for key, axis in dimension_axis_map.items():
             if key in expected:
                 actual = getattr(bbox, axis + "len")
                 target = expected[key]
@@ -121,6 +125,22 @@ def validate_generated_geometry(model: cq.Workplane, params: dict[str, Any]) -> 
             "pass": volume > 0,
         })
         if volume <= 0:
+            result["valid"] = False
+
+        watertight = True
+        try:
+            watertight = bool(model.val().isValid())
+        except Exception:
+            result["warnings"].append({
+                "code": "watertight_check_unavailable",
+                "message": "Backend did not expose a watertight/shape-validity check",
+            })
+        result["checks"].append({
+            "check": "watertight",
+            "pass": watertight,
+            "method": "cadquery_shape_is_valid",
+        })
+        if not watertight:
             result["valid"] = False
     except Exception as e:
         result["valid"] = False

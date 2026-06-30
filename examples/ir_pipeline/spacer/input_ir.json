@@ -1,0 +1,13 @@
+{
+  "part_type": "spacer",
+  "part_name": "spacer",
+  "unit": "mm",
+  "dimensions": {
+    "outer_diameter": 12,
+    "inner_diameter": 6.5,
+    "thickness": 20
+  },
+  "features": {},
+  "outputs": ["step", "stl"],
+  "check_level": "L0"
+}

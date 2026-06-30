@@ -1,0 +1,73 @@
+from pathlib import Path
+
+from ai_native_cad.cad_ir import CADIR, ir_from_text, validate_ir
+from ai_native_cad.cadquery.generator import generate_cadquery_code
+from ai_native_cad.pipeline import run_ir_pipeline
+
+
+def test_validate_ir_accepts_mounting_plate():
+    ir = CADIR.from_dict({
+        "part_type": "mounting_plate",
+        "unit": "mm",
+        "dimensions": {"length": 80, "width": 40, "thickness": 5},
+        "features": {"holes": {"diameter": 5, "positions": "corner_4"}},
+    })
+
+    result = validate_ir(ir)
+
+    assert result["valid"] is True
+
+
+def test_validate_ir_rejects_missing_required_dimension():
+    result = validate_ir({
+        "part_type": "spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "thickness": 20},
+    })
+
+    assert result["valid"] is False
+    assert any(error["code"] == "missing_dimension" and error["dimension"] == "inner_diameter" for error in result["errors"])
+
+
+def test_text_parser_returns_cad_ir():
+    ir = ir_from_text("Generate an 80x40x5 mounting plate with four M4 holes.")
+
+    assert ir.part_type == "mounting_plate"
+    assert ir.unit == "mm"
+    assert ir.dimensions["length"] == 80.0
+
+
+def test_cadquery_generation_is_deterministic():
+    ir = CADIR.from_dict({
+        "part_type": "spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
+        "features": {},
+    })
+
+    assert generate_cadquery_code(ir) == generate_cadquery_code(ir)
+
+
+def test_ir_pipeline_writes_required_output_contract():
+    ir = {
+        "part_type": "spacer",
+        "part_name": "pytest_spacer_contract",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
+        "features": {},
+        "outputs": ["step", "stl"],
+    }
+
+    output_root = Path.cwd() / "outputs"
+    result = run_ir_pipeline(ir, output_root=output_root)
+
+    part_dir = Path(result["output_dir"])
+    assert result["status"] == "success"
+    assert part_dir == output_root / "pytest_spacer_contract"
+    assert (part_dir / "input_ir.json").exists()
+    assert (part_dir / "model.py").exists()
+    assert (part_dir / "model.step").exists()
+    assert (part_dir / "model.stl").exists()
+    assert (part_dir / "report.json").exists()
+    assert (part_dir / "report.md").exists()
+    assert (part_dir / "preview.png").exists()

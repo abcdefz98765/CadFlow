@@ -12,9 +12,59 @@ input -> requirement -> planning -> part_modeling -> assembly -> review -> outpu
 
 Requirement 阶段负责澄清需求、识别候选零件/参考组件和缺失信息。Planning 阶段负责设计分析、workflow routing、接口/基准、风险和确认 gate。Part Modeling 再进入模板选择、参数化和单零件生成闭环。
 
+当前推荐的新单零件路径是 IR-first：
+
+```text
+text/input_ir.json -> CAD IR -> CadQuery generator -> STEP/STL -> validation -> report
+```
+
 Assembly 在当前开源初版中表示 assembly intent planning、manufactured/reference parts 列表、backend-neutral assembly config、基础放置和 bounding-box validation、以及 assembly review/report。它不是成熟几何约束求解器，不自动推断任意 CAD 文件的 mating，也不提供完整 tolerance stack-up、工业 DFA、运动仿真或生产级装配放行。
 
-## Run the Workflow
+## Run the IR-first Pipeline
+
+Generate the tracked examples:
+
+```bash
+python examples/ir_pipeline/generate_examples.py
+```
+
+Python API:
+
+```python
+from ai_native_cad.pipeline import run_ir_pipeline
+
+result = run_ir_pipeline({
+    "part_type": "mounting_plate",
+    "part_name": "mounting_plate",
+    "unit": "mm",
+    "dimensions": {"length": 80, "width": 40, "thickness": 5},
+    "features": {
+        "holes": {"diameter": 5, "positions": "corner_4"},
+        "chamfer": 1,
+    },
+    "outputs": ["step", "stl"],
+})
+print(result["status"])
+print(result["output_dir"])
+```
+
+Output:
+
+```text
+outputs/<part_name>/
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  preview.png
+  logs/runtime.json
+```
+
+The generated `model.py` is saved before execution. Execution runs from the part output directory inside the project workspace and logs runtime failures for regeneration/retry.
+
+## Run the Legacy Workflow
 
 One-command demo:
 
@@ -143,6 +193,7 @@ Avoid repairing a conflicted base conda environment in place.
 Agent 应输出或保留：
 
 - 原始输入：`input.md`
+- CAD IR：`input_ir.json`
 - 结构化需求：`requirement.json`
 - 单零件规格：`part_spec.json`
 - 建模计划：`plan.md`
@@ -150,6 +201,16 @@ Agent 应输出或保留：
 - 审查报告：`review.md`
 - 导出文件：`exports/`
 - 运行日志：`logs/run.json`、`logs/generation.json`
+
+IR-first pipeline 应输出或保留：
+
+- CAD IR：`input_ir.json`
+- 生成代码：`model.py`
+- FreeCAD-compatible exchange：`model.step`
+- Mesh exchange：`model.stl`
+- 验证报告：`report.json`、`report.md`
+- 预览占位图：`preview.png`
+- 执行日志：`logs/runtime.json`
 
 ## Check Levels
 

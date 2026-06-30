@@ -1,0 +1,20 @@
+{
+  "part_type": "simple_bracket",
+  "part_name": "simple_bracket",
+  "unit": "mm",
+  "dimensions": {
+    "base_length": 60,
+    "base_width": 30,
+    "height": 35,
+    "thickness": 5
+  },
+  "features": {
+    "holes": {
+      "diameter": 4,
+      "offset_from_edge": 15
+    },
+    "fillet": 1
+  },
+  "outputs": ["step", "stl"],
+  "check_level": "L0"
+}

@@ -2,9 +2,9 @@
 
 ## 1. 产品定位
 
-CadFlow 是一个开源的 workflow-first 自然语言参数化 CAD 建模工具。用户通过自然语言描述机械零件或简单结构，系统将需求转化为结构化设计说明、建模计划、参数化 CAD 代码、审查报告和可打开的模型导出文件。
+CadFlow 是一个开源的 IR-driven、workflow-first 自然语言参数化 CAD 建模工具。用户通过自然语言或结构化输入描述机械零件，系统先生成 JSON CAD IR，再由确定性的 CadQuery generator 生成参数化代码、STEP/STL、验证报告和可打开的模型导出文件。
 
-项目不是单纯的 Prompt to CAD，也不是 Prompt to STL，更不是宏大的 AI Engineering OS。当前阶段聚焦一个可运行、可追踪、可扩展后端的自然语言 CAD MVP。
+项目不是单纯的 Prompt to CAD，也不是 Prompt to STL，更不是宏大的 AI Engineering OS。当前阶段聚焦一个可运行、可追踪、可扩展后端的 IR-first engineering CAD MVP。
 
 ## 2. 核心 Workflow
 
@@ -12,7 +12,27 @@ CadFlow 是一个开源的 workflow-first 自然语言参数化 CAD 建模工具
 input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
 ```
 
-每个阶段都必须有明确输入、输出和日志。当前标准输出目录为：
+单零件生成的主路径为：
+
+```text
+text/input_ir.json -> CAD IR -> CadQuery generator -> model.py -> STEP/STL -> validation -> report
+```
+
+IR-first pipeline 的标准输出目录为：
+
+```text
+outputs/<part_name>/
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  preview.png
+  logs/runtime.json
+```
+
+旧 workflow 入口仍保留兼容，输出目录为：
 
 ```text
 project/
@@ -35,9 +55,10 @@ project/
 V0/V1 聚焦自然语言参数化建模：
 
 - 保留现有 CadQuery MVP。
-- 新增 workflow 层，沉淀 traceable outputs。
+- 新增 CAD IR 层，所有新生成路径先生成 IR，再生成 CadQuery 代码。
+- 新增 workflow/pipeline 层，沉淀 traceable outputs。
 - 抽象 CAD Backend，不让上层 workflow 绑定具体 CAD 工具。
-- 至少提供一个 `mounting_plate` 示例并保证 demo 可运行。
+- 至少提供 `mounting_plate`、`spacer`、`simple_bracket` 三个 IR pipeline 示例并保证可运行。
 - 建立 `knowledge/` 与 `policies/` 目录，但不过度实现。
 
 ## 4. 模块职责
@@ -52,7 +73,11 @@ V0/V1 聚焦自然语言参数化建模：
 
 ### Part Modeling
 
-负责模板选择、参数化、单零件生成闭环、几何检查和零件级意图一致性。通过 CAD Backend 生成模型。当前默认 backend 是 CadQuery。
+负责模板选择、参数化、单零件生成闭环、几何检查和零件级意图一致性。新主路径通过 CAD IR 驱动确定性 CadQuery generator；旧路径仍可通过 CAD Backend 兼容现有 examples。当前默认 backend 是 CadQuery。
+
+### CAD IR
+
+负责表达后端无关的零件意图，包括 `part_type`、`unit`、`dimensions`、`features`、`outputs` 和 `check_level`。IR 必须可 JSON 序列化、可验证、可作为重试和再生成的稳定输入。新生成流程不得把自然语言直接作为主要代码生成输入。
 
 ### Assembly
 
@@ -64,7 +89,7 @@ V0/V1 聚焦自然语言参数化建模：
 
 ### Output / Export Utility
 
-负责把 backend-native 模型导出到 `exports/`，当前支持 STEP/STL。输出路径和导出规则属于 `policies/output_contract.md`，不是独立设计 skill。
+负责把模型导出为 STEP/STL，当前 IR pipeline 直接写入 `outputs/<part_name>/model.step` 和 `model.stl`；旧 workflow 仍写入 `exports/`。输出路径和导出规则属于 `policies/output_contract.md`，不是独立设计 skill。
 
 ### CAD Backend
 
@@ -79,6 +104,8 @@ V0/V1 聚焦自然语言参数化建模：
 - 模型是否生成。
 - STEP/STL 是否导出。
 - 基础几何验证是否通过。
+- CadQuery execution 是否成功。
+- shape validity / watertight 检查是否通过或记录为不可用。
 - 主要尺寸和文件路径是否记录。
 
 ### L1 Maker
@@ -128,9 +155,11 @@ V0/V1 聚焦自然语言参数化建模：
 
 ## 8. MVP 验收标准
 
-- `examples/parts/mounting_plate/model.py` 可运行。
+- IR pipeline 可从 `input_ir.json` 生成模型。
+- `examples/ir_pipeline/generate_examples.py` 可生成 mounting_plate、spacer、simple_bracket。
 - `examples/parts/circular_button/model.py` 可运行，并保留开关触点/线束出口。
 - workflow 可输出 `input.md`、`requirement.json`、`plan.md`、`model.py`、`review.md`、`exports/`、`logs/`。
+- IR pipeline 可输出 `input_ir.json`、`model.py`、`model.step`、`model.stl`、`report.json`、`report.md`、`preview.png`、`logs/runtime.json`。
 - `python examples/workflow/mounting_plate_demo.py` 可一键运行 workflow demo。
 - 至少 STEP/STL 可导出。
 - 现有示例和测试不被破坏。

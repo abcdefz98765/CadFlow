@@ -1,0 +1,19 @@
+{
+  "part_type": "mounting_plate",
+  "part_name": "mounting_plate",
+  "unit": "mm",
+  "dimensions": {
+    "length": 80,
+    "width": 40,
+    "thickness": 5
+  },
+  "features": {
+    "holes": {
+      "diameter": 5,
+      "positions": "corner_4"
+    },
+    "chamfer": 1
+  },
+  "outputs": ["step", "stl"],
+  "check_level": "L0"
+}

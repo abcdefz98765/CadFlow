@@ -6,6 +6,26 @@ CadFlow 架构以 workflow 为主线，而不是以某个 CAD 工具为中心。
 input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
 ```
 
+当前单零件生成的主线是 IR-first：
+
+```text
+text/input_ir.json
+  ↓
+CAD IR
+  ↓
+CadQuery source generator
+  ↓
+model.py saved to workspace
+  ↓
+isolated execution in outputs/<part_name>/
+  ↓
+model.step + model.stl
+  ↓
+validation
+  ↓
+report.json + report.md
+```
+
 ```text
 input.md
   ↓
@@ -40,6 +60,11 @@ Examples are split by scope:
 
 ```text
 examples/
+  ir_pipeline/
+    mounting_plate/input_ir.json
+    spacer/input_ir.json
+    simple_bracket/input_ir.json
+    generate_examples.py
   parts/
     mounting_plate/
     circular_button/
@@ -58,6 +83,7 @@ examples/
 ```
 
 Standalone parts live under `examples/parts/`. Assembly-owned parts, assembly placement, and constraints live together under `examples/assemblies/<assembly>/`.
+IR-first examples live under `examples/ir_pipeline/` and regenerate artifacts into `outputs/<part_name>/`.
 
 ### Skill Layer
 
@@ -93,6 +119,38 @@ logs/
 `logs/` contains structured JSON logs such as `run.json` and `generation.json`.
 
 用户 workflow 应显式传入 `output_dir`。未传时使用 `runs/<instance_name>/` 作为 fallback。示例脚本属于 examples 自测，默认生成在各自 `model.py` 同目录，不代表任意用户项目的输出位置。
+
+### IR Pipeline Layer
+
+`src/ai_native_cad/cad_ir/`
+
+- `schema.py` 定义 JSON-serializable `CADIR`。
+- `parser.py` 支持 text -> requirement -> IR，以及 file -> IR。
+- `validator.py` 校验单位、part type、必需尺寸和输出格式。
+
+`src/ai_native_cad/cadquery/`
+
+- `generator.py` 将 CAD IR 确定性生成 CadQuery `model.py`。
+- `executor.py` 先保存生成代码，再在项目内 `outputs/<part_name>/` 执行，并写入 `logs/runtime.json` 和错误日志。
+
+`src/ai_native_cad/pipeline/`
+
+- `runner.py` 编排 `Text/IR -> CAD IR -> CadQuery -> STEP/STL -> validation -> report`。
+- `report.py` 生成 `report.json` 和 `report.md`。
+
+IR pipeline 默认输出：
+
+```text
+outputs/<part_name>/
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  preview.png
+  logs/runtime.json
+```
 
 `src/ai_native_cad/requirements.py` 提供第一版 `RequirementAgent`。当前实现仍是保守的确定性解析：识别内置示例，支持 overrides，并默认落到 `mounting_plate`。它会额外写入：
 
@@ -131,7 +189,23 @@ Planning 不做用户需求澄清，不参数化具体零件模板，也不写 b
 
 ### Part Generation Loop
 
-零件生成不是单次 “spec to STEP”，而是局部闭环：
+零件生成不是单次 “prompt to code”，而是局部闭环。新主路径为：
+
+```text
+CAD IR
+  ↓
+validate_ir
+  ↓
+generate_cadquery_code
+  ↓
+execute_model
+  ↓
+validate_output
+  ↓
+report.json + report.md
+```
+
+兼容 workflow 的旧闭环仍保留：
 
 ```text
 part_spec.json
@@ -182,7 +256,7 @@ industrial DFA, motion simulation, or production-ready assembly release.
 
 ### Existing MVP Layer
 
-这些模块继续保留，用于稳定 demo：
+这些模块继续保留，用于稳定旧 demo 和兼容入口：
 
 - `generator.py`：内置零件规格。
 - `runner.py`：旧式 part pipeline。
@@ -191,6 +265,8 @@ industrial DFA, motion simulation, or production-ready assembly release.
 - `assembly_planner.py`：装配意图规划、确认 gate 和 backend-neutral config 生成。
 - `assembly_validator.py`：装配 preflight、零件输入、bbox 放置、轻量约束意图和导出声明检查。
 - `report.py`：旧式 JSON/Markdown 报告。
+
+新 IR-first 层是新增主路径，不要求立即删除旧 examples 或 `run_part()`。
 
 ## Data Contracts
 
@@ -220,6 +296,32 @@ industrial DFA, motion simulation, or production-ready assembly release.
     "needs_user_input": false,
     "blocking_fields": []
   }
+}
+```
+
+### input_ir.json
+
+最小字段：
+
+```json
+{
+  "part_type": "mounting_plate",
+  "part_name": "mounting_plate",
+  "unit": "mm",
+  "dimensions": {
+    "length": 80,
+    "width": 40,
+    "thickness": 5
+  },
+  "features": {
+    "holes": {
+      "diameter": 5,
+      "positions": "corner_4"
+    },
+    "chamfer": 1
+  },
+  "outputs": ["step", "stl"],
+  "check_level": "L0"
 }
 ```
 
