@@ -26,6 +26,8 @@ Agent output must be structured JSON and must pass the relevant CadFlow validati
 ### 1. DeterministicAgentAdapter
 
 The deterministic adapter wraps the current rule and template-based behavior.
+For v0.5 it is the only implemented provider identity and reports itself as
+`local/mock` with networking disabled and no API key requirement.
 
 Use it for:
 
@@ -39,7 +41,10 @@ This mode is intentionally predictable and should remain dependency-light.
 
 ### 2. LLMApiAgentAdapter
 
-The LLM API adapter is the primary future user-facing mode.
+The LLM API adapter is the primary future user-facing mode, but it is not
+implemented in v0.5. The current phase only establishes the interface, local
+mock behavior, validation gates, and runtime tracing needed before a real
+provider can be added safely.
 
 It should:
 
@@ -75,3 +80,4 @@ OpenCode/Codex CLI is a developer assistant for evolving the repository, not the
 - Agent outputs must become validated JSON contracts before execution.
 - The execution layer must not consume unconstrained free-form agent text.
 - User confirmations should be captured as structured context and written into run artifacts.
+- Adapter activity recorded in `logs/runtime.json` must include only sanitized provider identity and operation metadata, not prompts, secrets, API keys, tokens, or chat transcripts.

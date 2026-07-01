@@ -11,11 +11,23 @@ from ai_native_cad.planning import create_planning_artifact
 from ai_native_cad.requirements import RequirementAgent
 
 
+LOCAL_MOCK_PROVIDER_IDENTITY = {
+    "provider": "local/mock",
+    "adapter": "deterministic",
+    "network": "disabled",
+    "api_key_required": False,
+}
+
+
 class DeterministicAgentAdapter(AgentAdapter):
     """Rule-based adapter for tests, CI, demos, and fallback execution."""
 
     def __init__(self, requirement_agent: RequirementAgent | None = None) -> None:
         self.requirement_agent = requirement_agent or RequirementAgent()
+
+    @property
+    def provider_identity(self) -> dict[str, Any]:
+        return dict(LOCAL_MOCK_PROVIDER_IDENTITY)
 
     def parse_requirement(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         context = context or {}

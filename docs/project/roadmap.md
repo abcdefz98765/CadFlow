@@ -209,24 +209,34 @@
 - 不绕过 `requirement.json` / `planning_artifact.json` / `input_ir.json` 直接从 prompt 生成 CAD。
 - Review 和 Outputs 是 local check stages：Review 读取既有 `report.json` flow decision；Outputs 检查可发布 artifact，尤其是 primary `model.step`，不重新生成 CAD。
 
-## Phase 1.12 / Product v0.5: LLMApiAgentAdapter
+## Phase 1.12 / Product v0.5: LLM Agent Adapter Foundation
 
-状态：计划中。该阶段在 v0.4 Web Workflow Console 和 `AgentAdapter` contract 稳定后推进。
+状态：local/mock foundation complete；真实 LLM provider integration 仍是后续阶段。
 
-目标：把默认用户体验从确定性 parser fallback 升级为 LLM API 辅助的自然语言理解、结构化需求生成、规划生成和解释，但仍保持 CadFlow Python API 为确定性执行层。
+目标：先把 `AgentAdapter` 边界接入本地 workflow，证明未来 provider 只能产出经过验证的结构化 artifact，而不能绕过 CadFlow Python API、CAD IR gate 或既有输出契约。
 
 交付：
 
-- `LLMApiAgentAdapter` 实现 `parse_requirement()`、`create_plan()`、`suggest_repair()` 和 `explain_review()`。
-- LLM 输出必须通过 schema validation 和 workflow gate。
-- 对缺失、歧义、高风险或安全相关字段进入用户确认流。
+- `AgentAdapter` 作为窄接口覆盖 `parse_requirement()`、`create_plan()`、`suggest_repair()` 和 `explain_review()`。
+- `DeterministicAgentAdapter` 作为 v0.5 唯一实现，provider identity 为 `local/mock`，network disabled，且不需要 API key。
+- `StageRunner` 在 Requirement 和 Planning 阶段调用 adapter，但仍由 runner 校验并写入 `requirement.json` / `planning_artifact.json`。
+- Planning-derived CAD IR 在进入 Part Modeling 前通过既有 IR validation；`input_ir.json` 仍由 Part Modeling pipeline 写入。
+- `logs/runtime.json` 记录 sanitized adapter operation/provider metadata，不记录 prompt、secret、token 或 provider transcript。
+- Invalid adapter output 在写入 artifact 前被拒绝。
 - 不直接生成任意 CadQuery 代码，不绕过 CAD IR。
 
 边界：
 
+- 本阶段不实现 `LLMApiAgentAdapter`、OpenAI/Anthropic/etc provider、API key config、streaming chat UI 或网络调用。
 - 不引入 OpenCode/Codex CLI 作为默认 end-user CAD generation runtime。
 - 不把 prompt/chat history 作为跨阶段 source of truth。
 - 不改变 `model.step` 是 primary CAD artifact 的输出策略。
+
+后续 provider integration：
+
+- 新增真实 `LLMApiAgentAdapter` 时，先定义 schema-constrained request/response tests and failure modes。
+- Provider config must be opt-in and secret-safe, with no secrets written to artifacts or runtime logs。
+- LLM outputs must continue to pass the same artifact validation before any downstream stage runs。
 
 ## Phase 2: Natural-language Requirement Parser
 

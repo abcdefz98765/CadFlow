@@ -107,14 +107,17 @@ Initial local UI slice complete; follow-up polish and review/output stage expans
 - Make the embedded STL viewer scroll-safe by default, with an explicit Interact/Release toggle for rotate and zoom.
 - Collapse report, gate, downloads, and activity into a right-side Inspector tab set so the STL preview and workflow controls stay in the first viewport.
 
-## M1.12 / v0.5: LLM Agent Adapter
+## M1.12 / v0.5: LLM Agent Adapter Foundation
 
-Next after the local Web Workflow Console foundation.
+Complete as a local/mock foundation; real provider calls remain future work.
 
-- Add `LLMApiAgentAdapter` behind the stable `AgentAdapter` contract.
-- Convert natural language into validated requirement and planning JSON.
-- Ask for user confirmation when fields are missing, ambiguous, risky, or safety-relevant.
-- Do not let LLM output bypass schema validation, CAD IR gates, or deterministic execution.
+- Define a narrow structural `AgentAdapter` contract for requirement parsing, planning drafts, repair suggestions, and review explanations.
+- Keep v0.5 provider identity local/mock only through `DeterministicAgentAdapter`; no API keys, network calls, or provider dependencies are required.
+- Route Requirement and Planning stage drafts through the adapter while `StageRunner` remains responsible for validation, artifact persistence, and runtime tracing.
+- Persist adapter outputs only through existing handoff artifacts: `requirement.json`, `planning_artifact.json`, and validated Planning-derived `input_ir.json`.
+- Record sanitized adapter activity in `logs/runtime.json` without prompts, secrets, tokens, or provider transcripts.
+- Reject invalid adapter output before it becomes authoritative.
+- Do not let adapter output bypass schema validation, CAD IR gates, or deterministic execution.
 
 ## M2: Parser Quality
 

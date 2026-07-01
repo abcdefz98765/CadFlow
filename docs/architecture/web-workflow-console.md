@@ -91,7 +91,7 @@ The first implementation should call existing deterministic Python entry points:
 
 `StageRunner` is not a replacement for `AgentAdapter`. `AgentAdapter` owns natural-language understanding, planning advice, repair suggestions, and explanations. `StageRunner` owns local workflow execution and artifact persistence.
 
-Even when a future stage uses `LLMApiAgentAdapter`, its output must be persisted as a validated artifact before the next stage runs. Chat history, token streams, or browser state must not become the cross-stage source of truth.
+As of v0.5, `StageRunner` can call the local/mock deterministic adapter for Requirement and Planning drafts, but the runner still validates and persists only `requirement.json`, `planning_artifact.json`, and `input_ir.json` before downstream execution. Adapter activity is recorded in `logs/runtime.json` as sanitized provider identity and operation metadata. Chat history, token streams, browser state, and provider responses must not become the cross-stage source of truth.
 
 ## v0.4a Backend Surface
 

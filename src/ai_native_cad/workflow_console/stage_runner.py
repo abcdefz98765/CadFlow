@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ai_native_cad.agents import AgentAdapter, DeterministicAgentAdapter
 from ai_native_cad.cad_ir.parser import ir_from_planning_artifact
+from ai_native_cad.cad_ir.validator import validate_ir
 from ai_native_cad.pipeline.runner import PROJECT_ROOT, run_ir_pipeline, run_text_pipeline
-from ai_native_cad.planning import create_planning_artifact
-from ai_native_cad.requirements import RequirementAgent
 from ai_native_cad.workflow_control import review_to_outputs_decision
 
 READABLE_ARTIFACTS = {
@@ -54,9 +54,13 @@ class StageRunner:
     behind the AgentAdapter boundary.
     """
 
-    def __init__(self, project_root: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        project_root: str | Path | None = None,
+        agent_adapter: AgentAdapter | None = None,
+    ) -> None:
         self.project_root = Path(project_root or PROJECT_ROOT).resolve()
-        self.requirement_agent = RequirementAgent()
+        self.agent_adapter = agent_adapter or DeterministicAgentAdapter()
 
     def create_run(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Create a local run directory with prompt.txt but do not execute stages."""
@@ -134,7 +138,8 @@ class StageRunner:
         context = context or {}
         output_dir = self._resolve_output_dir(context)
         output_dir.mkdir(parents=True, exist_ok=True)
-        requirement = self.requirement_agent.parse(prompt, overrides=context.get("overrides"))
+        requirement = self.agent_adapter.parse_requirement(prompt, context=context)
+        _validate_requirement_artifact(requirement)
         decision = requirement.get("requirement_status", {}).get("flow_decision", {})
         stage_status = _stage_status_from_decision(decision)
         (output_dir / "prompt.txt").write_text(prompt.strip() + "\n", encoding="utf-8")
@@ -146,6 +151,7 @@ class StageRunner:
             "output_dir": str(output_dir),
             "requirement": requirement,
             "flow_decision": decision,
+            "adapter_activity": self._adapter_activity("parse_requirement"),
         }
         self._write_stage_runtime(output_dir, stage="requirement", status=stage_status, result=result)
         return result
@@ -155,7 +161,8 @@ class StageRunner:
         context = context or {}
         output_dir = self._resolve_output_dir(context, requirement)
         output_dir.mkdir(parents=True, exist_ok=True)
-        planning_artifact = create_planning_artifact(requirement)
+        planning_artifact = self.agent_adapter.create_plan(requirement, context=context)
+        _validate_planning_artifact(planning_artifact)
         _write_json(output_dir / "planning_artifact.json", planning_artifact)
         decision = planning_artifact.get("flow_gate_status", {}).get("rework_decision", {})
         stage_status = _stage_status_from_decision(decision)
@@ -166,6 +173,7 @@ class StageRunner:
             "output_dir": str(output_dir),
             "planning_artifact": planning_artifact,
             "flow_decision": decision,
+            "adapter_activity": self._adapter_activity("create_plan"),
         }
         self._write_stage_runtime(output_dir, stage="planning", status=stage_status, result=result)
         return result
@@ -198,7 +206,9 @@ class StageRunner:
     ) -> dict[str, Any]:
         """Create CAD IR from Planning and run Part Modeling."""
         ir = ir_from_planning_artifact(planning_artifact)
-        return self.run_part_modeling(ir.to_dict(), context=context)
+        input_ir = ir.to_dict()
+        _validate_input_ir_artifact(input_ir)
+        return self.run_part_modeling(input_ir, context=context)
 
     def run_review(self, run_dir: str | Path, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Review existing report artifacts and record the review gate status."""
@@ -300,11 +310,19 @@ class StageRunner:
             "output_dir": str(output_dir),
             "flow_decision": result.get("flow_decision"),
             "rework_decision": result.get("rework_decision"),
+            "adapter_activity": result.get("adapter_activity"),
         }
         stages.append({key: value for key, value in entry.items() if value is not None})
         console["latest_stage"] = stages[-1]
         console["stage_count"] = len(stages)
         runtime_path.write_text(json.dumps(runtime, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    def _adapter_activity(self, operation: str) -> dict[str, Any]:
+        identity = dict(getattr(self.agent_adapter, "provider_identity", {}) or {})
+        return {
+            "operation": operation,
+            "provider_identity": _sanitize_adapter_identity(identity),
+        }
 
 
 def _safe_run_name(value: str) -> str:
@@ -342,6 +360,60 @@ def _read_json_if_present(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _validate_requirement_artifact(content: dict[str, Any]) -> None:
+    if not isinstance(content, dict):
+        raise ValueError("requirement adapter output must be a JSON object")
+    _require_keys(content, "requirement.json", ("part_type", "dimensions"))
+    if not isinstance(content.get("part_type"), str) or not content["part_type"]:
+        raise ValueError("requirement.json part_type must be a non-empty string")
+    if not isinstance(content.get("dimensions"), dict):
+        raise ValueError("requirement.json dimensions must be a dictionary")
+    if "features" in content and not isinstance(content["features"], dict):
+        raise ValueError("requirement.json features must be a dictionary")
+    if "requirement_status" in content and not isinstance(content["requirement_status"], dict):
+        raise ValueError("requirement.json requirement_status must be a dictionary")
+
+
+def _validate_planning_artifact(content: dict[str, Any]) -> None:
+    if not isinstance(content, dict):
+        raise ValueError("planning adapter output must be a JSON object")
+    _require_keys(content, "planning_artifact.json", ("artifact_type", "route", "selected_parts", "flow_gate_status"))
+    if content.get("artifact_type") != "planning":
+        raise ValueError("planning_artifact.json artifact_type must be 'planning'")
+    if not isinstance(content.get("route"), dict):
+        raise ValueError("planning_artifact.json route must be a dictionary")
+    if not isinstance(content.get("selected_parts"), list):
+        raise ValueError("planning_artifact.json selected_parts must be a list")
+    if not isinstance(content.get("flow_gate_status"), dict):
+        raise ValueError("planning_artifact.json flow_gate_status must be a dictionary")
+
+
+def _validate_input_ir_artifact(content: dict[str, Any]) -> None:
+    validation = validate_ir(content)
+    if not validation["valid"]:
+        codes = ", ".join(error.get("code", "unknown") for error in validation["errors"])
+        raise ValueError(f"input_ir.json failed CAD IR validation: {codes}")
+
+
+def _require_keys(content: dict[str, Any], artifact: str, keys: tuple[str, ...]) -> None:
+    missing = [key for key in keys if key not in content]
+    if missing:
+        raise ValueError(f"{artifact} is missing required fields: {', '.join(missing)}")
+
+
+def _sanitize_adapter_identity(identity: dict[str, Any]) -> dict[str, Any]:
+    blocked_tokens = ("key", "secret", "token", "password")
+    sanitized = {}
+    for key, value in identity.items():
+        lowered = str(key).lower()
+        if any(token in lowered for token in blocked_tokens):
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            sanitized[key] = value
+    sanitized.setdefault("provider", "local/mock")
+    return sanitized
 
 
 def _stage_status_from_decision(decision: dict[str, Any]) -> str:
