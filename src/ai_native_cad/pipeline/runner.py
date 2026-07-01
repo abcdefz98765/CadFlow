@@ -13,7 +13,7 @@ from ai_native_cad.pipeline.agent_loop import run_agent_loop
 from ai_native_cad.pipeline.report import write_pipeline_report
 from ai_native_cad.planning import PlanningHandoffBlocked, create_planning_artifact
 from ai_native_cad.requirements import RequirementAgent
-from ai_native_cad.workflow_control import cad_ir_to_part_modeling_decision
+from ai_native_cad.workflow_control import cad_ir_to_part_modeling_decision, is_proceed_action
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -42,7 +42,7 @@ def run_text_pipeline(
     )
 
     requirement_decision = requirement.get("requirement_status", {}).get("flow_decision", {})
-    if requirement_decision.get("action") != "proceed":
+    if not is_proceed_action(requirement_decision.get("action")):
         return _write_blocked_text_pipeline_result(
             output_dir=output_dir,
             stage="requirement",
@@ -58,7 +58,7 @@ def run_text_pipeline(
         encoding="utf-8",
     )
     planning_decision = planning_artifact.get("flow_gate_status", {}).get("rework_decision", {})
-    if planning_decision.get("action") != "proceed":
+    if not is_proceed_action(planning_decision.get("action")):
         return _write_blocked_text_pipeline_result(
             output_dir=output_dir,
             stage="planning",

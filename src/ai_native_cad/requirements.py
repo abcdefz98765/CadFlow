@@ -300,6 +300,7 @@ class RequirementAgent:
             "missing_count": len(requirement["missing_information"]),
             "follow_up_count": sum(1 for item in requirement["missing_information"] if item.get("ask_user")),
             "blocking_count": len(blocking),
+            "assumptions": list(requirement.get("assumptions", [])),
             "missing_fields": [item["field"] for item in requirement["missing_information"]],
             "non_blocking_fields": [
                 item["field"]

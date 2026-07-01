@@ -19,10 +19,27 @@ from ai_native_cad.workflow_console.stage_runner import (
     StageRunner,
     _safe_run_name,
 )
+from ai_native_cad.workflow_control import (
+    ASK_USER,
+    PROCEED_WITH_ASSUMPTIONS,
+    RETURN_TO_PLANNING,
+    RETURN_TO_REQUIREMENT,
+    REVISE_EXISTING_MODEL,
+)
 
 DOWNLOADABLE_FILES = ("model.step", "model.stl", "preview.png", "model.py")
 EDITABLE_ARTIFACTS = {"requirement.json", "planning_artifact.json", "input_ir.json"}
-GATE_DECISION_ACTIONS = {"approve", "reject", "return", "override"}
+GATE_DECISION_ACTIONS = {
+    "approve",
+    "reject",
+    "return",
+    "override",
+    PROCEED_WITH_ASSUMPTIONS,
+    ASK_USER,
+    RETURN_TO_REQUIREMENT,
+    RETURN_TO_PLANNING,
+    REVISE_EXISTING_MODEL,
+}
 GATE_DECISION_STAGES = SUPPORTED_STAGES | {"review", "outputs"}
 
 

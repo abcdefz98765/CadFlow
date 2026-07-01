@@ -343,7 +343,7 @@ def test_backend_reads_stage_status_from_runtime_without_report(tmp_path):
     assert metadata["status"]["stage"] == "requirement"
     assert metadata["stage_history"][0]["stage"] == "requirement"
     assert metadata["stage_history"][0]["status"] == "completed"
-    assert metadata["stage_history"][0]["flow_decision"]["action"] == "proceed"
+    assert metadata["stage_history"][0]["flow_decision"]["action"] == "proceed_with_assumptions"
     assert "timestamp" in metadata["stage_history"][0]
     assert "output_dir" not in metadata["stage_history"][0]
     assert runtime["content"]["workflow_console"]["latest_stage"]["stage"] == "requirement"
@@ -423,6 +423,34 @@ def test_backend_records_gate_decision_by_id_in_runtime(tmp_path):
     assert runtime["gate_decision_count"] == 1
     assert runtime["gate_decisions"] == [recorded["decision"]]
     assert "approve" in GATE_DECISION_ACTIONS
+
+
+def test_stage_runner_treats_proceed_with_assumptions_as_completed(tmp_path):
+    runner = StageRunner(project_root=tmp_path)
+    output_dir = tmp_path / "outputs" / "assumption_run"
+
+    result = runner.run_requirement("Make a mounting plate.", {"output_dir": output_dir})
+    runtime = json.loads((output_dir / "logs" / "runtime.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "proceed_with_assumptions"
+    assert result["stage_status"] == "completed"
+    assert result["flow_decision"]["assumptions"]
+    assert runtime["workflow_console"]["latest_stage"]["status"] == "completed"
+
+
+def test_backend_records_future_workflow_gate_actions(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("future_decision_run", "Make a mounting plate.")
+
+    recorded = backend.record_gate_decision_by_id(
+        "future_decision_run",
+        stage="requirement",
+        action="proceed_with_assumptions",
+        reason="Low-risk L0 draft can continue with visible assumptions.",
+    )
+
+    assert recorded["decision"]["action"] == "proceed_with_assumptions"
+    assert "proceed_with_assumptions" in GATE_DECISION_ACTIONS
 
 
 def test_backend_records_gate_decision_payload_without_new_readable_artifact(tmp_path):

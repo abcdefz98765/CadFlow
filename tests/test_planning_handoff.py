@@ -110,6 +110,26 @@ def test_text_pipeline_runs_requirement_planning_cad_ir_then_part_modeling():
     assert result["text_pipeline"]["planning_decision"]["action"] == "proceed"
 
 
+def test_l0_unclear_requirement_proceeds_with_recorded_assumptions():
+    output_dir = Path.cwd() / "outputs" / "pytest_text_pipeline_l0_assumptions"
+
+    result = run_text_pipeline(
+        "Make a mounting plate.",
+        output_dir=output_dir,
+    )
+
+    assert result["status"] == "success"
+    assert (output_dir / "planning_artifact.json").exists()
+    assert (output_dir / "input_ir.json").exists()
+    decision = result["text_pipeline"]["requirement_decision"]
+    assert decision["action"] == "proceed_with_assumptions"
+    assert decision["to_stage"] == "planning"
+    assert decision["assumptions"]
+    assert any(reason["field"].startswith("dimensions.") for reason in decision["reasons"])
+    requirement = json.loads((output_dir / "requirement.json").read_text(encoding="utf-8"))
+    assert requirement["requirement_status"]["flow_decision"] == decision
+
+
 def test_blocked_requirement_gate_does_not_enter_planning_or_cad_ir():
     output_dir = Path.cwd() / "outputs" / "pytest_text_pipeline_requirement_blocked"
 

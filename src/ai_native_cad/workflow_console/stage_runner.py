@@ -16,7 +16,7 @@ from ai_native_cad.agents.validation import (
 )
 from ai_native_cad.cad_ir.parser import ir_from_planning_artifact
 from ai_native_cad.pipeline.runner import PROJECT_ROOT, run_ir_pipeline, run_text_pipeline
-from ai_native_cad.workflow_control import review_to_outputs_decision
+from ai_native_cad.workflow_control import is_proceed_action, review_to_outputs_decision
 
 READABLE_ARTIFACTS = {
     "prompt.txt",
@@ -243,7 +243,7 @@ class StageRunner:
             if (output_dir / name).exists()
         }
         missing = [name for name in ("model.step", "report.json", "report.md") if not (output_dir / name).exists()]
-        can_publish = decision.get("action") == "proceed" and not missing
+        can_publish = is_proceed_action(decision.get("action")) and not missing
         stage_status = STATUS_COMPLETED if can_publish else STATUS_BLOCKED
         result = {
             "status": "published" if can_publish else "blocked",
@@ -380,4 +380,4 @@ def _sanitize_adapter_identity(identity: dict[str, Any]) -> dict[str, Any]:
 
 
 def _stage_status_from_decision(decision: dict[str, Any]) -> str:
-    return STATUS_COMPLETED if decision.get("action", "proceed") == "proceed" else STATUS_BLOCKED
+    return STATUS_COMPLETED if is_proceed_action(decision.get("action")) else STATUS_BLOCKED

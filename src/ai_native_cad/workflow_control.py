@@ -6,8 +6,16 @@ from typing import Any
 
 
 PROCEED = "proceed"
+PROCEED_WITH_ASSUMPTIONS = "proceed_with_assumptions"
+ASK_USER = "ask_user"
 RETURN = "return"
+RETURN_TO_REQUIREMENT = "return_to_requirement"
+RETURN_TO_PLANNING = "return_to_planning"
+REVISE_EXISTING_MODEL = "revise_existing_model"
 RETRY = "retry"
+
+PROCEED_ACTIONS = {PROCEED, PROCEED_WITH_ASSUMPTIONS}
+BLOCKING_ACTIONS = {ASK_USER, RETURN, RETURN_TO_REQUIREMENT, RETURN_TO_PLANNING, REVISE_EXISTING_MODEL}
 
 
 def make_flow_decision(
@@ -35,6 +43,31 @@ def make_flow_decision(
         "owner_stage": proceed_to,
         "reasons": [],
     }
+
+
+def make_assumption_decision(
+    *,
+    from_stage: str,
+    proceed_to: str,
+    assumptions: list[str],
+    reasons: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Create a non-blocking proceed decision that records explicit assumptions."""
+
+    return {
+        "action": PROCEED_WITH_ASSUMPTIONS,
+        "from_stage": from_stage,
+        "to_stage": proceed_to,
+        "owner_stage": proceed_to,
+        "assumptions": list(assumptions),
+        "reasons": list(reasons or []),
+    }
+
+
+def is_proceed_action(action: str | None) -> bool:
+    """Return whether a gate action may continue to the next workflow stage."""
+
+    return (action or PROCEED) in PROCEED_ACTIONS
 
 
 def cad_ir_to_part_modeling_decision(ir_validation: dict[str, Any]) -> dict[str, Any]:
@@ -68,6 +101,23 @@ def requirement_to_planning_decision(requirement_status: dict[str, Any]) -> dict
     """Decide whether Requirement has enough structured data for Planning."""
 
     if requirement_status.get("complete_for_generation", False):
+        assumption_fields = list(requirement_status.get("non_blocking_fields", []))
+        assumptions = list(requirement_status.get("assumptions", []))
+        if assumption_fields:
+            reasons = [
+                {
+                    "code": "requirement_assumption_used",
+                    "field": field,
+                    "message": f"Requirement field proceeds with explicit assumption: {field}",
+                }
+                for field in assumption_fields
+            ]
+            return make_assumption_decision(
+                from_stage="requirement",
+                proceed_to="planning",
+                assumptions=assumptions,
+                reasons=reasons,
+            )
         return make_flow_decision(
             from_stage="requirement",
             proceed_to="planning",
