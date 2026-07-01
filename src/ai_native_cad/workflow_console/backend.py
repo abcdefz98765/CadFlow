@@ -207,6 +207,7 @@ class WorkflowConsoleBackend:
             "status": self.read_run_status(path),
             "stage_history": self.read_stage_history(path),
             "gate_history": self.read_gate_history(path),
+            "report_summary": self.read_report_summary(path),
             "artifacts": self.list_artifacts(path),
             "downloadables": self.list_downloadables(path),
         }
@@ -226,6 +227,32 @@ class WorkflowConsoleBackend:
                 if key in {"stage", "status", "timestamp", "flow_decision", "rework_decision"}
             })
         return history
+
+    def read_report_summary(self, run_dir: str | Path) -> dict[str, Any]:
+        """Return a compact report/trace summary for the local console UI."""
+        path = self._require_project_path(Path(run_dir))
+        report = _read_json_if_present(path / "report.json")
+        trace = _read_json_if_present(path / "agent_trace.json")
+        warnings = list((report or {}).get("warnings") or [])
+        errors = list((report or {}).get("errors") or [])
+        flow_decision = (report or {}).get("flow_decision") or (trace or {}).get("final_flow_decision") or {}
+        rework_decision = (report or {}).get("rework_decision") or (trace or {}).get("rework_decision") or {}
+        return {
+            "report_present": report is not None,
+            "trace_present": trace is not None,
+            "status": (report or {}).get("status"),
+            "success": (report or {}).get("success"),
+            "warning_count": len(warnings),
+            "error_count": len(errors),
+            "warnings": [_compact_issue(item) for item in warnings[:3]],
+            "errors": [_compact_issue(item) for item in errors[:3]],
+            "flow_action": flow_decision.get("action"),
+            "flow_to_stage": flow_decision.get("to_stage") or flow_decision.get("proceed_to"),
+            "rework_action": rework_decision.get("action"),
+            "rework_to_stage": rework_decision.get("to_stage"),
+            "attempts": (trace or {}).get("total_attempts"),
+            "final_selected_candidate": (trace or {}).get("final_selected_candidate"),
+        }
 
     def read_gate_history(self, run_dir: str | Path) -> list[dict[str, Any]]:
         """Return path-free workflow console gate decision history for a run."""
@@ -459,6 +486,16 @@ def _require_keys(content: dict[str, Any], artifact: str, keys: tuple[str, ...])
     missing = [key for key in keys if key not in content]
     if missing:
         raise ValueError(f"{artifact} is missing required fields: {', '.join(missing)}")
+
+
+def _compact_issue(item: Any) -> dict[str, Any]:
+    if isinstance(item, dict):
+        return {
+            key: value
+            for key, value in item.items()
+            if key in {"code", "message", "dimension", "feature", "check"}
+        }
+    return {"message": str(item)}
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:

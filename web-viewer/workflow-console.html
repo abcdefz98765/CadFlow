@@ -122,7 +122,7 @@
 
   .viewer {
     display: grid;
-    grid-template-rows: auto minmax(220px, 1fr) minmax(210px, 34vh);
+    grid-template-rows: auto auto minmax(160px, 1fr) minmax(210px, 30vh) minmax(90px, auto);
     gap: 10px;
     padding: 12px;
     overflow: hidden;
@@ -335,6 +335,38 @@
     grid-column: 1 / -1;
   }
 
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .summary-item {
+    min-height: 44px;
+    padding: 7px 8px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+  }
+
+  .summary-list {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 6px;
+  }
+
+  .summary-line {
+    padding: 7px 8px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--muted);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+  .summary-line.warn { color: var(--warn); }
+  .summary-line.danger { color: var(--danger); }
+
   .download-list a {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -514,6 +546,13 @@
 
     <section class="section">
       <div class="section-header">
+        <h2>Report / Trace</h2>
+      </div>
+      <div id="report-summary" class="section-body summary-grid"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
         <h2>Downloadables</h2>
       </div>
       <div id="download-list" class="section-body download-list"></div>
@@ -667,6 +706,7 @@ async function reloadRun() {
     state.metadata = await api("read_run_metadata", { path_params: { run_id: state.selectedRunId } });
     renderMetadata();
     renderArtifacts();
+    renderReportSummary();
     renderDownloads();
     renderPreview();
     const firstArtifact = (state.metadata.artifacts || [])[0];
@@ -819,6 +859,58 @@ function renderDownloads() {
   }
 }
 
+function renderReportSummary() {
+  const target = el("report-summary");
+  const summary = state.metadata.report_summary || {};
+  if (!summary.report_present && !summary.trace_present) {
+    target.innerHTML = '<div class="empty" style="grid-column: 1 / -1;">No report or trace yet.</div>';
+    return;
+  }
+  const status = summary.status || (summary.report_present ? "unknown" : "no report");
+  const success = summary.success === null || summary.success === undefined ? "-" : String(summary.success);
+  const flow = summary.flow_action ? `${summary.flow_action}${summary.flow_to_stage ? ` -> ${summary.flow_to_stage}` : ""}` : "-";
+  const rework = summary.rework_action ? `${summary.rework_action}${summary.rework_to_stage ? ` -> ${summary.rework_to_stage}` : ""}` : "-";
+  const attempts = summary.attempts === null || summary.attempts === undefined ? "-" : String(summary.attempts);
+  const candidate = summary.final_selected_candidate || "-";
+  target.innerHTML = `
+    ${summaryItem("Status", status, statusClass(status))}
+    ${summaryItem("Success", success, summary.success ? "ok" : "")}
+    ${summaryItem("Flow", flow, summary.flow_action === "proceed" ? "ok" : statusClass(summary.flow_action))}
+    ${summaryItem("Rework", rework, summary.rework_action === "return" ? "warn" : "")}
+    ${summaryItem("Attempts", attempts, "")}
+    ${summaryItem("Candidate", candidate, "")}
+    ${summaryIssues("Warnings", summary.warning_count || 0, summary.warnings || [], "warn")}
+    ${summaryIssues("Errors", summary.error_count || 0, summary.errors || [], "danger")}
+  `;
+}
+
+function summaryItem(label, value, pillClass) {
+  return `
+    <div class="summary-item">
+      <div class="label">${escapeHtml(label)}</div>
+      <div class="value"><span class="pill ${pillClass}">${escapeHtml(value)}</span></div>
+    </div>
+  `;
+}
+
+function summaryIssues(label, count, items, kind) {
+  const lines = items.length
+    ? items.map((item) => `<div class="summary-line ${kind}">${escapeHtml(issueLabel(item))}</div>`).join("")
+    : '<div class="summary-line">None</div>';
+  return `
+    <div class="summary-list">
+      <div class="label">${escapeHtml(label)} (${count})</div>
+      ${lines}
+    </div>
+  `;
+}
+
+function issueLabel(item) {
+  const code = item.code || item.check || item.dimension || item.feature || "item";
+  const message = item.message ? `: ${item.message}` : "";
+  return `${code}${message}`;
+}
+
 function renderPreview() {
   const hasStl = (state.metadata.downloadables || []).some((item) => item.name === "model.stl");
   if (!hasStl) {
@@ -837,6 +929,7 @@ function renderEmptySelection() {
   el("status-updated").textContent = "-";
   el("timeline").innerHTML = "";
   el("artifact-list").innerHTML = '<div class="empty">Select or create a run.</div>';
+  el("report-summary").innerHTML = '<div class="empty" style="grid-column: 1 / -1;">Select or create a run.</div>';
   el("download-list").innerHTML = '<div class="empty">Select or create a run.</div>';
   clearArtifact();
 }

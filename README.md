@@ -292,6 +292,7 @@ The Web UI is a local workflow cockpit for running and visualizing CadFlow. The 
 - run the existing workflow from natural-language prompts
 - list artifact-backed runs under `outputs/` and `runs/`
 - derive run status from `report.json` and `agent_trace.json`
+- show compact report/trace summaries for review decisions and attempt status
 - read requirement, planning, IR, report, and trace artifacts
 - identify STEP-first outputs and derived preview/download files
 - run local Review and Outputs check stages from existing artifacts

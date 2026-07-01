@@ -236,6 +236,48 @@ def test_workflow_console_dispatch_exposes_path_free_gate_history_summary(tmp_pa
     assert _does_not_contain_keys(response["data"]["gate_history"], {"path", "run_dir", "root", "output_dir", "payload"})
 
 
+def test_workflow_console_metadata_includes_compact_report_trace_summary(tmp_path):
+    run_dir = tmp_path / "outputs" / "summary_run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a spacer.\n", encoding="utf-8")
+    (run_dir / "report.json").write_text(
+        json.dumps({
+            "status": "failed",
+            "success": False,
+            "warnings": [{"code": "thin_wall", "message": "Wall may be thin", "file": str(run_dir / "model.step")}],
+            "errors": [{"code": "missing_feature", "message": "Hole missing", "feature": "holes"}],
+            "flow_decision": {"action": "return", "to_stage": "planning"},
+            "rework_decision": {"action": "return", "to_stage": "planning"},
+        }) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "agent_trace.json").write_text(
+        json.dumps({"total_attempts": 2, "final_selected_candidate": "B"}) + "\n",
+        encoding="utf-8",
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    metadata = backend.read_run_metadata_by_id("summary_run")
+
+    assert metadata["report_summary"] == {
+        "report_present": True,
+        "trace_present": True,
+        "status": "failed",
+        "success": False,
+        "warning_count": 1,
+        "error_count": 1,
+        "warnings": [{"code": "thin_wall", "message": "Wall may be thin"}],
+        "errors": [{"code": "missing_feature", "message": "Hole missing", "feature": "holes"}],
+        "flow_action": "return",
+        "flow_to_stage": "planning",
+        "rework_action": "return",
+        "rework_to_stage": "planning",
+        "attempts": 2,
+        "final_selected_candidate": "B",
+    }
+    assert _does_not_contain_keys(metadata["report_summary"], {"path", "run_dir", "root", "output_dir", "file"})
+
+
 def test_workflow_console_dispatch_validation_errors_return_envelopes(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
 
@@ -710,6 +752,10 @@ def test_workflow_console_static_ui_exposes_required_local_workflow_controls():
         "Artifacts",
         "Downloadables",
         "Gate Decision",
+        "Report / Trace",
+        "report_summary",
+        "renderReportSummary",
+        "summaryIssues",
         "STL Preview",
         "stage_history",
         "gate_history",
