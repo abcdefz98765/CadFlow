@@ -188,6 +188,25 @@ def test_workflow_console_dispatch_writes_artifact_and_records_gate_decision(tmp
     assert runtime["gate_decision_count"] == 1
 
 
+def test_workflow_console_dispatch_exposes_path_free_stage_history(tmp_path):
+    runner = StageRunner(project_root=tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path, stage_runner=runner)
+    dispatch_route(
+        backend,
+        "create_run",
+        path_params={"run_id": "stage_history"},
+        body={"prompt": "Make a spacer."},
+    )
+    dispatch_route(backend, "run_stage", path_params={"run_id": "stage_history", "stage": "requirement"})
+
+    response = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "stage_history"})
+
+    assert response["ok"] is True
+    assert response["data"]["stage_history"][0]["stage"] == "created"
+    assert response["data"]["stage_history"][1]["stage"] == "requirement"
+    assert _does_not_contain_keys(response["data"]["stage_history"], {"path", "run_dir", "root", "output_dir"})
+
+
 def test_workflow_console_dispatch_validation_errors_return_envelopes(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
 
@@ -251,6 +270,11 @@ def test_backend_reads_stage_status_from_runtime_without_report(tmp_path):
 
     assert metadata["status"]["status"] == "completed"
     assert metadata["status"]["stage"] == "requirement"
+    assert metadata["stage_history"][0]["stage"] == "requirement"
+    assert metadata["stage_history"][0]["status"] == "completed"
+    assert metadata["stage_history"][0]["flow_decision"]["action"] == "proceed"
+    assert "timestamp" in metadata["stage_history"][0]
+    assert "output_dir" not in metadata["stage_history"][0]
     assert runtime["content"]["workflow_console"]["latest_stage"]["stage"] == "requirement"
 
 
@@ -658,6 +682,9 @@ def test_workflow_console_static_ui_exposes_required_local_workflow_controls():
         "Downloadables",
         "Gate Decision",
         "STL Preview",
+        "stage_history",
+        "stageHistoryByStage",
+        "stageHistorySummary",
         'api("write_artifact"',
         'api("record_gate_decision"',
         'api("run_stage"',

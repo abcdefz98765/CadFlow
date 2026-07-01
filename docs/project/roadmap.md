@@ -190,7 +190,7 @@
 
 当前已完成：
 
-- runs list/select、prompt-only create run、run status/current stage。
+- runs list/select、prompt-only create run、run status/current stage 和 path-free stage history timeline。
 - run Requirement、Planning、Part Modeling、Review、Outputs 和 full text pipeline by safe run id。
 - readable artifact list/read。
 - editable artifact save for `requirement.json`、`planning_artifact.json`、`input_ir.json` only。

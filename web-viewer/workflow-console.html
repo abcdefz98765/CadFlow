@@ -238,9 +238,9 @@
 
   .stage {
     display: grid;
-    grid-template-rows: auto 26px 32px;
+    grid-template-rows: auto 26px minmax(18px, auto) 32px;
     gap: 6px;
-    min-height: 96px;
+    min-height: 118px;
     padding: 8px;
     background: #fff;
     border: 1px solid var(--line);
@@ -249,6 +249,12 @@
 
   .stage.current { border-color: var(--accent); }
   .stage-name { font-weight: 650; }
+  .stage-history {
+    min-height: 18px;
+    color: var(--muted);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
 
   .pill {
     display: inline-flex;
@@ -671,20 +677,45 @@ function renderMetadata() {
 function renderTimeline(status) {
   const timeline = el("timeline");
   timeline.innerHTML = "";
+  const historyByStage = stageHistoryByStage(state.metadata.stage_history || []);
+  const latestStage = (state.metadata.stage_history || []).at(-1);
   for (const [stage, label] of displayStages) {
     const item = document.createElement("div");
-    const isCurrent = status.stage === stage;
+    const stageHistory = historyByStage.get(stage) || [];
+    const latestForStage = stageHistory.at(-1);
+    const stageStatus = latestForStage ? latestForStage.status : "pending";
+    const isCurrent = (latestStage && latestStage.stage === stage) || (!latestStage && status.stage === stage);
     const canRun = runnableStages.has(stage) && state.selectedRunId;
     item.className = `stage ${isCurrent ? "current" : ""}`;
     item.innerHTML = `
       <div class="stage-name">${label}</div>
-      <span class="pill ${isCurrent ? statusClass(status.status) : ""}">${isCurrent ? (status.status || "current") : "pending"}</span>
+      <span class="pill ${statusClass(stageStatus)}">${stageStatus}</span>
+      <div class="stage-history">${stageHistorySummary(stageHistory)}</div>
       <button ${canRun ? "" : "disabled"} data-stage="${stage}">${canRun ? "Run" : "Gate only"}</button>
     `;
     const button = item.querySelector("button");
     button.addEventListener("click", () => runStage(stage));
     timeline.appendChild(item);
   }
+}
+
+function stageHistoryByStage(history) {
+  const byStage = new Map();
+  for (const item of history) {
+    if (!item.stage) continue;
+    const existing = byStage.get(item.stage) || [];
+    existing.push(item);
+    byStage.set(item.stage, existing);
+  }
+  return byStage;
+}
+
+function stageHistorySummary(history) {
+  if (!history.length) return "not run";
+  const latest = history.at(-1);
+  const count = history.length === 1 ? "1 run" : `${history.length} runs`;
+  const when = latest.timestamp ? new Date(latest.timestamp).toLocaleString() : "no timestamp";
+  return `${count} · ${when}`;
 }
 
 function renderArtifacts() {

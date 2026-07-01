@@ -205,9 +205,26 @@ class WorkflowConsoleBackend:
             "root": str(path.parent),
             "updated_at": _timestamp(stat.st_mtime),
             "status": self.read_run_status(path),
+            "stage_history": self.read_stage_history(path),
             "artifacts": self.list_artifacts(path),
             "downloadables": self.list_downloadables(path),
         }
+
+    def read_stage_history(self, run_dir: str | Path) -> list[dict[str, Any]]:
+        """Return path-free workflow console stage history for a run."""
+        path = self._require_project_path(Path(run_dir))
+        runtime = _read_json_if_present(path / "logs" / "runtime.json") or {}
+        stages = ((runtime.get("workflow_console") or {}).get("stages") or [])
+        history = []
+        for stage in stages:
+            if not isinstance(stage, dict):
+                continue
+            history.append({
+                key: value
+                for key, value in stage.items()
+                if key in {"stage", "status", "timestamp", "flow_decision", "rework_decision"}
+            })
+        return history
 
     def list_artifacts_by_id(self, run_id: str, root: str | Path | None = None) -> list[dict[str, Any]]:
         """List known readable artifacts present for a path-safe run id."""
