@@ -1066,6 +1066,14 @@ function renderReportSummary() {
   const success = summary.success === null || summary.success === undefined ? "-" : String(summary.success);
   const flow = summary.flow_action ? `${summary.flow_action}${summary.flow_to_stage ? ` -> ${summary.flow_to_stage}` : ""}` : "-";
   const rework = summary.rework_action ? `${summary.rework_action}${summary.rework_to_stage ? ` -> ${summary.rework_to_stage}` : ""}` : "-";
+  const requirementDecision = summary.requirement_flow_decision || {};
+  const planningGate = summary.planning_flow_gate || {};
+  const requirementFlow = decisionLabel(requirementDecision);
+  const planningFlow = planningGate.status
+    ? `${planningGate.status}${decisionLabel(planningGate.rework_decision) !== "-" ? ` -> ${decisionLabel(planningGate.rework_decision)}` : ""}`
+    : "-";
+  const requirement = summary.requirement_summary || {};
+  const planning = summary.planning_summary || {};
   const attempts = summary.attempts === null || summary.attempts === undefined ? "-" : String(summary.attempts);
   const candidate = summary.final_selected_candidate || "-";
   target.innerHTML = `
@@ -1073,8 +1081,14 @@ function renderReportSummary() {
     ${summaryItem("Success", success, summary.success ? "ok" : "")}
     ${summaryItem("Flow", flow, summary.flow_action === "proceed" ? "ok" : statusClass(summary.flow_action))}
     ${summaryItem("Rework", rework, summary.rework_action === "return" ? "warn" : "")}
+    ${summaryItem("Requirement Gate", requirementFlow, gateClass(requirementDecision.action))}
+    ${summaryItem("Planning Gate", planningFlow, gateClass(planningGate.rework_decision?.action))}
     ${summaryItem("Attempts", attempts, "")}
     ${summaryItem("Candidate", candidate, "")}
+    ${summaryTextList("Assumptions", requirement.assumptions)}
+    ${summaryFields("Missing", requirement.missing_information, "warn")}
+    ${summaryFields("Follow-ups", requirement.follow_up_requests, "warn")}
+    ${summaryFields("Planning Risks", planning.risk_notes, "warn")}
     ${summaryIssues("Warnings", summary.warning_count || 0, summary.warnings || [], "warn")}
     ${summaryIssues("Errors", summary.error_count || 0, summary.errors || [], "danger")}
   `;
@@ -1101,10 +1115,50 @@ function summaryIssues(label, count, items, kind) {
   `;
 }
 
+function summaryTextList(label, summary) {
+  const value = summary || { count: 0, items: [] };
+  const lines = value.items && value.items.length
+    ? value.items.map((item) => `<div class="summary-line warn">${escapeHtml(item)}</div>`).join("")
+    : '<div class="summary-line">None</div>';
+  return `
+    <div class="summary-list">
+      <div class="label">${escapeHtml(label)} (${value.count || 0})</div>
+      ${lines}
+    </div>
+  `;
+}
+
+function summaryFields(label, summary, kind) {
+  const value = summary || { count: 0, fields: [], items: [] };
+  const fields = value.fields && value.fields.length
+    ? value.fields
+    : (value.items || []).map((item) => item.field || item.code || item.category).filter(Boolean);
+  const lines = fields.length
+    ? fields.map((field) => `<div class="summary-line ${kind}">${escapeHtml(field)}</div>`).join("")
+    : '<div class="summary-line">None</div>';
+  return `
+    <div class="summary-list">
+      <div class="label">${escapeHtml(label)} (${value.count || 0})</div>
+      ${lines}
+    </div>
+  `;
+}
+
 function issueLabel(item) {
   const code = item.code || item.check || item.dimension || item.feature || "item";
   const message = item.message ? `: ${item.message}` : "";
   return `${code}${message}`;
+}
+
+function decisionLabel(decision) {
+  if (!decision || !decision.action) return "-";
+  return `${decision.action}${decision.to_stage ? ` -> ${decision.to_stage}` : ""}`;
+}
+
+function gateClass(action) {
+  if (action === "proceed") return "ok";
+  if (action === "proceed_with_assumptions") return "warn";
+  return statusClass(action);
 }
 
 function renderPreview() {

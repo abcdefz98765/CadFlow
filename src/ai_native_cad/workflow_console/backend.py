@@ -248,12 +248,16 @@ class WorkflowConsoleBackend:
     def read_report_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return a compact report/trace summary for the local console UI."""
         path = self._require_project_path(Path(run_dir))
+        requirement = _read_json_if_present(path / "requirement.json")
+        planning = _read_json_if_present(path / "planning_artifact.json")
         report = _read_json_if_present(path / "report.json")
         trace = _read_json_if_present(path / "agent_trace.json")
         warnings = list((report or {}).get("warnings") or [])
         errors = list((report or {}).get("errors") or [])
         flow_decision = (report or {}).get("flow_decision") or (trace or {}).get("final_flow_decision") or {}
         rework_decision = (report or {}).get("rework_decision") or (trace or {}).get("rework_decision") or {}
+        requirement_summary = _compact_requirement_summary(requirement)
+        planning_summary = _compact_planning_summary(planning)
         return {
             "report_present": report is not None,
             "trace_present": trace is not None,
@@ -269,6 +273,10 @@ class WorkflowConsoleBackend:
             "rework_to_stage": rework_decision.get("to_stage"),
             "attempts": (trace or {}).get("total_attempts"),
             "final_selected_candidate": (trace or {}).get("final_selected_candidate"),
+            "requirement_summary": requirement_summary,
+            "planning_summary": planning_summary,
+            "requirement_flow_decision": requirement_summary["flow_decision"],
+            "planning_flow_gate": planning_summary["flow_gate"],
         }
 
     def read_gate_history(self, run_dir: str | Path) -> list[dict[str, Any]]:
@@ -384,6 +392,8 @@ class WorkflowConsoleBackend:
     def read_run_status(self, run_dir: str | Path) -> dict[str, Any]:
         """Derive status from report.json and agent_trace.json when present."""
         path = self._require_project_path(Path(run_dir))
+        requirement = _read_json_if_present(path / "requirement.json")
+        planning = _read_json_if_present(path / "planning_artifact.json")
         report = _read_json_if_present(path / "report.json")
         trace = _read_json_if_present(path / "agent_trace.json")
         runtime = _read_json_if_present(path / "logs" / "runtime.json")
@@ -411,6 +421,8 @@ class WorkflowConsoleBackend:
             "gate_decision": latest_gate_decision,
             "artifact_edit": latest_artifact_edit,
             "runtime": runtime_stage or None,
+            "requirement_summary": _compact_requirement_summary(requirement),
+            "planning_summary": _compact_planning_summary(planning),
         }
 
     def _resolved_run_roots(self) -> list[Path]:
@@ -513,6 +525,101 @@ def _compact_issue(item: Any) -> dict[str, Any]:
             if key in {"code", "message", "dimension", "feature", "check"}
         }
     return {"message": str(item)}
+
+
+def _compact_requirement_summary(requirement: dict[str, Any] | None) -> dict[str, Any]:
+    requirement = requirement or {}
+    missing = [item for item in requirement.get("missing_information", []) if isinstance(item, dict)]
+    follow_ups = [item for item in requirement.get("follow_up_requests", []) if isinstance(item, dict)]
+    status = requirement.get("requirement_status") if isinstance(requirement.get("requirement_status"), dict) else {}
+    decision = status.get("flow_decision") if isinstance(status.get("flow_decision"), dict) else {}
+    return {
+        "present": bool(requirement),
+        "check_level": requirement.get("check_level"),
+        "complete_for_generation": status.get("complete_for_generation"),
+        "needs_user_input": status.get("needs_user_input"),
+        "assumptions": _compact_text_list(requirement.get("assumptions", [])),
+        "missing_information": _compact_field_collection(missing),
+        "follow_up_requests": _compact_field_collection(follow_ups),
+        "flow_decision": _compact_flow_decision(decision),
+    }
+
+
+def _compact_planning_summary(planning: dict[str, Any] | None) -> dict[str, Any]:
+    planning = planning or {}
+    gate = planning.get("flow_gate_status") if isinstance(planning.get("flow_gate_status"), dict) else {}
+    risks = [item for item in planning.get("risk_notes", []) if isinstance(item, dict)]
+    blocking = [item for item in gate.get("blocking_reasons", []) if isinstance(item, dict)]
+    decision = gate.get("rework_decision") if isinstance(gate.get("rework_decision"), dict) else {}
+    return {
+        "present": bool(planning),
+        "route": (planning.get("route") or {}).get("selected") if isinstance(planning.get("route"), dict) else None,
+        "flow_gate": {
+            "status": gate.get("status"),
+            "blocking_count": len(blocking),
+            "blocking_reasons": [_compact_field_item(item) for item in blocking[:3]],
+            "rework_decision": _compact_flow_decision(decision),
+        },
+        "risk_notes": _compact_field_collection(risks),
+    }
+
+
+def _compact_flow_decision(decision: dict[str, Any] | None) -> dict[str, Any]:
+    decision = decision or {}
+    reasons = decision.get("reasons", [])
+    assumptions = decision.get("assumptions", [])
+    return {
+        "action": decision.get("action"),
+        "from_stage": decision.get("from_stage"),
+        "to_stage": decision.get("to_stage") or decision.get("proceed_to"),
+        "owner_stage": decision.get("owner_stage"),
+        "reason_count": len(reasons) if isinstance(reasons, list) else 0,
+        "assumption_count": len(assumptions) if isinstance(assumptions, list) else 0,
+    }
+
+
+def _compact_field_collection(items: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "count": len(items),
+        "fields": [
+            str(item.get("field"))
+            for item in items
+            if item.get("field") is not None and _safe_summary_text(item.get("field")) is not None
+        ][:8],
+        "items": [_compact_field_item(item) for item in items[:3]],
+    }
+
+
+def _compact_field_item(item: dict[str, Any]) -> dict[str, Any]:
+    allowed = {"code", "category", "field", "severity", "ask_user", "default_used", "blocks_cad_ir"}
+    return {
+        key: value
+        for key, value in item.items()
+        if key in allowed and _safe_summary_text(value) is not None
+    }
+
+
+def _compact_text_list(items: Any) -> dict[str, Any]:
+    values = items if isinstance(items, list) else []
+    compact = []
+    for item in values:
+        text = _safe_summary_text(item)
+        if text is not None:
+            compact.append(text)
+        if len(compact) == 3:
+            break
+    return {"count": len(values), "items": compact}
+
+
+def _safe_summary_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return str(value) if isinstance(value, (int, float, bool)) else None
+    lowered = value.lower()
+    if any(marker in lowered for marker in ("password", "secret", "token", "api_key", "apikey", "bearer ")):
+        return None
+    if ":\\" in value or "/" in value or "\\\\" in value:
+        return None
+    return value[:160]
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:

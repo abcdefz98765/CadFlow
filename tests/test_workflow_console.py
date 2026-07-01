@@ -274,8 +274,171 @@ def test_workflow_console_metadata_includes_compact_report_trace_summary(tmp_pat
         "rework_to_stage": "planning",
         "attempts": 2,
         "final_selected_candidate": "B",
+        "requirement_summary": {
+            "present": False,
+            "check_level": None,
+            "complete_for_generation": None,
+            "needs_user_input": None,
+            "assumptions": {"count": 0, "items": []},
+            "missing_information": {"count": 0, "fields": [], "items": []},
+            "follow_up_requests": {"count": 0, "fields": [], "items": []},
+            "flow_decision": {
+                "action": None,
+                "from_stage": None,
+                "to_stage": None,
+                "owner_stage": None,
+                "reason_count": 0,
+                "assumption_count": 0,
+            },
+        },
+        "planning_summary": {
+            "present": False,
+            "route": None,
+            "flow_gate": {
+                "status": None,
+                "blocking_count": 0,
+                "blocking_reasons": [],
+                "rework_decision": {
+                    "action": None,
+                    "from_stage": None,
+                    "to_stage": None,
+                    "owner_stage": None,
+                    "reason_count": 0,
+                    "assumption_count": 0,
+                },
+            },
+            "risk_notes": {"count": 0, "fields": [], "items": []},
+        },
+        "requirement_flow_decision": {
+            "action": None,
+            "from_stage": None,
+            "to_stage": None,
+            "owner_stage": None,
+            "reason_count": 0,
+            "assumption_count": 0,
+        },
+        "planning_flow_gate": {
+            "status": None,
+            "blocking_count": 0,
+            "blocking_reasons": [],
+            "rework_decision": {
+                "action": None,
+                "from_stage": None,
+                "to_stage": None,
+                "owner_stage": None,
+                "reason_count": 0,
+                "assumption_count": 0,
+            },
+        },
     }
     assert _does_not_contain_keys(metadata["report_summary"], {"path", "run_dir", "root", "output_dir", "file"})
+
+
+def test_workflow_console_metadata_summarizes_assumptions_and_risks_without_paths(tmp_path):
+    run_dir = tmp_path / "outputs" / "assumption_summary"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a mounting plate.\n", encoding="utf-8")
+    requirement = {
+        "part_type": "mounting_plate",
+        "unit": "mm",
+        "check_level": "L0",
+        "dimensions": {"length": 80, "width": 40, "thickness": 5},
+        "features": {},
+        "assumptions": [
+            "Primary dimensions were taken from the selected part template.",
+            r"Do not expose D:\MyCode\llm2cad\secret.txt",
+            "password copied from prompt",
+        ],
+        "missing_information": [
+            {
+                "field": "dimensions.length",
+                "category": "primary_dimensions",
+                "severity": "important",
+                "ask_user": False,
+                "default_used": True,
+                "question": r"Use D:\MyCode\llm2cad\outputs?",
+            },
+            {
+                "field": "manufacturing_process",
+                "category": "manufacturing_context",
+                "severity": "important",
+                "ask_user": False,
+                "default_used": False,
+            },
+        ],
+        "follow_up_requests": [
+            {
+                "field": "hole_pattern",
+                "category": "engineering_constraints",
+                "code": "missing_hole_pattern",
+                "question": "Confirm the hole pattern?",
+            }
+        ],
+        "requirement_status": {
+            "complete_for_generation": True,
+            "needs_user_input": False,
+            "flow_decision": {
+                "action": "proceed_with_assumptions",
+                "from_stage": "requirement",
+                "to_stage": "planning",
+                "owner_stage": "planning",
+                "assumptions": ["Primary dimensions were taken from the selected part template."],
+                "reasons": [{"field": "dimensions.length"}],
+            },
+        },
+    }
+    planning = {
+        "artifact_type": "planning",
+        "route": {"selected": "single_part"},
+        "selected_parts": [],
+        "risk_notes": [
+            {
+                "field": "manufacturing_process",
+                "category": "manufacturing",
+                "message": r"Local notes in D:\MyCode\llm2cad",
+                "blocks_cad_ir": False,
+            }
+        ],
+        "flow_gate_status": {
+            "status": "ready_for_cad_ir",
+            "blocking_reasons": [],
+            "rework_decision": {
+                "action": "proceed",
+                "from_stage": "planning",
+                "to_stage": "cad_ir",
+                "owner_stage": "cad_ir",
+                "reasons": [],
+            },
+        },
+    }
+    (run_dir / "requirement.json").write_text(json.dumps(requirement) + "\n", encoding="utf-8")
+    (run_dir / "planning_artifact.json").write_text(json.dumps(planning) + "\n", encoding="utf-8")
+
+    metadata = WorkflowConsoleBackend(project_root=tmp_path).read_run_metadata_by_id("assumption_summary")
+    summary = metadata["report_summary"]
+
+    assert summary["requirement_flow_decision"]["action"] == "proceed_with_assumptions"
+    assert summary["requirement_flow_decision"]["assumption_count"] == 1
+    assert summary["requirement_summary"]["assumptions"] == {
+        "count": 3,
+        "items": ["Primary dimensions were taken from the selected part template."],
+    }
+    assert summary["requirement_summary"]["missing_information"]["count"] == 2
+    assert summary["requirement_summary"]["missing_information"]["fields"] == [
+        "dimensions.length",
+        "manufacturing_process",
+    ]
+    assert summary["requirement_summary"]["follow_up_requests"]["items"] == [
+        {"field": "hole_pattern", "category": "engineering_constraints", "code": "missing_hole_pattern"}
+    ]
+    assert summary["planning_flow_gate"]["status"] == "ready_for_cad_ir"
+    assert summary["planning_summary"]["risk_notes"]["items"] == [
+        {"field": "manufacturing_process", "category": "manufacturing", "blocks_cad_ir": False}
+    ]
+    assert metadata["status"]["requirement_summary"]["flow_decision"]["action"] == "proceed_with_assumptions"
+    assert _does_not_contain_keys(summary, {"path", "run_dir", "root", "output_dir", "question", "message"})
+    assert "D:\\MyCode" not in json.dumps(summary)
+    assert "password" not in json.dumps(summary).lower()
 
 
 def test_workflow_console_dispatch_validation_errors_return_envelopes(tmp_path):
@@ -784,6 +947,14 @@ def test_workflow_console_static_ui_exposes_required_local_workflow_controls():
         "report_summary",
         "renderReportSummary",
         "summaryIssues",
+        "summaryTextList",
+        "summaryFields",
+        "Requirement Gate",
+        "Planning Gate",
+        "Assumptions",
+        "Missing",
+        "Follow-ups",
+        "Planning Risks",
         "preferredArtifact",
         "artifactKind",
         "artifact-kind",
