@@ -129,7 +129,7 @@ The local backend should expose only workflow operations:
 
 The backend should not change benchmark contracts, add new CAD generator behavior, or make browser state authoritative.
 
-The scaffold does not yet provide a running HTTP server, authentication, a database, or a frontend. A FastAPI app can be layered over the Python facade later if the dependency is intentionally added.
+The scaffold now includes a stdlib-only local HTTP bridge and a static frontend. It still does not provide authentication, a database, cloud deployment, or a framework-backed web app. A FastAPI app can be layered over the Python facade later only if the dependency is intentionally added.
 
 ## v0.4a UI Surface
 
@@ -139,7 +139,8 @@ The first frontend now lives in `web-viewer/workflow-console.html` and stays wor
 - Prompt entry and run controls.
 - Artifact inspector for `requirement.json`, `planning_artifact.json`, `input_ir.json`, reports, and traces.
 - Report/trace viewer that highlights verified, unverified, warning, error, and rework states.
-- Optional preview surface using current-run STL or later GLB assets.
+- Right-side Inspector tabs for report/trace summary, gate decisions, downloadables, and activity.
+- Scroll-safe preview surface using current-run STL or later GLB assets.
 
 Existing `web-viewer` work can be reused or evolved for artifact preview, but preview remains secondary to the STEP-first workflow.
 
@@ -161,7 +162,8 @@ The current UI supports the first usable local workflow loop:
 - inspect a compact report/trace summary without opening raw JSON;
 - edit only the allowed JSON handoff artifacts;
 - record approve/reject/return/override gate decisions;
-- list STEP-first downloadables and open the secondary STL preview when `model.stl` exists.
+- list STEP-first downloadables and open the secondary STL preview when `model.stl` exists;
+- use an explicit Interact/Release control before the embedded STL viewer captures pointer wheel/drag input.
 
 Review and Outputs are executable local check stages. Review reads the existing `report.json` flow decision and records the review gate status. Outputs checks publishable artifacts, including primary `model.step`, without regenerating CAD. STEP remains the primary CAD artifact; the embedded viewer loads `model.stl` only as a secondary inspection aid.
 

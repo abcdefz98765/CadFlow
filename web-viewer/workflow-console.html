@@ -69,8 +69,19 @@
   .app {
     display: grid;
     grid-template-columns: minmax(250px, 310px) minmax(420px, 1fr) minmax(340px, 42vw);
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto 1fr;
     min-height: 100vh;
+  }
+
+  .app.busy button,
+  .app.busy input,
+  .app.busy textarea,
+  .app.busy select {
+    pointer-events: none;
+  }
+
+  .app.busy button {
+    opacity: 0.68;
   }
 
   header {
@@ -99,6 +110,22 @@
     white-space: nowrap;
   }
 
+  .alert {
+    grid-column: 1 / -1;
+    display: none;
+    min-height: 38px;
+    padding: 9px 14px;
+    border-bottom: 1px solid #e6b8b3;
+    background: #fff1ef;
+    color: var(--danger);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  .alert.visible {
+    display: block;
+  }
+
   aside, main, .viewer {
     min-height: 0;
     border-right: 1px solid var(--line);
@@ -122,7 +149,7 @@
 
   .viewer {
     display: grid;
-    grid-template-rows: auto auto minmax(160px, 1fr) minmax(210px, 30vh) minmax(90px, auto);
+    grid-template-rows: auto minmax(220px, 36vh) minmax(0, 1fr);
     gap: 10px;
     padding: 12px;
     overflow: hidden;
@@ -293,10 +320,15 @@
     min-height: 0;
   }
 
+  .download-list {
+    max-height: none;
+  }
+
   .list-button {
     width: 100%;
     margin-bottom: 6px;
     text-align: left;
+    min-height: 46px;
   }
 
   .artifact-row {
@@ -348,6 +380,41 @@
     grid-column: 1 / -1;
   }
 
+  .inspector-section {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .inspector-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .inspector-tab {
+    min-width: 0;
+    min-height: 30px;
+    padding: 5px 8px;
+    font-size: 12px;
+  }
+
+  .inspector-tab.active {
+    border-color: var(--accent);
+    background: #ecfdf5;
+    color: var(--accent);
+  }
+
+  .inspector-panel {
+    display: none;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .inspector-panel.active {
+    display: block;
+  }
+
   .summary-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -385,7 +452,7 @@
     grid-template-columns: 1fr auto;
     gap: 8px;
     align-items: center;
-    min-height: 36px;
+    min-height: 30px;
     margin-bottom: 6px;
     padding: 7px 9px;
     border: 1px solid var(--line);
@@ -408,6 +475,37 @@
     background: #1f2528;
   }
 
+  .preview-shell {
+    position: relative;
+    height: clamp(200px, 32vh, 280px);
+    cursor: pointer;
+  }
+
+  .preview-shell iframe {
+    min-height: 0;
+    pointer-events: none;
+  }
+
+  .preview-shell iframe.preview-interactive {
+    pointer-events: auto;
+  }
+
+  .preview-shell.preview-active {
+    cursor: default;
+  }
+
+  .preview-hint {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    pointer-events: none;
+    color: #f8fafc;
+    background: rgba(31, 37, 40, 0.78);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+  }
+
   .empty {
     color: var(--muted);
     padding: 10px;
@@ -418,7 +516,7 @@
 
   .log {
     min-height: 80px;
-    max-height: 160px;
+    max-height: none;
     overflow: auto;
     font-family: Consolas, "SFMono-Regular", monospace;
     font-size: 12px;
@@ -434,10 +532,7 @@
       grid-column: 1 / -1;
       border-top: 1px solid var(--line);
       grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.3fr);
-      grid-template-rows: auto minmax(240px, 1fr);
-    }
-    .viewer > .section:first-child {
-      grid-column: 1 / -1;
+      grid-template-rows: minmax(240px, 1fr);
     }
   }
 
@@ -466,6 +561,7 @@
     <div class="meta">File-backed local workflow: prompt -> requirement -> planning -> part modeling -> review -> outputs</div>
     <div id="server-state" class="server-state">Checking local bridge</div>
   </header>
+  <div id="error-alert" class="alert"></div>
 
   <aside>
     <section class="section">
@@ -487,7 +583,7 @@
 
     <section class="section">
       <div class="section-header">
-        <h2>Runs</h2>
+        <h2>Run History</h2>
         <button id="refresh-runs">Refresh</button>
       </div>
     </section>
@@ -536,55 +632,53 @@
   <section class="viewer">
     <section class="section">
       <div class="section-header">
-        <h2>Gate Decision</h2>
-      </div>
-      <div class="section-body gate-form">
-        <select id="gate-stage">
-          <option value="requirement">Requirement</option>
-          <option value="planning">Planning</option>
-          <option value="part_modeling">Part Modeling</option>
-          <option value="review">Review</option>
-          <option value="outputs">Outputs</option>
-        </select>
-        <select id="gate-action">
-          <option value="approve">Approve</option>
-          <option value="return">Return</option>
-          <option value="reject">Reject</option>
-          <option value="override">Override</option>
-        </select>
-        <textarea id="gate-reason" placeholder="Reason"></textarea>
-        <button id="record-gate">Record Decision</button>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="section-header">
-        <h2>Report / Trace</h2>
-      </div>
-      <div id="report-summary" class="section-body summary-grid"></div>
-    </section>
-
-    <section class="section">
-      <div class="section-header">
-        <h2>Downloadables</h2>
-      </div>
-      <div id="download-list" class="section-body download-list"></div>
-    </section>
-
-    <section class="section">
-      <div class="section-header">
         <h2>STL Preview</h2>
+        <button id="toggle-preview">Interact</button>
       </div>
-      <div class="section-body" style="height: 100%;">
+      <div class="section-body preview-shell">
         <iframe id="preview-frame" title="STL preview"></iframe>
+        <div id="preview-hint" class="preview-hint">Scroll-safe preview. Click the preview or Interact to rotate or zoom.</div>
       </div>
     </section>
 
-    <section class="section">
+    <section class="section inspector-section">
       <div class="section-header">
-        <h2>Activity</h2>
+        <h2>Inspector</h2>
+        <div class="inspector-tabs" role="tablist" aria-label="Run inspector">
+          <button class="inspector-tab active" data-inspector-tab="summary" role="tab">Summary</button>
+          <button class="inspector-tab" data-inspector-tab="gate" role="tab">Gate</button>
+          <button class="inspector-tab" data-inspector-tab="downloads" role="tab">Downloads</button>
+          <button class="inspector-tab" data-inspector-tab="activity" role="tab">Activity</button>
+        </div>
       </div>
-      <div id="activity-log" class="section-body log"></div>
+      <div id="inspector-summary" class="section-body inspector-panel active" role="tabpanel">
+        <div id="report-summary" class="summary-grid"></div>
+      </div>
+      <div id="inspector-gate" class="section-body inspector-panel" role="tabpanel">
+        <div class="gate-form">
+          <select id="gate-stage">
+            <option value="requirement">Requirement</option>
+            <option value="planning">Planning</option>
+            <option value="part_modeling">Part Modeling</option>
+            <option value="review">Review</option>
+            <option value="outputs">Outputs</option>
+          </select>
+          <select id="gate-action">
+            <option value="approve">Approve</option>
+            <option value="return">Return</option>
+            <option value="reject">Reject</option>
+            <option value="override">Override</option>
+          </select>
+          <textarea id="gate-reason" placeholder="Reason"></textarea>
+          <button id="record-gate">Record Decision</button>
+        </div>
+      </div>
+      <div id="inspector-downloads" class="section-body inspector-panel" role="tabpanel">
+        <div id="download-list" class="download-list"></div>
+      </div>
+      <div id="inspector-activity" class="section-body inspector-panel" role="tabpanel">
+        <div id="activity-log" class="log"></div>
+      </div>
     </section>
   </section>
 </div>
@@ -612,6 +706,10 @@ const state = {
   selectedArtifact: null,
   selectedContent: null,
   metadata: null,
+  busy: false,
+  bridgeStatus: "Checking local bridge",
+  previewInteractive: false,
+  activeInspectorTab: "summary",
 };
 
 const el = (id) => document.getElementById(id);
@@ -619,6 +717,36 @@ const el = (id) => document.getElementById(id);
 function log(message) {
   const stamp = new Date().toLocaleTimeString();
   el("activity-log").textContent = `[${stamp}] ${message}\n` + el("activity-log").textContent;
+}
+
+function showError(message) {
+  el("error-alert").textContent = message;
+  el("error-alert").classList.add("visible");
+  log(message);
+}
+
+function clearError() {
+  el("error-alert").textContent = "";
+  el("error-alert").classList.remove("visible");
+}
+
+function setBusy(busy, label = "Working") {
+  state.busy = busy;
+  document.querySelector(".app").classList.toggle("busy", busy);
+  el("server-state").textContent = busy ? label : state.bridgeStatus;
+}
+
+async function withBusy(label, action) {
+  if (state.busy) return;
+  setBusy(true, label);
+  clearError();
+  try {
+    return await action();
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function api(route, { path_params = {}, body = {}, query = {} } = {}) {
@@ -635,7 +763,22 @@ async function api(route, { path_params = {}, body = {}, query = {} } = {}) {
 }
 
 function setBridgeState(ok, detail) {
-  el("server-state").textContent = ok ? "Local bridge ready" : `Local bridge unavailable: ${detail}`;
+  state.bridgeStatus = ok ? "Local bridge ready" : `Local bridge unavailable: ${detail}`;
+  if (!state.busy) {
+    el("server-state").textContent = state.bridgeStatus;
+  }
+}
+
+function setInspectorTab(tab) {
+  state.activeInspectorTab = tab;
+  document.querySelectorAll("[data-inspector-tab]").forEach((button) => {
+    const active = button.dataset.inspectorTab === tab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll(".inspector-panel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === `inspector-${tab}`);
+  });
 }
 
 function slug(value) {
@@ -683,7 +826,7 @@ async function loadRuns(selectFirst = true) {
     }
   } catch (error) {
     setBridgeState(false, error.message);
-    log(error.message);
+    showError(error.message);
   }
 }
 
@@ -729,7 +872,7 @@ async function reloadRun() {
       clearArtifact();
     }
   } catch (error) {
-    log(error.message);
+    showError(error.message);
   }
 }
 
@@ -825,7 +968,7 @@ function renderArtifacts() {
         <span>${escapeHtml(artifact.name)}</span>
         <span class="pill artifact-kind ${artifactKindClass(kind)}">${escapeHtml(kind)}</span>
       </span>
-      <div class="meta">${artifact.size_bytes} bytes · ${escapeHtml(artifact.updated_at || "")}</div>
+      <div class="meta">${artifact.size_bytes} bytes</div>
     `;
     button.addEventListener("click", () => readArtifact(artifact.name));
     list.appendChild(button);
@@ -882,7 +1025,7 @@ async function readArtifact(name) {
     el("format-json").disabled = typeof artifact.content === "string" && !name.endsWith(".json");
     renderArtifacts();
   } catch (error) {
-    log(error.message);
+    showError(error.message);
   }
 }
 
@@ -968,10 +1111,25 @@ function renderPreview() {
   const hasStl = (state.metadata.downloadables || []).some((item) => item.name === "model.stl");
   if (!hasStl) {
     el("preview-frame").removeAttribute("src");
+    el("toggle-preview").disabled = true;
+    setPreviewInteractive(false);
+    el("preview-hint").textContent = "No STL preview yet.";
     return;
   }
   const file = encodeURIComponent(`/api/downloads/${encodeURIComponent(state.selectedRunId)}/model.stl`);
   el("preview-frame").src = `/index.html?file=${file}`;
+  el("toggle-preview").disabled = false;
+  setPreviewInteractive(state.previewInteractive);
+}
+
+function setPreviewInteractive(enabled) {
+  state.previewInteractive = enabled;
+  document.querySelector(".preview-shell").classList.toggle("preview-active", enabled);
+  el("preview-frame").classList.toggle("preview-interactive", enabled);
+  el("toggle-preview").textContent = enabled ? "Release" : "Interact";
+  el("preview-hint").textContent = enabled
+    ? "Model interaction active. Click Release to restore page scrolling."
+    : "Scroll-safe preview. Click the preview or Interact to rotate or zoom.";
 }
 
 function renderEmptySelection() {
@@ -984,18 +1142,22 @@ function renderEmptySelection() {
   el("artifact-list").innerHTML = '<div class="empty">Select or create a run.</div>';
   el("report-summary").innerHTML = '<div class="empty" style="grid-column: 1 / -1;">Select or create a run.</div>';
   el("download-list").innerHTML = '<div class="empty">Select or create a run.</div>';
+  el("toggle-preview").disabled = true;
+  setPreviewInteractive(false);
+  el("preview-hint").textContent = "Select a run with model.stl.";
   clearArtifact();
 }
 
 async function createRun() {
+  if (state.busy) return;
   const prompt = el("prompt").value.trim();
   const runId = slug(el("run-id").value || prompt);
   const root = el("run-root").value;
   if (!prompt) {
-    log("Prompt is required.");
+    showError("Prompt is required.");
     return;
   }
-  try {
+  await withBusy(`Creating ${runId}`, async () => {
     await api("create_run", {
       path_params: { run_id: runId },
       body: { prompt },
@@ -1005,14 +1167,12 @@ async function createRun() {
     state.selectedRunId = runId;
     await loadRuns(false);
     await selectRun(runId);
-  } catch (error) {
-    log(error.message);
-  }
+  });
 }
 
 async function runStage(stage) {
-  if (!state.selectedRunId) return;
-  try {
+  if (!state.selectedRunId || state.busy) return;
+  await withBusy(`Running ${stage}`, async () => {
     log(`Running ${stage} for ${state.selectedRunId}.`);
     await api("run_stage", {
       path_params: { run_id: state.selectedRunId, stage },
@@ -1021,14 +1181,12 @@ async function runStage(stage) {
     await loadRuns(false);
     await reloadRun();
     log(`Finished ${stage}.`);
-  } catch (error) {
-    log(error.message);
-  }
+  });
 }
 
 async function runFullPipeline() {
-  if (!state.selectedRunId) return;
-  try {
+  if (!state.selectedRunId || state.busy) return;
+  await withBusy("Running full pipeline", async () => {
     log(`Running full text pipeline for ${state.selectedRunId}.`);
     await api("run_stage", {
       path_params: { run_id: state.selectedRunId, stage: "text_pipeline" },
@@ -1037,15 +1195,13 @@ async function runFullPipeline() {
     await loadRuns(false);
     await reloadRun();
     log("Finished full text pipeline.");
-  } catch (error) {
-    log(error.message);
-  }
+  });
 }
 
 async function saveArtifact() {
-  if (!state.selectedRunId || !state.selectedArtifact) return;
+  if (!state.selectedRunId || !state.selectedArtifact || state.busy) return;
   if (!editableArtifacts.has(state.selectedArtifact)) return;
-  try {
+  await withBusy(`Saving ${state.selectedArtifact}`, async () => {
     const content = JSON.parse(el("artifact-content").value);
     await api("write_artifact", {
       path_params: { run_id: state.selectedRunId, artifact: state.selectedArtifact },
@@ -1053,9 +1209,7 @@ async function saveArtifact() {
     });
     log(`Saved ${state.selectedArtifact}.`);
     await reloadRun();
-  } catch (error) {
-    log(error.message);
-  }
+  });
 }
 
 function formatJson() {
@@ -1067,20 +1221,18 @@ function formatJson() {
 }
 
 async function recordGate() {
-  if (!state.selectedRunId) return;
+  if (!state.selectedRunId || state.busy) return;
   const stage = el("gate-stage").value;
   const action = el("gate-action").value;
   const reason = el("gate-reason").value.trim();
-  try {
+  await withBusy(`Recording ${action}`, async () => {
     await api("record_gate_decision", {
       path_params: { run_id: state.selectedRunId },
       body: { stage, action, reason },
     });
     log(`Recorded ${action} for ${stage}.`);
     await reloadRun();
-  } catch (error) {
-    log(error.message);
-  }
+  });
 }
 
 el("prompt").addEventListener("input", updateRunIdSuggestion);
@@ -1091,8 +1243,18 @@ el("run-full").addEventListener("click", runFullPipeline);
 el("save-artifact").addEventListener("click", saveArtifact);
 el("format-json").addEventListener("click", formatJson);
 el("record-gate").addEventListener("click", recordGate);
+el("toggle-preview").addEventListener("click", () => setPreviewInteractive(!state.previewInteractive));
+document.querySelector(".preview-shell").addEventListener("click", () => {
+  if (!state.previewInteractive && !el("toggle-preview").disabled) {
+    setPreviewInteractive(true);
+  }
+});
+document.querySelectorAll("[data-inspector-tab]").forEach((button) => {
+  button.addEventListener("click", () => setInspectorTab(button.dataset.inspectorTab));
+});
 
 clearArtifact();
+setInspectorTab(state.activeInspectorTab);
 loadRuns();
 </script>
 </body>

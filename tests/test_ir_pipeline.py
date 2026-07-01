@@ -1,5 +1,7 @@
 from pathlib import Path
 import json
+import struct
+import zlib
 
 from ai_native_cad.cad_ir import CADIR, ir_from_text, validate_ir
 from ai_native_cad.cadquery.generator import generate_cadquery_code
@@ -93,6 +95,28 @@ def test_cadquery_generation_is_deterministic():
     })
 
     assert generate_cadquery_code(ir) == generate_cadquery_code(ir)
+
+
+def test_generated_preview_png_placeholder_is_visible_not_black_pixel():
+    namespace = {}
+    exec(generate_cadquery_code({
+        "part_type": "spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
+        "features": {},
+    }), namespace)
+
+    preview = namespace["_preview_png_bytes"]()
+    width, height = struct.unpack(">II", preview[16:24])
+    idat_start = preview.index(b"IDAT") + 4
+    idat_length = struct.unpack(">I", preview[idat_start - 8:idat_start - 4])[0]
+    raw = zlib.decompress(preview[idat_start:idat_start + idat_length])
+
+    assert width == 640
+    assert height == 360
+    assert b"CadFlow placeholder preview" in preview
+    assert raw[1:4] != b"\x00\x00\x00"
+    assert raw[1:4] in {bytes((248, 250, 247)), bytes((224, 226, 220))}
 
 
 def test_ir_pipeline_writes_required_output_contract():

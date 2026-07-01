@@ -197,7 +197,10 @@
 - compact report/trace summary：status、flow/rework decision、warnings/errors、attempts、final candidate。
 - editable artifact save for `requirement.json`、`planning_artifact.json`、`input_ir.json` only。
 - approve/reject/return/override gate decision recording。
+- UI running state and visible error banner for stage/action failures。
 - STEP/STL/preview/model.py downloadable list，`model.stl` secondary viewer link。
+- scroll-safe STL preview with explicit Interact/Release mode。
+- right-side Inspector tabs for summary, gate, downloads, and activity so the console remains dense without pushing the STL preview down。
 
 边界：
 

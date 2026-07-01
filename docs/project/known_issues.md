@@ -104,7 +104,7 @@ All four examples now call `generate_report()` from `ai_native_cad.report`, whic
 **Severity:** Medium
 **Status:** Open / deferred from Phase 1.8
 
-The CAD Agent Loop writes `preview.png`, but it is currently a placeholder image, not a rendered geometry snapshot. Phase 1.8 now records STEP-first inspection facts and trace summaries, while real preview rendering remains deferred because this slice should not introduce Blender, FreeCAD automation changes, or heavy rendering dependencies. Evaluation complete: recommended path is a lightweight three.js STL viewer (`web-viewer/index.html`) with optional trimesh-based glTF/GLB export. See `docs/web_preview.md` for full evaluation. FreeCAD screenshots remain GUI-only.
+The CAD Agent Loop writes `preview.png`, but it is currently a visible placeholder image, not a rendered geometry snapshot. The earlier 1x1 black placeholder has been replaced with a readable scaffold image so downloaded previews do not look like broken renders. Phase 1.8 now records STEP-first inspection facts and trace summaries, while real preview rendering remains deferred because this slice should not introduce Blender, FreeCAD automation changes, or heavy rendering dependencies. Evaluation complete: recommended path is a lightweight three.js STL viewer (`web-viewer/index.html`) with optional trimesh-based glTF/GLB export. See `docs/web_preview.md` for full evaluation. FreeCAD screenshots remain GUI-only.
 
 **Recommendation:** Implement `web-viewer/index.html` prototype, then optionally add GLB export to the pipeline if the dependency tradeoff remains acceptable.
 

@@ -98,12 +98,85 @@ def _common_helpers() -> str:
 
 
 def _preview_png_bytes() -> bytes:
-    # TODO Phase 1.8: replace this placeholder with a real geometry-rendered
-    # snapshot without introducing Blender or FreeCAD automation.
-    return bytes.fromhex(
-        '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489'
-        '0000000a49444154789c6360000002000100ffff03000006000557bfabd400000000'
-        '49454e44ae426082'
+    # Placeholder only: the browser STL viewer is the live geometry preview.
+    # Keep this PNG bright and recognizable so users do not mistake it for a
+    # broken black render while real rendered snapshots remain deferred.
+    import struct
+    import zlib
+
+    width, height = 640, 360
+    bg = (248, 250, 247)
+    grid = (224, 226, 220)
+    axis = (105, 113, 116)
+    teal = (15, 118, 110)
+    amber = (161, 98, 7)
+    ink = (31, 37, 40)
+    pixels = [[bg for _ in range(width)] for _ in range(height)]
+
+    def set_px(x: int, y: int, color: tuple[int, int, int]) -> None:
+        if 0 <= x < width and 0 <= y < height:
+            pixels[y][x] = color
+
+    def line(x0: int, y0: int, x1: int, y1: int, color: tuple[int, int, int]) -> None:
+        dx = abs(x1 - x0)
+        dy = -abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx + dy
+        while True:
+            set_px(x0, y0, color)
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy
+                x0 += sx
+            if e2 <= dx:
+                err += dx
+                y0 += sy
+
+    def rect(x0: int, y0: int, x1: int, y1: int, color: tuple[int, int, int]) -> None:
+        line(x0, y0, x1, y0, color)
+        line(x1, y0, x1, y1, color)
+        line(x1, y1, x0, y1, color)
+        line(x0, y1, x0, y0, color)
+
+    for x in range(0, width, 40):
+        line(x, 0, x, height - 1, grid)
+    for y in range(0, height, 40):
+        line(0, y, width - 1, y, grid)
+
+    line(70, 280, 570, 280, axis)
+    line(70, 280, 120, 80, axis)
+    line(70, 280, 70, 95, axis)
+
+    rect(190, 125, 450, 245, teal)
+    rect(210, 145, 430, 225, teal)
+    for offset in range(0, 70, 14):
+        line(210 + offset, 225, 330 + offset, 145, teal)
+
+    for cx, cy in ((235, 165), (405, 165), (235, 205), (405, 205)):
+        for r in range(10, 14):
+            for x in range(cx - r, cx + r + 1):
+                for y in range(cy - r, cy + r + 1):
+                    d = (x - cx) * (x - cx) + (y - cy) * (y - cy)
+                    if r * r - 12 <= d <= r * r + 12:
+                        set_px(x, y, amber)
+
+    rect(36, 28, 604, 332, ink)
+
+    raw = b''.join(b'\\x00' + bytes(channel for pixel in row for channel in pixel) for row in pixels)
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack('>I', len(data)) + body + struct.pack('>I', zlib.crc32(body) & 0xFFFFFFFF)
+
+    return (
+        b'\\x89PNG\\r\\n\\x1a\\n'
+        + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+        + chunk(b'tEXt', b'Description\\x00CadFlow placeholder preview; use model.stl for live geometry preview')
+        + chunk(b'IDAT', zlib.compress(raw, 9))
+        + chunk(b'IEND', b'')
     )
 """
 

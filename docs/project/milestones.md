@@ -102,6 +102,10 @@ Initial local UI slice complete; follow-up polish and review/output stage expans
 - Expose path-free gate decision history summaries and render each stage's latest approve/reject/return/override decision in the local UI timeline.
 - Expose a compact report/trace summary in run metadata and render status, flow/rework decisions, warning/error counts, attempts, and final candidate in the local UI.
 - Polish artifact inspection with type labels and a useful default selection order that opens `report.md` first when present.
+- Add UI running state and visible error banner so long stage actions cannot be double-clicked silently and failures are not hidden in the activity log.
+- Replace the 1x1 black `preview.png` placeholder with a visible scaffold image while keeping real rendered previews deferred to the STL viewer path.
+- Make the embedded STL viewer scroll-safe by default, with an explicit Interact/Release toggle for rotate and zoom.
+- Collapse report, gate, downloads, and activity into a right-side Inspector tab set so the STL preview and workflow controls stay in the first viewport.
 
 ## M1.12 / v0.5: LLM Agent Adapter
 
