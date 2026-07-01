@@ -25,16 +25,14 @@ It is not a browser CAD editor.
 
 ### v0.4a
 
-- Local FastAPI backend.
-- Simple frontend.
+- Local backend scaffold, currently dependency-free Python.
+- Future simple frontend.
 - Run existing `run_text_pipeline`.
-- List runs.
-- Show run status.
-- Show artifacts.
-- Show report.
-- Show `agent_trace`.
-- Use a deterministic `StageRunner` implementation for local workflow stages.
-- Serve `model.step`, `model.stl`, reports, traces, and artifact JSON from the selected run directory.
+- List runs from `outputs/` and `runs/`.
+- Show run status from `report.json` and `agent_trace.json`.
+- Show artifacts, reports, and `agent_trace`.
+- Use the deterministic `StageRunner` implementation for local workflow stages.
+- Identify `model.step`, `model.stl`, `preview.png`, and `model.py` as downloadable output files from the selected run directory.
 
 ### v0.4b
 
@@ -97,6 +95,13 @@ Even when a future stage uses `LLMApiAgentAdapter`, its output must be persisted
 
 ## v0.4a Backend Surface
 
+The current scaffold lives under `src/ai_native_cad/workflow_console/`:
+
+- `StageRunner`: deterministic local stage execution and artifact persistence.
+- `WorkflowConsoleBackend`: local run listing, artifact metadata/content reads, status derivation, and downloadable-file discovery.
+
+`StageRunner` records local stage history in the existing `logs/runtime.json` artifact under `workflow_console.stages`. This keeps stage status file-based without introducing a database or separate state store.
+
 The local backend should expose only workflow operations:
 
 - Run management: create, open, list, and inspect local run directories.
@@ -106,6 +111,8 @@ The local backend should expose only workflow operations:
 - File serving: serve `model.step`, `model.stl`, `report.md`, `report.json`, and `agent_trace.json`.
 
 The backend should not change benchmark contracts, add new CAD generator behavior, or make browser state authoritative.
+
+The scaffold does not yet provide HTTP routes, authentication, a database, or a frontend. A FastAPI app can be layered over the Python facade later if the dependency is intentionally added.
 
 ## v0.4a UI Surface
 

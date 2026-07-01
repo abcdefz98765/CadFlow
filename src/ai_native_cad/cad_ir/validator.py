@@ -21,10 +21,31 @@ SUPPORTED_FEATURES_BY_PART_TYPE = {
     "mounting_plate": {"holes", "mounting_holes", "chamfer"},
     "spacer": set(),
     "simple_bracket": {"holes", "base_holes", "fillet"},
-    "wall_bracket": set(),
-    "circular_button": set(),
-    "enclosure_base": set(),
+    "wall_bracket": {"base_holes", "wall_hole", "fillet"},
+    "circular_button": {
+        "switch_pocket",
+        "actuator_post",
+        "contact_slots",
+        "wire_exit",
+        "anti_slip_feet",
+        "edge_finish",
+    },
+    "enclosure_base": {"bosses", "bottom_cutout", "fillet"},
     "enclosure_lid": {"holes", "chamfer"},
+}
+
+UNVERIFIED_FEATURES_BY_PART_TYPE = {
+    "simple_bracket": {"fillet"},
+    "wall_bracket": {"base_holes", "wall_hole", "fillet"},
+    "circular_button": {
+        "switch_pocket",
+        "actuator_post",
+        "contact_slots",
+        "wire_exit",
+        "anti_slip_feet",
+        "edge_finish",
+    },
+    "enclosure_base": {"bosses", "bottom_cutout", "fillet"},
 }
 
 REQUIRED_DIMENSIONS = {
@@ -100,6 +121,18 @@ def _validate_supported_features(result: dict[str, Any], cad_ir: CADIR) -> None:
                 "owner_stage": "planning",
             })
             continue
+        if feature_name in UNVERIFIED_FEATURES_BY_PART_TYPE.get(cad_ir.part_type, set()):
+            result["warnings"].append({
+                "code": "feature_unverified",
+                "message": (
+                    f"Feature '{feature_name}' is accepted by the current "
+                    f"Part Modeling backend for part_type '{cad_ir.part_type}', "
+                    "but geometry verification is not implemented yet"
+                ),
+                "feature": feature_name,
+                "part_type": cad_ir.part_type,
+                "owner_stage": "review",
+            })
         _validate_feature_semantics(result, cad_ir, feature_name, feature_value)
 
 

@@ -22,6 +22,29 @@ def test_validate_ir_accepts_mounting_plate():
     assert result["valid"] is True
 
 
+def test_validate_ir_accepts_default_unverified_features_without_bypassing_unknown_features():
+    accepted = validate_ir({
+        "part_type": "enclosure_base",
+        "unit": "mm",
+        "dimensions": {"outer_length": 100, "outer_width": 60, "outer_height": 25, "wall_thickness": 2},
+        "features": {"bosses": {"diameter": 6}, "bottom_cutout": {"length": 60}, "fillet": {"radius": 1}},
+    })
+
+    assert accepted["valid"] is True
+    assert not accepted["errors"]
+    assert {warning["feature"] for warning in accepted["warnings"]} == {"bosses", "bottom_cutout", "fillet"}
+
+    rejected = validate_ir({
+        "part_type": "enclosure_base",
+        "unit": "mm",
+        "dimensions": {"outer_length": 100, "outer_width": 60, "outer_height": 25, "wall_thickness": 2},
+        "features": {"snap_tabs": {"count": 2}},
+    })
+
+    assert rejected["valid"] is False
+    assert any(error["code"] == "unsupported_feature" and error["feature"] == "snap_tabs" for error in rejected["errors"])
+
+
 def test_validate_ir_rejects_missing_required_dimension():
     result = validate_ir({
         "part_type": "spacer",

@@ -70,15 +70,15 @@ Next.
 
 ## M1.10 / v0.4a: Local Workflow Console Backend
 
-Next.
+In progress.
 
-- Expose the file-first workflow as a local single-user HTTP API.
-- Define `StageRunner` as the local execution unit: read upstream artifacts, run one deterministic Python stage, write downstream artifacts, status, flow/rework decisions, and logs.
-- Provide run management, stage run/status endpoints, artifact read/write endpoints, user gate decisions, and model/report/trace file serving.
+- Add a dependency-free Python backend scaffold for the file-first local workflow.
+- Define `StageRunner` as the local execution unit: read upstream artifacts, run deterministic Python stages, write downstream artifacts, and record stage history in `logs/runtime.json`.
+- Provide run management, artifact metadata/content reads, status derivation, and downloadable file discovery at the Python API layer.
 - Use the existing `run_text_pipeline` and IR pipeline paths first.
 - Keep LLM workers optional and future-facing; stage outputs must still be persisted artifacts.
 - Keep `AgentAdapter` separate from `StageRunner`: the adapter owns understanding/planning/explanation, while the runner owns execution/persistence.
-- Do not add cloud queues, accounts, multi-user collaboration, benchmark changes, or new CAD generator behavior.
+- Do not add cloud queues, accounts, multi-user collaboration, benchmark changes, new CAD generator behavior, or a full frontend in this step.
 
 ## M1.11 / v0.4a: Web Workflow Console UI And Viewer
 

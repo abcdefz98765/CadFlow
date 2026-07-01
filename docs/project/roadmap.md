@@ -145,17 +145,17 @@
 
 ## Phase 1.10 / Product v0.4a: Local Workflow Console Backend
 
-状态：计划中。该阶段承接 M1.8/M1.9 的 artifact、inspection、report、trace 成果，把现有 file-first workflow 暴露为本地单用户 HTTP API；不引入云端队列、账号系统、多用户协作、LLM provider 依赖或新的 CAD generator 能力。
+状态：进行中。当前已落地 dependency-free Python backend scaffold；HTTP API 和前端仍是后续工作。该阶段承接 M1.8/M1.9 的 artifact、inspection、report、trace 成果，把现有 file-first workflow 暴露为本地单用户 backend；不引入云端队列、账号系统、多用户协作、LLM provider 依赖或新的 CAD generator 能力。
 
 目标：让 Web UI 能按 workflow stage 推进，而不是一次性黑盒运行。首版本地执行单元定义为 `StageRunner`：读取上游 artifact，执行一个确定性 Python workflow step，写出下游 artifact、status、flow/rework decision 和 log。`AgentAdapter` 是自然语言理解和解释边界，`StageRunner` 是本地执行和落盘边界，两者不合并。LLM/token worker 只作为未来 `LLMApiAgentAdapter` 的可插拔实现，不能成为跨阶段状态源。
 
 交付：
 
-- run 管理：创建/打开本地 run directory，并列出当前 artifact。
-- stage API：Requirement、Planning、Part Modeling、Review 的 `run/status/artifacts` 接口。
-- artifact API：读取 `requirement.json`、`planning_artifact.json`、`input_ir.json`、`report.json`、`agent_trace.json`、`report.md` 和 generated files。
-- gate API：记录用户确认、覆盖、驳回或 return-to-upstream 决策，并落盘为正式 artifact。
-- file serving：服务当前 run 的 `model.stl`、`model.step`、report 和 trace，供 Web viewer 使用。
+- Python run 管理：创建/打开本地 run directory，并列出当前 artifact。
+- Python `StageRunner`：运行 Requirement、Planning、Part Modeling，以及完整 `run_text_pipeline()`，并在 `logs/runtime.json` 记录本地 stage history。
+- Python artifact API：读取 `prompt.txt`、`requirement.json`、`planning_artifact.json`、`input_ir.json`、`report.json`、`agent_trace.json`、`report.md` 和 `logs/runtime.json`。
+- Python file discovery：识别当前 run 的 `model.step`、`model.stl`、`preview.png` 和 `model.py`，供后续 HTTP/file serving 使用。
+- 后续 HTTP API：stage endpoints、gate decision endpoints、file serving。
 - deterministic runtime：优先复用 `run_text_pipeline()`、`run_ir_pipeline()`、`run_agent_loop()` 和 report/review helpers。
 
 边界：

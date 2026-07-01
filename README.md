@@ -287,12 +287,15 @@ Agent output must become validated structured contracts before the CAD Agent Loo
 
 ## Web Workflow Console
 
-The planned Web UI is a workflow cockpit for running and visualizing CadFlow:
+The planned Web UI is a workflow cockpit for running and visualizing CadFlow. A minimal local backend scaffold now exists under `ai_native_cad.workflow_console`:
 
 - run the existing workflow from natural-language prompts
-- show run status
-- display requirement, planning, IR, report, and trace artifacts
-- provide access to STEP-first outputs
+- list artifact-backed runs under `outputs/` and `runs/`
+- derive run status from `report.json` and `agent_trace.json`
+- read requirement, planning, IR, report, and trace artifacts
+- identify STEP-first outputs and derived preview/download files
+
+The scaffold is backend-only and dependency-free. It does not include a frontend or HTTP server yet.
 
 It is not a browser CAD editor, not a new CAD backend, and not a direct arbitrary code execution surface. Artifacts remain file-based and traceable so CLI, Python API, tests, and the future Web Console all inspect the same run contract.
 

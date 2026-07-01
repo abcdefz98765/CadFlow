@@ -39,7 +39,7 @@ Some files may be absent when a workflow gate blocks before CAD IR or model gene
 | `report.json` | Machine-readable review result | Developer-facing |
 | `report.md` | Human-readable review output | User-facing |
 | `agent_trace.json` | Internal workflow/debug trace | Debug-only, advanced developer-facing |
-| `logs/runtime.json` | Runtime details and timings | Debug-only |
+| `logs/runtime.json` | Runtime details, timings, and local StageRunner status history | Debug-only |
 
 ## Required Meaning
 
@@ -58,5 +58,9 @@ The future Web Workflow Console should read this contract directly:
 - User review from `report.md`.
 - Workflow inspection from `requirement.json`, `planning_artifact.json`, `input_ir.json`, and `agent_trace.json`.
 - CAD downloads from `model.step` and derived formats.
+
+The v0.4a Python backend scaffold in `ai_native_cad.workflow_console` already follows this rule: it lists run directories, reads only whitelisted artifact files, derives status from existing report/trace artifacts, and reports downloadable files without creating a second state store.
+
+For runs that stop before `report.json` exists, the backend may derive the latest local stage status from `logs/runtime.json` when `workflow_console.latest_stage` is present.
 
 The Web Console may cache or index metadata, but it should not become the authoritative workflow state store in v0.4.
