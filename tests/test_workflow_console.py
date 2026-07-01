@@ -20,6 +20,7 @@ from ai_native_cad.workflow_console import (
     status_code_for_exception,
     success_response,
 )
+from ai_native_cad.workflow_console.server import resolve_downloadable
 
 
 def _does_not_contain_keys(value, keys):
@@ -575,6 +576,40 @@ def test_backend_downloadables_by_id_remain_whitelisted(tmp_path):
         "preview.png",
         "model.py",
     ]
+
+
+def test_workflow_console_server_resolves_only_whitelisted_downloadables(tmp_path):
+    run_dir = tmp_path / "outputs" / "console_run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a spacer.\n", encoding="utf-8")
+    (run_dir / "model.step").write_text("STEP placeholder\n", encoding="utf-8")
+    (run_dir / "notes.txt").write_text("not downloadable\n", encoding="utf-8")
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    resolved = resolve_downloadable(backend, "console_run", "model.step")
+
+    assert resolved == (run_dir / "model.step").resolve()
+    with pytest.raises(ValueError, match="downloadable is not allowed"):
+        resolve_downloadable(backend, "console_run", "notes.txt")
+    with pytest.raises(FileNotFoundError, match="downloadable not found"):
+        resolve_downloadable(backend, "console_run", "model.stl")
+
+
+def test_workflow_console_static_ui_exposes_required_local_workflow_controls():
+    console = (Path.cwd() / "web-viewer" / "workflow-console.html").read_text(encoding="utf-8")
+
+    for expected in [
+        "Create Run",
+        "Stage Timeline",
+        "Artifacts",
+        "Downloadables",
+        "Gate Decision",
+        "STL Preview",
+        'api("write_artifact"',
+        'api("record_gate_decision"',
+        'api("run_stage"',
+    ]:
+        assert expected in console
 
 
 def test_backend_artifacts_by_id_remain_readable_artifact_whitelist(tmp_path):

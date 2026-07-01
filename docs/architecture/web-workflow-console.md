@@ -133,7 +133,7 @@ The scaffold does not yet provide a running HTTP server, authentication, a datab
 
 ## v0.4a UI Surface
 
-The first frontend should stay workflow-oriented:
+The first frontend now lives in `web-viewer/workflow-console.html` and stays workflow-oriented:
 
 - Stage timeline: Requirement -> Planning -> Part Modeling -> Review -> Outputs.
 - Prompt entry and run controls.
@@ -142,6 +142,27 @@ The first frontend should stay workflow-oriented:
 - Optional preview surface using current-run STL or later GLB assets.
 
 Existing `web-viewer` work can be reused or evolved for artifact preview, but preview remains secondary to the STEP-first workflow.
+
+The UI is served by `ai_native_cad.workflow_console.server`, a stdlib-only local bridge that binds to `127.0.0.1` by default. It does not add FastAPI or any HTTP dependency. The bridge exposes:
+
+- `POST /api/route`: a narrow JSON adapter over the existing dependency-free `dispatch_route(...)` contract.
+- `GET /api/downloads/{run_id}/{filename}`: whitelisted local file serving for `model.step`, `model.stl`, `preview.png`, and `model.py` only.
+- Static files from `web-viewer/`, including the existing STL viewer.
+
+The browser never becomes the source of truth. Create, stage execution, artifact edits, gate decisions, artifact reads, and downloadable discovery all round-trip through the Python backend and existing run artifacts. Editable artifacts remain limited to `requirement.json`, `planning_artifact.json`, and `input_ir.json`; the UI only enables save controls for those files and the backend remains authoritative for validation.
+
+The current UI supports the first usable local workflow loop:
+
+- list existing runs under `outputs/` and `runs/`;
+- create a run from a prompt without executing stages;
+- select a run and inspect status/current stage;
+- run Requirement, Planning, Part Modeling, or the full text pipeline by safe run id;
+- inspect readable artifacts;
+- edit only the allowed JSON handoff artifacts;
+- record approve/reject/return/override gate decisions;
+- list STEP-first downloadables and open the secondary STL preview when `model.stl` exists.
+
+Review and Outputs are represented as timeline/gate stages, but they are not yet separate executable backend stages. STEP remains the primary CAD artifact; the embedded viewer loads `model.stl` only as a secondary inspection aid.
 
 ## Security Notes
 

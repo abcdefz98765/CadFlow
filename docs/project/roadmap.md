@@ -175,7 +175,7 @@
 
 ## Phase 1.11 / Product v0.4a: Web Workflow Console UI + Viewer
 
-状态：计划中。该阶段在本地 backend 之上提供 workflow cockpit，不是浏览器内 CAD 编辑器。
+状态：first local UI slice landed。当前已有 `web-viewer/workflow-console.html` 和 stdlib-only local bridge `ai_native_cad.workflow_console.server`，在本地 backend 之上提供 workflow cockpit；不是浏览器内 CAD 编辑器。
 
 目标：用户可以在 Web 端输入需求、检查需求拆分、确认/修改 handoff artifact、触发下一阶段，并查看 report/trace/STL preview，形成可审查的逐步 workflow。
 
@@ -186,12 +186,23 @@
 - report/trace viewer：突出 verified、unverified、warnings、errors、flow/rework decision。
 - preview viewer：复用并改造 `web-viewer` 的 STL preview，加载当前 run 的 `model.stl`；STEP 仍是 primary CAD artifact。
 - stage controls：run next stage、rerun current stage、approve、return upstream、open output folder。
+- local bridge：使用 Python stdlib HTTP server 包裹现有 `dispatch_route(...)`，只暴露 route contract 和 whitelist downloadable files，不新增 FastAPI/HTTP dependency。
+
+当前已完成：
+
+- runs list/select、prompt-only create run、run status/current stage。
+- run Requirement、Planning、Part Modeling 和 full text pipeline by safe run id。
+- readable artifact list/read。
+- editable artifact save for `requirement.json`、`planning_artifact.json`、`input_ir.json` only。
+- approve/reject/return/override gate decision recording。
+- STEP/STL/preview/model.py downloadable list，`model.stl` secondary viewer link。
 
 边界：
 
 - 不做浏览器内参数化建模、约束求解、装配 mating 推断或生产级 release。
 - 不声称 `preview.png` 已变成真实渲染；Web viewer 是交互式 artifact preview。
 - 不绕过 `requirement.json` / `planning_artifact.json` / `input_ir.json` 直接从 prompt 生成 CAD。
+- Review 和 Outputs 目前是 timeline/gate 节点，不是独立 executable backend stages。
 
 ## Phase 1.12 / Product v0.5: LLMApiAgentAdapter
 

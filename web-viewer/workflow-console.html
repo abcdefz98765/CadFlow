@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CadFlow Workflow Console</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f1ec;
+    --panel: #ffffff;
+    --panel-subtle: #faf8f4;
+    --ink: #1f2528;
+    --muted: #657174;
+    --line: #d8d2c7;
+    --accent: #0f766e;
+    --accent-strong: #0b5f59;
+    --warn: #a16207;
+    --danger: #b42318;
+    --ok: #1f7a3f;
+    --shadow: 0 1px 2px rgba(31, 37, 40, 0.08);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+  }
+
+  button, input, textarea, select {
+    font: inherit;
+  }
+
+  button {
+    min-height: 32px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--ink);
+    padding: 6px 10px;
+    cursor: pointer;
+  }
+
+  button:hover { border-color: #a59d90; }
+  button:disabled { cursor: not-allowed; color: #9ca3af; background: #f3f4f6; }
+  button.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+  button.primary:hover { background: var(--accent-strong); }
+  button.danger { color: var(--danger); border-color: #e6b8b3; }
+
+  input, textarea, select {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--ink);
+    padding: 7px 9px;
+  }
+
+  textarea {
+    resize: vertical;
+    min-height: 72px;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: minmax(250px, 310px) minmax(420px, 1fr) minmax(340px, 42vw);
+    grid-template-rows: auto 1fr;
+    min-height: 100vh;
+  }
+
+  header {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 14px;
+    background: #26312f;
+    color: #f8fafc;
+    border-bottom: 1px solid #18201f;
+  }
+
+  header h1 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 650;
+    letter-spacing: 0;
+  }
+
+  .server-state {
+    color: #d4dedb;
+    font-size: 12px;
+    justify-self: end;
+    white-space: nowrap;
+  }
+
+  aside, main, .viewer {
+    min-height: 0;
+    border-right: 1px solid var(--line);
+  }
+
+  aside {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    gap: 10px;
+    padding: 12px;
+    overflow: hidden;
+  }
+
+  main {
+    display: grid;
+    grid-template-rows: auto auto minmax(160px, 1fr);
+    gap: 10px;
+    padding: 12px;
+    overflow: hidden;
+  }
+
+  .viewer {
+    display: grid;
+    grid-template-rows: auto minmax(220px, 1fr) minmax(210px, 34vh);
+    gap: 10px;
+    padding: 12px;
+    overflow: hidden;
+    border-right: 0;
+  }
+
+  .section {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    min-width: 0;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 38px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-subtle);
+  }
+
+  .section-header h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: 0;
+  }
+
+  .section-body {
+    padding: 10px;
+  }
+
+  .create-run {
+    display: grid;
+    gap: 8px;
+  }
+
+  .create-row {
+    display: grid;
+    grid-template-columns: 1fr 88px;
+    gap: 8px;
+  }
+
+  .run-list {
+    overflow: auto;
+    min-height: 0;
+  }
+
+  .run-button {
+    display: grid;
+    gap: 3px;
+    width: 100%;
+    min-height: 58px;
+    margin-bottom: 6px;
+    text-align: left;
+    background: #fff;
+  }
+
+  .run-button.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .run-title {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-weight: 650;
+  }
+
+  .meta {
+    color: var(--muted);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .status-item {
+    min-height: 56px;
+    padding: 8px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+
+  .label {
+    margin-bottom: 4px;
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+
+  .value {
+    min-width: 0;
+    font-weight: 650;
+    overflow-wrap: anywhere;
+  }
+
+  .timeline {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(94px, 1fr));
+    gap: 8px;
+  }
+
+  .stage {
+    display: grid;
+    grid-template-rows: auto 26px 32px;
+    gap: 6px;
+    min-height: 96px;
+    padding: 8px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+
+  .stage.current { border-color: var(--accent); }
+  .stage-name { font-weight: 650; }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+    min-height: 22px;
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: 12px;
+    color: var(--muted);
+    background: #eef0ed;
+    overflow-wrap: anywhere;
+  }
+
+  .pill.ok { color: var(--ok); background: #e7f4eb; }
+  .pill.warn { color: var(--warn); background: #fff5d6; }
+  .pill.danger { color: var(--danger); background: #fde8e5; }
+
+  .split {
+    display: grid;
+    grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);
+    gap: 10px;
+    min-height: 0;
+  }
+
+  .artifact-list, .download-list {
+    overflow: auto;
+    min-height: 0;
+  }
+
+  .list-button {
+    width: 100%;
+    margin-bottom: 6px;
+    text-align: left;
+  }
+
+  .list-button.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .artifact-tools {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .codebox {
+    width: 100%;
+    min-height: 330px;
+    height: calc(100vh - 372px);
+    min-width: 0;
+    font-family: Consolas, "SFMono-Regular", monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre;
+    overflow: auto;
+  }
+
+  .gate-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .gate-form textarea,
+  .gate-form button {
+    grid-column: 1 / -1;
+  }
+
+  .download-list a {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: center;
+    min-height: 36px;
+    margin-bottom: 6px;
+    padding: 7px 9px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .download-list a.primary-artifact {
+    border-color: var(--accent);
+  }
+
+  iframe {
+    width: 100%;
+    height: 100%;
+    min-height: 220px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #1f2528;
+  }
+
+  .empty {
+    color: var(--muted);
+    padding: 10px;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .log {
+    min-height: 80px;
+    max-height: 160px;
+    overflow: auto;
+    font-family: Consolas, "SFMono-Regular", monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+  }
+
+  @media (max-width: 1180px) {
+    .app {
+      grid-template-columns: 280px minmax(420px, 1fr);
+      grid-template-rows: auto minmax(560px, 1fr) minmax(440px, 72vh);
+    }
+    .viewer {
+      grid-column: 1 / -1;
+      border-top: 1px solid var(--line);
+      grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.3fr);
+      grid-template-rows: auto minmax(240px, 1fr);
+    }
+    .viewer > .section:first-child {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .app {
+      display: block;
+    }
+    aside, main, .viewer {
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+      overflow: visible;
+    }
+    .status-grid, .timeline, .split, .viewer, .gate-form, .create-row {
+      grid-template-columns: 1fr;
+    }
+    .codebox {
+      height: 360px;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>CadFlow Workflow Console</h1>
+    <div class="meta">File-backed local workflow: prompt -> requirement -> planning -> part modeling -> review -> outputs</div>
+    <div id="server-state" class="server-state">Checking local bridge</div>
+  </header>
+
+  <aside>
+    <section class="section">
+      <div class="section-header">
+        <h2>Create Run</h2>
+      </div>
+      <div class="section-body create-run">
+        <textarea id="prompt" placeholder="Describe the part to generate"></textarea>
+        <div class="create-row">
+          <input id="run-id" placeholder="run_id">
+          <select id="run-root">
+            <option value="outputs">outputs</option>
+            <option value="runs">runs</option>
+          </select>
+        </div>
+        <button id="create-run" class="primary">Create</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Runs</h2>
+        <button id="refresh-runs">Refresh</button>
+      </div>
+    </section>
+
+    <section id="run-list" class="run-list"></section>
+  </aside>
+
+  <main>
+    <section class="section">
+      <div class="section-header">
+        <h2>Run Status</h2>
+        <button id="reload-run">Reload</button>
+      </div>
+      <div class="section-body status-grid">
+        <div class="status-item"><div class="label">Run</div><div id="status-run" class="value">-</div></div>
+        <div class="status-item"><div class="label">Status</div><div id="status-state" class="value">-</div></div>
+        <div class="status-item"><div class="label">Stage</div><div id="status-stage" class="value">-</div></div>
+        <div class="status-item"><div class="label">Updated</div><div id="status-updated" class="value">-</div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Stage Timeline</h2>
+        <button id="run-full">Run Full</button>
+      </div>
+      <div id="timeline" class="section-body timeline"></div>
+    </section>
+
+    <section class="section split">
+      <div>
+        <div class="section-header"><h2>Artifacts</h2></div>
+        <div id="artifact-list" class="section-body artifact-list"></div>
+      </div>
+      <div class="section-body">
+        <div class="artifact-tools">
+          <div id="artifact-title" class="value">No artifact selected</div>
+          <button id="format-json">Format</button>
+          <button id="save-artifact" class="primary">Save</button>
+        </div>
+        <textarea id="artifact-content" class="codebox" spellcheck="false"></textarea>
+      </div>
+    </section>
+  </main>
+
+  <section class="viewer">
+    <section class="section">
+      <div class="section-header">
+        <h2>Gate Decision</h2>
+      </div>
+      <div class="section-body gate-form">
+        <select id="gate-stage">
+          <option value="requirement">Requirement</option>
+          <option value="planning">Planning</option>
+          <option value="part_modeling">Part Modeling</option>
+          <option value="review">Review</option>
+          <option value="outputs">Outputs</option>
+        </select>
+        <select id="gate-action">
+          <option value="approve">Approve</option>
+          <option value="return">Return</option>
+          <option value="reject">Reject</option>
+          <option value="override">Override</option>
+        </select>
+        <textarea id="gate-reason" placeholder="Reason"></textarea>
+        <button id="record-gate">Record Decision</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Downloadables</h2>
+      </div>
+      <div id="download-list" class="section-body download-list"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>STL Preview</h2>
+      </div>
+      <div class="section-body" style="height: 100%;">
+        <iframe id="preview-frame" title="STL preview"></iframe>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Activity</h2>
+      </div>
+      <div id="activity-log" class="section-body log"></div>
+    </section>
+  </section>
+</div>
+
+<script>
+const editableArtifacts = new Set(["requirement.json", "planning_artifact.json", "input_ir.json"]);
+const runnableStages = new Map([
+  ["requirement", "Requirement"],
+  ["planning", "Planning"],
+  ["part_modeling", "Part Modeling"],
+]);
+const displayStages = [
+  ["requirement", "Requirement"],
+  ["planning", "Planning"],
+  ["part_modeling", "Part Modeling"],
+  ["review", "Review"],
+  ["outputs", "Outputs"],
+];
+
+const state = {
+  runs: [],
+  selectedRunId: null,
+  selectedArtifact: null,
+  selectedContent: null,
+  metadata: null,
+};
+
+const el = (id) => document.getElementById(id);
+
+function log(message) {
+  const stamp = new Date().toLocaleTimeString();
+  el("activity-log").textContent = `[${stamp}] ${message}\n` + el("activity-log").textContent;
+}
+
+async function api(route, { path_params = {}, body = {}, query = {} } = {}) {
+  const response = await fetch("/api/route", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ route, path_params, body, query }),
+  });
+  const envelope = await response.json();
+  if (!envelope.ok) {
+    throw new Error(envelope.error ? envelope.error.message : "Workflow console request failed");
+  }
+  return envelope.data;
+}
+
+function setBridgeState(ok, detail) {
+  el("server-state").textContent = ok ? "Local bridge ready" : `Local bridge unavailable: ${detail}`;
+}
+
+function slug(value) {
+  return (value || "workflow_run")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/^[._]+|[._]+$/g, "")
+    .slice(0, 54) || "workflow_run";
+}
+
+function statusClass(value) {
+  if (["success", "completed", "created"].includes(value)) return "ok";
+  if (["blocked", "running_or_incomplete"].includes(value)) return "warn";
+  if (["failed"].includes(value)) return "danger";
+  return "";
+}
+
+function updateRunIdSuggestion() {
+  if (el("run-id").value.trim()) return;
+  const firstWords = el("prompt").value.split(/\s+/).slice(0, 8).join("_");
+  el("run-id").value = slug(firstWords);
+}
+
+async function loadRuns(selectFirst = true) {
+  try {
+    const runs = await api("list_runs");
+    state.runs = runs;
+    setBridgeState(true);
+    renderRuns();
+    if (selectFirst && !state.selectedRunId && runs.length) {
+      await selectRun(runs[0].run_id);
+    }
+    if (!runs.length) {
+      renderEmptySelection();
+    }
+  } catch (error) {
+    setBridgeState(false, error.message);
+    log(error.message);
+  }
+}
+
+function renderRuns() {
+  const list = el("run-list");
+  list.innerHTML = "";
+  if (!state.runs.length) {
+    list.innerHTML = '<div class="empty">No workflow runs found under outputs/ or runs/.</div>';
+    return;
+  }
+  for (const run of state.runs) {
+    const button = document.createElement("button");
+    button.className = `run-button ${run.run_id === state.selectedRunId ? "active" : ""}`;
+    button.innerHTML = `
+      <span class="run-title"><span>${run.run_id}</span><span class="pill ${statusClass(run.status.status)}">${run.status.status}</span></span>
+      <span class="meta">${run.status.stage || "no stage"} · ${run.updated_at || ""}</span>
+    `;
+    button.addEventListener("click", () => selectRun(run.run_id));
+    list.appendChild(button);
+  }
+}
+
+async function selectRun(runId) {
+  state.selectedRunId = runId;
+  state.selectedArtifact = null;
+  renderRuns();
+  await reloadRun();
+}
+
+async function reloadRun() {
+  if (!state.selectedRunId) return;
+  try {
+    state.metadata = await api("read_run_metadata", { path_params: { run_id: state.selectedRunId } });
+    renderMetadata();
+    renderArtifacts();
+    renderDownloads();
+    renderPreview();
+    const firstArtifact = (state.metadata.artifacts || [])[0];
+    if (firstArtifact) {
+      await readArtifact(firstArtifact.name);
+    } else {
+      clearArtifact();
+    }
+  } catch (error) {
+    log(error.message);
+  }
+}
+
+function renderMetadata() {
+  const run = state.metadata;
+  const status = run.status || {};
+  el("status-run").textContent = run.run_id || "-";
+  el("status-state").innerHTML = `<span class="pill ${statusClass(status.status)}">${status.status || "-"}</span>`;
+  el("status-stage").textContent = status.stage || "-";
+  el("status-updated").textContent = run.updated_at || "-";
+  renderTimeline(status);
+}
+
+function renderTimeline(status) {
+  const timeline = el("timeline");
+  timeline.innerHTML = "";
+  for (const [stage, label] of displayStages) {
+    const item = document.createElement("div");
+    const isCurrent = status.stage === stage;
+    const canRun = runnableStages.has(stage) && state.selectedRunId;
+    item.className = `stage ${isCurrent ? "current" : ""}`;
+    item.innerHTML = `
+      <div class="stage-name">${label}</div>
+      <span class="pill ${isCurrent ? statusClass(status.status) : ""}">${isCurrent ? (status.status || "current") : "pending"}</span>
+      <button ${canRun ? "" : "disabled"} data-stage="${stage}">${canRun ? "Run" : "Gate only"}</button>
+    `;
+    const button = item.querySelector("button");
+    button.addEventListener("click", () => runStage(stage));
+    timeline.appendChild(item);
+  }
+}
+
+function renderArtifacts() {
+  const list = el("artifact-list");
+  list.innerHTML = "";
+  const artifacts = state.metadata.artifacts || [];
+  if (!artifacts.length) {
+    list.innerHTML = '<div class="empty">No readable artifacts yet.</div>';
+    return;
+  }
+  for (const artifact of artifacts) {
+    const button = document.createElement("button");
+    button.className = `list-button ${artifact.name === state.selectedArtifact ? "active" : ""}`;
+    button.innerHTML = `${artifact.name}<div class="meta">${artifact.size_bytes} bytes</div>`;
+    button.addEventListener("click", () => readArtifact(artifact.name));
+    list.appendChild(button);
+  }
+}
+
+async function readArtifact(name) {
+  if (!state.selectedRunId) return;
+  try {
+    const artifact = await api("read_artifact", {
+      path_params: { run_id: state.selectedRunId, artifact: name },
+    });
+    state.selectedArtifact = name;
+    state.selectedContent = artifact.content;
+    el("artifact-title").textContent = name;
+    el("artifact-content").value = typeof artifact.content === "string"
+      ? artifact.content
+      : JSON.stringify(artifact.content, null, 2);
+    el("artifact-content").readOnly = !editableArtifacts.has(name);
+    el("save-artifact").disabled = !editableArtifacts.has(name);
+    el("format-json").disabled = typeof artifact.content === "string" && !name.endsWith(".json");
+    renderArtifacts();
+  } catch (error) {
+    log(error.message);
+  }
+}
+
+function clearArtifact() {
+  state.selectedArtifact = null;
+  state.selectedContent = null;
+  el("artifact-title").textContent = "No artifact selected";
+  el("artifact-content").value = "";
+  el("artifact-content").readOnly = true;
+  el("save-artifact").disabled = true;
+}
+
+function renderDownloads() {
+  const list = el("download-list");
+  const files = state.metadata.downloadables || [];
+  list.innerHTML = "";
+  if (!files.length) {
+    list.innerHTML = '<div class="empty">No downloadable STEP/STL/preview/model files yet.</div>';
+    return;
+  }
+  for (const file of files) {
+    const link = document.createElement("a");
+    link.href = `/api/downloads/${encodeURIComponent(state.selectedRunId)}/${encodeURIComponent(file.name)}`;
+    link.className = file.name === "model.step" ? "primary-artifact" : "";
+    link.innerHTML = `<span>${file.name}</span><span class="meta">${file.size_bytes} bytes</span>`;
+    list.appendChild(link);
+  }
+}
+
+function renderPreview() {
+  const hasStl = (state.metadata.downloadables || []).some((item) => item.name === "model.stl");
+  if (!hasStl) {
+    el("preview-frame").removeAttribute("src");
+    return;
+  }
+  const file = encodeURIComponent(`/api/downloads/${encodeURIComponent(state.selectedRunId)}/model.stl`);
+  el("preview-frame").src = `/index.html?file=${file}`;
+}
+
+function renderEmptySelection() {
+  state.metadata = null;
+  el("status-run").textContent = "-";
+  el("status-state").textContent = "-";
+  el("status-stage").textContent = "-";
+  el("status-updated").textContent = "-";
+  el("timeline").innerHTML = "";
+  el("artifact-list").innerHTML = '<div class="empty">Select or create a run.</div>';
+  el("download-list").innerHTML = '<div class="empty">Select or create a run.</div>';
+  clearArtifact();
+}
+
+async function createRun() {
+  const prompt = el("prompt").value.trim();
+  const runId = slug(el("run-id").value || prompt);
+  const root = el("run-root").value;
+  if (!prompt) {
+    log("Prompt is required.");
+    return;
+  }
+  try {
+    await api("create_run", {
+      path_params: { run_id: runId },
+      body: { prompt },
+      query: { root },
+    });
+    log(`Created ${runId}.`);
+    state.selectedRunId = runId;
+    await loadRuns(false);
+    await selectRun(runId);
+  } catch (error) {
+    log(error.message);
+  }
+}
+
+async function runStage(stage) {
+  if (!state.selectedRunId) return;
+  try {
+    log(`Running ${stage} for ${state.selectedRunId}.`);
+    await api("run_stage", {
+      path_params: { run_id: state.selectedRunId, stage },
+      body: {},
+    });
+    await loadRuns(false);
+    await reloadRun();
+    log(`Finished ${stage}.`);
+  } catch (error) {
+    log(error.message);
+  }
+}
+
+async function runFullPipeline() {
+  if (!state.selectedRunId) return;
+  try {
+    log(`Running full text pipeline for ${state.selectedRunId}.`);
+    await api("run_stage", {
+      path_params: { run_id: state.selectedRunId, stage: "text_pipeline" },
+      body: {},
+    });
+    await loadRuns(false);
+    await reloadRun();
+    log("Finished full text pipeline.");
+  } catch (error) {
+    log(error.message);
+  }
+}
+
+async function saveArtifact() {
+  if (!state.selectedRunId || !state.selectedArtifact) return;
+  if (!editableArtifacts.has(state.selectedArtifact)) return;
+  try {
+    const content = JSON.parse(el("artifact-content").value);
+    await api("write_artifact", {
+      path_params: { run_id: state.selectedRunId, artifact: state.selectedArtifact },
+      body: { content },
+    });
+    log(`Saved ${state.selectedArtifact}.`);
+    await reloadRun();
+  } catch (error) {
+    log(error.message);
+  }
+}
+
+function formatJson() {
+  try {
+    el("artifact-content").value = JSON.stringify(JSON.parse(el("artifact-content").value), null, 2);
+  } catch (error) {
+    log(error.message);
+  }
+}
+
+async function recordGate() {
+  if (!state.selectedRunId) return;
+  const stage = el("gate-stage").value;
+  const action = el("gate-action").value;
+  const reason = el("gate-reason").value.trim();
+  try {
+    await api("record_gate_decision", {
+      path_params: { run_id: state.selectedRunId },
+      body: { stage, action, reason },
+    });
+    log(`Recorded ${action} for ${stage}.`);
+    await reloadRun();
+  } catch (error) {
+    log(error.message);
+  }
+}
+
+el("prompt").addEventListener("input", updateRunIdSuggestion);
+el("create-run").addEventListener("click", createRun);
+el("refresh-runs").addEventListener("click", () => loadRuns(false));
+el("reload-run").addEventListener("click", reloadRun);
+el("run-full").addEventListener("click", runFullPipeline);
+el("save-artifact").addEventListener("click", saveArtifact);
+el("format-json").addEventListener("click", formatJson);
+el("record-gate").addEventListener("click", recordGate);
+
+clearArtifact();
+loadRuns();
+</script>
+</body>
+</html>

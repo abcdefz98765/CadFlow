@@ -1,4 +1,30 @@
-# Web STL 查看器
+# Web Workflow Console 和 STL 查看器
+
+## Workflow Console
+
+本地 workflow cockpit 位于 `workflow-console.html`，通过 Python stdlib-only bridge 调用现有 file-backed backend。
+
+```bash
+PYTHONPATH=src python -m ai_native_cad.workflow_console.server
+```
+
+Windows PowerShell:
+
+```powershell
+$env:PYTHONPATH='src'; python -m ai_native_cad.workflow_console.server
+```
+
+打开：
+
+```text
+http://127.0.0.1:8765/workflow-console.html
+```
+
+当前支持 runs list/select、prompt-only create run、运行 Requirement/Planning/Part Modeling/full text pipeline、查看 artifact、编辑允许的 JSON handoff artifact、记录 gate decision、列出 STEP/STL/preview/model.py 下载项，并在有 `model.stl` 时嵌入 STL 预览。
+
+它不是浏览器 CAD 编辑器；workflow state 仍以 artifact files 和 `logs/runtime.json` 为准。
+
+## Web STL 查看器
 
 轻量级 three.js 单零件 STL 预览器，无需 FreeCAD 安装。
 

@@ -87,13 +87,16 @@ Backend foundation complete; HTTP server and frontend remain future work.
 
 ## M1.11 / v0.4a: Web Workflow Console UI And Viewer
 
-Next.
+Initial local UI slice complete; follow-up polish and review/output stage expansion remain.
 
 - Build a workflow cockpit with a stage timeline for Requirement, Planning, Part Modeling, Review, and Outputs.
 - Let users inspect and confirm `requirement.json`, `planning_artifact.json`, `input_ir.json`, reports, and traces before advancing.
 - Reuse and evolve `web-viewer` for current-run STL preview when useful; STEP remains the primary CAD artifact.
 - Surface verified/unverified inspection state, warnings, errors, and rework decisions.
 - Do not implement browser-side CAD editing, general assembly solving, or direct prompt-to-CAD bypasses around artifacts.
+- Add `web-viewer/workflow-console.html` as the first operational console screen.
+- Add a stdlib-only local bridge, `ai_native_cad.workflow_console.server`, that serves static UI files, dispatches the existing route contract, and serves only whitelisted downloadable artifacts.
+- Support listing/selecting runs, creating prompt-only runs, running supported deterministic stages by id, reading artifacts, editing allowed JSON handoff artifacts, recording gate decisions, listing downloadables, and opening the existing STL viewer for `model.stl`.
 
 ## M1.12 / v0.5: LLM Agent Adapter
 
