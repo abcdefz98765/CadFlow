@@ -99,6 +99,7 @@ The current scaffold lives under `src/ai_native_cad/workflow_console/`:
 
 - `StageRunner`: deterministic local stage execution and artifact persistence.
 - `WorkflowConsoleBackend`: local run listing, path-safe run-id resolution, artifact metadata/content reads, status derivation, and downloadable-file discovery.
+- `routes.py`: dependency-free future route contract specs, response envelopes, and backend exception to HTTP-like status mapping.
 
 `StageRunner` records local stage history in the existing `logs/runtime.json` artifact under `workflow_console.stages`. This keeps stage status file-based without introducing a database or separate state store.
 
@@ -107,6 +108,8 @@ The Python facade can run supported stages from an existing run directory by rea
 It can also create a run without executing stages, writing only `prompt.txt` and local runtime status so a future UI can advance the workflow stage by stage.
 
 For future HTTP routes, `WorkflowConsoleBackend` also exposes run-id based operations that create or resolve runs only under configured local run roots, currently `outputs/` and `runs/`. These methods reject absolute paths, traversal segments, path separators, duplicate create targets, and unconfigured run roots so routes do not need to accept arbitrary filesystem paths.
+
+The route contract scaffold defines future method/path semantics without importing a web framework or starting an HTTP server. Future FastAPI or other HTTP adapters must wrap the by-id backend methods only, such as `create_run_by_id`, `run_stage_by_id`, `read_artifact_by_id`, `write_artifact_by_id`, and `record_gate_decision_by_id`; direct local `run_dir` operations remain internal Python APIs.
 
 Readable artifacts remain limited to `prompt.txt`, `requirement.json`, `planning_artifact.json`, `input_ir.json`, `report.json`, `report.md`, `agent_trace.json`, and `logs/runtime.json`. Downloadable discovery remains limited to `model.step`, `model.stl`, `preview.png`, and `model.py`.
 
@@ -126,7 +129,7 @@ The local backend should expose only workflow operations:
 
 The backend should not change benchmark contracts, add new CAD generator behavior, or make browser state authoritative.
 
-The scaffold does not yet provide HTTP routes, authentication, a database, or a frontend. A FastAPI app can be layered over the Python facade later if the dependency is intentionally added.
+The scaffold does not yet provide a running HTTP server, authentication, a database, or a frontend. A FastAPI app can be layered over the Python facade later if the dependency is intentionally added.
 
 ## v0.4a UI Surface
 

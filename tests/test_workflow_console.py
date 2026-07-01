@@ -9,10 +9,15 @@ from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
 from ai_native_cad.workflow_console import (
     EDITABLE_ARTIFACTS,
     GATE_DECISION_ACTIONS,
+    ROUTE_SPECS,
+    ROUTE_SPECS_BY_NAME,
     STATUS_CREATED,
     WORKFLOW_STATUS_VALUES,
     StageRunner,
     WorkflowConsoleBackend,
+    error_response,
+    status_code_for_exception,
+    success_response,
 )
 
 
@@ -37,6 +42,80 @@ def test_stage_runner_runs_requirement_and_planning_to_artifacts(tmp_path):
     assert artifacts["planning_artifact.json"]["artifact_type"] == "planning"
     assert [stage["stage"] for stage in runtime["stages"]] == ["requirement", "planning"]
     assert runtime["latest_stage"]["stage"] == "planning"
+
+
+def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
+    expected_operations = {
+        "create_run_by_id",
+        "list_runs",
+        "read_run_metadata_by_id",
+        "run_stage_by_id",
+        "list_artifacts_by_id",
+        "read_artifact_by_id",
+        "write_artifact_by_id",
+        "list_downloadables_by_id",
+        "record_gate_decision_by_id",
+    }
+
+    assert {spec.backend_operation for spec in ROUTE_SPECS} == expected_operations
+    assert all(
+        spec.backend_operation.endswith("_by_id") or spec.backend_operation == "list_runs"
+        for spec in ROUTE_SPECS
+    )
+    assert "run_dir" not in {spec.backend_operation for spec in ROUTE_SPECS}
+
+
+def test_workflow_console_route_paths_do_not_accept_filesystem_paths():
+    forbidden_placeholders = {"{path}", "{file_path}", "{run_dir}", "{local_path}", "{filesystem_path}"}
+
+    for spec in ROUTE_SPECS:
+        assert not any(placeholder in spec.path for placeholder in forbidden_placeholders)
+        assert "..." not in spec.path
+        assert "*" not in spec.path
+        assert "\\" not in spec.path
+
+
+def test_workflow_console_error_mapping_uses_http_like_status_codes():
+    assert status_code_for_exception(ValueError("bad stage")) == 400
+    assert status_code_for_exception(FileNotFoundError("missing run")) == 404
+    assert status_code_for_exception(FileExistsError("duplicate run")) == 409
+    assert status_code_for_exception(RuntimeError("unexpected")) == 500
+
+
+def test_workflow_console_response_envelopes_are_stable():
+    assert success_response({"run_id": "console_run"}, status_code=201) == {
+        "ok": True,
+        "status_code": 201,
+        "data": {"run_id": "console_run"},
+        "error": None,
+    }
+
+    assert error_response(ValueError("unsupported workflow console stage: shell")) == {
+        "ok": False,
+        "status_code": 400,
+        "data": None,
+        "error": {
+            "type": "bad_request",
+            "message": "unsupported workflow console stage: shell",
+        },
+    }
+
+
+def test_workflow_console_route_contract_includes_edit_and_gate_routes():
+    assert ROUTE_SPECS_BY_NAME["write_artifact"].method == "PUT"
+    assert ROUTE_SPECS_BY_NAME["write_artifact"].backend_operation == "write_artifact_by_id"
+    assert ROUTE_SPECS_BY_NAME["record_gate_decision"].method == "POST"
+    assert ROUTE_SPECS_BY_NAME["record_gate_decision"].backend_operation == "record_gate_decision_by_id"
+
+
+def test_workflow_console_internal_error_shape_does_not_leak_local_paths():
+    response = error_response(RuntimeError(r"failed under D:\MyCode\llm2cad\outputs\secret_run"))
+
+    assert response["status_code"] == 500
+    assert response["error"]["type"] == "internal_error"
+    assert response["error"]["message"] == "internal workflow console error"
+    assert "D:\\MyCode" not in response["error"]["message"]
+    assert "secret_run" not in response["error"]["message"]
 
 
 def test_backend_reads_stage_status_from_runtime_without_report(tmp_path):
