@@ -7,10 +7,16 @@ Python package: `ai_native_cad`
 CadFlow is natural-language first for users, but structured-workflow first internally.
 Users describe CAD intent in plain language. CadFlow converts that into auditable requirement, planning, CAD IR, generation, validation, repair, and report artifacts.
 
+The product direction is iterative natural-language CAD workflow, not one-shot
+Text-to-CAD. Users may start with incomplete intent, review explicit
+assumptions, revise a generated or imported model later, and compare parent and
+child runs through traceable artifacts.
+
 本项目不是宏大的 AI Engineering OS，也不是一次性 Prompt to STL。短期目标是保留一个能跑的自然语言建模 MVP，同时把工程结构调整为可追踪、可替换后端、可逐步引入知识和策略的 CAD workflow。
 
 ```text
 input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
+      -> feedback / revision -> child run -> comparison
 ```
 
 Core architecture:
@@ -62,6 +68,21 @@ input_ir.json
   -> report + agent_trace
 ```
 
+Future workflow decisions are richer than only proceed/return:
+
+- `proceed`
+- `proceed_with_assumptions`
+- `ask_user`
+- `return_to_requirement`
+- `return_to_planning`
+- `revise_existing_model`
+
+For L0 Playground and early L1 Maker workflows, CadFlow may proceed with
+explicit assumptions when the risk is low. Those assumptions must be written into
+artifacts and shown to the user. For L2/L3/L4 workflows, missing engineering
+critical fields such as material, loads, tolerances, fit, safety constraints, or
+certification requirements must block or require focused confirmation.
+
 装配阶段也按闭环推进：
 
 ```text
@@ -91,6 +112,7 @@ It does not currently mean:
 - **Backend Agnostic**：workflow 层不直接绑定 CadQuery、FreeCAD 或未来 build123d/JSCAD 后端。
 - **Engineering over Geometry**：先表达工程意图、关键尺寸、约束和检查，再生成几何。
 - **Traceable by Default**：默认输出完整项目记录，方便复核和迭代。
+- **Iterative by Default**：支持 first draft、用户反馈、修订计划、patch、child run、old/new comparison。
 - **Skill Oriented**：把 requirement、planning、part modeling、assembly、review 收束为少量职责清晰的 skill。
 - **Knowledge Ready / Policy Ready**：`skills/<step>/knowledge/` 放步骤内知识，顶层 `knowledge/` 只做跨 skill 索引，`policies/` 放全局策略和等级定义。
 
@@ -100,6 +122,8 @@ CadFlow is an AI-assisted natural-language CAD workflow system, a workflow-first
 
 - The natural-language parser is template-backed and deterministic in the MVP.
 - Unknown or underspecified requests may fall back to built-in part templates.
+- Revision workflow, model intake, and external CAD-file editing are documented
+  product directions; full revision execution is not implemented yet.
 - Current generated models are suitable for exploration and review, not production release.
 - L0 Playground is the only fully supported check level today.
 - L1 Maker currently provides a report scaffold, not complete printability validation.
@@ -286,6 +310,12 @@ CadFlow separates agent reasoning from deterministic CAD execution:
 
 Agent output must become validated structured contracts before the CAD Agent Loop executes. The execution layer should not rely on unconstrained free-form LLM behavior or direct arbitrary CadQuery code produced from user text.
 
+The AgentAdapter direction includes iterative CAD operations: interpreting
+ambiguous first prompts, proposing assumptions, asking focused questions,
+parsing revision requests, creating revision plans, proposing constrained
+patches, and explaining old/new comparisons. CadFlow still owns validation,
+normalization, CAD execution, and artifact contracts.
+
 ## Web Workflow Console
 
 The Web UI is a local workflow cockpit for running and visualizing CadFlow. The backend and first static console now exist under `ai_native_cad.workflow_console` and `web-viewer/`:
@@ -301,6 +331,12 @@ The Web UI is a local workflow cockpit for running and visualizing CadFlow. The 
 - show path-free gate decision history in the workflow timeline
 - edit only `requirement.json`, `planning_artifact.json`, and `input_ir.json`
 - record approve/reject/return/override gate decisions in `logs/runtime.json`
+
+Future Web Console stages should add iterative workflow support: show
+assumptions and risky missing fields, ask focused clarification questions,
+select a previous run, submit a revision prompt, display the revision plan and
+patch diff, compare old/new outputs, show lineage, and download parent/child
+artifacts.
 
 Run the local console with the stdlib-only bridge:
 
@@ -350,6 +386,9 @@ CadFlow/
       agent-adapter.md
       web-workflow-console.md
       workflow-contract.md
+      workflow-decisions.md
+      revision-workflow.md
+      model-intake.md
     product/
       positioning.md
       roadmap.md
@@ -432,6 +471,9 @@ CadFlow/
 - `docs/architecture/agent-adapter.md`
 - `docs/architecture/web-workflow-console.md`
 - `docs/architecture/workflow-contract.md`
+- `docs/architecture/workflow-decisions.md`
+- `docs/architecture/revision-workflow.md`
+- `docs/architecture/model-intake.md`
 - `docs/product/roadmap.md`
 - `docs/architecture.md`
 - `docs/usage.md`

@@ -17,22 +17,49 @@ CadFlow's roadmap keeps the product boundary clear:
 
 ## v0.4
 
-- Web Workflow Console.
-- Local workflow execution.
-- Artifact viewer.
-- Trace viewer.
-- Report viewer.
+- Web Workflow Console baseline.
+- Run existing workflow.
+- List runs.
+- Show artifacts.
+- Show report and trace.
 
 v0.4 is not a Web CAD editor. It is a Web Workflow Console for running and inspecting the existing CadFlow workflow.
 
 ## v0.5
 
-- `LLMApiAgentAdapter`.
-- Structured natural-language understanding.
-- Requirement/planning JSON generation.
-- User confirmation flow.
+- LLM-first UX clarification.
+- AgentAdapter design planning.
+- Assumptions and `proceed_with_assumptions` workflow.
+- Focused confirmation flow documentation.
+- Keep provider integration staged behind validated structured contracts.
 
 ## v0.6
+
+- Revision Workflow for CadFlow-native runs.
+- `revision_request.json`.
+- `change_intent.json`.
+- `revision_plan.json`.
+- CAD IR patch.
+- Child run lineage.
+- Old/new comparison.
+
+## v0.7
+
+- Web revision UI.
+- Select previous run.
+- Submit revision prompt.
+- Show patch diff.
+- Show comparison.
+- Show lineage.
+
+## v0.8
+
+- Model Intake for external files.
+- STEP as reference geometry.
+- STL/OBJ as mesh reference.
+- Editability classification.
+
+## v0.9
 
 - Engineering CAD IR v2.
 - Manufacturing context.
@@ -42,15 +69,10 @@ v0.4 is not a Web CAD editor. It is a Web Workflow Console for running and inspe
 - Design intent.
 - Validation targets.
 
-## v0.7
+## v1.0
 
-- Assembly workflow refinement.
-- Part decomposition.
-- Assembly planning.
-- Basic placement validation.
-
-## v0.8
-
-- Improved preview / visualization.
-- STL or GLB browser preview.
-- STEP remains primary artifact.
+- Integrated natural-language create-and-revise CAD workflow.
+- Web Workflow Console supports create, review, revise, compare, and lineage
+  across artifact-backed runs.
+- STEP remains the primary CAD artifact; mesh outputs remain derived preview or
+  manufacturing aids.

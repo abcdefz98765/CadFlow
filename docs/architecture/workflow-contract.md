@@ -24,6 +24,11 @@ runs/<run_id>/ or outputs/<part_name>/
 
 Some files may be absent when a workflow gate blocks before CAD IR or model generation. For example, a requirement or planning block should still write `prompt.txt`, `requirement.json`, `report.json`, `report.md`, and `agent_trace.json`, but should not fabricate `input_ir.json`.
 
+Future workflow gates may also produce `proceed_with_assumptions`, `ask_user`,
+`return_to_requirement`, `return_to_planning`, or `revise_existing_model`
+decisions. When a run proceeds with assumptions, the assumptions must be present
+in structured artifacts and visible in reports or UI summaries.
+
 ## Artifact Roles
 
 | Artifact | Role | Audience |
@@ -40,6 +45,50 @@ Some files may be absent when a workflow gate blocks before CAD IR or model gene
 | `report.md` | Human-readable review output | User-facing |
 | `agent_trace.json` | Internal workflow/debug trace | Debug-only, advanced developer-facing |
 | `logs/runtime.json` | Runtime details, timings, and local StageRunner status history | Debug-only |
+
+## Revision Run Contract
+
+Revisions create a new child run instead of overwriting the parent run:
+
+```text
+runs/<child_run_id>/
+  parent_run_id.txt
+  revision_request.json
+  change_intent.json
+  revision_plan.json
+  patch.json
+  requirement.json
+  planning_artifact.json
+  input_ir.json
+  model.py
+  model.step
+  model.stl
+  report.json
+  report.md
+  comparison.json
+  revision_report.md
+  agent_trace.json
+  lineage.json
+  logs/runtime.json
+```
+
+Some revision artifacts may be absent until the revision workflow is
+implemented. Their intended roles are:
+
+| Artifact | Role | Audience |
+| --- | --- | --- |
+| `parent_run_id.txt` | Parent run pointer | Developer-facing |
+| `revision_request.json` | Original revision request and parent context | Developer-facing, advanced user-facing |
+| `change_intent.json` | Parsed change intent | Developer-facing |
+| `revision_plan.json` | Proposed edit strategy and patch targets | Developer-facing, advanced user-facing |
+| `patch.json` | Structured before/after changes | Developer-facing |
+| `comparison.json` | Machine-readable old/new comparison | Developer-facing |
+| `revision_report.md` | Human-readable revision summary | User-facing |
+| `lineage.json` | Parent/child run relationship | Developer-facing, UI-facing |
+
+Patches should record before/after values where possible. Comparison should
+summarize old vs new dimensions, features, validation status, and changed
+artifacts.
 
 ## Required Meaning
 
@@ -58,6 +107,8 @@ The future Web Workflow Console should read this contract directly:
 - User review from `report.md`.
 - Workflow inspection from `requirement.json`, `planning_artifact.json`, `input_ir.json`, and `agent_trace.json`.
 - CAD downloads from `model.step` and derived formats.
+- Revision review from `revision_plan.json`, `patch.json`,
+  `comparison.json`, `revision_report.md`, and `lineage.json` when present.
 
 The v0.4a Python backend scaffold in `ai_native_cad.workflow_console` already follows this rule: it lists run directories, reads only whitelisted artifact files, derives status from existing report/trace artifacts, and reports downloadable files without creating a second state store.
 
@@ -72,3 +123,12 @@ User gate decisions for future staged UI workflows are recorded in the same runt
 Future UI edits are limited to structured workflow handoff artifacts: `requirement.json`, `planning_artifact.json`, and `input_ir.json`. The backend validates these JSON objects before writing and records edit history in `logs/runtime.json`; generated reports, traces, downloads, and prompts are not editable through this boundary.
 
 The Web Console may cache or index metadata, but it should not become the authoritative workflow state store in v0.4.
+
+## Immutability and Lineage
+
+- Parent runs are immutable workflow records.
+- Revisions create child runs.
+- Child runs record `parent_run_id.txt` and `lineage.json`.
+- Comparison artifacts identify the parent and child artifacts used.
+- User-requested changes should be distinguishable from validation repair
+  changes.

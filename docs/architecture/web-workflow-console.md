@@ -4,6 +4,11 @@ The Web Workflow Console is the future user-facing cockpit for running and revie
 
 It is not a browser CAD editor.
 
+The long-term UI should support iterative natural-language CAD workflow: create
+a first model from a prompt, show assumptions or missing risky fields, ask
+focused questions, revise a previous run, display patch diffs, compare old/new
+outputs, and show lineage.
+
 ## The Web UI Is
 
 - Workflow runner.
@@ -12,6 +17,9 @@ It is not a browser CAD editor.
 - Artifact viewer.
 - Report viewer.
 - Agent trace viewer.
+- Assumption and missing-field review surface.
+- Previous-run selector for revision workflows.
+- Revision plan, patch diff, comparison, and lineage viewer.
 - Optional STL/preview viewer later.
 
 ## The Web UI Is Not
@@ -36,9 +44,11 @@ It is not a browser CAD editor.
 
 ### v0.4b
 
-- Add `LLMApiAgentAdapter`.
-- Natural language to structured requirement/planning.
-- User confirmation for missing or risky fields.
+- Clarify LLM-first UX without adding a provider dependency.
+- Natural language to structured requirement/planning through the existing
+  local/mock adapter boundary.
+- Assumptions and `proceed_with_assumptions` workflow design.
+- User confirmation design for missing or risky fields.
 
 ### v0.4c
 
@@ -46,6 +56,28 @@ It is not a browser CAD editor.
 - Follow-up questions.
 - Confirm-before-generation.
 - Compare attempts/candidates.
+- Keep real provider integration behind future validated `AgentAdapter`
+  contracts.
+
+## Future Iterative Scope
+
+The Web Console should eventually support:
+
+- Create a new model from a prompt.
+- Show assumptions made under `proceed_with_assumptions`.
+- Show missing or risky fields by check level.
+- Ask focused clarification questions.
+- Select a previous run.
+- Submit a revision prompt.
+- Show Model Intake classification and editability warnings.
+- Show revision plan.
+- Show patch diff.
+- Show old/new comparison.
+- Show parent/child lineage.
+- Download parent and child outputs.
+
+This is staged roadmap work. The current console remains a local artifact-backed
+workflow UI and does not yet implement the full revision experience.
 
 ## State Model
 
@@ -65,6 +97,10 @@ report.md
 agent_trace.json
 logs/runtime.json
 ```
+
+Revision workflows should add child-run artifacts from
+`docs/architecture/revision-workflow.md` when implemented. The browser should
+read those artifacts; it should not maintain a separate revision state store.
 
 ## StageRunner Boundary
 
@@ -118,6 +154,11 @@ Editable artifacts are narrower than readable artifacts. The backend can write o
 The backend exposes shared status constants for the current local status vocabulary: `created`, `completed`, `blocked`, `success`, `failed`, `running_or_incomplete`, and `unknown`.
 
 Gate decisions are also file-backed. The backend can record `approve`, `reject`, `return`, and `override` decisions for supported workflow stages by appending to `logs/runtime.json` under `workflow_console.gate_decisions`; no separate decision store or new readable artifact has been added. Public run metadata exposes only a gate summary (`stage`, `action`, `reason`, and `timestamp`), not arbitrary decision payloads.
+
+Future gate actions should expand to include `proceed_with_assumptions`,
+`ask_user`, `return_to_requirement`, `return_to_planning`, and
+`revise_existing_model` once the backend supports the richer workflow decision
+contract.
 
 The local backend should expose only workflow operations:
 
