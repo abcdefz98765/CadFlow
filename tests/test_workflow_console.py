@@ -15,6 +15,7 @@ from ai_native_cad.workflow_console import (
     WORKFLOW_STATUS_VALUES,
     StageRunner,
     WorkflowConsoleBackend,
+    dispatch_route,
     error_response,
     status_code_for_exception,
     success_response,
@@ -116,6 +117,93 @@ def test_workflow_console_internal_error_shape_does_not_leak_local_paths():
     assert response["error"]["message"] == "internal workflow console error"
     assert "D:\\MyCode" not in response["error"]["message"]
     assert "secret_run" not in response["error"]["message"]
+
+
+def test_workflow_console_dispatch_creates_and_reads_run_by_id(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    created = dispatch_route(
+        backend,
+        "create_run",
+        path_params={"run_id": "dispatch_run"},
+        body={"prompt": "Make a spacer."},
+        query={"root": "runs"},
+    )
+    read = dispatch_route(
+        backend,
+        "read_run_metadata",
+        path_params={"run_id": "dispatch_run"},
+        query={"root": "runs"},
+    )
+
+    assert created["ok"] is True
+    assert created["status_code"] == 201
+    assert created["data"]["run"]["run_id"] == "dispatch_run"
+    assert read["ok"] is True
+    assert read["data"]["run_id"] == "dispatch_run"
+    assert Path(read["data"]["run_dir"]) == (tmp_path / "runs" / "dispatch_run").resolve()
+
+
+def test_workflow_console_dispatch_writes_artifact_and_records_gate_decision(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "dispatch_edit"}, body={"prompt": "Make a spacer."})
+    requirement = {
+        "part_type": "spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
+        "features": {},
+    }
+
+    written = dispatch_route(
+        backend,
+        "write_artifact",
+        path_params={"run_id": "dispatch_edit", "artifact": "requirement.json"},
+        body={"content": requirement},
+    )
+    decision = dispatch_route(
+        backend,
+        "record_gate_decision",
+        path_params={"run_id": "dispatch_edit"},
+        body={"stage": "requirement", "action": "approve", "reason": "Looks complete."},
+    )
+    runtime = backend.read_artifact_by_id("dispatch_edit", "logs/runtime.json")["content"]["workflow_console"]
+
+    assert written["ok"] is True
+    assert written["data"]["artifact"]["content"]["part_type"] == "spacer"
+    assert decision["ok"] is True
+    assert decision["status_code"] == 201
+    assert runtime["artifact_edit_count"] == 1
+    assert runtime["gate_decision_count"] == 1
+
+
+def test_workflow_console_dispatch_validation_errors_return_envelopes(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    missing_prompt = dispatch_route(backend, "create_run", path_params={"run_id": "bad_run"}, body={})
+    unknown_route = dispatch_route(backend, "delete_run", path_params={"run_id": "bad_run"})
+    bad_body = dispatch_route(backend, "create_run", path_params={"run_id": "bad_run"}, body=["not", "a", "dict"])
+
+    assert missing_prompt["status_code"] == 400
+    assert missing_prompt["error"]["type"] == "bad_request"
+    assert "prompt" in missing_prompt["error"]["message"]
+    assert unknown_route["status_code"] == 400
+    assert unknown_route["error"]["message"] == "unknown workflow console route: delete_run"
+    assert bad_body["status_code"] == 400
+    assert "body must be a dictionary" in bad_body["error"]["message"]
+
+
+def test_workflow_console_dispatch_does_not_expose_unlisted_backend_methods(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    response = dispatch_route(
+        backend,
+        "read_artifact",
+        path_params={"run_id": "../outside", "artifact": "prompt.txt"},
+    )
+
+    assert response["status_code"] == 400
+    assert response["error"]["type"] == "bad_request"
+    assert "run id" in response["error"]["message"]
 
 
 def test_backend_reads_stage_status_from_runtime_without_report(tmp_path):

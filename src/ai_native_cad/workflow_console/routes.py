@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
+
+from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,29 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
 ROUTE_SPECS_BY_NAME = {spec.name: spec for spec in ROUTE_SPECS}
 
 
+def dispatch_route(
+    backend: WorkflowConsoleBackend,
+    route_name: str,
+    path_params: dict[str, Any] | None = None,
+    body: dict[str, Any] | None = None,
+    query: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Invoke a route contract by name and return a stable response envelope."""
+    try:
+        if route_name not in ROUTE_SPECS_BY_NAME:
+            raise ValueError(f"unknown workflow console route: {route_name}")
+        handler = _ROUTE_HANDLERS[route_name]
+        data = handler(
+            backend,
+            _require_dict(path_params, "path_params"),
+            _require_dict(body, "body"),
+            _require_dict(query, "query"),
+        )
+        return success_response(data, status_code=_success_status_code(route_name))
+    except Exception as exc:
+        return error_response(exc)
+
+
 def success_response(data: Any, status_code: int = 200) -> dict[str, Any]:
     """Return a stable success envelope for future route adapters."""
     return {
@@ -135,3 +160,149 @@ def _public_error_message(exc: Exception, status_code: int) -> str:
     if status_code == 500:
         return "internal workflow console error"
     return str(exc)
+
+
+def _create_run(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.create_run_by_id(
+        _require_value(path_params, "run_id"),
+        _require_value(body, "prompt"),
+        root=query.get("root", "outputs"),
+    )
+
+
+def _list_runs(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return backend.list_runs()
+
+
+def _read_run_metadata(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.read_run_metadata_by_id(_require_value(path_params, "run_id"), root=query.get("root"))
+
+
+def _run_stage(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.run_stage_by_id(
+        _require_value(path_params, "run_id"),
+        _require_value(path_params, "stage"),
+        prompt=body.get("prompt"),
+        context=body.get("context"),
+        root=query.get("root"),
+    )
+
+
+def _list_artifacts(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return backend.list_artifacts_by_id(_require_value(path_params, "run_id"), root=query.get("root"))
+
+
+def _read_artifact(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.read_artifact_by_id(
+        _require_value(path_params, "run_id"),
+        _require_value(path_params, "artifact"),
+        root=query.get("root"),
+    )
+
+
+def _write_artifact(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.write_artifact_by_id(
+        _require_value(path_params, "run_id"),
+        _require_value(path_params, "artifact"),
+        _require_value(body, "content"),
+        root=query.get("root"),
+    )
+
+
+def _list_downloadables(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return backend.list_downloadables_by_id(_require_value(path_params, "run_id"), root=query.get("root"))
+
+
+def _record_gate_decision(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.record_gate_decision_by_id(
+        _require_value(path_params, "run_id"),
+        stage=_require_value(body, "stage"),
+        action=_require_value(body, "action"),
+        reason=body.get("reason"),
+        payload=body.get("payload"),
+        root=query.get("root"),
+    )
+
+
+RouteHandler = Callable[
+    [WorkflowConsoleBackend, dict[str, Any], dict[str, Any], dict[str, Any]],
+    Any,
+]
+
+_ROUTE_HANDLERS: dict[str, RouteHandler] = {
+    "create_run": _create_run,
+    "list_runs": _list_runs,
+    "read_run_metadata": _read_run_metadata,
+    "run_stage": _run_stage,
+    "list_artifacts": _list_artifacts,
+    "read_artifact": _read_artifact,
+    "write_artifact": _write_artifact,
+    "list_downloadables": _list_downloadables,
+    "record_gate_decision": _record_gate_decision,
+}
+
+
+def _success_status_code(route_name: str) -> int:
+    if route_name in {"create_run", "record_gate_decision"}:
+        return 201
+    return 200
+
+
+def _require_dict(value: dict[str, Any] | None, label: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"workflow console route {label} must be a dictionary")
+    return value
+
+
+def _require_value(values: dict[str, Any], key: str) -> Any:
+    value = values.get(key)
+    if value is None:
+        raise ValueError(f"workflow console route is missing required value: {key}")
+    return value

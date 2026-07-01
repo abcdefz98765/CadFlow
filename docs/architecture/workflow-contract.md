@@ -63,7 +63,7 @@ The v0.4a Python backend scaffold in `ai_native_cad.workflow_console` already fo
 
 For future HTTP routes, the backend has path-safe run-id operations that create or resolve a single directory name only under configured run roots, currently `outputs/` and `runs/`. These operations reject absolute paths, traversal, path separators, duplicate create targets, and unconfigured roots. Existing artifact files remain the source of truth; no database or separate state store has been introduced.
 
-The backend also includes a dependency-free future route contract scaffold. It records intended route names, methods, path templates, by-id backend operation mappings, stable success/error envelopes, and HTTP-like exception mapping without adding an HTTP server or framework dependency. Future route adapters must wrap only the by-id methods and must not expose direct local path APIs.
+The backend also includes a dependency-free future route contract scaffold. It records intended route names, methods, path templates, by-id backend operation mappings, stable success/error envelopes, HTTP-like exception mapping, and an in-process dispatcher for route-name based tests without adding an HTTP server or framework dependency. Future route adapters must wrap only the by-id methods and must not expose direct local path APIs.
 
 For runs that stop before `report.json` exists, the backend may derive the latest local stage status from `logs/runtime.json` when `workflow_console.latest_stage` is present.
 

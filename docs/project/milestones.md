@@ -76,7 +76,7 @@ In progress.
 - Define `StageRunner` as the local execution unit: read upstream artifacts, run deterministic Python stages, write downstream artifacts, and record stage history in `logs/runtime.json`.
 - Provide run creation, artifact metadata/content reads, deterministic stage execution from existing run artifacts, status derivation, and downloadable file discovery at the Python API layer.
 - Provide path-safe run-id operations for future HTTP routes, creating/resolving only under configured `outputs/` and `runs/` roots while rejecting absolute paths, traversal, path separators, duplicate create targets, and unconfigured roots.
-- Define a dependency-free future route contract scaffold that maps method/path semantics to by-id backend operations and standardizes success/error envelopes without adding an HTTP server or framework.
+- Define a dependency-free future route contract scaffold that maps method/path semantics to by-id backend operations, provides in-process route dispatch for tests, and standardizes success/error envelopes without adding an HTTP server or framework.
 - Keep workflow status values centralized for local backend/stage comparisons.
 - Record local gate decisions for future staged UI workflows in `logs/runtime.json`, preserving the file-backed state model.
 - Allow validated edits only for structured handoff artifacts: `requirement.json`, `planning_artifact.json`, and `input_ir.json`.
