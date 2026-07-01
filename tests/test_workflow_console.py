@@ -6,7 +6,13 @@ import pytest
 
 from ai_native_cad.agents import DeterministicAgentAdapter
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
-from ai_native_cad.workflow_console import STATUS_CREATED, WORKFLOW_STATUS_VALUES, StageRunner, WorkflowConsoleBackend
+from ai_native_cad.workflow_console import (
+    GATE_DECISION_ACTIONS,
+    STATUS_CREATED,
+    WORKFLOW_STATUS_VALUES,
+    StageRunner,
+    WorkflowConsoleBackend,
+)
 
 
 def test_stage_runner_runs_requirement_and_planning_to_artifacts(tmp_path):
@@ -100,6 +106,57 @@ def test_backend_create_run_by_id_rejects_existing_run(tmp_path):
 
     with pytest.raises(FileExistsError, match="workflow console run already exists"):
         backend.create_run_by_id("created_by_id", "Make another spacer.")
+
+
+def test_backend_records_gate_decision_by_id_in_runtime(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("decision_run", "Make a spacer.")
+
+    recorded = backend.record_gate_decision_by_id(
+        "decision_run",
+        stage="requirement",
+        action="approve",
+        reason="Requirement is acceptable.",
+    )
+    runtime = backend.read_artifact_by_id("decision_run", "logs/runtime.json")["content"]["workflow_console"]
+
+    assert recorded["decision"]["action"] == "approve"
+    assert recorded["decision"]["stage"] == "requirement"
+    assert recorded["run"]["status"]["gate_decision"]["reason"] == "Requirement is acceptable."
+    assert runtime["latest_gate_decision"] == recorded["decision"]
+    assert runtime["gate_decision_count"] == 1
+    assert runtime["gate_decisions"] == [recorded["decision"]]
+    assert "approve" in GATE_DECISION_ACTIONS
+
+
+def test_backend_records_gate_decision_payload_without_new_readable_artifact(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("decision_run", "Make a spacer.")
+
+    recorded = backend.record_gate_decision_by_id(
+        "decision_run",
+        stage="planning",
+        action="override",
+        payload={"field": "dimensions.outer_diameter_mm", "value": 12},
+    )
+
+    assert recorded["decision"]["payload"]["field"] == "dimensions.outer_diameter_mm"
+    assert [item["name"] for item in backend.list_artifacts_by_id("decision_run")] == [
+        "logs/runtime.json",
+        "prompt.txt",
+    ]
+
+
+def test_backend_rejects_invalid_gate_decision_inputs(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("decision_run", "Make a spacer.")
+
+    with pytest.raises(ValueError, match="gate decision stage"):
+        backend.record_gate_decision_by_id("decision_run", stage="shell", action="approve")
+    with pytest.raises(ValueError, match="gate decision action"):
+        backend.record_gate_decision_by_id("decision_run", stage="requirement", action="execute")
+    with pytest.raises(ValueError, match="payload must be a dictionary"):
+        backend.record_gate_decision_by_id("decision_run", stage="requirement", action="override", payload="bad")
 
 
 def test_backend_runs_stages_from_existing_run_artifacts(tmp_path):

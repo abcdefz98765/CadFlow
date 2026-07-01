@@ -156,6 +156,7 @@
 - Python `StageRunner`：运行 Requirement、Planning、Part Modeling，以及完整 `run_text_pipeline()`；可从已有 run artifact 推进下一阶段，并在 `logs/runtime.json` 记录本地 stage history。
 - Python artifact API：读取 `prompt.txt`、`requirement.json`、`planning_artifact.json`、`input_ir.json`、`report.json`、`agent_trace.json`、`report.md` 和 `logs/runtime.json`。
 - Python file discovery：识别当前 run 的 `model.step`、`model.stl`、`preview.png` 和 `model.py`，供后续 HTTP/file serving 使用。
+- Python gate decision API：把 approve/reject/return/override 记录追加到 `logs/runtime.json` 的 `workflow_console.gate_decisions`，不新增独立 decision store。
 - 后续 HTTP API：stage endpoints、gate decision endpoints、file serving。
 - deterministic runtime：优先复用 `run_text_pipeline()`、`run_ir_pipeline()`、`run_agent_loop()` 和 report/review helpers。
 

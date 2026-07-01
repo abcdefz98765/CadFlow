@@ -20,6 +20,8 @@ from ai_native_cad.workflow_console.stage_runner import (
 )
 
 DOWNLOADABLE_FILES = ("model.step", "model.stl", "preview.png", "model.py")
+GATE_DECISION_ACTIONS = {"approve", "reject", "return", "override"}
+GATE_DECISION_STAGES = SUPPORTED_STAGES | {"review", "outputs"}
 
 
 class WorkflowConsoleBackend:
@@ -121,6 +123,61 @@ class WorkflowConsoleBackend:
         """Run a supported deterministic stage for a path-safe run id."""
         return self.run_stage(self.resolve_run(run_id, root=root), stage, prompt=prompt, context=context)
 
+    def record_gate_decision_by_id(
+        self,
+        run_id: str,
+        stage: str,
+        action: str,
+        reason: str | None = None,
+        payload: dict[str, Any] | None = None,
+        root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Record a user gate decision for a path-safe run id."""
+        return self.record_gate_decision(
+            self.resolve_run(run_id, root=root),
+            stage=stage,
+            action=action,
+            reason=reason,
+            payload=payload,
+        )
+
+    def record_gate_decision(
+        self,
+        run_dir: str | Path,
+        stage: str,
+        action: str,
+        reason: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Append a local gate decision to logs/runtime.json."""
+        if stage not in GATE_DECISION_STAGES:
+            raise ValueError(f"unsupported workflow console gate decision stage: {stage}")
+        if action not in GATE_DECISION_ACTIONS:
+            raise ValueError(f"unsupported workflow console gate decision action: {action}")
+        if payload is not None and not isinstance(payload, dict):
+            raise ValueError("workflow console gate decision payload must be a dictionary")
+
+        run_path = self._require_project_path(Path(run_dir))
+        runtime_path = self._require_child_path(run_path, "logs/runtime.json")
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime = _read_json_if_present(runtime_path) or {}
+        console = runtime.setdefault("workflow_console", {})
+        decisions = console.setdefault("gate_decisions", [])
+        decision = {
+            "stage": stage,
+            "action": action,
+            "timestamp": _now_timestamp(),
+        }
+        if reason is not None:
+            decision["reason"] = reason
+        if payload:
+            decision["payload"] = payload
+        decisions.append(decision)
+        console["latest_gate_decision"] = decision
+        console["gate_decision_count"] = len(decisions)
+        _write_json(runtime_path, runtime)
+        return {"decision": decision, "run": self.read_run_metadata(run_path)}
+
     def resolve_run(self, run_id: str, root: str | Path | None = None) -> Path:
         """Resolve a run id under configured run roots without accepting paths."""
         self._require_safe_run_id(run_id)
@@ -202,6 +259,7 @@ class WorkflowConsoleBackend:
         trace = _read_json_if_present(path / "agent_trace.json")
         runtime = _read_json_if_present(path / "logs" / "runtime.json")
         runtime_stage = ((runtime or {}).get("workflow_console") or {}).get("latest_stage") or {}
+        latest_gate_decision = ((runtime or {}).get("workflow_console") or {}).get("latest_gate_decision")
         flow_decision = (report or {}).get("flow_decision") or (trace or {}).get("final_flow_decision")
         rework_decision = (report or {}).get("rework_decision") or (trace or {}).get("rework_decision")
         status = (report or {}).get("status")
@@ -220,6 +278,7 @@ class WorkflowConsoleBackend:
             "final_selected_candidate": (trace or {}).get("final_selected_candidate"),
             "flow_decision": flow_decision,
             "rework_decision": rework_decision,
+            "gate_decision": latest_gate_decision,
             "runtime": runtime_stage or None,
         }
 
@@ -278,6 +337,10 @@ def _read_json_if_present(path: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _write_json(path: Path, value: dict[str, Any]) -> None:
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def _file_metadata(name: str, path: Path) -> dict[str, Any]:
     stat = path.stat()
     return {
@@ -292,3 +355,9 @@ def _timestamp(seconds: float) -> str:
     from datetime import datetime, timezone
 
     return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
+
+
+def _now_timestamp() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
