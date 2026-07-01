@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from ai_native_cad.agents.base import AgentAdapter
+from ai_native_cad.agents.validation import (
+    validate_planning_draft,
+    validate_repair_suggestion,
+    validate_requirement_draft,
+    validate_review_explanation,
+)
 from ai_native_cad.cad_ir.repair import repair_ir
 from ai_native_cad.pipeline.failure_analyzer import analyze_failure
 from ai_native_cad.planning import create_planning_artifact
@@ -34,10 +40,14 @@ class DeterministicAgentAdapter(AgentAdapter):
         overrides = context.get("overrides")
         if overrides is not None and not isinstance(overrides, dict):
             raise TypeError("context['overrides'] must be a dict when provided")
-        return self.requirement_agent.parse(prompt, overrides=overrides)
+        requirement = self.requirement_agent.parse(prompt, overrides=overrides)
+        validate_requirement_draft(requirement)
+        return requirement
 
     def create_plan(self, requirement: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
-        return create_planning_artifact(requirement)
+        planning_artifact = create_planning_artifact(requirement)
+        validate_planning_draft(planning_artifact)
+        return planning_artifact
 
     def suggest_repair(
         self,
@@ -52,11 +62,13 @@ class DeterministicAgentAdapter(AgentAdapter):
                 validation=analysis.get("validation"),
             )
         repair = repair_ir(ir, analysis)
-        return {
+        result = {
             "analysis": analysis,
             "repair": repair,
             "mode": "deterministic",
         }
+        validate_repair_suggestion(result)
+        return result
 
     def explain_review(
         self,
@@ -65,13 +77,15 @@ class DeterministicAgentAdapter(AgentAdapter):
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         status = report.get("status") or ("success" if report.get("success") else "failed")
-        return {
+        result = {
             "status": status,
             "summary": _review_summary(report, trace),
             "errors": list(report.get("errors", [])),
             "warnings": list(report.get("warnings", [])),
             "mode": "deterministic",
         }
+        validate_review_explanation(result)
+        return result
 
 
 def _review_summary(report: dict[str, Any], trace: dict[str, Any]) -> str:

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from ai_native_cad.agents import AgentAdapter, DeterministicAgentAdapter
+from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
 from ai_native_cad.workflow_console.stage_runner import StageRunner
 
 
@@ -112,3 +113,43 @@ def test_agent_adapter_has_no_direct_prompt_to_cad_surface():
     assert "run_shell" not in public_methods
     assert "parse_requirement" in public_methods
     assert "create_plan" in public_methods
+
+
+def test_adapter_validation_dispatch_accepts_all_deterministic_operations():
+    adapter = DeterministicAgentAdapter()
+    requirement = adapter.parse_requirement("Make a spacer washer with OD 12 mm, ID 6.5 mm, thickness 20 mm.")
+    planning = adapter.create_plan(requirement)
+    repair = adapter.suggest_repair(
+        {"affected_feature": "holes", "suggested_ir_fix": {"strategy": "increase_spacing"}},
+        {
+            "part_type": "mounting_plate",
+            "part_name": "repairable_plate",
+            "unit": "mm",
+            "dimensions": {"length": 30, "width": 20, "thickness": 4},
+            "features": {"holes": {"diameter": 5, "positions": "corner_4", "offset_from_edge": 1}},
+            "outputs": ["step", "stl"],
+        },
+    )
+    review = adapter.explain_review({"status": "success", "success": True, "part_name": "spacer"}, {"total_attempts": 1})
+
+    validate_adapter_result("parse_requirement", requirement)
+    validate_adapter_result("create_plan", planning)
+    validate_adapter_result("suggest_repair", repair)
+    validate_adapter_result("explain_review", review)
+
+
+def test_adapter_validation_rejects_direct_cad_and_shell_bypass_fields():
+    with pytest.raises(ValueError, match="cadquery_code"):
+        validate_requirement_draft({
+            "part_type": "spacer",
+            "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
+            "cadquery_code": "import cadquery as cq",
+        })
+
+    with pytest.raises(ValueError, match="shell_command"):
+        validate_adapter_result("create_plan", {
+            "artifact_type": "planning",
+            "route": {},
+            "selected_parts": [{"shell_command": "python model.py"}],
+            "flow_gate_status": {},
+        })

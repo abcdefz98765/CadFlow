@@ -9,8 +9,12 @@ from typing import Any
 from uuid import uuid4
 
 from ai_native_cad.agents import AgentAdapter, DeterministicAgentAdapter
+from ai_native_cad.agents.validation import (
+    validate_input_ir_draft,
+    validate_planning_draft,
+    validate_requirement_draft,
+)
 from ai_native_cad.cad_ir.parser import ir_from_planning_artifact
-from ai_native_cad.cad_ir.validator import validate_ir
 from ai_native_cad.pipeline.runner import PROJECT_ROOT, run_ir_pipeline, run_text_pipeline
 from ai_native_cad.workflow_control import review_to_outputs_decision
 
@@ -139,7 +143,7 @@ class StageRunner:
         output_dir = self._resolve_output_dir(context)
         output_dir.mkdir(parents=True, exist_ok=True)
         requirement = self.agent_adapter.parse_requirement(prompt, context=context)
-        _validate_requirement_artifact(requirement)
+        validate_requirement_draft(requirement)
         decision = requirement.get("requirement_status", {}).get("flow_decision", {})
         stage_status = _stage_status_from_decision(decision)
         (output_dir / "prompt.txt").write_text(prompt.strip() + "\n", encoding="utf-8")
@@ -162,7 +166,7 @@ class StageRunner:
         output_dir = self._resolve_output_dir(context, requirement)
         output_dir.mkdir(parents=True, exist_ok=True)
         planning_artifact = self.agent_adapter.create_plan(requirement, context=context)
-        _validate_planning_artifact(planning_artifact)
+        validate_planning_draft(planning_artifact)
         _write_json(output_dir / "planning_artifact.json", planning_artifact)
         decision = planning_artifact.get("flow_gate_status", {}).get("rework_decision", {})
         stage_status = _stage_status_from_decision(decision)
@@ -207,7 +211,7 @@ class StageRunner:
         """Create CAD IR from Planning and run Part Modeling."""
         ir = ir_from_planning_artifact(planning_artifact)
         input_ir = ir.to_dict()
-        _validate_input_ir_artifact(input_ir)
+        validate_input_ir_draft(input_ir)
         return self.run_part_modeling(input_ir, context=context)
 
     def run_review(self, run_dir: str | Path, context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -360,47 +364,6 @@ def _read_json_if_present(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _validate_requirement_artifact(content: dict[str, Any]) -> None:
-    if not isinstance(content, dict):
-        raise ValueError("requirement adapter output must be a JSON object")
-    _require_keys(content, "requirement.json", ("part_type", "dimensions"))
-    if not isinstance(content.get("part_type"), str) or not content["part_type"]:
-        raise ValueError("requirement.json part_type must be a non-empty string")
-    if not isinstance(content.get("dimensions"), dict):
-        raise ValueError("requirement.json dimensions must be a dictionary")
-    if "features" in content and not isinstance(content["features"], dict):
-        raise ValueError("requirement.json features must be a dictionary")
-    if "requirement_status" in content and not isinstance(content["requirement_status"], dict):
-        raise ValueError("requirement.json requirement_status must be a dictionary")
-
-
-def _validate_planning_artifact(content: dict[str, Any]) -> None:
-    if not isinstance(content, dict):
-        raise ValueError("planning adapter output must be a JSON object")
-    _require_keys(content, "planning_artifact.json", ("artifact_type", "route", "selected_parts", "flow_gate_status"))
-    if content.get("artifact_type") != "planning":
-        raise ValueError("planning_artifact.json artifact_type must be 'planning'")
-    if not isinstance(content.get("route"), dict):
-        raise ValueError("planning_artifact.json route must be a dictionary")
-    if not isinstance(content.get("selected_parts"), list):
-        raise ValueError("planning_artifact.json selected_parts must be a list")
-    if not isinstance(content.get("flow_gate_status"), dict):
-        raise ValueError("planning_artifact.json flow_gate_status must be a dictionary")
-
-
-def _validate_input_ir_artifact(content: dict[str, Any]) -> None:
-    validation = validate_ir(content)
-    if not validation["valid"]:
-        codes = ", ".join(error.get("code", "unknown") for error in validation["errors"])
-        raise ValueError(f"input_ir.json failed CAD IR validation: {codes}")
-
-
-def _require_keys(content: dict[str, Any], artifact: str, keys: tuple[str, ...]) -> None:
-    missing = [key for key in keys if key not in content]
-    if missing:
-        raise ValueError(f"{artifact} is missing required fields: {', '.join(missing)}")
 
 
 def _sanitize_adapter_identity(identity: dict[str, Any]) -> dict[str, Any]:

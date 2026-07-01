@@ -21,6 +21,11 @@ class AgentAdapter:
 
 Agent output must be structured JSON and must pass the relevant CadFlow validation before the execution layer consumes it.
 
+The shared validation entry point is `ai_native_cad.agents.validate_adapter_result(...)`.
+It validates adapter output by operation and rejects direct code/shell bypass
+fields such as `cadquery_code`, `python_code`, `model_code`, and
+`shell_command`.
+
 ## Adapter Modes
 
 ### 1. DeterministicAgentAdapter
@@ -81,3 +86,4 @@ OpenCode/Codex CLI is a developer assistant for evolving the repository, not the
 - The execution layer must not consume unconstrained free-form agent text.
 - User confirmations should be captured as structured context and written into run artifacts.
 - Adapter activity recorded in `logs/runtime.json` must include only sanitized provider identity and operation metadata, not prompts, secrets, API keys, tokens, or chat transcripts.
+- Provider adapters should run the same local adapter-output validation in tests before they are wired into workflow stages.
