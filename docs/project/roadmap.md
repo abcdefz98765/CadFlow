@@ -145,7 +145,7 @@
 
 ## Phase 1.10 / Product v0.4a: Local Workflow Console Backend
 
-状态：进行中。当前已落地 dependency-free Python backend scaffold；HTTP API 和前端仍是后续工作。该阶段承接 M1.8/M1.9 的 artifact、inspection、report、trace 成果，把现有 file-first workflow 暴露为本地单用户 backend；不引入云端队列、账号系统、多用户协作、LLM provider 依赖或新的 CAD generator 能力。
+状态：backend foundation complete。当前已落地 dependency-free Python backend scaffold、path-safe by-id API、route contract 和 in-process dispatch；HTTP server/API adapter 和前端仍是后续工作。该阶段承接 M1.8/M1.9 的 artifact、inspection、report、trace 成果，把现有 file-first workflow 暴露为本地单用户 backend；不引入云端队列、账号系统、多用户协作、LLM provider 依赖或新的 CAD generator 能力。
 
 目标：让 Web UI 能按 workflow stage 推进，而不是一次性黑盒运行。首版本地执行单元定义为 `StageRunner`：读取上游 artifact，执行一个确定性 Python workflow step，写出下游 artifact、status、flow/rework decision 和 log。`AgentAdapter` 是自然语言理解和解释边界，`StageRunner` 是本地执行和落盘边界，两者不合并。LLM/token worker 只作为未来 `LLMApiAgentAdapter` 的可插拔实现，不能成为跨阶段状态源。
 

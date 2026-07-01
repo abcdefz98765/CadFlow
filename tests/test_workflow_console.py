@@ -22,6 +22,14 @@ from ai_native_cad.workflow_console import (
 )
 
 
+def _does_not_contain_keys(value, keys):
+    if isinstance(value, dict):
+        return all(key not in keys and _does_not_contain_keys(item, keys) for key, item in value.items())
+    if isinstance(value, list):
+        return all(_does_not_contain_keys(item, keys) for item in value)
+    return True
+
+
 def test_stage_runner_runs_requirement_and_planning_to_artifacts(tmp_path):
     runner = StageRunner(project_root=tmp_path)
     output_dir = tmp_path / "outputs" / "console_requirement_planning"
@@ -139,9 +147,10 @@ def test_workflow_console_dispatch_creates_and_reads_run_by_id(tmp_path):
     assert created["ok"] is True
     assert created["status_code"] == 201
     assert created["data"]["run"]["run_id"] == "dispatch_run"
+    assert _does_not_contain_keys(created["data"], {"path", "run_dir", "root", "output_dir"})
     assert read["ok"] is True
     assert read["data"]["run_id"] == "dispatch_run"
-    assert Path(read["data"]["run_dir"]) == (tmp_path / "runs" / "dispatch_run").resolve()
+    assert _does_not_contain_keys(read["data"], {"path", "run_dir", "root", "output_dir"})
 
 
 def test_workflow_console_dispatch_writes_artifact_and_records_gate_decision(tmp_path):
@@ -170,8 +179,10 @@ def test_workflow_console_dispatch_writes_artifact_and_records_gate_decision(tmp
 
     assert written["ok"] is True
     assert written["data"]["artifact"]["content"]["part_type"] == "spacer"
+    assert _does_not_contain_keys(written["data"], {"path", "run_dir", "root", "output_dir"})
     assert decision["ok"] is True
     assert decision["status_code"] == 201
+    assert _does_not_contain_keys(decision["data"], {"path", "run_dir", "root", "output_dir"})
     assert runtime["artifact_edit_count"] == 1
     assert runtime["gate_decision_count"] == 1
 
@@ -204,6 +215,27 @@ def test_workflow_console_dispatch_does_not_expose_unlisted_backend_methods(tmp_
     assert response["status_code"] == 400
     assert response["error"]["type"] == "bad_request"
     assert "run id" in response["error"]["message"]
+
+
+def test_workflow_console_dispatch_preserves_artifact_content_path_keys(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "content_path"}, body={"prompt": "Make a spacer."})
+    requirement = {
+        "part_type": "spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
+        "features": {"path": "not a filesystem path"},
+    }
+    backend.write_artifact_by_id("content_path", "requirement.json", requirement)
+
+    response = dispatch_route(
+        backend,
+        "read_artifact",
+        path_params={"run_id": "content_path", "artifact": "requirement.json"},
+    )
+
+    assert "path" not in response["data"]
+    assert response["data"]["content"]["features"]["path"] == "not a filesystem path"
 
 
 def test_backend_reads_stage_status_from_runtime_without_report(tmp_path):

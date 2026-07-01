@@ -70,7 +70,7 @@ Next.
 
 ## M1.10 / v0.4a: Local Workflow Console Backend
 
-In progress.
+Backend foundation complete; HTTP server and frontend remain future work.
 
 - Add a dependency-free Python backend scaffold for the file-first local workflow.
 - Define `StageRunner` as the local execution unit: read upstream artifacts, run deterministic Python stages, write downstream artifacts, and record stage history in `logs/runtime.json`.

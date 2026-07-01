@@ -106,7 +106,7 @@ def dispatch_route(
             _require_dict(body, "body"),
             _require_dict(query, "query"),
         )
-        return success_response(data, status_code=_success_status_code(route_name))
+        return success_response(_public_route_data(data), status_code=_success_status_code(route_name))
     except Exception as exc:
         return error_response(exc)
 
@@ -306,3 +306,19 @@ def _require_value(values: dict[str, Any], key: str) -> Any:
     if value is None:
         raise ValueError(f"workflow console route is missing required value: {key}")
     return value
+
+
+def _public_route_data(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_public_route_data(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    public = {
+        key: _public_route_data(item)
+        for key, item in value.items()
+        if key not in {"path", "run_dir", "root", "output_dir"}
+    }
+    if "content" in value:
+        public["content"] = value["content"]
+    return public
