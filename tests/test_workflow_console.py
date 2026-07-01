@@ -544,9 +544,73 @@ def test_backend_reads_stage_status_from_runtime_without_report(tmp_path):
     assert metadata["stage_history"][0]["stage"] == "requirement"
     assert metadata["stage_history"][0]["status"] == "completed"
     assert metadata["stage_history"][0]["flow_decision"]["action"] == "proceed_with_assumptions"
+    assert metadata["stage_history"][0]["adapter_activity"] == {
+        "operation": "parse_requirement",
+        "provider_identity": {
+            "provider": "local/mock",
+            "adapter": "deterministic",
+            "network": "disabled",
+        },
+    }
+    assert metadata["status"]["adapter_activity"] == metadata["stage_history"][0]["adapter_activity"]
     assert "timestamp" in metadata["stage_history"][0]
     assert "output_dir" not in metadata["stage_history"][0]
     assert runtime["content"]["workflow_console"]["latest_stage"]["stage"] == "requirement"
+
+
+def test_backend_sanitizes_adapter_activity_metadata(tmp_path):
+    run_dir = tmp_path / "outputs" / "adapter_metadata"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a spacer.\n", encoding="utf-8")
+    (run_dir / "logs").mkdir()
+    (run_dir / "logs" / "runtime.json").write_text(
+        json.dumps({
+            "workflow_console": {
+                "latest_stage": {
+                    "stage": "requirement",
+                    "status": "completed",
+                    "adapter_activity": {
+                        "operation": "parse_requirement",
+                        "provider_identity": {
+                            "provider": "local/mock",
+                            "adapter": "deterministic",
+                            "api_key": "secret-token",
+                            "endpoint": r"D:\MyCode\llm2cad\provider.log",
+                        },
+                    },
+                },
+                "stages": [
+                    {
+                        "stage": "requirement",
+                        "status": "completed",
+                        "adapter_activity": {
+                            "operation": "parse_requirement",
+                            "provider_identity": {
+                                "provider": "local/mock",
+                                "adapter": "deterministic",
+                                "api_key": "secret-token",
+                                "endpoint": r"D:\MyCode\llm2cad\provider.log",
+                            },
+                        },
+                    }
+                ],
+            }
+        }) + "\n",
+        encoding="utf-8",
+    )
+
+    metadata = WorkflowConsoleBackend(project_root=tmp_path).read_run_metadata_by_id("adapter_metadata")
+
+    assert metadata["status"]["adapter_activity"] == {
+        "operation": "parse_requirement",
+        "provider_identity": {
+            "provider": "local/mock",
+            "adapter": "deterministic",
+        },
+    }
+    assert metadata["stage_history"][0]["adapter_activity"] == metadata["status"]["adapter_activity"]
+    assert "secret-token" not in json.dumps(metadata["status"]["adapter_activity"])
+    assert "D:\\MyCode" not in json.dumps(metadata["stage_history"])
 
 
 def test_backend_creates_run_without_executing_stages(tmp_path):
@@ -1054,6 +1118,7 @@ def test_workflow_console_static_ui_exposes_required_local_workflow_controls():
         "gate_history",
         "stageHistoryByStage",
         "stageHistorySummary",
+        "adapterActivityLine",
         "gateHistoryByStage",
         "gateHistorySummary",
         "payloadSummaryLine",

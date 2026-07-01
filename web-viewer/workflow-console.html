@@ -941,7 +941,16 @@ function stageHistorySummary(history) {
   const latest = history.at(-1);
   const count = history.length === 1 ? "1 run" : `${history.length} runs`;
   const when = latest.timestamp ? new Date(latest.timestamp).toLocaleString() : "no timestamp";
-  return `${count} · ${when}`;
+  const adapter = adapterActivityLine(latest.adapter_activity);
+  return `${count} · ${when}${adapter}`;
+}
+
+function adapterActivityLine(activity) {
+  if (!activity) return "";
+  const identity = activity.provider_identity || {};
+  const provider = [identity.provider, identity.adapter].filter(Boolean).join("/");
+  const operation = activity.operation || "adapter";
+  return ` · ${escapeHtml(operation)}${provider ? ` · ${escapeHtml(provider)}` : ""}`;
 }
 
 function gateHistorySummary(history) {
