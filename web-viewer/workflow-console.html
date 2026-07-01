@@ -299,6 +299,19 @@
     text-align: left;
   }
 
+  .artifact-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .artifact-kind {
+    min-width: 58px;
+    justify-content: center;
+    text-transform: uppercase;
+  }
+
   .list-button.active {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent);
@@ -709,9 +722,9 @@ async function reloadRun() {
     renderReportSummary();
     renderDownloads();
     renderPreview();
-    const firstArtifact = (state.metadata.artifacts || [])[0];
-    if (firstArtifact) {
-      await readArtifact(firstArtifact.name);
+    const defaultArtifact = preferredArtifact(state.metadata.artifacts || []);
+    if (defaultArtifact) {
+      await readArtifact(defaultArtifact.name);
     } else {
       clearArtifact();
     }
@@ -806,10 +819,50 @@ function renderArtifacts() {
   for (const artifact of artifacts) {
     const button = document.createElement("button");
     button.className = `list-button ${artifact.name === state.selectedArtifact ? "active" : ""}`;
-    button.innerHTML = `${artifact.name}<div class="meta">${artifact.size_bytes} bytes</div>`;
+    const kind = artifactKind(artifact.name);
+    button.innerHTML = `
+      <span class="artifact-row">
+        <span>${escapeHtml(artifact.name)}</span>
+        <span class="pill artifact-kind ${artifactKindClass(kind)}">${escapeHtml(kind)}</span>
+      </span>
+      <div class="meta">${artifact.size_bytes} bytes · ${escapeHtml(artifact.updated_at || "")}</div>
+    `;
     button.addEventListener("click", () => readArtifact(artifact.name));
     list.appendChild(button);
   }
+}
+
+function preferredArtifact(artifacts) {
+  const byName = new Map(artifacts.map((artifact) => [artifact.name, artifact]));
+  for (const name of [
+    "report.md",
+    "report.json",
+    "requirement.json",
+    "planning_artifact.json",
+    "input_ir.json",
+    "agent_trace.json",
+    "logs/runtime.json",
+    "prompt.txt",
+  ]) {
+    if (byName.has(name)) return byName.get(name);
+  }
+  return artifacts[0] || null;
+}
+
+function artifactKind(name) {
+  if (name === "logs/runtime.json") return "runtime";
+  if (name === "agent_trace.json") return "trace";
+  if (name === "report.md") return "report";
+  if (name === "prompt.txt") return "prompt";
+  if (name.endsWith(".md")) return "md";
+  if (name.endsWith(".json")) return editableArtifacts.has(name) ? "handoff" : "json";
+  return "text";
+}
+
+function artifactKindClass(kind) {
+  if (kind === "report") return "ok";
+  if (kind === "runtime" || kind === "trace") return "warn";
+  return "";
 }
 
 async function readArtifact(name) {

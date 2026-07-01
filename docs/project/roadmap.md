@@ -193,6 +193,7 @@
 - runs list/select、prompt-only create run、run status/current stage、path-free stage history timeline 和 gate decision timeline。
 - run Requirement、Planning、Part Modeling、Review、Outputs 和 full text pipeline by safe run id。
 - readable artifact list/read。
+- artifact inspector polish：type labels and default selection order favoring `report.md`。
 - compact report/trace summary：status、flow/rework decision、warnings/errors、attempts、final candidate。
 - editable artifact save for `requirement.json`、`planning_artifact.json`、`input_ir.json` only。
 - approve/reject/return/override gate decision recording。

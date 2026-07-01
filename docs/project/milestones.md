@@ -101,6 +101,7 @@ Initial local UI slice complete; follow-up polish and review/output stage expans
 - Expose path-free stage history in run metadata and render per-stage last status/run count in the local UI timeline.
 - Expose path-free gate decision history summaries and render each stage's latest approve/reject/return/override decision in the local UI timeline.
 - Expose a compact report/trace summary in run metadata and render status, flow/rework decisions, warning/error counts, attempts, and final candidate in the local UI.
+- Polish artifact inspection with type labels and a useful default selection order that opens `report.md` first when present.
 
 ## M1.12 / v0.5: LLM Agent Adapter
 
