@@ -101,7 +101,7 @@ The current scaffold lives under `src/ai_native_cad/workflow_console/`:
 - `WorkflowConsoleBackend`: local run listing, path-safe run-id resolution, artifact metadata/content reads, status derivation, and downloadable-file discovery.
 - `routes.py`: dependency-free future route contract specs, in-process route dispatch, response envelopes, and backend exception to HTTP-like status mapping.
 
-`StageRunner` records local stage history in the existing `logs/runtime.json` artifact under `workflow_console.stages`. This keeps stage status file-based without introducing a database or separate state store. `WorkflowConsoleBackend.read_run_metadata(...)` exposes a path-free `stage_history` summary for UI timelines, while the raw runtime artifact remains readable for audit.
+`StageRunner` records local stage history in the existing `logs/runtime.json` artifact under `workflow_console.stages`. This keeps stage status file-based without introducing a database or separate state store. `WorkflowConsoleBackend.read_run_metadata(...)` exposes path-free `stage_history` and `gate_history` summaries for UI timelines, while the raw runtime artifact remains readable for audit.
 
 The Python facade can run supported stages from an existing run directory by reading upstream artifacts: `prompt.txt` for Requirement or full text pipeline, `requirement.json` for Planning, and `planning_artifact.json` or `input_ir.json` for Part Modeling.
 
@@ -117,7 +117,7 @@ Editable artifacts are narrower than readable artifacts. The backend can write o
 
 The backend exposes shared status constants for the current local status vocabulary: `created`, `completed`, `blocked`, `success`, `failed`, `running_or_incomplete`, and `unknown`.
 
-Gate decisions are also file-backed. The backend can record `approve`, `reject`, `return`, and `override` decisions for supported workflow stages by appending to `logs/runtime.json` under `workflow_console.gate_decisions`; no separate decision store or new readable artifact has been added.
+Gate decisions are also file-backed. The backend can record `approve`, `reject`, `return`, and `override` decisions for supported workflow stages by appending to `logs/runtime.json` under `workflow_console.gate_decisions`; no separate decision store or new readable artifact has been added. Public run metadata exposes only a gate summary (`stage`, `action`, `reason`, and `timestamp`), not arbitrary decision payloads.
 
 The local backend should expose only workflow operations:
 
@@ -155,7 +155,7 @@ The current UI supports the first usable local workflow loop:
 
 - list existing runs under `outputs/` and `runs/`;
 - create a run from a prompt without executing stages;
-- select a run and inspect status/current stage plus stage history;
+- select a run and inspect status/current stage plus stage/gate history;
 - run Requirement, Planning, Part Modeling, Review, Outputs, or the full text pipeline by safe run id;
 - inspect readable artifacts;
 - edit only the allowed JSON handoff artifacts;

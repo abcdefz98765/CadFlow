@@ -238,7 +238,7 @@
 
   .stage {
     display: grid;
-    grid-template-rows: auto 26px minmax(18px, auto) 32px;
+    grid-template-rows: auto 26px minmax(18px, auto) minmax(18px, auto) 32px;
     gap: 6px;
     min-height: 118px;
     padding: 8px;
@@ -250,6 +250,13 @@
   .stage.current { border-color: var(--accent); }
   .stage-name { font-weight: 650; }
   .stage-history {
+    min-height: 18px;
+    color: var(--muted);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+
+  .stage-gate {
     min-height: 18px;
     color: var(--muted);
     font-size: 11px;
@@ -595,6 +602,15 @@ function statusClass(value) {
   return "";
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function updateRunIdSuggestion() {
   if (el("run-id").value.trim()) return;
   const firstWords = el("prompt").value.split(/\s+/).slice(0, 8).join("_");
@@ -678,11 +694,13 @@ function renderTimeline(status) {
   const timeline = el("timeline");
   timeline.innerHTML = "";
   const historyByStage = stageHistoryByStage(state.metadata.stage_history || []);
+  const gatesByStage = gateHistoryByStage(state.metadata.gate_history || []);
   const latestStage = (state.metadata.stage_history || []).at(-1);
   for (const [stage, label] of displayStages) {
     const item = document.createElement("div");
     const stageHistory = historyByStage.get(stage) || [];
     const latestForStage = stageHistory.at(-1);
+    const gateHistory = gatesByStage.get(stage) || [];
     const stageStatus = latestForStage ? latestForStage.status : "pending";
     const isCurrent = (latestStage && latestStage.stage === stage) || (!latestStage && status.stage === stage);
     const canRun = runnableStages.has(stage) && state.selectedRunId;
@@ -691,12 +709,24 @@ function renderTimeline(status) {
       <div class="stage-name">${label}</div>
       <span class="pill ${statusClass(stageStatus)}">${stageStatus}</span>
       <div class="stage-history">${stageHistorySummary(stageHistory)}</div>
+      <div class="stage-gate">${gateHistorySummary(gateHistory)}</div>
       <button ${canRun ? "" : "disabled"} data-stage="${stage}">${canRun ? "Run" : "Gate only"}</button>
     `;
     const button = item.querySelector("button");
     button.addEventListener("click", () => runStage(stage));
     timeline.appendChild(item);
   }
+}
+
+function gateHistoryByStage(history) {
+  const byStage = new Map();
+  for (const item of history) {
+    if (!item.stage) continue;
+    const existing = byStage.get(item.stage) || [];
+    existing.push(item);
+    byStage.set(item.stage, existing);
+  }
+  return byStage;
 }
 
 function stageHistoryByStage(history) {
@@ -716,6 +746,13 @@ function stageHistorySummary(history) {
   const count = history.length === 1 ? "1 run" : `${history.length} runs`;
   const when = latest.timestamp ? new Date(latest.timestamp).toLocaleString() : "no timestamp";
   return `${count} · ${when}`;
+}
+
+function gateHistorySummary(history) {
+  if (!history.length) return "no gate";
+  const latest = history.at(-1);
+  const reason = latest.reason ? ` · ${escapeHtml(latest.reason)}` : "";
+  return `gate: ${escapeHtml(latest.action)}${reason}`;
 }
 
 function renderArtifacts() {

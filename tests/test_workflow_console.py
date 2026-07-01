@@ -207,6 +207,35 @@ def test_workflow_console_dispatch_exposes_path_free_stage_history(tmp_path):
     assert _does_not_contain_keys(response["data"]["stage_history"], {"path", "run_dir", "root", "output_dir"})
 
 
+def test_workflow_console_dispatch_exposes_path_free_gate_history_summary(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "gate_history"}, body={"prompt": "Make a spacer."})
+    dispatch_route(
+        backend,
+        "record_gate_decision",
+        path_params={"run_id": "gate_history"},
+        body={
+            "stage": "planning",
+            "action": "return",
+            "reason": "Need a clearer wall thickness.",
+            "payload": {"path": r"D:\MyCode\llm2cad\outputs\gate_history"},
+        },
+    )
+
+    response = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "gate_history"})
+
+    assert response["ok"] is True
+    assert response["data"]["gate_history"] == [
+        {
+            "stage": "planning",
+            "action": "return",
+            "reason": "Need a clearer wall thickness.",
+            "timestamp": response["data"]["gate_history"][0]["timestamp"],
+        }
+    ]
+    assert _does_not_contain_keys(response["data"]["gate_history"], {"path", "run_dir", "root", "output_dir", "payload"})
+
+
 def test_workflow_console_dispatch_validation_errors_return_envelopes(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
 
@@ -683,8 +712,12 @@ def test_workflow_console_static_ui_exposes_required_local_workflow_controls():
         "Gate Decision",
         "STL Preview",
         "stage_history",
+        "gate_history",
         "stageHistoryByStage",
         "stageHistorySummary",
+        "gateHistoryByStage",
+        "gateHistorySummary",
+        "escapeHtml",
         'api("write_artifact"',
         'api("record_gate_decision"',
         'api("run_stage"',

@@ -206,6 +206,7 @@ class WorkflowConsoleBackend:
             "updated_at": _timestamp(stat.st_mtime),
             "status": self.read_run_status(path),
             "stage_history": self.read_stage_history(path),
+            "gate_history": self.read_gate_history(path),
             "artifacts": self.list_artifacts(path),
             "downloadables": self.list_downloadables(path),
         }
@@ -223,6 +224,22 @@ class WorkflowConsoleBackend:
                 key: value
                 for key, value in stage.items()
                 if key in {"stage", "status", "timestamp", "flow_decision", "rework_decision"}
+            })
+        return history
+
+    def read_gate_history(self, run_dir: str | Path) -> list[dict[str, Any]]:
+        """Return path-free workflow console gate decision history for a run."""
+        path = self._require_project_path(Path(run_dir))
+        runtime = _read_json_if_present(path / "logs" / "runtime.json") or {}
+        decisions = ((runtime.get("workflow_console") or {}).get("gate_decisions") or [])
+        history = []
+        for decision in decisions:
+            if not isinstance(decision, dict):
+                continue
+            history.append({
+                key: value
+                for key, value in decision.items()
+                if key in {"stage", "action", "reason", "timestamp"}
             })
         return history
 

@@ -99,6 +99,7 @@ Initial local UI slice complete; follow-up polish and review/output stage expans
 - Support listing/selecting runs, creating prompt-only runs, running supported deterministic stages by id, reading artifacts, editing allowed JSON handoff artifacts, recording gate decisions, listing downloadables, and opening the existing STL viewer for `model.stl`.
 - Add executable Review and Outputs check stages: Review records the report flow decision; Outputs checks publishable artifacts such as primary `model.step` without regenerating CAD.
 - Expose path-free stage history in run metadata and render per-stage last status/run count in the local UI timeline.
+- Expose path-free gate decision history summaries and render each stage's latest approve/reject/return/override decision in the local UI timeline.
 
 ## M1.12 / v0.5: LLM Agent Adapter
 
