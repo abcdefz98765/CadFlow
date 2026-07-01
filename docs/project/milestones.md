@@ -78,6 +78,7 @@ In progress.
 - Provide path-safe run-id operations for future HTTP routes, creating/resolving only under configured `outputs/` and `runs/` roots while rejecting absolute paths, traversal, path separators, duplicate create targets, and unconfigured roots.
 - Keep workflow status values centralized for local backend/stage comparisons.
 - Record local gate decisions for future staged UI workflows in `logs/runtime.json`, preserving the file-backed state model.
+- Allow validated edits only for structured handoff artifacts: `requirement.json`, `planning_artifact.json`, and `input_ir.json`.
 - Use the existing `run_text_pipeline` and IR pipeline paths first.
 - Keep LLM workers optional and future-facing; stage outputs must still be persisted artifacts.
 - Keep `AgentAdapter` separate from `StageRunner`: the adapter owns understanding/planning/explanation, while the runner owns execution/persistence.

@@ -110,6 +110,8 @@ For future HTTP routes, `WorkflowConsoleBackend` also exposes run-id based opera
 
 Readable artifacts remain limited to `prompt.txt`, `requirement.json`, `planning_artifact.json`, `input_ir.json`, `report.json`, `report.md`, `agent_trace.json`, and `logs/runtime.json`. Downloadable discovery remains limited to `model.step`, `model.stl`, `preview.png`, and `model.py`.
 
+Editable artifacts are narrower than readable artifacts. The backend can write only `requirement.json`, `planning_artifact.json`, and `input_ir.json`; writes must be JSON objects, pass artifact-specific validation, and are recorded in `logs/runtime.json` under `workflow_console.artifact_edits`.
+
 The backend exposes shared status constants for the current local status vocabulary: `created`, `completed`, `blocked`, `success`, `failed`, `running_or_incomplete`, and `unknown`.
 
 Gate decisions are also file-backed. The backend can record `approve`, `reject`, `return`, and `override` decisions for supported workflow stages by appending to `logs/runtime.json` under `workflow_console.gate_decisions`; no separate decision store or new readable artifact has been added.

@@ -7,6 +7,7 @@ import pytest
 from ai_native_cad.agents import DeterministicAgentAdapter
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
 from ai_native_cad.workflow_console import (
+    EDITABLE_ARTIFACTS,
     GATE_DECISION_ACTIONS,
     STATUS_CREATED,
     WORKFLOW_STATUS_VALUES,
@@ -157,6 +158,102 @@ def test_backend_rejects_invalid_gate_decision_inputs(tmp_path):
         backend.record_gate_decision_by_id("decision_run", stage="requirement", action="execute")
     with pytest.raises(ValueError, match="payload must be a dictionary"):
         backend.record_gate_decision_by_id("decision_run", stage="requirement", action="override", payload="bad")
+
+
+def test_backend_writes_editable_requirement_artifact_by_id(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("edit_run", "Make a spacer.")
+    requirement = {
+        "part_type": "spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
+        "features": {},
+        "requirement_status": {"complete_for_generation": True},
+    }
+
+    written = backend.write_artifact_by_id("edit_run", "requirement.json", requirement)
+    runtime = backend.read_artifact_by_id("edit_run", "logs/runtime.json")["content"]["workflow_console"]
+
+    assert written["artifact"]["content"]["part_type"] == "spacer"
+    assert written["edit"]["artifact"] == "requirement.json"
+    assert written["run"]["status"]["artifact_edit"]["artifact"] == "requirement.json"
+    assert runtime["latest_artifact_edit"] == written["edit"]
+    assert runtime["artifact_edit_count"] == 1
+    assert "requirement.json" in EDITABLE_ARTIFACTS
+
+
+def test_backend_writes_valid_input_ir_by_id(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("edit_run", "Make a spacer.")
+    input_ir = {
+        "part_type": "spacer",
+        "part_name": "edited_spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
+        "features": {},
+        "outputs": ["step", "stl"],
+        "check_level": "L0",
+    }
+
+    written = backend.write_artifact_by_id("edit_run", "input_ir.json", input_ir)
+
+    assert written["artifact"]["content"]["part_name"] == "edited_spacer"
+
+
+def test_backend_rejects_non_editable_artifact_write(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("edit_run", "Make a spacer.")
+
+    with pytest.raises(ValueError, match="artifact is not editable"):
+        backend.write_artifact_by_id("edit_run", "report.json", {"status": "success"})
+
+
+def test_backend_rejects_artifact_write_traversal(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("edit_run", "Make a spacer.")
+
+    with pytest.raises(ValueError, match="artifact is not editable"):
+        backend.write_artifact_by_id("edit_run", "../requirement.json", {"part_type": "spacer"})
+
+
+def test_backend_rejects_non_object_artifact_write(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("edit_run", "Make a spacer.")
+
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        backend.write_artifact_by_id("edit_run", "requirement.json", ["bad"])
+
+
+def test_backend_rejects_invalid_input_ir_write(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("edit_run", "Make a spacer.")
+    invalid_ir = {
+        "part_type": "spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12},
+        "features": {},
+        "outputs": ["step"],
+    }
+
+    with pytest.raises(ValueError, match="failed CAD IR validation"):
+        backend.write_artifact_by_id("edit_run", "input_ir.json", invalid_ir)
+
+
+def test_backend_rejects_invalid_planning_artifact_write(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("edit_run", "Make a spacer.")
+
+    with pytest.raises(ValueError, match="artifact_type must be 'planning'"):
+        backend.write_artifact_by_id(
+            "edit_run",
+            "planning_artifact.json",
+            {
+                "artifact_type": "plan",
+                "route": {},
+                "selected_parts": [],
+                "flow_gate_status": {},
+            },
+        )
 
 
 def test_backend_runs_stages_from_existing_run_artifacts(tmp_path):

@@ -67,4 +67,6 @@ For runs that stop before `report.json` exists, the backend may derive the lates
 
 User gate decisions for future staged UI workflows are recorded in the same runtime artifact under `workflow_console.gate_decisions`. This keeps approve/reject/return/override history file-backed without expanding the public artifact whitelist.
 
+Future UI edits are limited to structured workflow handoff artifacts: `requirement.json`, `planning_artifact.json`, and `input_ir.json`. The backend validates these JSON objects before writing and records edit history in `logs/runtime.json`; generated reports, traces, downloads, and prompts are not editable through this boundary.
+
 The Web Console may cache or index metadata, but it should not become the authoritative workflow state store in v0.4.

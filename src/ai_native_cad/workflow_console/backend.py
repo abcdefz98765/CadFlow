@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ai_native_cad.cad_ir.validator import validate_ir
 from ai_native_cad.pipeline.runner import PROJECT_ROOT
 from ai_native_cad.workflow_console.stage_runner import (
     READABLE_ARTIFACTS,
@@ -20,6 +21,7 @@ from ai_native_cad.workflow_console.stage_runner import (
 )
 
 DOWNLOADABLE_FILES = ("model.step", "model.stl", "preview.png", "model.py")
+EDITABLE_ARTIFACTS = {"requirement.json", "planning_artifact.json", "input_ir.json"}
 GATE_DECISION_ACTIONS = {"approve", "reject", "return", "override"}
 GATE_DECISION_STAGES = SUPPORTED_STAGES | {"review", "outputs"}
 
@@ -225,6 +227,39 @@ class WorkflowConsoleBackend:
         """Read a whitelisted artifact from a path-safe run id."""
         return self.read_artifact(self.resolve_run(run_id, root=root), artifact)
 
+    def write_artifact_by_id(
+        self,
+        run_id: str,
+        artifact: str,
+        content: dict[str, Any],
+        root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Write an editable JSON artifact for a path-safe run id."""
+        return self.write_artifact(self.resolve_run(run_id, root=root), artifact, content)
+
+    def write_artifact(
+        self,
+        run_dir: str | Path,
+        artifact: str,
+        content: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate and write an editable workflow JSON artifact."""
+        if artifact not in EDITABLE_ARTIFACTS:
+            raise ValueError(f"artifact is not editable by the workflow console: {artifact}")
+        if not isinstance(content, dict):
+            raise ValueError(f"workflow console editable artifact must be a JSON object: {artifact}")
+        _validate_editable_artifact(artifact, content)
+
+        run_path = self._require_project_path(Path(run_dir))
+        artifact_path = self._require_child_path(run_path, artifact)
+        _write_json(artifact_path, content)
+        edit = self._record_artifact_edit(run_path, artifact)
+        return {
+            "artifact": self.read_artifact(run_path, artifact),
+            "edit": edit,
+            "run": self.read_run_metadata(run_path),
+        }
+
     def read_artifact(self, run_dir: str | Path, artifact: str) -> dict[str, Any]:
         """Read a whitelisted artifact by relative artifact name."""
         if artifact not in READABLE_ARTIFACTS:
@@ -238,6 +273,22 @@ class WorkflowConsoleBackend:
             **_file_metadata(artifact, artifact_path),
             "content": json.loads(text) if artifact_path.suffix == ".json" else text,
         }
+
+    def _record_artifact_edit(self, run_path: Path, artifact: str) -> dict[str, Any]:
+        runtime_path = self._require_child_path(run_path, "logs/runtime.json")
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime = _read_json_if_present(runtime_path) or {}
+        console = runtime.setdefault("workflow_console", {})
+        edits = console.setdefault("artifact_edits", [])
+        edit = {
+            "artifact": artifact,
+            "timestamp": _now_timestamp(),
+        }
+        edits.append(edit)
+        console["latest_artifact_edit"] = edit
+        console["artifact_edit_count"] = len(edits)
+        _write_json(runtime_path, runtime)
+        return edit
 
     def list_downloadables_by_id(self, run_id: str, root: str | Path | None = None) -> list[dict[str, Any]]:
         """List downloadable files for a path-safe run id."""
@@ -260,6 +311,7 @@ class WorkflowConsoleBackend:
         runtime = _read_json_if_present(path / "logs" / "runtime.json")
         runtime_stage = ((runtime or {}).get("workflow_console") or {}).get("latest_stage") or {}
         latest_gate_decision = ((runtime or {}).get("workflow_console") or {}).get("latest_gate_decision")
+        latest_artifact_edit = ((runtime or {}).get("workflow_console") or {}).get("latest_artifact_edit")
         flow_decision = (report or {}).get("flow_decision") or (trace or {}).get("final_flow_decision")
         rework_decision = (report or {}).get("rework_decision") or (trace or {}).get("rework_decision")
         status = (report or {}).get("status")
@@ -279,6 +331,7 @@ class WorkflowConsoleBackend:
             "flow_decision": flow_decision,
             "rework_decision": rework_decision,
             "gate_decision": latest_gate_decision,
+            "artifact_edit": latest_artifact_edit,
             "runtime": runtime_stage or None,
         }
 
@@ -335,6 +388,43 @@ def _read_json_if_present(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _validate_editable_artifact(artifact: str, content: dict[str, Any]) -> None:
+    if artifact == "requirement.json":
+        _require_keys(content, artifact, ("part_type", "dimensions"))
+        if not isinstance(content.get("part_type"), str) or not content["part_type"]:
+            raise ValueError("requirement.json part_type must be a non-empty string")
+        if not isinstance(content.get("dimensions"), dict):
+            raise ValueError("requirement.json dimensions must be a dictionary")
+        if "features" in content and not isinstance(content["features"], dict):
+            raise ValueError("requirement.json features must be a dictionary")
+        if "requirement_status" in content and not isinstance(content["requirement_status"], dict):
+            raise ValueError("requirement.json requirement_status must be a dictionary")
+        return
+
+    if artifact == "planning_artifact.json":
+        _require_keys(content, artifact, ("artifact_type", "route", "selected_parts", "flow_gate_status"))
+        if content.get("artifact_type") != "planning":
+            raise ValueError("planning_artifact.json artifact_type must be 'planning'")
+        if not isinstance(content.get("route"), dict):
+            raise ValueError("planning_artifact.json route must be a dictionary")
+        if not isinstance(content.get("selected_parts"), list):
+            raise ValueError("planning_artifact.json selected_parts must be a list")
+        if not isinstance(content.get("flow_gate_status"), dict):
+            raise ValueError("planning_artifact.json flow_gate_status must be a dictionary")
+        return
+
+    validation = validate_ir(content)
+    if not validation["valid"]:
+        codes = ", ".join(error.get("code", "unknown") for error in validation["errors"])
+        raise ValueError(f"input_ir.json failed CAD IR validation: {codes}")
+
+
+def _require_keys(content: dict[str, Any], artifact: str, keys: tuple[str, ...]) -> None:
+    missing = [key for key in keys if key not in content]
+    if missing:
+        raise ValueError(f"{artifact} is missing required fields: {', '.join(missing)}")
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:

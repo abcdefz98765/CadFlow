@@ -155,6 +155,7 @@
 - Path-safe run-id API：为后续 HTTP routes 提供按 run id 创建 run、读取 metadata/artifact/downloadables 和运行 stage 的入口，只解析 `outputs/` / `runs/` 下的单级目录名，拒绝 absolute path、`..`、path separator、重复创建目标和未配置 root。
 - Python `StageRunner`：运行 Requirement、Planning、Part Modeling，以及完整 `run_text_pipeline()`；可从已有 run artifact 推进下一阶段，并在 `logs/runtime.json` 记录本地 stage history。
 - Python artifact API：读取 `prompt.txt`、`requirement.json`、`planning_artifact.json`、`input_ir.json`、`report.json`、`agent_trace.json`、`report.md` 和 `logs/runtime.json`。
+- Python artifact edit API：只允许校验后写入 `requirement.json`、`planning_artifact.json` 和 `input_ir.json`，并把 edit history 记录到 `logs/runtime.json`。
 - Python file discovery：识别当前 run 的 `model.step`、`model.stl`、`preview.png` 和 `model.py`，供后续 HTTP/file serving 使用。
 - Python gate decision API：把 approve/reject/return/override 记录追加到 `logs/runtime.json` 的 `workflow_console.gate_decisions`，不新增独立 decision store。
 - 后续 HTTP API：stage endpoints、gate decision endpoints、file serving。
