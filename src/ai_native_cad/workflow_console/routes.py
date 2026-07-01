@@ -317,7 +317,7 @@ def _public_route_data(value: Any) -> Any:
     public = {
         key: _public_route_data(item)
         for key, item in value.items()
-        if key not in {"path", "run_dir", "root", "output_dir"}
+        if key not in {"path", "run_dir", "root", "output_dir", "payload"}
     }
     if "content" in value:
         public["content"] = value["content"]

@@ -236,6 +236,43 @@ def test_workflow_console_dispatch_exposes_path_free_gate_history_summary(tmp_pa
     assert _does_not_contain_keys(response["data"]["gate_history"], {"path", "run_dir", "root", "output_dir", "payload"})
 
 
+def test_workflow_console_dispatch_sanitizes_gate_payload_but_preserves_runtime_artifact(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "gate_payload"}, body={"prompt": "Make a spacer."})
+
+    recorded = dispatch_route(
+        backend,
+        "record_gate_decision",
+        path_params={"run_id": "gate_payload"},
+        body={
+            "stage": "requirement",
+            "action": "proceed_with_assumptions",
+            "reason": "Proceed with defaults.",
+            "payload": {
+                "field": "dimensions.length",
+                "assumption": "Use selected template defaults.",
+                "api_key": "secret-token",
+                "path": r"D:\MyCode\llm2cad\outputs\gate_payload",
+            },
+        },
+    )
+    runtime = dispatch_route(
+        backend,
+        "read_artifact",
+        path_params={"run_id": "gate_payload", "artifact": "logs/runtime.json"},
+    )
+
+    assert recorded["ok"] is True
+    assert "payload" not in recorded["data"]["decision"]
+    assert recorded["data"]["run"]["status"]["gate_decision"]["payload_summary"]["items"] == [
+        {"key": "assumption", "value": "Use selected template defaults."},
+        {"key": "field", "value": "dimensions.length"},
+    ]
+    assert "secret-token" not in json.dumps(recorded["data"])
+    assert "D:\\MyCode" not in json.dumps(recorded["data"])
+    assert runtime["data"]["content"]["workflow_console"]["latest_gate_decision"]["payload"]["api_key"] == "secret-token"
+
+
 def test_workflow_console_metadata_includes_compact_report_trace_summary(tmp_path):
     run_dir = tmp_path / "outputs" / "summary_run"
     run_dir.mkdir(parents=True)
@@ -634,6 +671,44 @@ def test_backend_records_gate_decision_payload_without_new_readable_artifact(tmp
     ]
 
 
+def test_backend_exposes_safe_gate_payload_summary_only(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("payload_summary", "Make a mounting plate.")
+
+    recorded = backend.record_gate_decision_by_id(
+        "payload_summary",
+        stage="requirement",
+        action="proceed_with_assumptions",
+        reason="Proceed with template defaults.",
+        payload={
+            "field": "dimensions.length",
+            "assumption": "Use selected template defaults.",
+            "path": r"D:\MyCode\llm2cad\outputs\payload_summary",
+            "api_key": "secret-token",
+            "count": 3,
+            "fields": ["dimensions.length", r"D:\MyCode\llm2cad\secret.txt"],
+        },
+    )
+    metadata = backend.read_run_metadata_by_id("payload_summary")
+    runtime = backend.read_artifact_by_id("payload_summary", "logs/runtime.json")["content"]["workflow_console"]
+
+    assert recorded["decision"]["payload"]["path"].startswith("D:\\MyCode")
+    assert runtime["latest_gate_decision"]["payload"]["api_key"] == "secret-token"
+    assert metadata["status"]["gate_decision"]["payload_summary"] == {
+        "count": 6,
+        "items": [
+            {"key": "assumption", "value": "Use selected template defaults."},
+            {"key": "count", "value": 3},
+            {"key": "field", "value": "dimensions.length"},
+            {"key": "fields", "value": "dimensions.length"},
+        ],
+    }
+    assert metadata["gate_history"][0]["payload_summary"] == metadata["status"]["gate_decision"]["payload_summary"]
+    assert "payload" not in metadata["status"]["gate_decision"]
+    assert "D:\\MyCode" not in json.dumps(metadata["status"]["gate_decision"])
+    assert "secret-token" not in json.dumps(metadata["gate_history"])
+
+
 def test_backend_rejects_invalid_gate_decision_inputs(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_run_by_id("decision_run", "Make a spacer.")
@@ -981,6 +1056,7 @@ def test_workflow_console_static_ui_exposes_required_local_workflow_controls():
         "stageHistorySummary",
         "gateHistoryByStage",
         "gateHistorySummary",
+        "payloadSummaryLine",
         "escapeHtml",
         'api("write_artifact"',
         'api("record_gate_decision"',

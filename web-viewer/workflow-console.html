@@ -948,7 +948,16 @@ function gateHistorySummary(history) {
   if (!history.length) return "no gate";
   const latest = history.at(-1);
   const reason = latest.reason ? ` · ${escapeHtml(latest.reason)}` : "";
-  return `gate: ${escapeHtml(latest.action)}${reason}`;
+  const payload = payloadSummaryLine(latest.payload_summary);
+  return `gate: ${escapeHtml(latest.action)}${reason}${payload}`;
+}
+
+function payloadSummaryLine(summary) {
+  if (!summary || !summary.items || !summary.items.length) return "";
+  const items = summary.items
+    .map((item) => `${item.key}=${item.value}`)
+    .join(", ");
+  return ` · ${escapeHtml(items)}`;
 }
 
 function renderArtifacts() {

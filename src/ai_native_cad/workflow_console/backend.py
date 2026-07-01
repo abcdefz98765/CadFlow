@@ -288,11 +288,15 @@ class WorkflowConsoleBackend:
         for decision in decisions:
             if not isinstance(decision, dict):
                 continue
-            history.append({
+            item = {
                 key: value
                 for key, value in decision.items()
                 if key in {"stage", "action", "reason", "timestamp"}
-            })
+            }
+            payload_summary = _compact_payload_summary(decision.get("payload"))
+            if payload_summary["items"]:
+                item["payload_summary"] = payload_summary
+            history.append(item)
         return history
 
     def list_artifacts_by_id(self, run_id: str, root: str | Path | None = None) -> list[dict[str, Any]]:
@@ -400,6 +404,7 @@ class WorkflowConsoleBackend:
         runtime_stage = ((runtime or {}).get("workflow_console") or {}).get("latest_stage") or {}
         latest_gate_decision = ((runtime or {}).get("workflow_console") or {}).get("latest_gate_decision")
         latest_artifact_edit = ((runtime or {}).get("workflow_console") or {}).get("latest_artifact_edit")
+        gate_decision = _compact_gate_decision(latest_gate_decision)
         flow_decision = (report or {}).get("flow_decision") or (trace or {}).get("final_flow_decision")
         rework_decision = (report or {}).get("rework_decision") or (trace or {}).get("rework_decision")
         status = (report or {}).get("status")
@@ -418,7 +423,7 @@ class WorkflowConsoleBackend:
             "final_selected_candidate": (trace or {}).get("final_selected_candidate"),
             "flow_decision": flow_decision,
             "rework_decision": rework_decision,
-            "gate_decision": latest_gate_decision,
+            "gate_decision": gate_decision,
             "artifact_edit": latest_artifact_edit,
             "runtime": runtime_stage or None,
             "requirement_summary": _compact_requirement_summary(requirement),
@@ -576,6 +581,47 @@ def _compact_flow_decision(decision: dict[str, Any] | None) -> dict[str, Any]:
         "reason_count": len(reasons) if isinstance(reasons, list) else 0,
         "assumption_count": len(assumptions) if isinstance(assumptions, list) else 0,
     }
+
+
+def _compact_gate_decision(decision: Any) -> dict[str, Any] | None:
+    if not isinstance(decision, dict):
+        return None
+    item = {
+        key: value
+        for key, value in decision.items()
+        if key in {"stage", "action", "reason", "timestamp"}
+    }
+    payload_summary = _compact_payload_summary(decision.get("payload"))
+    if payload_summary["items"]:
+        item["payload_summary"] = payload_summary
+    return item
+
+
+def _compact_payload_summary(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"count": 0, "items": []}
+    items = []
+    for key in sorted(payload):
+        safe_key = _safe_summary_text(key)
+        safe_value = _safe_payload_value(payload[key])
+        if safe_key is None or safe_value is None:
+            continue
+        items.append({"key": safe_key, "value": safe_value})
+        if len(items) == 5:
+            break
+    return {"count": len(payload), "items": items}
+
+
+def _safe_payload_value(value: Any) -> str | int | float | bool | None:
+    if isinstance(value, (int, float, bool)):
+        return value
+    if isinstance(value, str):
+        return _safe_summary_text(value)
+    if isinstance(value, list):
+        safe = [_safe_payload_value(item) for item in value[:3]]
+        safe = [item for item in safe if item is not None]
+        return ", ".join(str(item) for item in safe) if safe else None
+    return None
 
 
 def _compact_field_collection(items: list[dict[str, Any]]) -> dict[str, Any]:
