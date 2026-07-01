@@ -4,10 +4,31 @@ CadFlow is an early-stage workflow-first natural-language parametric CAD toolkit
 
 Python package: `ai_native_cad`
 
+CadFlow is natural-language first for users, but structured-workflow first internally.
+Users describe CAD intent in plain language. CadFlow converts that into auditable requirement, planning, CAD IR, generation, validation, repair, and report artifacts.
+
 本项目不是宏大的 AI Engineering OS，也不是一次性 Prompt to STL。短期目标是保留一个能跑的自然语言建模 MVP，同时把工程结构调整为可追踪、可替换后端、可逐步引入知识和策略的 CAD workflow。
 
 ```text
 input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
+```
+
+Core architecture:
+
+```text
+User Prompt
+  ↓
+Agent Adapter
+  ↓
+Requirement + Planning
+  ↓
+CAD IR
+  ↓
+CAD Agent Loop
+  ↓
+STEP-first artifacts
+  ↓
+Web Workflow Console
 ```
 
 自然语言 prompt 现在先走结构化 handoff：
@@ -72,6 +93,8 @@ It does not currently mean:
 - **Traceable by Default**：默认输出完整项目记录，方便复核和迭代。
 - **Skill Oriented**：把 requirement、planning、part modeling、assembly、review 收束为少量职责清晰的 skill。
 - **Knowledge Ready / Policy Ready**：`skills/<step>/knowledge/` 放步骤内知识，顶层 `knowledge/` 只做跨 skill 索引，`policies/` 放全局策略和等级定义。
+
+CadFlow is an AI-assisted natural-language CAD workflow system, a workflow-first CAD agent scaffold, and a STEP-first parametric CAD generation pipeline. It is not a browser CAD editor, mesh generation system, prompt-to-STL toy, production-ready CAD engineer replacement, full FreeCAD/SolidWorks replacement, or cloud SaaS platform at this stage.
 
 ## Current Limitations
 
@@ -252,6 +275,27 @@ examples/ir_pipeline/<part_name>/outputs/
   logs/runtime.json
 ```
 
+## Agent runtime model
+
+CadFlow separates agent reasoning from deterministic CAD execution:
+
+- The deterministic parser exists as fallback and test mode. It is useful for CI, demos, and offline development.
+- The future `LLMApiAgentAdapter` is the intended user-facing natural-language mode. It should convert user prompts into validated requirement and planning JSON.
+- CLI agents are for repository development, not default CAD generation runtime. They may help modify CadFlow source, add templates, write tests, or refactor code, but they should not be the ordinary end-user model generation path.
+
+Agent output must become validated structured contracts before the CAD Agent Loop executes. The execution layer should not rely on unconstrained free-form LLM behavior or direct arbitrary CadQuery code produced from user text.
+
+## Web Workflow Console
+
+The planned Web UI is a workflow cockpit for running and visualizing CadFlow:
+
+- run the existing workflow from natural-language prompts
+- show run status
+- display requirement, planning, IR, report, and trace artifacts
+- provide access to STEP-first outputs
+
+It is not a browser CAD editor, not a new CAD backend, and not a direct arbitrary code execution surface. Artifacts remain file-based and traceable so CLI, Python API, tests, and the future Web Console all inspect the same run contract.
+
 ### 6. FreeCAD/装配辅助
 
 FreeCAD handoff、TechDraw 和装配脚本仍在 `scripts/` 中，属于工程承接层，不是主 workflow 的强依赖。当前 assembly 是初版 workflow scaffold：记录装配意图、生成 backend-neutral config、执行基础放置和包围盒验证，并输出 review/report；它不是成熟工业装配求解器。
@@ -273,6 +317,14 @@ CadFlow/
   docs/
     PRD_new.md
     FINAL-PRD.md
+    architecture/
+      overview.md
+      agent-adapter.md
+      web-workflow-console.md
+      workflow-contract.md
+    product/
+      positioning.md
+      roadmap.md
     architecture.md
     usage.md
     philosophy.md
@@ -311,6 +363,9 @@ CadFlow/
     review/
   scripts/
   src/ai_native_cad/
+    agents/
+      base.py
+      deterministic.py
     requirements.py
     workflow.py
     backends/
@@ -344,6 +399,12 @@ CadFlow/
 更多说明见：
 
 - `docs/PRD_new.md`
+- `docs/product/positioning.md`
+- `docs/architecture/overview.md`
+- `docs/architecture/agent-adapter.md`
+- `docs/architecture/web-workflow-console.md`
+- `docs/architecture/workflow-contract.md`
+- `docs/product/roadmap.md`
 - `docs/architecture.md`
 - `docs/usage.md`
 - `docs/philosophy.md`

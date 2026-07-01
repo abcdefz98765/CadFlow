@@ -68,6 +68,37 @@ Next.
 - Start with mounting plate, spacer, L-bracket, flange, and simple enclosure base.
 - Score benchmark success by valid STEP output, required features, key dimensions, trace completeness, and repair behavior.
 
+## M1.10 / v0.4a: Local Workflow Console Backend
+
+Next.
+
+- Expose the file-first workflow as a local single-user HTTP API.
+- Define `StageRunner` as the local execution unit: read upstream artifacts, run one deterministic Python stage, write downstream artifacts, status, flow/rework decisions, and logs.
+- Provide run management, stage run/status endpoints, artifact read/write endpoints, user gate decisions, and model/report/trace file serving.
+- Use the existing `run_text_pipeline` and IR pipeline paths first.
+- Keep LLM workers optional and future-facing; stage outputs must still be persisted artifacts.
+- Keep `AgentAdapter` separate from `StageRunner`: the adapter owns understanding/planning/explanation, while the runner owns execution/persistence.
+- Do not add cloud queues, accounts, multi-user collaboration, benchmark changes, or new CAD generator behavior.
+
+## M1.11 / v0.4a: Web Workflow Console UI And Viewer
+
+Next.
+
+- Build a workflow cockpit with a stage timeline for Requirement, Planning, Part Modeling, Review, and Outputs.
+- Let users inspect and confirm `requirement.json`, `planning_artifact.json`, `input_ir.json`, reports, and traces before advancing.
+- Reuse and evolve `web-viewer` for current-run STL preview when useful; STEP remains the primary CAD artifact.
+- Surface verified/unverified inspection state, warnings, errors, and rework decisions.
+- Do not implement browser-side CAD editing, general assembly solving, or direct prompt-to-CAD bypasses around artifacts.
+
+## M1.12 / v0.5: LLM Agent Adapter
+
+Next after the local Web Workflow Console foundation.
+
+- Add `LLMApiAgentAdapter` behind the stable `AgentAdapter` contract.
+- Convert natural language into validated requirement and planning JSON.
+- Ask for user confirmation when fields are missing, ambiguous, risky, or safety-relevant.
+- Do not let LLM output bypass schema validation, CAD IR gates, or deterministic execution.
+
 ## M2: Parser Quality
 
 Next.

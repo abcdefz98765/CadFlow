@@ -55,6 +55,38 @@ Prompt pipeline 是调试入口，从自然语言经过 Requirement Agent 到 CA
 outputs。Legacy `CADWorkflow` 保留为兼容旧 demo 和旧输出结构的入口，后续可
 收敛到同一套 artifact contract。
 
+## Planned Workflow Console
+
+未来 Web 端定位为本地单用户 Workflow Console：它是 workflow review/control
+surface，不是浏览器内 CAD 编辑器，也不是聊天式黑盒 agent。详细边界见
+[`docs/architecture/web-workflow-console.md`](architecture/web-workflow-console.md)。
+Console 的状态模型继续沿用 artifact-first contract：
+
+```text
+Web UI -> local workflow API -> StageRunner -> artifact files
+```
+
+首版本地执行单元可以定义为 `StageRunner`：
+
+- 读取上游 artifact，例如 `requirement.json`、`planning_artifact.json` 或
+  `input_ir.json`。
+- 执行一个 workflow stage，例如 Requirement、Planning、Part Modeling 或
+  Review。
+- 写出下游 artifact、stage status、flow/rework decision 和 logs。
+
+StageRunner 首版使用现有 deterministic Python 入口：`RequirementAgent`、
+`create_planning_artifact()`、`run_text_pipeline()`、`run_ir_pipeline()` /
+`run_agent_loop()` 和 report/review helpers。它与
+[`AgentAdapter`](architecture/agent-adapter.md) 分工不同：`AgentAdapter`
+负责自然语言理解、计划建议、修复建议和解释；`StageRunner` 负责本地 workflow
+执行和 artifact 落盘。即使未来某个 stage 使用 LLM，输出也必须落盘成正式
+artifact，并经过 gate 后才能进入下一阶段。聊天上下文、token stream 或浏览器
+状态不能成为跨阶段 source of truth。
+
+Console 可以展示、编辑和确认 artifact，但修改必须写回 run directory 中的
+结构化文件。它不绕过 `requirement.json` / `planning_artifact.json` /
+`input_ir.json` 直接从 prompt 生成 CAD。
+
 ## Example Layout
 
 Examples are split by scope:
@@ -378,4 +410,4 @@ Minimal `input_ir.json` shape:
 
 ## Non-Goals
 
-当前架构不做 Agent OS、不做大规模服务化、不做复杂多 agent 调度、不把 FreeCAD 或 CadQuery 写死为唯一未来方向，也不声称具备成熟工业装配求解、运动仿真、完整工程校核或生产级放行能力。
+当前架构不做 Agent OS、不做大规模服务化、不做复杂多 agent 调度、不把 FreeCAD 或 CadQuery 写死为唯一未来方向，也不声称具备成熟工业装配求解、运动仿真、完整工程校核或生产级放行能力。计划中的 Web Console 也不做账号系统、云端队列、多用户协作、浏览器内 CAD 建模、任意装配约束求解或生产级 release。

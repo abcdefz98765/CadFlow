@@ -143,6 +143,68 @@
 - 每个 benchmark 检查 STEP 输出、关键尺寸、必需 feature、trace 完整性。
 - 至少包含一个需要 IR repair 才能成功的 case。
 
+## Phase 1.10 / Product v0.4a: Local Workflow Console Backend
+
+状态：计划中。该阶段承接 M1.8/M1.9 的 artifact、inspection、report、trace 成果，把现有 file-first workflow 暴露为本地单用户 HTTP API；不引入云端队列、账号系统、多用户协作、LLM provider 依赖或新的 CAD generator 能力。
+
+目标：让 Web UI 能按 workflow stage 推进，而不是一次性黑盒运行。首版本地执行单元定义为 `StageRunner`：读取上游 artifact，执行一个确定性 Python workflow step，写出下游 artifact、status、flow/rework decision 和 log。`AgentAdapter` 是自然语言理解和解释边界，`StageRunner` 是本地执行和落盘边界，两者不合并。LLM/token worker 只作为未来 `LLMApiAgentAdapter` 的可插拔实现，不能成为跨阶段状态源。
+
+交付：
+
+- run 管理：创建/打开本地 run directory，并列出当前 artifact。
+- stage API：Requirement、Planning、Part Modeling、Review 的 `run/status/artifacts` 接口。
+- artifact API：读取 `requirement.json`、`planning_artifact.json`、`input_ir.json`、`report.json`、`agent_trace.json`、`report.md` 和 generated files。
+- gate API：记录用户确认、覆盖、驳回或 return-to-upstream 决策，并落盘为正式 artifact。
+- file serving：服务当前 run 的 `model.stl`、`model.step`、report 和 trace，供 Web viewer 使用。
+- deterministic runtime：优先复用 `run_text_pipeline()`、`run_ir_pipeline()`、`run_agent_loop()` 和 report/review helpers。
+
+边界：
+
+- workflow state 仍以文件 artifact 为准。
+- 首版 StageRunner 使用现有 deterministic Python 入口；不要求 LLM provider。
+- 不把聊天上下文、token 流或浏览器状态作为 source of truth。
+- 不运行 benchmark，不改变 benchmark contract。
+- 不提供任意 shell command endpoint 或普通用户 workflow 中的 unrestricted CLI agent execution。
+
+## Phase 1.11 / Product v0.4a: Web Workflow Console UI + Viewer
+
+状态：计划中。该阶段在本地 backend 之上提供 workflow cockpit，不是浏览器内 CAD 编辑器。
+
+目标：用户可以在 Web 端输入需求、检查需求拆分、确认/修改 handoff artifact、触发下一阶段，并查看 report/trace/STL preview，形成可审查的逐步 workflow。
+
+交付：
+
+- stage timeline：Requirement -> Planning -> Part Modeling -> Review -> Outputs。
+- artifact inspector/editor：展示 JSON/Markdown artifact；修改必须通过确认动作写回文件。
+- report/trace viewer：突出 verified、unverified、warnings、errors、flow/rework decision。
+- preview viewer：复用并改造 `web-viewer` 的 STL preview，加载当前 run 的 `model.stl`；STEP 仍是 primary CAD artifact。
+- stage controls：run next stage、rerun current stage、approve、return upstream、open output folder。
+
+边界：
+
+- 不做浏览器内参数化建模、约束求解、装配 mating 推断或生产级 release。
+- 不声称 `preview.png` 已变成真实渲染；Web viewer 是交互式 artifact preview。
+- 不绕过 `requirement.json` / `planning_artifact.json` / `input_ir.json` 直接从 prompt 生成 CAD。
+
+## Phase 1.12 / Product v0.5: LLMApiAgentAdapter
+
+状态：计划中。该阶段在 v0.4 Web Workflow Console 和 `AgentAdapter` contract 稳定后推进。
+
+目标：把默认用户体验从确定性 parser fallback 升级为 LLM API 辅助的自然语言理解、结构化需求生成、规划生成和解释，但仍保持 CadFlow Python API 为确定性执行层。
+
+交付：
+
+- `LLMApiAgentAdapter` 实现 `parse_requirement()`、`create_plan()`、`suggest_repair()` 和 `explain_review()`。
+- LLM 输出必须通过 schema validation 和 workflow gate。
+- 对缺失、歧义、高风险或安全相关字段进入用户确认流。
+- 不直接生成任意 CadQuery 代码，不绕过 CAD IR。
+
+边界：
+
+- 不引入 OpenCode/Codex CLI 作为默认 end-user CAD generation runtime。
+- 不把 prompt/chat history 作为跨阶段 source of truth。
+- 不改变 `model.step` 是 primary CAD artifact 的输出策略。
+
 ## Phase 2: Natural-language Requirement Parser
 
 目标：增强 Requirement Parser，但保持 CAD IR 输出 contract 不变。
