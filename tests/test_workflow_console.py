@@ -44,6 +44,25 @@ def test_backend_reads_stage_status_from_runtime_without_report(tmp_path):
     assert runtime["content"]["workflow_console"]["latest_stage"]["stage"] == "requirement"
 
 
+def test_backend_creates_run_without_executing_stages(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    created = backend.create_run("Make a mounting plate.", run_name="created_run")
+    run_dir = Path(created["run"]["run_dir"])
+    listed = backend.list_runs()
+
+    assert created["result"]["status"] == "created"
+    assert created["run"]["status"]["status"] == "created"
+    assert created["run"]["status"]["stage"] == "created"
+    assert [run["run_id"] for run in listed] == ["created_run"]
+    assert (run_dir / "prompt.txt").exists()
+    assert not (run_dir / "requirement.json").exists()
+
+    requirement = backend.run_stage(run_dir, "requirement")
+    assert requirement["result"]["stage"] == "requirement"
+    assert (run_dir / "requirement.json").exists()
+
+
 def test_backend_runs_stages_from_existing_run_artifacts(tmp_path):
     runner = StageRunner()
     backend = WorkflowConsoleBackend(stage_runner=runner)

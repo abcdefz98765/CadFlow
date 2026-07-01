@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from ai_native_cad.cad_ir.parser import ir_from_planning_artifact
 from ai_native_cad.pipeline.runner import PROJECT_ROOT, run_ir_pipeline, run_text_pipeline
@@ -37,6 +38,21 @@ class StageRunner:
     def __init__(self, project_root: str | Path | None = None) -> None:
         self.project_root = Path(project_root or PROJECT_ROOT).resolve()
         self.requirement_agent = RequirementAgent()
+
+    def create_run(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Create a local run directory with prompt.txt but do not execute stages."""
+        context = dict(context or {})
+        context.setdefault("run_name", f"workflow_run_{uuid4().hex}")
+        output_dir = self._resolve_output_dir(context)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "prompt.txt").write_text(prompt.strip() + "\n", encoding="utf-8")
+        result = {
+            "status": "created",
+            "stage": "created",
+            "output_dir": str(output_dir),
+        }
+        self._write_stage_runtime(output_dir, stage="created", status="created", result=result)
+        return result
 
     def run_text_pipeline(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Run the complete deterministic prompt workflow and write artifacts."""

@@ -104,6 +104,8 @@ The current scaffold lives under `src/ai_native_cad/workflow_console/`:
 
 The Python facade can run supported stages from an existing run directory by reading upstream artifacts: `prompt.txt` for Requirement or full text pipeline, `requirement.json` for Planning, and `planning_artifact.json` or `input_ir.json` for Part Modeling.
 
+It can also create a run without executing stages, writing only `prompt.txt` and local runtime status so a future UI can advance the workflow stage by stage.
+
 The local backend should expose only workflow operations:
 
 - Run management: create, open, list, and inspect local run directories.

@@ -56,6 +56,21 @@ class WorkflowConsoleBackend:
         metadata = self.read_run_metadata(result["output_dir"])
         return {"result": result, "run": metadata}
 
+    def create_run(
+        self,
+        prompt: str,
+        run_name: str | None = None,
+        output_root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Create a local run directory without executing workflow stages."""
+        context: dict[str, Any] = {}
+        if run_name is not None:
+            context["run_name"] = run_name
+        if output_root is not None:
+            context["output_root"] = output_root
+        result = self.stage_runner.create_run(prompt, context=context)
+        return {"result": result, "run": self.read_run_metadata(result["output_dir"])}
+
     def run_stage(
         self,
         run_dir: str | Path,
