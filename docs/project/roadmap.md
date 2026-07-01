@@ -191,7 +191,7 @@
 当前已完成：
 
 - runs list/select、prompt-only create run、run status/current stage。
-- run Requirement、Planning、Part Modeling 和 full text pipeline by safe run id。
+- run Requirement、Planning、Part Modeling、Review、Outputs 和 full text pipeline by safe run id。
 - readable artifact list/read。
 - editable artifact save for `requirement.json`、`planning_artifact.json`、`input_ir.json` only。
 - approve/reject/return/override gate decision recording。
@@ -202,7 +202,7 @@
 - 不做浏览器内参数化建模、约束求解、装配 mating 推断或生产级 release。
 - 不声称 `preview.png` 已变成真实渲染；Web viewer 是交互式 artifact preview。
 - 不绕过 `requirement.json` / `planning_artifact.json` / `input_ir.json` 直接从 prompt 生成 CAD。
-- Review 和 Outputs 目前是 timeline/gate 节点，不是独立 executable backend stages。
+- Review 和 Outputs 是 local check stages：Review 读取既有 `report.json` flow decision；Outputs 检查可发布 artifact，尤其是 primary `model.step`，不重新生成 CAD。
 
 ## Phase 1.12 / Product v0.5: LLMApiAgentAdapter
 

@@ -12,6 +12,7 @@ from ai_native_cad.cad_ir.parser import ir_from_planning_artifact
 from ai_native_cad.pipeline.runner import PROJECT_ROOT, run_ir_pipeline, run_text_pipeline
 from ai_native_cad.planning import create_planning_artifact
 from ai_native_cad.requirements import RequirementAgent
+from ai_native_cad.workflow_control import review_to_outputs_decision
 
 READABLE_ARTIFACTS = {
     "prompt.txt",
@@ -24,7 +25,7 @@ READABLE_ARTIFACTS = {
     "logs/runtime.json",
 }
 
-SUPPORTED_STAGES = {"text_pipeline", "requirement", "planning", "part_modeling"}
+SUPPORTED_STAGES = {"text_pipeline", "requirement", "planning", "part_modeling", "review", "outputs"}
 
 STATUS_BLOCKED = "blocked"
 STATUS_COMPLETED = "completed"
@@ -113,6 +114,12 @@ class StageRunner:
             requirement = context.get("requirement") or _read_json_required(output_dir / "requirement.json")
             return self.run_planning(requirement, context=context)
 
+        if stage == "review":
+            return self.run_review(output_dir, context=context)
+
+        if stage == "outputs":
+            return self.run_outputs(output_dir, context=context)
+
         input_ir = context.get("input_ir")
         if input_ir is not None:
             return self.run_part_modeling(input_ir, context=context)
@@ -192,6 +199,49 @@ class StageRunner:
         """Create CAD IR from Planning and run Part Modeling."""
         ir = ir_from_planning_artifact(planning_artifact)
         return self.run_part_modeling(ir.to_dict(), context=context)
+
+    def run_review(self, run_dir: str | Path, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Review existing report artifacts and record the review gate status."""
+        output_dir = self._require_project_path(Path(run_dir))
+        report = _read_json_required(output_dir / "report.json")
+        decision = report.get("flow_decision") or review_to_outputs_decision(report)
+        stage_status = _stage_status_from_decision(decision)
+        result = {
+            "status": decision.get("action", "return"),
+            "stage_status": stage_status,
+            "stage": "review",
+            "output_dir": str(output_dir),
+            "report_status": report.get("status"),
+            "success": report.get("success"),
+            "flow_decision": decision,
+        }
+        self._write_stage_runtime(output_dir, stage="review", status=stage_status, result=result)
+        return result
+
+    def run_outputs(self, run_dir: str | Path, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Check publishable output artifacts and record the outputs gate status."""
+        output_dir = self._require_project_path(Path(run_dir))
+        report = _read_json_required(output_dir / "report.json")
+        decision = report.get("flow_decision") or review_to_outputs_decision(report)
+        files = {
+            name: str(output_dir / name)
+            for name in ("model.step", "model.stl", "preview.png", "model.py")
+            if (output_dir / name).exists()
+        }
+        missing = [name for name in ("model.step", "report.json", "report.md") if not (output_dir / name).exists()]
+        can_publish = decision.get("action") == "proceed" and not missing
+        stage_status = STATUS_COMPLETED if can_publish else STATUS_BLOCKED
+        result = {
+            "status": "published" if can_publish else "blocked",
+            "stage_status": stage_status,
+            "stage": "outputs",
+            "output_dir": str(output_dir),
+            "files": files,
+            "missing": missing,
+            "flow_decision": decision,
+        }
+        self._write_stage_runtime(output_dir, stage="outputs", status=stage_status, result=result)
+        return result
 
     def read_artifacts(self, run_dir: str | Path) -> dict[str, Any]:
         """Read known workflow artifacts from an existing run directory."""

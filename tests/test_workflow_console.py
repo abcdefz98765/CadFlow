@@ -479,6 +479,59 @@ def test_backend_runs_stages_from_existing_run_artifacts(tmp_path):
     assert [stage["stage"] for stage in runtime["stages"]] == ["requirement", "planning", "part_modeling"]
 
 
+def test_backend_runs_review_and_outputs_from_existing_artifacts(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    run_dir = tmp_path / "outputs" / "reviewable_run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a spacer.\n", encoding="utf-8")
+    (run_dir / "model.step").write_text("STEP placeholder\n", encoding="utf-8")
+    (run_dir / "model.stl").write_text("STL placeholder\n", encoding="utf-8")
+    (run_dir / "report.md").write_text("# Report\n", encoding="utf-8")
+    (run_dir / "report.json").write_text(
+        json.dumps({
+            "status": "success",
+            "success": True,
+            "errors": [],
+            "flow_decision": {"action": "proceed", "from_stage": "review", "proceed_to": "outputs"},
+        }) + "\n",
+        encoding="utf-8",
+    )
+
+    review = backend.run_stage_by_id("reviewable_run", "review")
+    outputs = backend.run_stage_by_id("reviewable_run", "outputs")
+    runtime = backend.read_artifact_by_id("reviewable_run", "logs/runtime.json")["content"]["workflow_console"]
+
+    assert review["result"]["stage"] == "review"
+    assert review["result"]["stage_status"] == "completed"
+    assert outputs["result"]["stage"] == "outputs"
+    assert outputs["result"]["status"] == "published"
+    assert outputs["result"]["files"]["model.step"].endswith("model.step")
+    assert [stage["stage"] for stage in runtime["stages"]] == ["review", "outputs"]
+    assert runtime["latest_stage"]["stage"] == "outputs"
+
+
+def test_outputs_stage_blocks_without_primary_step_artifact(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    run_dir = tmp_path / "outputs" / "blocked_outputs"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a spacer.\n", encoding="utf-8")
+    (run_dir / "report.md").write_text("# Report\n", encoding="utf-8")
+    (run_dir / "report.json").write_text(
+        json.dumps({
+            "status": "success",
+            "success": True,
+            "errors": [],
+            "flow_decision": {"action": "proceed", "from_stage": "review", "proceed_to": "outputs"},
+        }) + "\n",
+        encoding="utf-8",
+    )
+
+    outputs = backend.run_stage_by_id("blocked_outputs", "outputs")
+
+    assert outputs["result"]["stage_status"] == "blocked"
+    assert outputs["result"]["missing"] == ["model.step"]
+
+
 def test_workflow_console_backend_lists_status_artifacts_and_downloadables(tmp_path):
     run_dir = tmp_path / "outputs" / "console_run"
     run_dir.mkdir(parents=True)

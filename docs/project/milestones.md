@@ -97,6 +97,7 @@ Initial local UI slice complete; follow-up polish and review/output stage expans
 - Add `web-viewer/workflow-console.html` as the first operational console screen.
 - Add a stdlib-only local bridge, `ai_native_cad.workflow_console.server`, that serves static UI files, dispatches the existing route contract, and serves only whitelisted downloadable artifacts.
 - Support listing/selecting runs, creating prompt-only runs, running supported deterministic stages by id, reading artifacts, editing allowed JSON handoff artifacts, recording gate decisions, listing downloadables, and opening the existing STL viewer for `model.stl`.
+- Add executable Review and Outputs check stages: Review records the report flow decision; Outputs checks publishable artifacts such as primary `model.step` without regenerating CAD.
 
 ## M1.12 / v0.5: LLM Agent Adapter
 

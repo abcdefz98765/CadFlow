@@ -156,13 +156,13 @@ The current UI supports the first usable local workflow loop:
 - list existing runs under `outputs/` and `runs/`;
 - create a run from a prompt without executing stages;
 - select a run and inspect status/current stage;
-- run Requirement, Planning, Part Modeling, or the full text pipeline by safe run id;
+- run Requirement, Planning, Part Modeling, Review, Outputs, or the full text pipeline by safe run id;
 - inspect readable artifacts;
 - edit only the allowed JSON handoff artifacts;
 - record approve/reject/return/override gate decisions;
 - list STEP-first downloadables and open the secondary STL preview when `model.stl` exists.
 
-Review and Outputs are represented as timeline/gate stages, but they are not yet separate executable backend stages. STEP remains the primary CAD artifact; the embedded viewer loads `model.stl` only as a secondary inspection aid.
+Review and Outputs are executable local check stages. Review reads the existing `report.json` flow decision and records the review gate status. Outputs checks publishable artifacts, including primary `model.step`, without regenerating CAD. STEP remains the primary CAD artifact; the embedded viewer loads `model.stl` only as a secondary inspection aid.
 
 ## Security Notes
 
