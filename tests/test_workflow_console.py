@@ -1,4 +1,5 @@
 import json
+from uuid import uuid4
 from pathlib import Path
 
 from ai_native_cad.agents import DeterministicAgentAdapter
@@ -41,6 +42,29 @@ def test_backend_reads_stage_status_from_runtime_without_report(tmp_path):
     assert metadata["status"]["status"] == "completed"
     assert metadata["status"]["stage"] == "requirement"
     assert runtime["content"]["workflow_console"]["latest_stage"]["stage"] == "requirement"
+
+
+def test_backend_runs_stages_from_existing_run_artifacts(tmp_path):
+    runner = StageRunner()
+    backend = WorkflowConsoleBackend(stage_runner=runner)
+    run_dir = Path.cwd() / "outputs" / f"pytest_console_stage_sequence_{uuid4().hex}"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text(
+        "Make a spacer washer with OD 12 mm, ID 6.5 mm, thickness 20 mm.\n",
+        encoding="utf-8",
+    )
+
+    requirement = backend.run_stage(run_dir, "requirement")
+    planning = backend.run_stage(run_dir, "planning")
+    modeling = backend.run_stage(run_dir, "part_modeling")
+    runtime = backend.read_artifact(run_dir, "logs/runtime.json")["content"]["workflow_console"]
+
+    assert requirement["result"]["stage"] == "requirement"
+    assert planning["result"]["stage"] == "planning"
+    assert modeling["result"]["status"] == "success"
+    assert (run_dir / "input_ir.json").exists()
+    assert (run_dir / "model.step").exists()
+    assert [stage["stage"] for stage in runtime["stages"]] == ["requirement", "planning", "part_modeling"]
 
 
 def test_workflow_console_backend_lists_status_artifacts_and_downloadables(tmp_path):

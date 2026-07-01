@@ -23,6 +23,8 @@ READABLE_ARTIFACTS = {
     "logs/runtime.json",
 }
 
+SUPPORTED_STAGES = {"text_pipeline", "requirement", "planning", "part_modeling"}
+
 
 class StageRunner:
     """Local execution unit behind the future Web Workflow Console.
@@ -52,6 +54,39 @@ class StageRunner:
             result=result,
         )
         return result
+
+    def run_stage(
+        self,
+        stage: str,
+        run_dir: str | Path,
+        prompt: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run one deterministic stage using artifacts in a run directory."""
+        if stage not in SUPPORTED_STAGES:
+            raise ValueError(f"unsupported workflow console stage: {stage}")
+        context = dict(context or {})
+        context["output_dir"] = run_dir
+        output_dir = self._require_project_path(Path(run_dir))
+
+        if stage in {"text_pipeline", "requirement"}:
+            stage_prompt = prompt if prompt is not None else _read_prompt(output_dir)
+            if stage == "text_pipeline":
+                return self.run_text_pipeline(stage_prompt, context=context)
+            return self.run_requirement(stage_prompt, context=context)
+
+        if stage == "planning":
+            requirement = context.get("requirement") or _read_json_required(output_dir / "requirement.json")
+            return self.run_planning(requirement, context=context)
+
+        input_ir = context.get("input_ir")
+        if input_ir is not None:
+            return self.run_part_modeling(input_ir, context=context)
+        input_ir = _read_json_if_present(output_dir / "input_ir.json")
+        if input_ir is not None:
+            return self.run_part_modeling(input_ir, context=context)
+        planning_artifact = context.get("planning_artifact") or _read_json_required(output_dir / "planning_artifact.json")
+        return self.run_planning_to_part_modeling(planning_artifact, context=context)
 
     def run_requirement(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Run Requirement and persist prompt.txt plus requirement.json."""
@@ -97,6 +132,10 @@ class StageRunner:
     def run_part_modeling(self, input_ir: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Run deterministic Part Modeling from CAD IR and write output artifacts."""
         context = context or {}
+        previous_console = None
+        if context.get("output_dir"):
+            runtime = _read_json_if_present(Path(context["output_dir"]) / "logs" / "runtime.json")
+            previous_console = (runtime or {}).get("workflow_console")
         result = run_ir_pipeline(
             input_ir,
             output_root=context.get("output_root"),
@@ -107,6 +146,7 @@ class StageRunner:
             stage="part_modeling",
             status=result.get("status", "unknown"),
             result=result,
+            previous_console=previous_console,
         )
         return result
 
@@ -154,10 +194,19 @@ class StageRunner:
             raise ValueError(f"workflow console paths must stay inside project root: {self.project_root}") from exc
         return resolved
 
-    def _write_stage_runtime(self, output_dir: Path, stage: str, status: str, result: dict[str, Any]) -> None:
+    def _write_stage_runtime(
+        self,
+        output_dir: Path,
+        stage: str,
+        status: str,
+        result: dict[str, Any],
+        previous_console: dict[str, Any] | None = None,
+    ) -> None:
         runtime_path = output_dir / "logs" / "runtime.json"
         runtime_path.parent.mkdir(parents=True, exist_ok=True)
         runtime = _read_json_if_present(runtime_path) or {}
+        if previous_console is not None and "workflow_console" not in runtime:
+            runtime["workflow_console"] = previous_console
         console = runtime.setdefault("workflow_console", {})
         stages = console.setdefault("stages", [])
         entry = {
@@ -189,6 +238,20 @@ def _read_artifact(path: Path) -> Any:
     if path.suffix == ".json":
         return json.loads(text)
     return text
+
+
+def _read_prompt(output_dir: Path) -> str:
+    prompt_path = output_dir / "prompt.txt"
+    if not prompt_path.exists():
+        raise FileNotFoundError(str(prompt_path))
+    return prompt_path.read_text(encoding="utf-8").strip()
+
+
+def _read_json_required(path: Path) -> dict[str, Any]:
+    value = _read_json_if_present(path)
+    if value is None:
+        raise FileNotFoundError(str(path))
+    return value
 
 
 def _read_json_if_present(path: Path) -> dict[str, Any] | None:

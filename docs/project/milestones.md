@@ -74,7 +74,7 @@ In progress.
 
 - Add a dependency-free Python backend scaffold for the file-first local workflow.
 - Define `StageRunner` as the local execution unit: read upstream artifacts, run deterministic Python stages, write downstream artifacts, and record stage history in `logs/runtime.json`.
-- Provide run management, artifact metadata/content reads, status derivation, and downloadable file discovery at the Python API layer.
+- Provide run management, artifact metadata/content reads, deterministic stage execution from existing run artifacts, status derivation, and downloadable file discovery at the Python API layer.
 - Use the existing `run_text_pipeline` and IR pipeline paths first.
 - Keep LLM workers optional and future-facing; stage outputs must still be persisted artifacts.
 - Keep `AgentAdapter` separate from `StageRunner`: the adapter owns understanding/planning/explanation, while the runner owns execution/persistence.

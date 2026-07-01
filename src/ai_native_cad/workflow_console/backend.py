@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_native_cad.pipeline.runner import PROJECT_ROOT
-from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS, StageRunner, _safe_run_name
+from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS, SUPPORTED_STAGES, StageRunner, _safe_run_name
 
 DOWNLOADABLE_FILES = ("model.step", "model.stl", "preview.png", "model.py")
 
@@ -55,6 +55,20 @@ class WorkflowConsoleBackend:
         result = self.stage_runner.run_text_pipeline(prompt, context=context)
         metadata = self.read_run_metadata(result["output_dir"])
         return {"result": result, "run": metadata}
+
+    def run_stage(
+        self,
+        run_dir: str | Path,
+        stage: str,
+        prompt: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run a supported deterministic stage for an existing local run."""
+        if stage not in SUPPORTED_STAGES:
+            raise ValueError(f"unsupported workflow console stage: {stage}")
+        run_path = self._require_project_path(Path(run_dir))
+        result = self.stage_runner.run_stage(stage, run_path, prompt=prompt, context=context)
+        return {"result": result, "run": self.read_run_metadata(run_path)}
 
     def read_run_metadata(self, run_dir: str | Path) -> dict[str, Any]:
         """Return artifact metadata, downloadables, and derived status for a run."""

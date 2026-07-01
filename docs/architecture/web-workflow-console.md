@@ -102,6 +102,8 @@ The current scaffold lives under `src/ai_native_cad/workflow_console/`:
 
 `StageRunner` records local stage history in the existing `logs/runtime.json` artifact under `workflow_console.stages`. This keeps stage status file-based without introducing a database or separate state store.
 
+The Python facade can run supported stages from an existing run directory by reading upstream artifacts: `prompt.txt` for Requirement or full text pipeline, `requirement.json` for Planning, and `planning_artifact.json` or `input_ir.json` for Part Modeling.
+
 The local backend should expose only workflow operations:
 
 - Run management: create, open, list, and inspect local run directories.
