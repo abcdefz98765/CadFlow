@@ -98,13 +98,17 @@ Even when a future stage uses `LLMApiAgentAdapter`, its output must be persisted
 The current scaffold lives under `src/ai_native_cad/workflow_console/`:
 
 - `StageRunner`: deterministic local stage execution and artifact persistence.
-- `WorkflowConsoleBackend`: local run listing, artifact metadata/content reads, status derivation, and downloadable-file discovery.
+- `WorkflowConsoleBackend`: local run listing, path-safe run-id resolution, artifact metadata/content reads, status derivation, and downloadable-file discovery.
 
 `StageRunner` records local stage history in the existing `logs/runtime.json` artifact under `workflow_console.stages`. This keeps stage status file-based without introducing a database or separate state store.
 
 The Python facade can run supported stages from an existing run directory by reading upstream artifacts: `prompt.txt` for Requirement or full text pipeline, `requirement.json` for Planning, and `planning_artifact.json` or `input_ir.json` for Part Modeling.
 
 It can also create a run without executing stages, writing only `prompt.txt` and local runtime status so a future UI can advance the workflow stage by stage.
+
+For future HTTP routes, `WorkflowConsoleBackend` also exposes run-id based operations that resolve only under configured local run roots, currently `outputs/` and `runs/`. These methods reject absolute paths, traversal segments, path separators, and unconfigured run roots so routes do not need to accept arbitrary filesystem paths.
+
+Readable artifacts remain limited to `prompt.txt`, `requirement.json`, `planning_artifact.json`, `input_ir.json`, `report.json`, `report.md`, `agent_trace.json`, and `logs/runtime.json`. Downloadable discovery remains limited to `model.step`, `model.stl`, `preview.png`, and `model.py`.
 
 The local backend should expose only workflow operations:
 

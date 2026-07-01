@@ -2,7 +2,10 @@ import json
 from uuid import uuid4
 from pathlib import Path
 
+import pytest
+
 from ai_native_cad.agents import DeterministicAgentAdapter
+from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
 from ai_native_cad.workflow_console import StageRunner, WorkflowConsoleBackend
 
 
@@ -111,6 +114,97 @@ def test_workflow_console_backend_lists_status_artifacts_and_downloadables(tmp_p
     assert metadata["status"]["attempts"] == 1
     assert [item["name"] for item in metadata["downloadables"]] == ["model.step"]
     assert report["content"]["flow_decision"]["action"] == "proceed"
+
+
+def test_backend_resolves_metadata_by_safe_run_id(tmp_path):
+    run_dir = tmp_path / "outputs" / "console_run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a spacer.\n", encoding="utf-8")
+
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    metadata = backend.read_run_metadata_by_id("console_run", root="outputs")
+
+    assert metadata["run_id"] == "console_run"
+    assert Path(metadata["run_dir"]) == run_dir.resolve()
+
+
+def test_backend_rejects_path_traversal_run_id(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    with pytest.raises(ValueError, match="run id"):
+        backend.read_run_metadata_by_id("../outside")
+
+
+def test_backend_rejects_absolute_run_id(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    with pytest.raises(ValueError, match="run id"):
+        backend.read_run_metadata_by_id(str(tmp_path / "outputs" / "console_run"))
+
+
+def test_backend_unknown_run_id_raises_clear_error(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    with pytest.raises(FileNotFoundError, match="workflow console run not found: missing_run"):
+        backend.read_run_metadata_by_id("missing_run")
+
+
+def test_backend_rejects_artifact_path_traversal_by_id(tmp_path):
+    run_dir = tmp_path / "outputs" / "console_run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a spacer.\n", encoding="utf-8")
+
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    with pytest.raises(ValueError, match="artifact is not readable"):
+        backend.read_artifact_by_id("console_run", "../report.json")
+
+
+def test_backend_rejects_unsupported_stage_by_id(tmp_path):
+    run_dir = tmp_path / "outputs" / "console_run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a spacer.\n", encoding="utf-8")
+
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    with pytest.raises(ValueError, match="unsupported workflow console stage"):
+        backend.run_stage_by_id("console_run", "shell")
+
+
+def test_backend_downloadables_by_id_remain_whitelisted(tmp_path):
+    run_dir = tmp_path / "outputs" / "console_run"
+    run_dir.mkdir(parents=True)
+    for name in ["model.step", "model.stl", "preview.png", "model.py", "notes.txt", "report.md"]:
+        (run_dir / name).write_text(f"{name}\n", encoding="utf-8")
+
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    assert [item["name"] for item in backend.list_downloadables_by_id("console_run")] == [
+        "model.step",
+        "model.stl",
+        "preview.png",
+        "model.py",
+    ]
+
+
+def test_backend_artifacts_by_id_remain_readable_artifact_whitelist(tmp_path):
+    run_dir = tmp_path / "outputs" / "console_run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "logs").mkdir()
+    for name in READABLE_ARTIFACTS:
+        artifact_path = run_dir / name
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        content = "{}\n" if artifact_path.suffix == ".json" else f"{name}\n"
+        artifact_path.write_text(content, encoding="utf-8")
+    (run_dir / "model.step").write_text("STEP placeholder\n", encoding="utf-8")
+    (run_dir / "extra.json").write_text("{}\n", encoding="utf-8")
+
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    assert {item["name"] for item in backend.list_artifacts_by_id("console_run")} == READABLE_ARTIFACTS
+    with pytest.raises(ValueError, match="artifact is not readable"):
+        backend.read_artifact_by_id("console_run", "extra.json")
 
 
 def test_stage_runner_text_pipeline_and_deterministic_adapter_smoke():

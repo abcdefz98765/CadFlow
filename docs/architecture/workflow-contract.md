@@ -61,6 +61,8 @@ The future Web Workflow Console should read this contract directly:
 
 The v0.4a Python backend scaffold in `ai_native_cad.workflow_console` already follows this rule: it lists run directories, reads only whitelisted artifact files, derives status from existing report/trace artifacts, and reports downloadable files without creating a second state store.
 
+For future HTTP routes, the backend has path-safe run-id operations that resolve a single directory name only under configured run roots, currently `outputs/` and `runs/`. These operations reject absolute paths, traversal, path separators, and unconfigured roots. Existing artifact files remain the source of truth; no database or separate state store has been introduced.
+
 For runs that stop before `report.json` exists, the backend may derive the latest local stage status from `logs/runtime.json` when `workflow_console.latest_stage` is present.
 
 The Web Console may cache or index metadata, but it should not become the authoritative workflow state store in v0.4.

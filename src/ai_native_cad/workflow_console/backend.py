@@ -85,6 +85,32 @@ class WorkflowConsoleBackend:
         result = self.stage_runner.run_stage(stage, run_path, prompt=prompt, context=context)
         return {"result": result, "run": self.read_run_metadata(run_path)}
 
+    def run_stage_by_id(
+        self,
+        run_id: str,
+        stage: str,
+        prompt: str | None = None,
+        context: dict[str, Any] | None = None,
+        root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Run a supported deterministic stage for a path-safe run id."""
+        return self.run_stage(self.resolve_run(run_id, root=root), stage, prompt=prompt, context=context)
+
+    def resolve_run(self, run_id: str, root: str | Path | None = None) -> Path:
+        """Resolve a run id under configured run roots without accepting paths."""
+        self._require_safe_run_id(run_id)
+        search_roots = [self._resolve_run_root(root)] if root is not None else self._resolved_run_roots()
+        for run_root in search_roots:
+            candidate = self._require_child_path(run_root, run_id)
+            if candidate.is_dir() and _has_workflow_artifact(candidate):
+                return candidate
+        root_labels = ", ".join(str(path) for path in search_roots)
+        raise FileNotFoundError(f"workflow console run not found: {run_id} under {root_labels}")
+
+    def read_run_metadata_by_id(self, run_id: str, root: str | Path | None = None) -> dict[str, Any]:
+        """Return run metadata for a path-safe run id."""
+        return self.read_run_metadata(self.resolve_run(run_id, root=root))
+
     def read_run_metadata(self, run_dir: str | Path) -> dict[str, Any]:
         """Return artifact metadata, downloadables, and derived status for a run."""
         path = self._require_project_path(Path(run_dir))
@@ -99,6 +125,10 @@ class WorkflowConsoleBackend:
             "downloadables": self.list_downloadables(path),
         }
 
+    def list_artifacts_by_id(self, run_id: str, root: str | Path | None = None) -> list[dict[str, Any]]:
+        """List known readable artifacts present for a path-safe run id."""
+        return self.list_artifacts(self.resolve_run(run_id, root=root))
+
     def list_artifacts(self, run_dir: str | Path) -> list[dict[str, Any]]:
         """List known readable artifacts present in a run directory."""
         path = self._require_project_path(Path(run_dir))
@@ -108,6 +138,10 @@ class WorkflowConsoleBackend:
             if artifact_path.exists():
                 artifacts.append(_file_metadata(name, artifact_path))
         return artifacts
+
+    def read_artifact_by_id(self, run_id: str, artifact: str, root: str | Path | None = None) -> dict[str, Any]:
+        """Read a whitelisted artifact from a path-safe run id."""
+        return self.read_artifact(self.resolve_run(run_id, root=root), artifact)
 
     def read_artifact(self, run_dir: str | Path, artifact: str) -> dict[str, Any]:
         """Read a whitelisted artifact by relative artifact name."""
@@ -122,6 +156,10 @@ class WorkflowConsoleBackend:
             **_file_metadata(artifact, artifact_path),
             "content": json.loads(text) if artifact_path.suffix == ".json" else text,
         }
+
+    def list_downloadables_by_id(self, run_id: str, root: str | Path | None = None) -> list[dict[str, Any]]:
+        """List downloadable files for a path-safe run id."""
+        return self.list_downloadables(self.resolve_run(run_id, root=root))
 
     def list_downloadables(self, run_dir: str | Path) -> list[dict[str, Any]]:
         """List generated output files that can be served or downloaded."""
@@ -166,6 +204,25 @@ class WorkflowConsoleBackend:
             path = root if root.is_absolute() else self.project_root / root
             roots.append(self._require_project_path(path))
         return roots
+
+    def _resolve_run_root(self, root: str | Path) -> Path:
+        candidate = Path(root)
+        if not candidate.is_absolute():
+            candidate = self.project_root / candidate
+        resolved = self._require_project_path(candidate)
+        allowed_roots = self._resolved_run_roots()
+        if resolved not in allowed_roots:
+            raise ValueError(f"workflow console run root is not configured: {root}")
+        return resolved
+
+    def _require_safe_run_id(self, run_id: str) -> None:
+        if not run_id or run_id in {".", ".."}:
+            raise ValueError("workflow console run id must be a non-empty directory name")
+        if "/" in run_id or "\\" in run_id or ":" in run_id:
+            raise ValueError(f"workflow console run id must not contain path separators: {run_id}")
+        path = Path(run_id)
+        if path.is_absolute() or ".." in path.parts or len(path.parts) != 1:
+            raise ValueError(f"workflow console run id must be a single relative directory name: {run_id}")
 
     def _require_project_path(self, path: Path) -> Path:
         resolved = path.resolve()
