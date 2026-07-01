@@ -6,7 +6,7 @@ import pytest
 
 from ai_native_cad.agents import DeterministicAgentAdapter
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
-from ai_native_cad.workflow_console import StageRunner, WorkflowConsoleBackend
+from ai_native_cad.workflow_console import STATUS_CREATED, WORKFLOW_STATUS_VALUES, StageRunner, WorkflowConsoleBackend
 
 
 def test_stage_runner_runs_requirement_and_planning_to_artifacts(tmp_path):
@@ -64,6 +64,42 @@ def test_backend_creates_run_without_executing_stages(tmp_path):
     requirement = backend.run_stage(run_dir, "requirement")
     assert requirement["result"]["stage"] == "requirement"
     assert (run_dir / "requirement.json").exists()
+
+
+def test_backend_creates_run_by_safe_id_under_configured_root(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    created = backend.create_run_by_id("created_by_id", "Make a spacer.", root="runs")
+    metadata = backend.read_run_metadata_by_id("created_by_id", root="runs")
+
+    assert created["result"]["status"] == STATUS_CREATED
+    assert created["run"]["run_id"] == "created_by_id"
+    assert created["run"]["status"]["status"] in WORKFLOW_STATUS_VALUES
+    assert Path(created["run"]["run_dir"]) == (tmp_path / "runs" / "created_by_id").resolve()
+    assert metadata["status"]["stage"] == STATUS_CREATED
+    assert (tmp_path / "runs" / "created_by_id" / "prompt.txt").read_text(encoding="utf-8") == "Make a spacer.\n"
+
+
+def test_backend_create_run_by_id_rejects_unsafe_id(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    with pytest.raises(ValueError, match="run id"):
+        backend.create_run_by_id("../outside", "Make a spacer.")
+
+
+def test_backend_create_run_by_id_rejects_unconfigured_root(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    with pytest.raises(ValueError, match="run root is not configured"):
+        backend.create_run_by_id("created_by_id", "Make a spacer.", root="tmp")
+
+
+def test_backend_create_run_by_id_rejects_existing_run(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("created_by_id", "Make a spacer.")
+
+    with pytest.raises(FileExistsError, match="workflow console run already exists"):
+        backend.create_run_by_id("created_by_id", "Make another spacer.")
 
 
 def test_backend_runs_stages_from_existing_run_artifacts(tmp_path):

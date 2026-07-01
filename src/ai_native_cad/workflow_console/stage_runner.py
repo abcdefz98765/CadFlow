@@ -26,6 +26,24 @@ READABLE_ARTIFACTS = {
 
 SUPPORTED_STAGES = {"text_pipeline", "requirement", "planning", "part_modeling"}
 
+STATUS_BLOCKED = "blocked"
+STATUS_COMPLETED = "completed"
+STATUS_CREATED = "created"
+STATUS_FAILED = "failed"
+STATUS_RUNNING_OR_INCOMPLETE = "running_or_incomplete"
+STATUS_SUCCESS = "success"
+STATUS_UNKNOWN = "unknown"
+
+WORKFLOW_STATUS_VALUES = {
+    STATUS_BLOCKED,
+    STATUS_COMPLETED,
+    STATUS_CREATED,
+    STATUS_FAILED,
+    STATUS_RUNNING_OR_INCOMPLETE,
+    STATUS_SUCCESS,
+    STATUS_UNKNOWN,
+}
+
 
 class StageRunner:
     """Local execution unit behind the future Web Workflow Console.
@@ -47,11 +65,11 @@ class StageRunner:
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "prompt.txt").write_text(prompt.strip() + "\n", encoding="utf-8")
         result = {
-            "status": "created",
-            "stage": "created",
+            "status": STATUS_CREATED,
+            "stage": STATUS_CREATED,
             "output_dir": str(output_dir),
         }
-        self._write_stage_runtime(output_dir, stage="created", status="created", result=result)
+        self._write_stage_runtime(output_dir, stage=STATUS_CREATED, status=STATUS_CREATED, result=result)
         return result
 
     def run_text_pipeline(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -66,7 +84,7 @@ class StageRunner:
         self._write_stage_runtime(
             Path(result["output_dir"]),
             stage="text_pipeline",
-            status=result.get("status", "unknown"),
+            status=result.get("status", STATUS_UNKNOWN),
             result=result,
         )
         return result
@@ -160,7 +178,7 @@ class StageRunner:
         self._write_stage_runtime(
             Path(result["output_dir"]),
             stage="part_modeling",
-            status=result.get("status", "unknown"),
+            status=result.get("status", STATUS_UNKNOWN),
             result=result,
             previous_console=previous_console,
         )
@@ -277,4 +295,4 @@ def _read_json_if_present(path: Path) -> dict[str, Any] | None:
 
 
 def _stage_status_from_decision(decision: dict[str, Any]) -> str:
-    return "completed" if decision.get("action", "proceed") == "proceed" else "blocked"
+    return STATUS_COMPLETED if decision.get("action", "proceed") == "proceed" else STATUS_BLOCKED

@@ -152,7 +152,7 @@
 交付：
 
 - Python run 管理：创建/打开本地 run directory，可只写入 `prompt.txt` 后再逐阶段推进，并列出当前 artifact。
-- Path-safe run-id API：为后续 HTTP routes 提供按 run id 读取 metadata、artifact、downloadables 和运行 stage 的入口，只解析 `outputs/` / `runs/` 下的单级目录名，拒绝 absolute path、`..` 和 path separator。
+- Path-safe run-id API：为后续 HTTP routes 提供按 run id 创建 run、读取 metadata/artifact/downloadables 和运行 stage 的入口，只解析 `outputs/` / `runs/` 下的单级目录名，拒绝 absolute path、`..`、path separator、重复创建目标和未配置 root。
 - Python `StageRunner`：运行 Requirement、Planning、Part Modeling，以及完整 `run_text_pipeline()`；可从已有 run artifact 推进下一阶段，并在 `logs/runtime.json` 记录本地 stage history。
 - Python artifact API：读取 `prompt.txt`、`requirement.json`、`planning_artifact.json`、`input_ir.json`、`report.json`、`agent_trace.json`、`report.md` 和 `logs/runtime.json`。
 - Python file discovery：识别当前 run 的 `model.step`、`model.stl`、`preview.png` 和 `model.py`，供后续 HTTP/file serving 使用。
@@ -163,6 +163,7 @@
 
 - workflow state 仍以文件 artifact 为准。
 - 不引入独立 state store；run-id API 只是对现有 artifact directories 的安全解析层。
+- 本地 workflow status vocabulary 保持集中定义，便于后续 API/UI 复用。
 - 首版 StageRunner 使用现有 deterministic Python 入口；不要求 LLM provider。
 - 不把聊天上下文、token 流或浏览器状态作为 source of truth。
 - 不运行 benchmark，不改变 benchmark contract。

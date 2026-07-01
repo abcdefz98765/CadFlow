@@ -1,6 +1,27 @@
 """Local backend scaffolding for the future Web Workflow Console."""
 
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
-from ai_native_cad.workflow_console.stage_runner import StageRunner
+from ai_native_cad.workflow_console.stage_runner import (
+    STATUS_BLOCKED,
+    STATUS_COMPLETED,
+    STATUS_CREATED,
+    STATUS_FAILED,
+    STATUS_RUNNING_OR_INCOMPLETE,
+    STATUS_SUCCESS,
+    STATUS_UNKNOWN,
+    WORKFLOW_STATUS_VALUES,
+    StageRunner,
+)
 
-__all__ = ["StageRunner", "WorkflowConsoleBackend"]
+__all__ = [
+    "STATUS_BLOCKED",
+    "STATUS_COMPLETED",
+    "STATUS_CREATED",
+    "STATUS_FAILED",
+    "STATUS_RUNNING_OR_INCOMPLETE",
+    "STATUS_SUCCESS",
+    "STATUS_UNKNOWN",
+    "WORKFLOW_STATUS_VALUES",
+    "StageRunner",
+    "WorkflowConsoleBackend",
+]

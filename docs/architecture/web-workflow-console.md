@@ -106,9 +106,11 @@ The Python facade can run supported stages from an existing run directory by rea
 
 It can also create a run without executing stages, writing only `prompt.txt` and local runtime status so a future UI can advance the workflow stage by stage.
 
-For future HTTP routes, `WorkflowConsoleBackend` also exposes run-id based operations that resolve only under configured local run roots, currently `outputs/` and `runs/`. These methods reject absolute paths, traversal segments, path separators, and unconfigured run roots so routes do not need to accept arbitrary filesystem paths.
+For future HTTP routes, `WorkflowConsoleBackend` also exposes run-id based operations that create or resolve runs only under configured local run roots, currently `outputs/` and `runs/`. These methods reject absolute paths, traversal segments, path separators, duplicate create targets, and unconfigured run roots so routes do not need to accept arbitrary filesystem paths.
 
 Readable artifacts remain limited to `prompt.txt`, `requirement.json`, `planning_artifact.json`, `input_ir.json`, `report.json`, `report.md`, `agent_trace.json`, and `logs/runtime.json`. Downloadable discovery remains limited to `model.step`, `model.stl`, `preview.png`, and `model.py`.
+
+The backend exposes shared status constants for the current local status vocabulary: `created`, `completed`, `blocked`, `success`, `failed`, `running_or_incomplete`, and `unknown`.
 
 The local backend should expose only workflow operations:
 

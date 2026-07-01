@@ -7,7 +7,17 @@ from pathlib import Path
 from typing import Any
 
 from ai_native_cad.pipeline.runner import PROJECT_ROOT
-from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS, SUPPORTED_STAGES, StageRunner, _safe_run_name
+from ai_native_cad.workflow_console.stage_runner import (
+    READABLE_ARTIFACTS,
+    STATUS_BLOCKED,
+    STATUS_FAILED,
+    STATUS_RUNNING_OR_INCOMPLETE,
+    STATUS_SUCCESS,
+    STATUS_UNKNOWN,
+    SUPPORTED_STAGES,
+    StageRunner,
+    _safe_run_name,
+)
 
 DOWNLOADABLE_FILES = ("model.step", "model.stl", "preview.png", "model.py")
 
@@ -69,6 +79,21 @@ class WorkflowConsoleBackend:
         if output_root is not None:
             context["output_root"] = output_root
         result = self.stage_runner.create_run(prompt, context=context)
+        return {"result": result, "run": self.read_run_metadata(result["output_dir"])}
+
+    def create_run_by_id(
+        self,
+        run_id: str,
+        prompt: str,
+        root: str | Path = "outputs",
+    ) -> dict[str, Any]:
+        """Create a local run from a path-safe id under a configured run root."""
+        self._require_safe_run_id(run_id)
+        run_root = self._resolve_run_root(root)
+        output_dir = self._require_child_path(run_root, run_id)
+        if output_dir.exists():
+            raise FileExistsError(f"workflow console run already exists: {run_id}")
+        result = self.stage_runner.create_run(prompt, context={"output_dir": output_dir})
         return {"result": result, "run": self.read_run_metadata(result["output_dir"])}
 
     def run_stage(
@@ -181,13 +206,13 @@ class WorkflowConsoleBackend:
         rework_decision = (report or {}).get("rework_decision") or (trace or {}).get("rework_decision")
         status = (report or {}).get("status")
         if status is None and report:
-            status = "success" if report.get("success") else "failed"
+            status = STATUS_SUCCESS if report.get("success") else STATUS_FAILED
         if status is None and trace:
-            status = "blocked" if rework_decision and rework_decision.get("action") == "return" else "running_or_incomplete"
+            status = STATUS_BLOCKED if rework_decision and rework_decision.get("action") == "return" else STATUS_RUNNING_OR_INCOMPLETE
         if status is None and runtime_stage:
             status = runtime_stage.get("status")
         return {
-            "status": status or "unknown",
+            "status": status or STATUS_UNKNOWN,
             "success": (report or {}).get("success"),
             "stage": runtime_stage.get("stage"),
             "blocked_stage": (report or {}).get("blocked_stage") or (trace or {}).get("text_pipeline", {}).get("blocked_stage"),
