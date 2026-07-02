@@ -135,6 +135,12 @@ The context assembler must run before the injected provider client sees the
 request. It must use allowlisted structured data and the existing privacy
 sanitizer.
 
+The first runtime implementation lives in
+`src/ai_native_cad/agents/provider_context.py`. It uses a static
+operation-to-skill mapping and compact operation-specific knowledge summaries;
+it does not perform embedding search, vector retrieval, auto-indexing, external
+search, or long-document stuffing.
+
 Provider-visible context must not include:
 
 - API keys, tokens, passwords, or secret values.
@@ -272,25 +278,27 @@ Skill behavior:
 - Block or ask when the requested change cannot be mapped safely.
 - Never overwrite parent artifacts.
 
-## Runtime Implementation Direction
+## Runtime Implementation
 
-The next implementation step should introduce a provider context module rather
-than expanding inline strings in `json_contract.py`:
+The first runtime implementation uses a provider context module rather than
+expanding inline strings in `json_contract.py`:
 
 ```text
 src/ai_native_cad/agents/provider_context.py
 ```
 
-Suggested responsibilities:
+Current responsibilities:
 
-- `system_prompt_for(operation)`: combine global rules, stage skill guide, and
-  operation contract guide.
+- `system_prompt_for(operation)`: combine global rules and the stage skill
+  guide.
+- `contract_guide_for(operation)`: return the compact operation-specific
+  contract guide.
 - `knowledge_summary_for(operation, context)`: return a small static summary
   selected for the stage.
-- `provider_payload_for(operation, input, context, model_context)`: build the
-  sanitized provider-visible payload.
+- `provider_messages_for(...)`: build provider-visible system/user messages
+  containing selected context and the sanitized operation payload.
 
-The first version should be static and deterministic. It should not implement
+This first version is static and deterministic. It does not implement
 general RAG, long knowledge stuffing, background indexing, or provider-side
 memory. Selection should use an explicit operation-to-skill mapping, for
 example `parse_requirement -> requirement`, `create_plan -> planning`,

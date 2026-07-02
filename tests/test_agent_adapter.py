@@ -15,6 +15,7 @@ from ai_native_cad.agents import (
     OpenAIResponsesJsonContractClient,
     make_json_contract_adapter_from_env,
 )
+from ai_native_cad.agents.provider_context import knowledge_summary_for, provider_messages_for
 from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
 from ai_native_cad.workflow_console.stage_runner import StageRunner
 
@@ -226,7 +227,15 @@ def _valid_revision_plan():
 
 
 def _request_user_payload(request):
-    return json.loads(request["messages"][1]["content"])
+    return json.loads(_request_user_message(request)["content"])
+
+
+def _request_user_message(request):
+    return next(message for message in request["messages"] if message["role"] == "user")
+
+
+def _request_system_text(request):
+    return "\n".join(message["content"] for message in request["messages"] if message["role"] == "system")
 
 
 def test_deterministic_agent_adapter_satisfies_contract_without_provider_config():
@@ -266,7 +275,62 @@ def test_json_contract_agent_adapter_accepts_valid_fake_requirement_output():
     assert fake_client.requests[0]["response_format"] == {"type": "json_object"}
     assert fake_client.requests[0]["provider_options"] == {"timeout_seconds": 30, "max_retries": 0}
     assert fake_client.requests[0]["messages"][0]["role"] == "system"
-    assert "JSON object" in fake_client.requests[0]["messages"][0]["content"]
+    assert "Return JSON only" in fake_client.requests[0]["messages"][0]["content"]
+    assert "requirement.json" in _request_system_text(fake_client.requests[0])
+
+
+def test_parse_requirement_provider_request_is_requirement_scoped():
+    fake_client = FakeJsonContractClient(_valid_requirement_json())
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    adapter.parse_requirement("Make a spacer washer.")
+
+    request = fake_client.requests[0]
+    system_text = _request_system_text(request)
+
+    assert "Stage skill: requirement" in system_text
+    assert "requirement_check_level_missing_information" in system_text
+    assert "revision_supported_changes" not in system_text
+    assert "revision_patch_contract" not in system_text
+    assert "assembly" not in system_text.lower()
+
+
+def test_provider_messages_include_selected_knowledge_in_messages_not_only_context():
+    fake_client = FakeJsonContractClient(_valid_requirement_json())
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    adapter.parse_requirement("Make a spacer washer.", context={"workflow_stage": "requirement"})
+
+    request = fake_client.requests[0]
+    messages_text = json.dumps(request["messages"], sort_keys=True)
+    context_text = json.dumps(request["context"], sort_keys=True)
+
+    assert "Selected compact knowledge" in messages_text
+    assert "requirement_check_level_missing_information" in messages_text
+    assert "requirement_check_level_missing_information" not in context_text
+
+
+def test_provider_context_messages_use_only_system_and_user_roles():
+    messages = provider_messages_for(
+        operation="create_plan",
+        contract_instruction="Return planning JSON.",
+        user_payload=_valid_requirement(),
+    )
+
+    assert [message["role"] for message in messages] == ["system", "system", "system", "user"]
+    assert {message["role"] for message in messages} == {"system", "user"}
+
+
+def test_provider_context_unknown_operation_fails_closed():
+    with pytest.raises(ValueError, match="unsupported provider context operation"):
+        knowledge_summary_for("interpret_user_intent")
+
+    with pytest.raises(ValueError, match="unsupported provider context operation"):
+        provider_messages_for(
+            operation="interpret_user_intent",
+            contract_instruction="Return JSON.",
+            user_payload={},
+        )
 
 
 @pytest.mark.parametrize("response", [
@@ -313,7 +377,7 @@ def test_json_contract_agent_adapter_accepts_valid_fake_planning_output():
     assert fake_client.requests[0]["operation"] == "create_plan"
     assert fake_client.requests[0]["response_format"] == {"type": "json_object"}
     assert fake_client.requests[0]["messages"][0]["role"] == "system"
-    assert "planning_artifact.json" in fake_client.requests[0]["messages"][0]["content"]
+    assert "planning_artifact.json" in _request_system_text(fake_client.requests[0])
 
 
 def test_json_contract_agent_adapter_accepts_revision_contract_outputs():
@@ -334,8 +398,26 @@ def test_json_contract_agent_adapter_accepts_revision_contract_outputs():
         "create_revision_plan",
     ]
     assert fake_client.requests[0]["response_format"] == {"type": "json_object"}
-    assert "revision change intent" in fake_client.requests[0]["messages"][0]["content"]
-    assert "revision_plan.json" in fake_client.requests[1]["messages"][0]["content"]
+    assert "revision_intent" in _request_system_text(fake_client.requests[0])
+    assert "revision_plan.json" in _request_system_text(fake_client.requests[1])
+
+
+def test_create_revision_plan_provider_request_includes_revision_patch_guidance():
+    fake_client = OperationFakeJsonContractClient({
+        "create_revision_plan": _valid_revision_plan(),
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    adapter.create_revision_plan(_valid_revision_intent(), {"current_ir": _valid_ir()})
+
+    request = fake_client.requests[0]
+    system_text = _request_system_text(request)
+
+    assert request["operation"] == "create_revision_plan"
+    assert "Stage skill: revision" in system_text
+    assert "revision_patch_contract" in system_text
+    assert "patch operations" in system_text
+    assert "blocked/no_structured_changes" in system_text
 
 
 @pytest.mark.parametrize("operation,response", [
@@ -528,8 +610,8 @@ def test_json_contract_agent_adapter_sanitizes_context_before_provider_request()
         "workflow_stage": "requirement",
         "target_contract": "requirement_v0",
     }
-    assert "[redacted-local-path]" in request["messages"][1]["content"]
-    assert "[redacted-secret]" in request["messages"][1]["content"]
+    assert "[redacted-local-path]" in _request_user_message(request)["content"]
+    assert "[redacted-secret]" in _request_user_message(request)["content"]
     assert "D:/private" not in serialized
     assert "D:\\private" not in serialized
     assert "sk-test-secret123456" not in serialized
@@ -563,6 +645,49 @@ def test_json_contract_agent_adapter_sanitizes_requirement_payload_before_planni
     assert "sk-test-secret123456" not in serialized
     assert "D:\\private" not in serialized
     assert "CADFLOW_FAKE_API_KEY" not in serialized
+
+
+def test_json_contract_agent_adapter_removes_sensitive_payload_fields_from_provider_messages():
+    fake_client = FakeJsonContractClient(_valid_planning_json())
+    adapter = JsonContractAgentAdapter(fake_client)
+    requirement = _valid_requirement()
+    requirement.update({
+        "password": "not-for-provider",
+        "api_key": "sk-test-secret123456",
+        "token": "private-token",
+        "provider_response": {"output_text": "raw provider text"},
+        "chat_logs": ["raw chat"],
+    })
+
+    adapter.create_plan(requirement)
+
+    messages_text = json.dumps(fake_client.requests[0]["messages"], sort_keys=True)
+
+    assert "password" not in messages_text
+    assert "api_key" not in messages_text
+    assert "token" not in messages_text
+    assert "provider_response" not in messages_text
+    assert "chat_logs" not in messages_text
+    assert "not-for-provider" not in messages_text
+    assert "sk-test-secret123456" not in messages_text
+    assert "raw provider text" not in messages_text
+
+
+def test_json_contract_agent_adapter_removes_api_env_names_and_local_paths_from_provider_messages():
+    fake_client = FakeJsonContractClient(_valid_requirement_json())
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    adapter.parse_requirement(
+        r"Use CADFLOW_FAKE_API_KEY with D:\MyCode\llm2cad\outputs\secret.step and /home/admin/private/file.step"
+    )
+
+    messages_text = json.dumps(fake_client.requests[0]["messages"], sort_keys=True)
+
+    assert "CADFLOW_FAKE_API_KEY" not in messages_text
+    assert r"D:\MyCode" not in messages_text
+    assert "/home/admin" not in messages_text
+    assert "[redacted-api-env-var]" in messages_text
+    assert "[redacted-local-path]" in messages_text
 
 
 def test_json_contract_agent_adapter_sanitizes_revision_model_context_before_provider_request():

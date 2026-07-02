@@ -91,6 +91,13 @@ contract request, parses the returned JSON object, and runs the matching local
 adapter validation before the result can be persisted or consumed by workflow
 code.
 
+Provider-backed requests use
+`src/ai_native_cad/agents/provider_context.py` to assemble CadFlow-owned runtime
+context in provider messages: global minimal rules, the operation's stage skill
+guide, the compact contract guide, selected static knowledge, and the sanitized
+operation payload. The first implementation is deterministic and static rather
+than retrieval-backed.
+
 It must not record prompts, transcripts, token contents, secrets, API keys, or
 local paths in provider identity metadata.
 
