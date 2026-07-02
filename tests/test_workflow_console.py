@@ -367,8 +367,75 @@ def test_workflow_console_metadata_includes_compact_report_trace_summary(tmp_pat
                 "assumption_count": 0,
             },
         },
+        "revision_summary": {
+            "present": False,
+            "relationship": None,
+            "parent_run_id": None,
+            "child_run_id": None,
+            "revision_index": None,
+            "plan_status": None,
+            "status": None,
+            "blocked_reason": None,
+            "requested_change_count": 0,
+            "actual_ir_change_count": 0,
+            "validation_change_count": 0,
+            "system_repair_change_count": 0,
+        },
     }
     assert _does_not_contain_keys(metadata["report_summary"], {"path", "run_dir", "root", "output_dir", "file"})
+
+
+def test_workflow_console_metadata_summarizes_revision_without_paths(tmp_path):
+    run_dir = tmp_path / "outputs" / "revision_summary"
+    run_dir.mkdir(parents=True)
+    (run_dir / "report.json").write_text('{"status": "blocked", "success": false}\n', encoding="utf-8")
+    (run_dir / "revision_plan.json").write_text('{"status": "no_structured_changes"}\n', encoding="utf-8")
+    (run_dir / "comparison.json").write_text(
+        json.dumps({
+            "status": "blocked",
+            "blocked_reason": "revision_plan.status=no_structured_changes",
+            "parent_run_id": "parent_plate",
+            "child_run_id": "revision_summary",
+            "summary": {
+                "requested_change_count": 0,
+                "actual_ir_change_count": 0,
+                "validation_change_count": 0,
+                "system_repair_change_count": 0,
+            },
+            "parent_artifacts": {"input_ir": str(run_dir / "parent" / "input_ir.json")},
+        }) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "lineage.json").write_text(
+        json.dumps({
+            "relationship": "revision_blocked",
+            "parent_run_id": "parent_plate",
+            "child_run_id": "revision_summary",
+            "revision_index": 2,
+            "parent_run_dir": str(tmp_path / "outputs" / "parent_plate"),
+        }) + "\n",
+        encoding="utf-8",
+    )
+
+    summary = WorkflowConsoleBackend(project_root=tmp_path).read_run_metadata_by_id("revision_summary")[
+        "report_summary"
+    ]["revision_summary"]
+
+    assert summary == {
+        "present": True,
+        "relationship": "revision_blocked",
+        "parent_run_id": "parent_plate",
+        "child_run_id": "revision_summary",
+        "revision_index": 2,
+        "plan_status": "no_structured_changes",
+        "status": "blocked",
+        "blocked_reason": "revision_plan.status=no_structured_changes",
+        "requested_change_count": 0,
+        "actual_ir_change_count": 0,
+        "validation_change_count": 0,
+        "system_repair_change_count": 0,
+    }
+    assert _does_not_contain_keys(summary, {"path", "run_dir", "root", "output_dir", "parent_artifacts"})
 
 
 def test_workflow_console_metadata_summarizes_assumptions_and_risks_without_paths(tmp_path):

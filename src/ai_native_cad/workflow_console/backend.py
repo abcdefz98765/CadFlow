@@ -255,6 +255,9 @@ class WorkflowConsoleBackend:
         planning = _read_json_if_present(path / "planning_artifact.json")
         report = _read_json_if_present(path / "report.json")
         trace = _read_json_if_present(path / "agent_trace.json")
+        comparison = _read_json_if_present(path / "comparison.json")
+        lineage = _read_json_if_present(path / "lineage.json")
+        revision_plan = _read_json_if_present(path / "revision_plan.json")
         warnings = list((report or {}).get("warnings") or [])
         errors = list((report or {}).get("errors") or [])
         flow_decision = (report or {}).get("flow_decision") or (trace or {}).get("final_flow_decision") or {}
@@ -280,6 +283,7 @@ class WorkflowConsoleBackend:
             "planning_summary": planning_summary,
             "requirement_flow_decision": requirement_summary["flow_decision"],
             "planning_flow_gate": planning_summary["flow_gate"],
+            "revision_summary": _compact_revision_summary(comparison, lineage, revision_plan),
         }
 
     def read_gate_history(self, run_dir: str | Path) -> list[dict[str, Any]]:
@@ -571,6 +575,33 @@ def _compact_planning_summary(planning: dict[str, Any] | None) -> dict[str, Any]
             "rework_decision": _compact_flow_decision(decision),
         },
         "risk_notes": _compact_field_collection(risks),
+    }
+
+
+def _compact_revision_summary(
+    comparison: dict[str, Any] | None,
+    lineage: dict[str, Any] | None,
+    revision_plan: dict[str, Any] | None,
+) -> dict[str, Any]:
+    comparison = comparison or {}
+    lineage = lineage or {}
+    revision_plan = revision_plan or {}
+    summary = comparison.get("summary") if isinstance(comparison.get("summary"), dict) else {}
+    status_value = comparison.get("status")
+    child_status = status_value.get("child") if isinstance(status_value, dict) else status_value
+    return {
+        "present": bool(comparison or lineage or revision_plan),
+        "relationship": lineage.get("relationship"),
+        "parent_run_id": lineage.get("parent_run_id") or comparison.get("parent_run_id"),
+        "child_run_id": lineage.get("child_run_id") or comparison.get("child_run_id"),
+        "revision_index": lineage.get("revision_index"),
+        "plan_status": revision_plan.get("status"),
+        "status": child_status,
+        "blocked_reason": comparison.get("blocked_reason") or lineage.get("blocked_reason"),
+        "requested_change_count": summary.get("requested_change_count", 0),
+        "actual_ir_change_count": summary.get("actual_ir_change_count", 0),
+        "validation_change_count": summary.get("validation_change_count", 0),
+        "system_repair_change_count": summary.get("system_repair_change_count", 0),
     }
 
 
