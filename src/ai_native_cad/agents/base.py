@@ -23,6 +23,38 @@ class AgentAdapter(Protocol):
     def create_plan(self, requirement: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return a structured planning artifact."""
 
+    def interpret_user_intent(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return the interpreted design intent behind a user prompt."""
+
+    def propose_design_brief(self, intent: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return a design brief with assumptions, constraints, and goals."""
+
+    def generate_candidate_plans(
+        self,
+        design_brief: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return candidate CAD design plans for the brief."""
+
+    def convert_plan_to_ir(self, selected_plan: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return CAD IR for the selected plan."""
+
+    def parse_revision_request(
+        self,
+        prompt: str,
+        model_context: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return structured change intent for a revision prompt."""
+
+    def create_revision_plan(
+        self,
+        change_intent: dict[str, Any],
+        model_context: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return a structured plan for revising an existing CadFlow run."""
+
     def suggest_repair(
         self,
         failure: dict[str, Any],

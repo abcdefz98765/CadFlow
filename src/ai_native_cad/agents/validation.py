@@ -32,6 +32,19 @@ def validate_adapter_result(operation: str, content: dict[str, Any]) -> None:
     if operation == "create_plan":
         validate_planning_draft(content)
         return
+    if operation == "interpret_user_intent":
+        validate_intent_draft(content)
+        return
+    if operation == "propose_design_brief":
+        validate_design_brief_draft(content)
+        return
+    if operation == "convert_plan_to_ir":
+        validate_input_ir_draft(content)
+        return
+    if operation in {"parse_revision_request", "create_revision_plan"}:
+        _require_object(content, f"{operation} adapter output")
+        _reject_direct_cad_bypass(content)
+        return
     if operation == "suggest_repair":
         validate_repair_suggestion(content)
         return
@@ -67,6 +80,30 @@ def validate_planning_draft(content: dict[str, Any]) -> None:
         raise ValueError("planning_artifact.json selected_parts must be a list")
     if not isinstance(content.get("flow_gate_status"), dict):
         raise ValueError("planning_artifact.json flow_gate_status must be a dictionary")
+
+
+def validate_intent_draft(content: dict[str, Any]) -> None:
+    _require_object(content, "intent adapter output")
+    _reject_direct_cad_bypass(content)
+    _require_keys(content, "intent.json", ("artifact_type", "recognized_part_type", "interpreted_constraints"))
+    if content.get("artifact_type") != "intent":
+        raise ValueError("intent.json artifact_type must be 'intent'")
+    if not isinstance(content.get("recognized_part_type"), str) or not content["recognized_part_type"]:
+        raise ValueError("intent.json recognized_part_type must be a non-empty string")
+    if not isinstance(content.get("interpreted_constraints"), dict):
+        raise ValueError("intent.json interpreted_constraints must be a dictionary")
+
+
+def validate_design_brief_draft(content: dict[str, Any]) -> None:
+    _require_object(content, "design brief adapter output")
+    _reject_direct_cad_bypass(content)
+    _require_keys(content, "design_brief.json", ("artifact_type", "part_type", "geometry_constraints"))
+    if content.get("artifact_type") != "design_brief":
+        raise ValueError("design_brief.json artifact_type must be 'design_brief'")
+    if not isinstance(content.get("part_type"), str) or not content["part_type"]:
+        raise ValueError("design_brief.json part_type must be a non-empty string")
+    if not isinstance(content.get("geometry_constraints"), dict):
+        raise ValueError("design_brief.json geometry_constraints must be a dictionary")
 
 
 def validate_input_ir_draft(content: dict[str, Any]) -> None:

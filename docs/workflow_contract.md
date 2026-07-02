@@ -4,10 +4,13 @@ Purpose: define CadFlow workflow responsibilities, handoff artifacts, and
 stage boundaries.
 
 CadFlow is organized around explicit artifacts, not around re-parsing a prompt
-at every step.
+at every step. The main future UX is LLM-first, artifact-first, and
+validation-backed: the agent proposes intent, assumptions, candidate plans, and
+revisions; CadFlow validates, normalizes, executes, compares, and records.
 
 ```text
-user input -> requirement -> planning -> CAD IR -> part modeling -> assembly -> review -> outputs
+user prompt -> intent -> design brief -> candidate plans -> selected plan
+  -> CAD IR -> part modeling -> review -> outputs
 ```
 
 Each stage owns one decision layer and hands off structured data to the next
@@ -28,7 +31,37 @@ text, design notes, or earlier prompts.
 
 ## Entry Points
 
-### prompt_pipeline
+### Agent Create Pipeline
+
+`run_agent_create_pipeline(...)` is the documented v0.5 LLM-shaped create entry
+point.
+
+```text
+prompt.txt
+  -> intent.json
+  -> design_brief.json
+  -> candidate_plans.json
+  -> selected_plan.json
+  -> input_ir.json
+  -> run_ir_pipeline(...)
+  -> report.json/report.md/agent_trace.json
+```
+
+The planning artifacts are distinct:
+
+- `intent.json` records interpreted user intent, recognized part family,
+  constraints, assumptions, and open questions.
+- `design_brief.json` turns intent into design goals, functional requirements,
+  geometry constraints, validation targets, and planning assumptions.
+- `candidate_plans.json` records multiple candidate design plans and tradeoffs.
+- `selected_plan.json` records the candidate chosen for CAD IR conversion.
+- `input_ir.json` is the validated CAD generation source of truth.
+
+`agent_trace.json` records the agent create stage list and selected candidate
+under `agent_create` so the Web Workflow Console can display planning stages
+without inventing a separate state store.
+
+### Text Pipeline Fallback
 
 `examples/prompt_pipeline/` is a debug and exploration path from natural
 language to generated artifacts.
@@ -37,8 +70,9 @@ language to generated artifacts.
 prompt -> requirement.json -> CAD IR -> model.step/model.stl -> report/trace
 ```
 
-It is useful for parser and handoff development. It does not replace IR-first
-benchmarks and should not be treated as the deterministic benchmark contract.
+It is useful for parser and handoff development, legacy demos, and fallback
+execution. It is not the main future UX and should not consume the majority of
+v0.5+ product work.
 
 ### IR Pipeline
 

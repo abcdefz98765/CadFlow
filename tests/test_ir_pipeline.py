@@ -5,8 +5,9 @@ import zlib
 
 from ai_native_cad.cad_ir import CADIR, ir_from_text, validate_ir
 from ai_native_cad.cadquery.generator import generate_cadquery_code
+from ai_native_cad.agents import DesignPlannerFakeAgentAdapter
 from ai_native_cad.exporter import export_model
-from ai_native_cad.pipeline import run_ir_pipeline
+from ai_native_cad.pipeline import run_agent_create_pipeline, run_agent_revision_pipeline, run_ir_pipeline
 from ai_native_cad.pipeline.report import write_pipeline_report
 from ai_native_cad.pipeline.validator import validate_pipeline_outputs
 
@@ -165,6 +166,175 @@ def test_ir_pipeline_writes_required_output_contract():
     assert report["flow_decision"]["action"] == "proceed"
     assert report["flow_decision"]["from_stage"] == "review"
     assert report["flow_decision"]["to_stage"] == "outputs"
+
+
+def test_agent_create_pipeline_writes_planning_artifacts_and_real_cad_output():
+    output_dir = Path.cwd() / "outputs" / "pytest_agent_create_mounting_plate"
+
+    result = run_agent_create_pipeline(
+        "Make an 80 x 40 x 5 mm mounting plate with four M4 corner holes.",
+        DesignPlannerFakeAgentAdapter(),
+        output_dir=output_dir,
+    )
+
+    assert result["status"] == "success"
+    assert result["intent"]["recognized_part_type"] == "mounting_plate"
+    assert result["design_brief"]["artifact_type"] == "design_brief"
+    assert result["selected_plan"]["candidate_id"] == "A"
+    assert result["input_ir"]["part_type"] == "mounting_plate"
+
+    for artifact in (
+        "prompt.txt",
+        "intent.json",
+        "design_brief.json",
+        "candidate_plans.json",
+        "selected_plan.json",
+        "input_ir.json",
+        "report.json",
+        "report.md",
+        "agent_trace.json",
+        "model.step",
+        "model.stl",
+    ):
+        assert (output_dir / artifact).exists()
+
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    assert trace["agent_create"]["workflow"] == "agent_create"
+    assert trace["agent_create"]["selected_candidate"] == "A"
+    assert report["agent_create"]["artifacts"]["design_brief"] == "design_brief.json"
+    assert result["files"]["intent"] == str(output_dir / "intent.json")
+
+
+def test_agent_revision_pipeline_patches_parent_ir_and_records_lineage():
+    parent_dir = Path.cwd() / "outputs" / "pytest_revision_parent_plate"
+    child_dir = Path.cwd() / "outputs" / "pytest_revision_child_plate"
+    parent = run_ir_pipeline(
+        {
+            "part_type": "mounting_plate",
+            "part_name": "pytest_revision_parent_plate",
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5},
+            "features": {"holes": {"diameter": 4.5, "positions": "corner_4"}, "chamfer": {"size": 1}},
+            "outputs": ["step", "stl"],
+        },
+        output_dir=parent_dir,
+    )
+
+    result = run_agent_revision_pipeline(
+        parent["output_dir"],
+        "Make the holes M5, increase thickness to 6 mm, and remove the chamfer.",
+        DesignPlannerFakeAgentAdapter(),
+        output_dir=child_dir,
+    )
+
+    assert result["status"] == "success"
+    assert result["input_ir"]["dimensions"]["thickness"] == 6.0
+    assert result["input_ir"]["features"]["holes"]["diameter"] == 5.5
+    assert "chamfer" not in result["input_ir"]["features"]
+
+    for artifact in (
+        "revision_prompt.txt",
+        "revision_request.json",
+        "change_intent.json",
+        "revision_plan.json",
+        "patch.json",
+        "parent_input_ir.json",
+        "parent_report_snapshot.json",
+        "parent_agent_trace_snapshot.json",
+        "input_ir.json",
+        "report.json",
+        "agent_trace.json",
+        "comparison.json",
+        "lineage.json",
+        "model.step",
+        "model.stl",
+    ):
+        assert (child_dir / artifact).exists()
+
+    patch = json.loads((child_dir / "patch.json").read_text(encoding="utf-8"))
+    comparison = json.loads((child_dir / "comparison.json").read_text(encoding="utf-8"))
+    lineage = json.loads((child_dir / "lineage.json").read_text(encoding="utf-8"))
+    trace = json.loads((child_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    revision_request = json.loads((child_dir / "revision_request.json").read_text(encoding="utf-8"))
+    assert {change["path"] for change in patch["changes"]} == {
+        "dimensions.thickness",
+        "features.holes.diameter",
+        "features.chamfer",
+    }
+    assert all("before" in change and "after" in change and "reason" in change for change in patch["changes"])
+    assert (child_dir / "revision_prompt.txt").read_text(encoding="utf-8").strip().startswith("Make the holes M5")
+    assert revision_request["prompt_artifact"] == "revision_prompt.txt"
+    assert comparison["parent_run_id"] == parent_dir.name
+    assert comparison["child_run_id"] == child_dir.name
+    assert {change["path"] for change in comparison["requested_changes"]} == {
+        "dimensions.thickness",
+        "features.holes.diameter",
+        "features.chamfer",
+    }
+    assert comparison["actual_ir_changes"]
+    assert "validation_changes" in comparison
+    assert "system_repair_changes" in comparison
+    assert lineage["relationship"] == "revision_child"
+    assert lineage["root_run_id"] == parent_dir.name
+    assert lineage["parent_run_id"] == parent_dir.name
+    assert lineage["child_run_id"] == child_dir.name
+    assert lineage["revision_index"] == 1
+    assert trace["agent_revision"]["stages"][-1] == "record_lineage"
+    assert trace["agent_revision"]["revision_index"] == 1
+
+
+def test_agent_revision_pipeline_supports_chained_native_revisions():
+    adapter = DesignPlannerFakeAgentAdapter()
+    root_dir = Path.cwd() / "outputs" / "pytest_revision_chain_root"
+    thickness_dir = Path.cwd() / "outputs" / "pytest_revision_chain_thickness"
+    hole_dir = Path.cwd() / "outputs" / "pytest_revision_chain_hole"
+    chamfer_dir = Path.cwd() / "outputs" / "pytest_revision_chain_no_chamfer"
+
+    root = run_agent_create_pipeline(
+        "Make an 80 x 40 x 5 mm mounting plate with four M4 corner holes and a chamfer.",
+        adapter,
+        output_dir=root_dir,
+    )
+    assert root["status"] == "success"
+    assert "chamfer" in root["input_ir"]["features"]
+
+    thickness = run_agent_revision_pipeline(
+        root["output_dir"],
+        "Increase thickness to 6 mm.",
+        adapter,
+        output_dir=thickness_dir,
+    )
+    hole = run_agent_revision_pipeline(
+        thickness["output_dir"],
+        "Change hole diameter to 6 mm.",
+        adapter,
+        output_dir=hole_dir,
+    )
+    no_chamfer = run_agent_revision_pipeline(
+        hole["output_dir"],
+        "Remove the chamfer.",
+        adapter,
+        output_dir=chamfer_dir,
+    )
+
+    assert thickness["input_ir"]["dimensions"]["thickness"] == 6.0
+    assert hole["input_ir"]["features"]["holes"]["diameter"] == 6.0
+    assert "chamfer" not in no_chamfer["input_ir"]["features"]
+
+    for run_dir, parent_dir, revision_index in (
+        (thickness_dir, root_dir, 1),
+        (hole_dir, thickness_dir, 2),
+        (chamfer_dir, hole_dir, 3),
+    ):
+        lineage = json.loads((run_dir / "lineage.json").read_text(encoding="utf-8"))
+        comparison = json.loads((run_dir / "comparison.json").read_text(encoding="utf-8"))
+        assert lineage["root_run_id"] == root_dir.name
+        assert lineage["parent_run_id"] == parent_dir.name
+        assert lineage["child_run_id"] == run_dir.name
+        assert lineage["revision_index"] == revision_index
+        assert comparison["requested_changes"]
+        assert comparison["actual_ir_changes"]
 
 
 def test_ir_pipeline_report_includes_mounting_plate_hole_inspection():

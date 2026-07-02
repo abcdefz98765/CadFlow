@@ -21,6 +21,49 @@ This is a staged product direction. The first implementation should focus on
 CadFlow-native runs and patch-based revision. Full external STEP feature
 recovery and mesh reverse engineering are non-goals for the near term.
 
+## v0.6 MVP
+
+The v0.6 MVP is CadFlow-native and starts from a parent run directory that
+already contains `input_ir.json`.
+
+```text
+parent run + revision prompt
+  -> change_intent.json
+  -> revision_plan.json
+  -> patch.json
+  -> child input_ir.json
+  -> run_ir_pipeline(...)
+  -> comparison.json
+  -> lineage.json
+```
+
+The implementation entry point is `run_agent_revision_pipeline(...)`.
+
+The MVP patches CAD IR only. It does not edit external STEP/STL files, does not
+integrate a real provider SDK, and does not execute arbitrary LLM-generated
+code.
+
+### Fake Revision Parser Scope
+
+`DesignPlannerFakeAgentAdapter` is a deterministic local test adapter, not a
+real LLM provider. Its v0.6 revision parser supports only small CadFlow-native
+IR edits:
+
+- Named numeric dimension replacement, such as `thickness to 6 mm`.
+- Metric fastener hole requests, such as `M5`, mapped to a simple clearance
+  diameter of nominal size plus 0.5 mm.
+- Explicit hole diameter replacement, such as `hole diameter to 6 mm`.
+- Chamfer removal when `features.chamfer` exists.
+
+Current limitations:
+
+- It does not understand arbitrary geometry edits.
+- It does not add new topology or new unsupported feature families.
+- It does not patch `model.py`.
+- It does not edit STEP, STL, OBJ, or mesh files.
+- It does not call a real provider SDK.
+- It does not execute arbitrary LLM-generated code.
+
 ## Source Priority
 
 ### 1. CadFlow-Native Run

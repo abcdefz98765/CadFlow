@@ -49,6 +49,58 @@ class DeterministicAgentAdapter(AgentAdapter):
         validate_planning_draft(planning_artifact)
         return planning_artifact
 
+    def interpret_user_intent(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+        from ai_native_cad.agents.design_planner_fake import DesignPlannerFakeAgentAdapter
+
+        return DesignPlannerFakeAgentAdapter(self.requirement_agent).interpret_user_intent(prompt, context=context)
+
+    def propose_design_brief(self, intent: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+        from ai_native_cad.agents.design_planner_fake import DesignPlannerFakeAgentAdapter
+
+        return DesignPlannerFakeAgentAdapter(self.requirement_agent).propose_design_brief(intent, context=context)
+
+    def generate_candidate_plans(
+        self,
+        design_brief: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        from ai_native_cad.agents.design_planner_fake import DesignPlannerFakeAgentAdapter
+
+        return DesignPlannerFakeAgentAdapter(self.requirement_agent).generate_candidate_plans(design_brief, context=context)
+
+    def convert_plan_to_ir(self, selected_plan: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+        from ai_native_cad.agents.design_planner_fake import DesignPlannerFakeAgentAdapter
+
+        return DesignPlannerFakeAgentAdapter(self.requirement_agent).convert_plan_to_ir(selected_plan, context=context)
+
+    def parse_revision_request(
+        self,
+        prompt: str,
+        model_context: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from ai_native_cad.agents.design_planner_fake import DesignPlannerFakeAgentAdapter
+
+        return DesignPlannerFakeAgentAdapter(self.requirement_agent).parse_revision_request(
+            prompt,
+            model_context,
+            context=context,
+        )
+
+    def create_revision_plan(
+        self,
+        change_intent: dict[str, Any],
+        model_context: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from ai_native_cad.agents.design_planner_fake import DesignPlannerFakeAgentAdapter
+
+        return DesignPlannerFakeAgentAdapter(self.requirement_agent).create_revision_plan(
+            change_intent,
+            model_context,
+            context=context,
+        )
+
     def suggest_repair(
         self,
         failure: dict[str, Any],

@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from ai_native_cad.agents import AgentAdapter, DeterministicAgentAdapter, JsonContractAgentAdapter
+from ai_native_cad.agents import (
+    AgentAdapter,
+    DesignPlannerFakeAgentAdapter,
+    DeterministicAgentAdapter,
+    JsonContractAgentAdapter,
+)
 from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
 from ai_native_cad.workflow_console.stage_runner import StageRunner
 
@@ -448,7 +453,7 @@ def test_stage_runner_records_sanitized_local_mock_adapter_activity(tmp_path):
     }
 
 
-def test_agent_adapter_has_no_direct_prompt_to_cad_surface():
+def test_agent_adapter_exposes_llm_shaped_planning_without_direct_execution_surface():
     public_methods = {
         name
         for name in dir(DeterministicAgentAdapter())
@@ -459,6 +464,30 @@ def test_agent_adapter_has_no_direct_prompt_to_cad_surface():
     assert "run_shell" not in public_methods
     assert "parse_requirement" in public_methods
     assert "create_plan" in public_methods
+    assert "interpret_user_intent" in public_methods
+    assert "propose_design_brief" in public_methods
+    assert "generate_candidate_plans" in public_methods
+    assert "convert_plan_to_ir" in public_methods
+    assert "parse_revision_request" in public_methods
+    assert "create_revision_plan" in public_methods
+
+
+def test_design_planner_fake_adapter_creates_llm_shaped_artifacts():
+    adapter = DesignPlannerFakeAgentAdapter()
+
+    intent = adapter.interpret_user_intent("Make an 80 x 40 x 5 mm mounting plate with four M4 corner holes.")
+    design_brief = adapter.propose_design_brief(intent)
+    candidates = adapter.generate_candidate_plans(design_brief)
+    ir = adapter.convert_plan_to_ir(candidates[0])
+
+    assert intent["artifact_type"] == "intent"
+    assert intent["recognized_part_type"] == "mounting_plate"
+    assert design_brief["artifact_type"] == "design_brief"
+    assert design_brief["geometry_constraints"]["dimensions"]["length"] == 80.0
+    assert [candidate["candidate_id"] for candidate in candidates] == ["A", "B"]
+    assert candidates[0]["cad_ir"]["part_type"] == "mounting_plate"
+    assert ir["part_type"] == "mounting_plate"
+    assert ir["source"]["agent_create_workflow"]["selected_candidate"] == "A"
 
 
 def test_adapter_validation_dispatch_accepts_all_deterministic_operations():
