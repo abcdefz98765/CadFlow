@@ -142,10 +142,18 @@ The check does not write run artifacts.
 
 ### 3. LLMApiAgentAdapter
 
-The LLM API adapter is the primary future user-facing mode, but it is not
-implemented in v0.5. The current phase only establishes the interface, local
-mock behavior, validation gates, and runtime tracing needed before a real
-provider can be added safely.
+The LLM API adapter is still the future product-level adapter, but the
+experimental provider-backed `JsonContractAgentAdapter` now covers the first
+provider integration path. Treat `JsonContractAgentAdapter` as the low-level
+JSON contract boundary: it builds provider requests, calls an injected client,
+extracts JSON, and runs local validation.
+
+`LLMApiAgentAdapter` should not duplicate that boundary. It should become a
+higher-level orchestration layer when CadFlow needs richer behavior such as
+model selection policy, staged skill/context assembly, tool/provider fallback,
+streaming UX, multi-provider routing, or richer recovery workflows. Until those
+needs are concrete, provider-backed runtime work should continue through
+`JsonContractAgentAdapter` and the provider context architecture.
 
 It should:
 

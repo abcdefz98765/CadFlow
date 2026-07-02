@@ -11,6 +11,7 @@ input
   -> requirement
   -> planning
   -> part_modeling
+  -> revision
   -> assembly
   -> review
 ```
@@ -32,6 +33,8 @@ knowledge tree by default.
   confirmation gates before geometry generation.
 - `part_modeling/`: template-backed part generation and the single-part closed
   loop.
+- `revision/`: parent-run context, change intent parsing, revision plans,
+  constrained patch boundaries, and child-run lineage.
 - `assembly/`: part relationships, contacts, clearances, serviceability,
   backend-neutral assembly configs, and assembly validation.
 - `review/`: check-level report organization for parts and assemblies.

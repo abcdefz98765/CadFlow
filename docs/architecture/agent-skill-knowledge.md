@@ -95,6 +95,10 @@ skills/
     SKILL.md
     knowledge/
 
+  revision/
+    SKILL.md
+    knowledge/
+
   assembly/
     SKILL.md
     knowledge/
@@ -288,7 +292,13 @@ Suggested responsibilities:
 
 The first version should be static and deterministic. It should not implement
 general RAG, long knowledge stuffing, background indexing, or provider-side
-memory.
+memory. Selection should use an explicit operation-to-skill mapping, for
+example `parse_requirement -> requirement`, `create_plan -> planning`,
+`parse_revision_request -> revision`, and `create_revision_plan -> revision`.
+Each mapped operation should receive only a small hand-written summary of the
+relevant skill and knowledge. Embeddings, vector databases, model-driven
+retrieval, and automatic repository indexing are later options, not part of the
+first implementation.
 
 ## Testing Requirements
 
