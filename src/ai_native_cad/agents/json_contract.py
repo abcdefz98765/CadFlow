@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from typing import Any, Callable, Protocol, runtime_checkable
 
@@ -16,6 +17,69 @@ from ai_native_cad.agents.validation import (
 
 
 JsonContractCallable = Callable[[dict[str, Any]], Any]
+
+
+@dataclass(frozen=True)
+class JsonContractProviderConfig:
+    """Secret-free provider configuration for injected JSON-contract clients."""
+
+    provider: str = "json-contract"
+    model: str | None = None
+    enabled: bool = False
+    timeout_seconds: int = 30
+    max_retries: int = 0
+    api_key_env_var: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.provider, str) or not self.provider.strip():
+            raise ValueError("JSON contract provider must be a non-empty string")
+        if not isinstance(self.enabled, bool):
+            raise ValueError("JSON contract provider enabled flag must be boolean")
+        if not isinstance(self.timeout_seconds, int) or not 1 <= self.timeout_seconds <= 300:
+            raise ValueError("JSON contract provider timeout_seconds must be between 1 and 300")
+        if not isinstance(self.max_retries, int) or not 0 <= self.max_retries <= 5:
+            raise ValueError("JSON contract provider max_retries must be between 0 and 5")
+        if self.model is not None and (not isinstance(self.model, str) or not self.model.strip()):
+            raise ValueError("JSON contract provider model must be a non-empty string when set")
+        if self.api_key_env_var is not None:
+            if not isinstance(self.api_key_env_var, str) or not self.api_key_env_var.strip():
+                raise ValueError("JSON contract provider api_key_env_var must be a non-empty string when set")
+            if any(part in self.api_key_env_var for part in ("/", "\\", ":", " ")):
+                raise ValueError("JSON contract provider api_key_env_var must be an environment variable name")
+
+    @classmethod
+    def from_mapping(cls, value: dict[str, Any]) -> "JsonContractProviderConfig":
+        """Create config from plain data without reading provider secrets."""
+        if not isinstance(value, dict):
+            raise ValueError("JSON contract provider config must be a dictionary")
+        allowed = {"provider", "model", "enabled", "timeout_seconds", "max_retries", "api_key_env_var"}
+        unknown = sorted(set(value) - allowed)
+        if unknown:
+            raise ValueError(f"unsupported JSON contract provider config fields: {', '.join(unknown)}")
+        return cls(**{key: value[key] for key in allowed if key in value})
+
+    def provider_identity(self) -> dict[str, Any]:
+        """Return secret-free identity metadata for logs and traces."""
+        identity: dict[str, Any] = {
+            "provider": self.provider,
+            "adapter": "json_contract",
+            "network": "client_injected",
+            "enabled": self.enabled,
+            "timeout_seconds": self.timeout_seconds,
+            "max_retries": self.max_retries,
+            "api_key_required": self.api_key_env_var is not None,
+            "api_key_config": "env_var_name_configured" if self.api_key_env_var else "not_configured",
+        }
+        if self.model:
+            identity["model"] = self.model
+        return identity
+
+    def request_options(self) -> dict[str, Any]:
+        """Return non-secret options that an injected client may honor."""
+        return {
+            "timeout_seconds": self.timeout_seconds,
+            "max_retries": self.max_retries,
+        }
 
 
 @runtime_checkable
@@ -44,28 +108,26 @@ class JsonContractAgentAdapter(AgentAdapter):
         *,
         provider: str = "json-contract",
         model: str | None = None,
+        config: JsonContractProviderConfig | dict[str, Any] | None = None,
     ) -> None:
         self.client = client
-        self._provider = provider
-        self._model = model
+        if config is None:
+            self._config = JsonContractProviderConfig(provider=provider, model=model)
+        elif isinstance(config, JsonContractProviderConfig):
+            self._config = config
+        else:
+            self._config = JsonContractProviderConfig.from_mapping(config)
 
     @property
     def provider_identity(self) -> dict[str, Any]:
-        identity = {
-            "provider": self._provider,
-            "adapter": "json_contract",
-            "network": "client_injected",
-            "api_key_required": "provider_dependent",
-        }
-        if self._model:
-            identity["model"] = self._model
+        identity = self._config.provider_identity()
         client_identity = getattr(self.client, "provider_identity", None)
         if isinstance(client_identity, dict):
             identity.update(_sanitize_provider_identity(client_identity))
         return identity
 
     def parse_requirement(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
-        request = _requirement_contract_request(prompt, context or {})
+        request = self._with_provider_options(_requirement_contract_request(prompt, context or {}))
         raw_response = _call_json_client(self.client, request)
         requirement = _extract_json_object(raw_response)
         validate_requirement_draft(requirement)
@@ -73,7 +135,7 @@ class JsonContractAgentAdapter(AgentAdapter):
 
     def create_plan(self, requirement: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         validate_requirement_draft(requirement)
-        request = _planning_contract_request(requirement, context or {})
+        request = self._with_provider_options(_planning_contract_request(requirement, context or {}))
         raw_response = _call_json_client(self.client, request)
         planning_artifact = _extract_json_object(raw_response)
         validate_planning_draft(planning_artifact)
@@ -85,7 +147,7 @@ class JsonContractAgentAdapter(AgentAdapter):
         model_context: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        request = _revision_intent_contract_request(prompt, model_context, context or {})
+        request = self._with_provider_options(_revision_intent_contract_request(prompt, model_context, context or {}))
         raw_response = _call_json_client(self.client, request)
         change_intent = _extract_json_object(raw_response)
         validate_adapter_result("parse_revision_request", change_intent)
@@ -98,7 +160,7 @@ class JsonContractAgentAdapter(AgentAdapter):
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         validate_adapter_result("parse_revision_request", change_intent)
-        request = _revision_plan_contract_request(change_intent, model_context, context or {})
+        request = self._with_provider_options(_revision_plan_contract_request(change_intent, model_context, context or {}))
         raw_response = _call_json_client(self.client, request)
         revision_plan = _extract_json_object(raw_response)
         validate_adapter_result("create_revision_plan", revision_plan)
@@ -110,7 +172,7 @@ class JsonContractAgentAdapter(AgentAdapter):
         ir: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        request = _repair_contract_request(failure, ir, context or {})
+        request = self._with_provider_options(_repair_contract_request(failure, ir, context or {}))
         raw_response = _call_json_client(self.client, request)
         repair_suggestion = _extract_json_object(raw_response)
         validate_repair_suggestion(repair_suggestion)
@@ -122,11 +184,16 @@ class JsonContractAgentAdapter(AgentAdapter):
         trace: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        request = _review_contract_request(report, trace, context or {})
+        request = self._with_provider_options(_review_contract_request(report, trace, context or {}))
         raw_response = _call_json_client(self.client, request)
         review_explanation = _extract_json_object(raw_response)
         validate_review_explanation(review_explanation)
         return review_explanation
+
+    def _with_provider_options(self, request: dict[str, Any]) -> dict[str, Any]:
+        request = dict(request)
+        request["provider_options"] = self._config.request_options()
+        return request
 
 
 def _requirement_contract_request(prompt: str, context: dict[str, Any]) -> dict[str, Any]:

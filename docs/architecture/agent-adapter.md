@@ -89,6 +89,13 @@ code.
 It must not record prompts, transcripts, token contents, secrets, API keys, or
 local paths in provider identity metadata.
 
+Provider setup remains opt-in and client-injected. `JsonContractProviderConfig`
+records only non-secret settings such as provider name, model name,
+`enabled`, timeout, retry count, and whether an API key environment variable
+name has been configured. The adapter passes timeout/retry options to the
+injected client in request metadata, but it does not read secret values, import a
+provider SDK, or perform network I/O by itself.
+
 ### 3. LLMApiAgentAdapter
 
 The LLM API adapter is the primary future user-facing mode, but it is not

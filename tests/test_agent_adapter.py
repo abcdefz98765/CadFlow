@@ -8,6 +8,7 @@ from ai_native_cad.agents import (
     DesignPlannerFakeAgentAdapter,
     DeterministicAgentAdapter,
     JsonContractAgentAdapter,
+    JsonContractProviderConfig,
 )
 from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
 from ai_native_cad.workflow_console.stage_runner import StageRunner
@@ -212,6 +213,7 @@ def test_json_contract_agent_adapter_accepts_valid_fake_requirement_output():
     assert requirement["part_type"] == "spacer"
     assert fake_client.requests[0]["operation"] == "parse_requirement"
     assert fake_client.requests[0]["response_format"] == {"type": "json_object"}
+    assert fake_client.requests[0]["provider_options"] == {"timeout_seconds": 30, "max_retries": 0}
     assert fake_client.requests[0]["messages"][0]["role"] == "system"
     assert "JSON object" in fake_client.requests[0]["messages"][0]["content"]
 
@@ -403,9 +405,56 @@ def test_json_contract_agent_adapter_provider_identity_is_sanitized():
         "provider": "fake/json",
         "adapter": "json_contract",
         "network": "client_injected",
-        "api_key_required": "provider_dependent",
+        "enabled": False,
+        "timeout_seconds": 30,
+        "max_retries": 0,
+        "api_key_required": False,
+        "api_key_config": "not_configured",
         "model": "fake-requirement-v1",
     }
+
+
+def test_json_contract_provider_config_is_secret_free_and_request_scoped():
+    config = JsonContractProviderConfig(
+        provider="fake/json",
+        model="fake-revision-v1",
+        enabled=True,
+        timeout_seconds=12,
+        max_retries=2,
+        api_key_env_var="CADFLOW_FAKE_API_KEY",
+    )
+    fake_client = FakeJsonContractClient(_valid_requirement_json(), provider_identity={"provider": "fake/json"})
+    adapter = JsonContractAgentAdapter(fake_client, config=config)
+
+    adapter.parse_requirement("Make a spacer washer.")
+
+    assert adapter.provider_identity == {
+        "provider": "fake/json",
+        "adapter": "json_contract",
+        "network": "client_injected",
+        "enabled": True,
+        "timeout_seconds": 12,
+        "max_retries": 2,
+        "api_key_required": True,
+        "api_key_config": "env_var_name_configured",
+        "model": "fake-revision-v1",
+    }
+    assert "CADFLOW_FAKE_API_KEY" not in json.dumps(adapter.provider_identity)
+    assert fake_client.requests[0]["provider_options"] == {"timeout_seconds": 12, "max_retries": 2}
+
+
+@pytest.mark.parametrize("config", [
+    {"provider": ""},
+    {"timeout_seconds": 0},
+    {"timeout_seconds": 301},
+    {"max_retries": -1},
+    {"max_retries": 6},
+    {"api_key_env_var": r"C:\secret\key.txt"},
+    {"unknown": True},
+])
+def test_json_contract_provider_config_rejects_unsafe_values(config):
+    with pytest.raises(ValueError):
+        JsonContractProviderConfig.from_mapping(config)
 
 
 def test_json_contract_agent_adapter_requires_no_provider_sdk_or_network():
@@ -457,6 +506,8 @@ def test_json_contract_agent_adapter_supports_all_contract_operations_with_fake_
     fake_client = OperationFakeJsonContractClient({
         "parse_requirement": _valid_requirement_json(),
         "create_plan": _valid_planning_json(),
+        "parse_revision_request": _valid_revision_intent(),
+        "create_revision_plan": _valid_revision_plan(),
         "suggest_repair": _valid_repair_json(),
         "explain_review": _valid_review_json(),
     })
@@ -464,15 +515,20 @@ def test_json_contract_agent_adapter_supports_all_contract_operations_with_fake_
 
     requirement = adapter.parse_requirement("Make a spacer washer.")
     planning = adapter.create_plan(requirement)
+    change_intent = adapter.parse_revision_request("Increase the thickness to 8 mm.", {"current_ir": _valid_ir()})
+    revision_plan = adapter.create_revision_plan(change_intent, {"current_ir": _valid_ir()})
     repair = adapter.suggest_repair({"affected_feature": "holes"}, _valid_ir())
     review = adapter.explain_review({"status": "success"}, {"total_attempts": 1})
 
     assert planning["artifact_type"] == "planning"
+    assert revision_plan["artifact_type"] == "revision_plan"
     assert repair["repair"]["strategy"] == "increase_spacing"
     assert review["status"] == "success"
     assert [request["operation"] for request in fake_client.requests] == [
         "parse_requirement",
         "create_plan",
+        "parse_revision_request",
+        "create_revision_plan",
         "suggest_repair",
         "explain_review",
     ]
