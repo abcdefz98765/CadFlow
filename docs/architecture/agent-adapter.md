@@ -77,11 +77,12 @@ This mode is intentionally predictable and should remain dependency-light.
 JSON contract generation. It is not the default adapter and does not import a
 provider SDK.
 
-For this first slice it supports only `parse_requirement(prompt, context)`.
-Callers must explicitly inject a fake or provider-specific client at the
-boundary. The adapter builds a JSON-only contract request, parses the returned
-JSON object, and runs `validate_requirement_draft(...)` before the result can be
-persisted or consumed by `StageRunner`.
+For this scaffold it supports `parse_requirement(prompt, context)` and
+`create_plan(requirement, context)`. Callers must explicitly inject a fake or
+provider-specific client at the boundary. The adapter builds a JSON-only
+contract request, parses the returned JSON object, and runs the matching local
+adapter validation before the result can be persisted or consumed by
+`StageRunner`.
 
 It must not record prompts, transcripts, token contents, secrets, API keys, or
 local paths in provider identity metadata.

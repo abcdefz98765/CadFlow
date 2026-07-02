@@ -48,6 +48,20 @@ class FakeJsonContractClient:
         return self.response
 
 
+class OperationFakeJsonContractClient:
+    def __init__(self, responses, provider_identity=None):
+        self.responses = responses
+        self.requests = []
+        self.provider_identity = provider_identity or {
+            "provider": "fake/json",
+            "model": "fake-contract-v1",
+        }
+
+    def generate_json_contract(self, request):
+        self.requests.append(request)
+        return self.responses[request["operation"]]
+
+
 def _valid_requirement_json():
     return json.dumps({
         "part_type": "spacer",
@@ -75,6 +89,14 @@ def _valid_requirement_json():
             },
         },
     })
+
+
+def _valid_requirement():
+    return json.loads(_valid_requirement_json())
+
+
+def _valid_planning_json():
+    return json.dumps(DeterministicAgentAdapter().create_plan(_valid_requirement()))
 
 
 def test_deterministic_agent_adapter_satisfies_contract_without_provider_config():
@@ -149,6 +171,37 @@ def test_json_contract_agent_adapter_validates_provider_wrapper_content():
         adapter.parse_requirement("Make a spacer washer.")
 
 
+def test_json_contract_agent_adapter_accepts_valid_fake_planning_output():
+    fake_client = FakeJsonContractClient(_valid_planning_json())
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    planning = adapter.create_plan(_valid_requirement())
+
+    assert planning["artifact_type"] == "planning"
+    assert planning["selected_parts"][0]["resolved_decisions"]["part_type"] == "spacer"
+    assert fake_client.requests[0]["operation"] == "create_plan"
+    assert fake_client.requests[0]["response_format"] == {"type": "json_object"}
+    assert fake_client.requests[0]["messages"][0]["role"] == "system"
+    assert "planning_artifact.json" in fake_client.requests[0]["messages"][0]["content"]
+
+
+@pytest.mark.parametrize("response", [
+    "[]",
+    {"artifact_type": "plan", "route": {}, "selected_parts": [], "flow_gate_status": {}},
+    {
+        "artifact_type": "planning",
+        "route": {},
+        "selected_parts": [{"shell_command": "python model.py"}],
+        "flow_gate_status": {},
+    },
+])
+def test_json_contract_agent_adapter_rejects_invalid_planning_output(response):
+    adapter = JsonContractAgentAdapter(FakeJsonContractClient(response))
+
+    with pytest.raises(ValueError):
+        adapter.create_plan(_valid_requirement())
+
+
 @pytest.mark.parametrize("response", ["[]", "not json", {"part_type": "spacer", "dimensions": []}])
 def test_json_contract_agent_adapter_rejects_invalid_or_non_object_output(response):
     adapter = JsonContractAgentAdapter(FakeJsonContractClient(response))
@@ -203,6 +256,26 @@ def test_stage_runner_can_use_json_contract_adapter_when_explicitly_injected(tmp
     assert result["requirement"]["part_type"] == "spacer"
     assert json.loads((output_dir / "requirement.json").read_text(encoding="utf-8")) == result["requirement"]
     assert activity["provider_identity"]["adapter"] == "json_contract"
+    assert activity["provider_identity"]["provider"] == "fake/json"
+
+
+def test_stage_runner_can_use_json_contract_adapter_for_planning_when_explicitly_injected(tmp_path):
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": _valid_requirement_json(),
+        "create_plan": _valid_planning_json(),
+    })
+    runner = StageRunner(project_root=tmp_path, agent_adapter=JsonContractAgentAdapter(fake_client))
+    output_dir = tmp_path / "outputs" / "json_contract_planning"
+
+    requirement = runner.run_requirement("Make a spacer washer.", {"output_dir": output_dir})["requirement"]
+    result = runner.run_planning(requirement, {"output_dir": output_dir})
+    runtime = json.loads((output_dir / "logs" / "runtime.json").read_text(encoding="utf-8"))
+    activity = runtime["workflow_console"]["latest_stage"]["adapter_activity"]
+
+    assert result["planning_artifact"]["artifact_type"] == "planning"
+    assert result["planning_artifact"]["selected_parts"][0]["resolved_decisions"]["part_type"] == "spacer"
+    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement", "create_plan"]
+    assert activity["operation"] == "create_plan"
     assert activity["provider_identity"]["provider"] == "fake/json"
 
 

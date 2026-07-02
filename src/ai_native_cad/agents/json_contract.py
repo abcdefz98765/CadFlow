@@ -6,7 +6,7 @@ import json
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from ai_native_cad.agents.base import AgentAdapter
-from ai_native_cad.agents.validation import validate_requirement_draft
+from ai_native_cad.agents.validation import validate_planning_draft, validate_requirement_draft
 
 
 JsonContractCallable = Callable[[dict[str, Any]], Any]
@@ -29,7 +29,7 @@ class JsonContractAgentAdapter(AgentAdapter):
 
     The adapter does not import an LLM SDK and does not perform network I/O by
     itself. A caller must explicitly inject a client/callable that returns a
-    JSON requirement contract.
+    JSON requirement or planning contract.
     """
 
     def __init__(
@@ -66,7 +66,12 @@ class JsonContractAgentAdapter(AgentAdapter):
         return requirement
 
     def create_plan(self, requirement: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
-        raise NotImplementedError("JsonContractAgentAdapter currently supports parse_requirement only")
+        validate_requirement_draft(requirement)
+        request = _planning_contract_request(requirement, context or {})
+        raw_response = _call_json_client(self.client, request)
+        planning_artifact = _extract_json_object(raw_response)
+        validate_planning_draft(planning_artifact)
+        return planning_artifact
 
     def suggest_repair(
         self,
@@ -100,6 +105,27 @@ def _requirement_contract_request(prompt: str, context: dict[str, Any]) -> dict[
             {
                 "role": "user",
                 "content": prompt,
+            },
+        ],
+        "context": _contract_context(context),
+    }
+
+
+def _planning_contract_request(requirement: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "operation": "create_plan",
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Return only a JSON object matching CadFlow planning_artifact.json. "
+                    "Do not include markdown, prose, CAD code, Python code, shell commands, or paths."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(requirement, sort_keys=True),
             },
         ],
         "context": _contract_context(context),
