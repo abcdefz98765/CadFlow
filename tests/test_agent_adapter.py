@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_native_cad.agents import AgentAdapter, DeterministicAgentAdapter
+from ai_native_cad.agents import AgentAdapter, DeterministicAgentAdapter, JsonContractAgentAdapter
 from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
 from ai_native_cad.workflow_console.stage_runner import StageRunner
 
@@ -34,6 +34,49 @@ class SecretiveAdapter(DeterministicAgentAdapter):
         }
 
 
+class FakeJsonContractClient:
+    def __init__(self, response, provider_identity=None):
+        self.response = response
+        self.requests = []
+        self.provider_identity = provider_identity or {
+            "provider": "fake/json",
+            "model": "fake-requirement-v1",
+        }
+
+    def generate_json_contract(self, request):
+        self.requests.append(request)
+        return self.response
+
+
+def _valid_requirement_json():
+    return json.dumps({
+        "part_type": "spacer",
+        "dimensions": {
+            "outer_diameter": 12,
+            "inner_diameter": 6.5,
+            "thickness": 20,
+        },
+        "features": {},
+        "assumptions": [],
+        "missing_information": [],
+        "follow_up_questions": [],
+        "follow_up_requests": [],
+        "requirement_status": {
+            "complete_for_generation": True,
+            "needs_user_input": False,
+            "blocking_fields": [],
+            "missing_count": 0,
+            "follow_up_count": 0,
+            "flow_decision": {
+                "action": "proceed",
+                "from_stage": "requirement",
+                "to_stage": "planning",
+                "reasons": [],
+            },
+        },
+    })
+
+
 def test_deterministic_agent_adapter_satisfies_contract_without_provider_config():
     adapter = DeterministicAgentAdapter()
 
@@ -58,6 +101,82 @@ def test_deterministic_agent_adapter_outputs_are_repeatable():
     assert first["part_type"] == "spacer"
     assert plan["artifact_type"] == "planning"
     assert plan["selected_parts"][0]["resolved_decisions"]["part_type"] == "spacer"
+
+
+def test_json_contract_agent_adapter_accepts_valid_fake_requirement_output():
+    fake_client = FakeJsonContractClient(_valid_requirement_json())
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    requirement = adapter.parse_requirement("Make a spacer washer.")
+
+    assert requirement["part_type"] == "spacer"
+    assert fake_client.requests[0]["operation"] == "parse_requirement"
+    assert fake_client.requests[0]["response_format"] == {"type": "json_object"}
+    assert fake_client.requests[0]["messages"][0]["role"] == "system"
+    assert "JSON object" in fake_client.requests[0]["messages"][0]["content"]
+
+
+@pytest.mark.parametrize("response", ["[]", "not json", {"part_type": "spacer", "dimensions": []}])
+def test_json_contract_agent_adapter_rejects_invalid_or_non_object_output(response):
+    adapter = JsonContractAgentAdapter(FakeJsonContractClient(response))
+
+    with pytest.raises(ValueError):
+        adapter.parse_requirement("Make a spacer washer.")
+
+
+def test_json_contract_agent_adapter_provider_identity_is_sanitized():
+    adapter = JsonContractAgentAdapter(
+        FakeJsonContractClient(
+            _valid_requirement_json(),
+            provider_identity={
+                "provider": "fake/json",
+                "model": "fake-requirement-v1",
+                "api_key": "secret",
+                "token_count": 123,
+                "prompt_path": "D:/private/prompt.txt",
+                "transcript": "private chat",
+            },
+        )
+    )
+
+    assert adapter.provider_identity == {
+        "provider": "fake/json",
+        "adapter": "json_contract",
+        "network": "client_injected",
+        "api_key_required": "provider_dependent",
+        "model": "fake-requirement-v1",
+    }
+
+
+def test_json_contract_agent_adapter_requires_no_provider_sdk_or_network():
+    fake_client = FakeJsonContractClient(_valid_requirement_json())
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    adapter.parse_requirement("Make a spacer washer.")
+
+    assert len(fake_client.requests) == 1
+    assert "openai" not in JsonContractAgentAdapter.__module__
+
+
+def test_stage_runner_can_use_json_contract_adapter_when_explicitly_injected(tmp_path):
+    fake_client = FakeJsonContractClient(_valid_requirement_json())
+    runner = StageRunner(project_root=tmp_path, agent_adapter=JsonContractAgentAdapter(fake_client))
+    output_dir = tmp_path / "outputs" / "json_contract_requirement"
+
+    result = runner.run_requirement("Make a spacer washer.", {"output_dir": output_dir})
+    runtime = json.loads((output_dir / "logs" / "runtime.json").read_text(encoding="utf-8"))
+    activity = runtime["workflow_console"]["latest_stage"]["adapter_activity"]
+
+    assert result["requirement"]["part_type"] == "spacer"
+    assert json.loads((output_dir / "requirement.json").read_text(encoding="utf-8")) == result["requirement"]
+    assert activity["provider_identity"]["adapter"] == "json_contract"
+    assert activity["provider_identity"]["provider"] == "fake/json"
+
+
+def test_stage_runner_keeps_deterministic_agent_adapter_as_default(tmp_path):
+    runner = StageRunner(project_root=tmp_path)
+
+    assert isinstance(runner.agent_adapter, DeterministicAgentAdapter)
 
 
 def test_stage_runner_rejects_invalid_requirement_adapter_output(tmp_path):

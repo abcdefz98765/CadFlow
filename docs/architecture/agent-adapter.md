@@ -71,7 +71,22 @@ Use it for:
 
 This mode is intentionally predictable and should remain dependency-light.
 
-### 2. LLMApiAgentAdapter
+### 2. JsonContractAgentAdapter
+
+`JsonContractAgentAdapter` is a post-v0.5 scaffold for optional provider-backed
+JSON contract generation. It is not the default adapter and does not import a
+provider SDK.
+
+For this first slice it supports only `parse_requirement(prompt, context)`.
+Callers must explicitly inject a fake or provider-specific client at the
+boundary. The adapter builds a JSON-only contract request, parses the returned
+JSON object, and runs `validate_requirement_draft(...)` before the result can be
+persisted or consumed by `StageRunner`.
+
+It must not record prompts, transcripts, token contents, secrets, API keys, or
+local paths in provider identity metadata.
+
+### 3. LLMApiAgentAdapter
 
 The LLM API adapter is the primary future user-facing mode, but it is not
 implemented in v0.5. The current phase only establishes the interface, local
@@ -94,7 +109,7 @@ It should:
 
 It must not directly write arbitrary CadQuery code. Geometry execution remains owned by the CadFlow Python API and CAD Agent Loop.
 
-### 3. CliDeveloperAgentAdapter
+### 4. CliDeveloperAgentAdapter
 
 The CLI developer adapter is optional developer mode.
 
