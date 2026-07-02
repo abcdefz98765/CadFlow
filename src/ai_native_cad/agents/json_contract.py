@@ -225,6 +225,11 @@ def _requirement_contract_request(prompt: str, context: dict[str, Any]) -> dict[
                 "role": "system",
                 "content": (
                     "Return only a JSON object matching CadFlow requirement.json. "
+                    "The top-level object must include part_type and dimensions. "
+                    "Use dimensions as an object containing numeric CAD parameters such as "
+                    "outer_diameter, inner_diameter, thickness, length, width, height, or diameter. "
+                    "Use optional top-level fields unit, features, assumptions, missing_information, "
+                    "follow_up_questions, follow_up_requests, and requirement_status when useful. "
                     "Do not include markdown, prose, CAD code, Python code, shell commands, or paths."
                 ),
             },
@@ -248,6 +253,12 @@ def _planning_contract_request(requirement: dict[str, Any], context: dict[str, A
                 "role": "system",
                 "content": (
                     "Return only a JSON object matching CadFlow planning_artifact.json. "
+                    "The top-level object must include artifact_type, route, selected_parts, and flow_gate_status. "
+                    "Set artifact_type to planning. Use route as an object with selected, scope, and reason. "
+                    "Use selected_parts as a non-empty array. Each selected part must include part_name, "
+                    "generation_order, resolved, and resolved_decisions. resolved_decisions must include "
+                    "part_type, part_name, unit, dimensions, features, outputs, and check_level. "
+                    "Use flow_gate_status with status, blocking_reasons, and rework_decision. "
                     "Do not include markdown, prose, CAD code, Python code, shell commands, or paths."
                 ),
             },

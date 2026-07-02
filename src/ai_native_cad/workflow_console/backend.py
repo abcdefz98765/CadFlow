@@ -104,7 +104,7 @@ class WorkflowConsoleBackend:
             }
         try:
             requirement = adapter.parse_requirement(
-                "Provider connectivity check. Return a spacer requirement for OD 12 mm, ID 6 mm, thickness 4 mm.",
+                "Make a spacer washer with OD 12 mm, ID 6 mm, thickness 4 mm.",
                 context={
                     "workflow_stage": "provider_check",
                     "target_contract": "requirement_connectivity_check",
