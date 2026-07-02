@@ -121,6 +121,9 @@ def _call_json_client(client: JsonContractClient | JsonContractCallable, request
 
 
 def _extract_json_object(raw_response: Any) -> dict[str, Any]:
+    provider_content = _extract_provider_content(raw_response)
+    if provider_content is not raw_response:
+        return _extract_json_object(provider_content)
     if isinstance(raw_response, dict) and "content" in raw_response and len(raw_response) <= 3:
         return _extract_json_object(raw_response["content"])
     if isinstance(raw_response, dict):
@@ -136,6 +139,39 @@ def _extract_json_object(raw_response: Any) -> dict[str, Any]:
             raise ValueError("JSON contract client output must be a JSON object")
         return parsed
     raise ValueError("JSON contract client output must be a JSON object")
+
+
+def _extract_provider_content(raw_response: Any) -> Any:
+    if not isinstance(raw_response, dict):
+        return raw_response
+
+    if "output_text" in raw_response:
+        return raw_response["output_text"]
+
+    choices = raw_response.get("choices")
+    if isinstance(choices, list) and choices:
+        first_choice = choices[0]
+        if isinstance(first_choice, dict):
+            message = first_choice.get("message")
+            if isinstance(message, dict) and "content" in message:
+                return message["content"]
+            if "text" in first_choice:
+                return first_choice["text"]
+
+    output = raw_response.get("output")
+    if isinstance(output, list) and output:
+        first_output = output[0]
+        if isinstance(first_output, dict):
+            content = first_output.get("content")
+            if isinstance(content, list) and content:
+                first_content = content[0]
+                if isinstance(first_content, dict):
+                    if "text" in first_content:
+                        return first_content["text"]
+                    if "json" in first_content:
+                        return first_content["json"]
+
+    return raw_response
 
 
 def _sanitize_provider_identity(identity: dict[str, Any]) -> dict[str, Any]:

@@ -116,6 +116,39 @@ def test_json_contract_agent_adapter_accepts_valid_fake_requirement_output():
     assert "JSON object" in fake_client.requests[0]["messages"][0]["content"]
 
 
+@pytest.mark.parametrize("response", [
+    {"content": _valid_requirement_json()},
+    {"output_text": _valid_requirement_json()},
+    {"choices": [{"message": {"content": _valid_requirement_json()}}]},
+    {"choices": [{"text": _valid_requirement_json()}]},
+    {"output": [{"content": [{"text": _valid_requirement_json()}]}]},
+    {"output": [{"content": [{"json": json.loads(_valid_requirement_json())}]}]},
+])
+def test_json_contract_agent_adapter_accepts_provider_response_wrappers(response):
+    adapter = JsonContractAgentAdapter(FakeJsonContractClient(response))
+
+    requirement = adapter.parse_requirement("Make a spacer washer.")
+
+    assert requirement["part_type"] == "spacer"
+
+
+def test_json_contract_agent_adapter_validates_provider_wrapper_content():
+    adapter = JsonContractAgentAdapter(FakeJsonContractClient({
+        "choices": [{
+            "message": {
+                "content": json.dumps({
+                    "part_type": "spacer",
+                    "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
+                    "python_code": "print('bypass')",
+                })
+            }
+        }]
+    }))
+
+    with pytest.raises(ValueError, match="python_code"):
+        adapter.parse_requirement("Make a spacer washer.")
+
+
 @pytest.mark.parametrize("response", ["[]", "not json", {"part_type": "spacer", "dimensions": []}])
 def test_json_contract_agent_adapter_rejects_invalid_or_non_object_output(response):
     adapter = JsonContractAgentAdapter(FakeJsonContractClient(response))
