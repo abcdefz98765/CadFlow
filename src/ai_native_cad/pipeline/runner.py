@@ -135,13 +135,15 @@ def run_agent_revision_pipeline(
         "prompt_artifact": "revision_prompt.txt",
         "root_run_id": root_run_id,
         "parent_run_id": parent_path.name,
-        "parent_run_dir": str(parent_path),
+        "parent_run_dir": _repo_relative_string(parent_path),
         "child_run_id": output_path.name,
         "revision_index": revision_index,
         "parent_artifacts": {
-            "input_ir": str(parent_ir_path),
-            "report": str(parent_path / "report.json") if (parent_path / "report.json").exists() else None,
-            "agent_trace": str(parent_path / "agent_trace.json") if (parent_path / "agent_trace.json").exists() else None,
+            "input_ir": _repo_relative_string(parent_ir_path),
+            "report": _repo_relative_string(parent_path / "report.json") if (parent_path / "report.json").exists() else None,
+            "agent_trace": _repo_relative_string(parent_path / "agent_trace.json")
+            if (parent_path / "agent_trace.json").exists()
+            else None,
         },
         "child_parent_snapshots": {
             "input_ir": "parent_input_ir.json",
@@ -173,6 +175,22 @@ def run_agent_revision_pipeline(
 
     patch = _build_cad_ir_patch(parent_ir, revision_plan)
     _write_json(output_path / "patch.json", patch)
+    if revision_plan.get("status") != "ready_for_patch" or not patch.get("changes"):
+        return _write_blocked_revision_result(
+            output_path=output_path,
+            parent_path=parent_path,
+            parent_ir=parent_ir,
+            parent_report=parent_report,
+            parent_trace=parent_trace,
+            revision_request=revision_request,
+            change_intent=change_intent,
+            revision_plan=revision_plan,
+            patch=patch,
+            revision_prompt=revision_prompt,
+            adapter=adapter,
+            root_run_id=root_run_id,
+            revision_index=revision_index,
+        )
 
     child_ir = _apply_cad_ir_patch(parent_ir, patch)
     validate_input_ir_draft(child_ir)
@@ -199,9 +217,9 @@ def run_agent_revision_pipeline(
         "relationship": "revision_child",
         "root_run_id": root_run_id,
         "parent_run_id": parent_path.name,
-        "parent_run_dir": str(parent_path),
+        "parent_run_dir": _repo_relative_string(parent_path),
         "child_run_id": output_path.name,
-        "child_run_dir": str(output_path),
+        "child_run_dir": _repo_relative_string(output_path),
         "revision_index": revision_index,
         "revision_prompt": revision_prompt,
         "revision_request_artifact": "revision_request.json",
@@ -209,6 +227,7 @@ def run_agent_revision_pipeline(
         "comparison_artifact": "comparison.json",
     }
     _write_json(output_path / "lineage.json", lineage)
+    _write_revision_report(output_path, revision_request, comparison, lineage)
     _merge_agent_revision_metadata(output_path, {
         "workflow": "agent_revision",
         "version": "cadflow-native-revision-v0.6",
@@ -235,6 +254,7 @@ def run_agent_revision_pipeline(
             "child_input_ir": "input_ir.json",
             "comparison": "comparison.json",
             "lineage": "lineage.json",
+            "revision_report": "revision_report.md",
             "parent_input_ir_snapshot": "parent_input_ir.json",
         },
     })
@@ -448,6 +468,7 @@ def _collect_files(output_dir: Path) -> dict[str, str]:
         "revision_plan.json": "revision_plan",
         "patch.json": "patch",
         "comparison.json": "comparison",
+        "revision_report.md": "revision_report",
         "lineage.json": "lineage",
         "parent_input_ir.json": "parent_input_ir",
         "parent_report_snapshot.json": "parent_report_snapshot",
@@ -472,6 +493,253 @@ def _collect_files(output_dir: Path) -> dict[str, str]:
 
 def _write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_blocked_revision_result(
+    *,
+    output_path: Path,
+    parent_path: Path,
+    parent_ir: dict[str, Any],
+    parent_report: dict[str, Any],
+    parent_trace: dict[str, Any],
+    revision_request: dict[str, Any],
+    change_intent: dict[str, Any],
+    revision_plan: dict[str, Any],
+    patch: dict[str, Any],
+    revision_prompt: str,
+    adapter: AgentAdapter,
+    root_run_id: str,
+    revision_index: int,
+) -> dict[str, Any]:
+    comparison = _compare_blocked_revision(
+        parent_ir,
+        parent_report,
+        parent_trace,
+        parent_path,
+        output_path,
+        patch,
+        revision_plan,
+    )
+    _write_json(output_path / "comparison.json", comparison)
+    lineage = {
+        "artifact_type": "lineage",
+        "version": "lineage-v0.1",
+        "relationship": "revision_blocked",
+        "root_run_id": root_run_id,
+        "parent_run_id": parent_path.name,
+        "parent_run_dir": _repo_relative_string(parent_path),
+        "child_run_id": output_path.name,
+        "child_run_dir": _repo_relative_string(output_path),
+        "revision_index": revision_index,
+        "revision_prompt": revision_prompt,
+        "revision_request_artifact": "revision_request.json",
+        "patch_artifact": "patch.json",
+        "comparison_artifact": "comparison.json",
+        "blocked_reason": comparison["blocked_reason"],
+    }
+    _write_json(output_path / "lineage.json", lineage)
+    _write_revision_report(output_path, revision_request, comparison, lineage)
+
+    revision_metadata = {
+        "workflow": "agent_revision",
+        "version": "cadflow-native-revision-v0.6",
+        "adapter": _safe_provider_identity(adapter),
+        "root_run_id": root_run_id,
+        "parent_run_id": parent_path.name,
+        "child_run_id": output_path.name,
+        "revision_index": revision_index,
+        "status": "blocked",
+        "blocked_reason": comparison["blocked_reason"],
+        "stages": [
+            "parent_run",
+            "parse_revision_request",
+            "create_revision_plan",
+            "patch_input_ir",
+            "block_no_structured_changes",
+            "compare_parent_child",
+            "record_lineage",
+        ],
+        "artifacts": {
+            "revision_prompt": "revision_prompt.txt",
+            "revision_request": "revision_request.json",
+            "change_intent": "change_intent.json",
+            "revision_plan": "revision_plan.json",
+            "patch": "patch.json",
+            "comparison": "comparison.json",
+            "lineage": "lineage.json",
+            "revision_report": "revision_report.md",
+            "parent_input_ir_snapshot": "parent_input_ir.json",
+        },
+    }
+    files = _collect_files(output_path)
+    report = {
+        "success": False,
+        "status": "blocked",
+        "blocked_reason": comparison["blocked_reason"],
+        "part_type": parent_ir.get("part_type"),
+        "part_name": parent_ir.get("part_name", parent_ir.get("part_type")),
+        "revision_request": revision_request,
+        "change_intent": change_intent,
+        "revision_plan": revision_plan,
+        "patch": patch,
+        "comparison": comparison,
+        "lineage": lineage,
+        "agent_revision": revision_metadata,
+        "files": files,
+    }
+    _write_json(output_path / "report.json", report)
+    _write_blocked_revision_report_md(output_path, report)
+    _merge_agent_revision_metadata(output_path, revision_metadata)
+    files = _collect_files(output_path)
+    report["files"] = files
+    _write_json(output_path / "report.json", report)
+    return {
+        "status": "blocked",
+        "success": False,
+        "output_dir": str(output_path),
+        "blocked_reason": comparison["blocked_reason"],
+        "revision_request": revision_request,
+        "change_intent": change_intent,
+        "revision_plan": revision_plan,
+        "patch": patch,
+        "comparison": comparison,
+        "lineage": lineage,
+        "files": files,
+        "agent_trace": json.loads((output_path / "agent_trace.json").read_text(encoding="utf-8")),
+    }
+
+
+def _compare_blocked_revision(
+    parent_ir: dict[str, Any],
+    parent_report: dict[str, Any],
+    parent_trace: dict[str, Any],
+    parent_path: Path,
+    child_path: Path,
+    patch: dict[str, Any],
+    revision_plan: dict[str, Any],
+) -> dict[str, Any]:
+    blocked_reason = _revision_blocked_reason(revision_plan, patch)
+    return {
+        "artifact_type": "revision_comparison",
+        "version": "revision-comparison-v0.1",
+        "status": "blocked",
+        "blocked_reason": blocked_reason,
+        "parent_run_id": parent_path.name,
+        "child_run_id": child_path.name,
+        "parent_artifacts": {
+            "input_ir": _repo_relative_string(parent_path / "input_ir.json"),
+            "report": _repo_relative_string(parent_path / "report.json") if parent_report else None,
+        },
+        "child_artifacts": {
+            "report": "report.json",
+            "revision_report": "revision_report.md",
+        },
+        "requested_changes": [
+            {
+                "path": change.get("path"),
+                "op": change.get("op"),
+                "before": change.get("before"),
+                "after": change.get("after"),
+                "reason": change.get("reason"),
+            }
+            for change in patch.get("changes", [])
+        ],
+        "actual_ir_changes": [],
+        "validation_changes": [],
+        "system_repair_changes": [],
+        "summary": {
+            "requested_change_count": len(patch.get("changes", [])),
+            "actual_ir_change_count": 0,
+            "validation_change_count": 0,
+            "system_repair_change_count": 0,
+        },
+        "dimension_changes": [],
+        "feature_changes": [],
+        "status_detail": {
+            "parent": parent_report.get("status") if parent_report else None,
+            "child": "blocked",
+            "child_success": False,
+            "parent_attempts": parent_trace.get("total_attempts") if parent_trace else None,
+            "child_attempts": 0,
+        },
+    }
+
+
+def _revision_blocked_reason(revision_plan: dict[str, Any], patch: dict[str, Any]) -> str:
+    if revision_plan.get("status") != "ready_for_patch":
+        return f"revision_plan.status={revision_plan.get('status', 'unknown')}"
+    return "patch.changes is empty"
+
+
+def _write_revision_report(
+    output_path: Path,
+    revision_request: dict[str, Any],
+    comparison: dict[str, Any],
+    lineage: dict[str, Any],
+) -> None:
+    requested = comparison.get("requested_changes", [])
+    actual = comparison.get("actual_ir_changes", [])
+    validation = comparison.get("validation_changes", [])
+    repairs = comparison.get("system_repair_changes", [])
+    status_value = comparison.get("status")
+    if isinstance(status_value, dict):
+        status = status_value.get("child") or "success"
+    else:
+        status = status_value or comparison.get("status_detail", {}).get("child") or "success"
+    lines = [
+        "# Revision Report",
+        "",
+        f"- Parent run: `{lineage.get('parent_run_id')}`",
+        f"- Child run: `{lineage.get('child_run_id')}`",
+        f"- Revision index: {lineage.get('revision_index')}",
+        f"- Status: `{status}`",
+        f"- Requested prompt: {revision_request.get('prompt', '').strip()}",
+        f"- Requested structured changes: {len(requested)}",
+        f"- Actual IR changes: {len(actual)}",
+        f"- Validation changes: {len(validation)}",
+        f"- System repair changes: {len(repairs)}",
+    ]
+    if comparison.get("blocked_reason"):
+        lines.append(f"- Blocked reason: `{comparison['blocked_reason']}`")
+    if requested:
+        lines.extend(["", "## Requested Changes", ""])
+        for change in requested:
+            lines.append(
+                f"- `{change.get('op')}` `{change.get('path')}`: "
+                f"`{change.get('before')}` -> `{change.get('after')}`"
+            )
+    if actual:
+        lines.extend(["", "## Actual IR Changes", ""])
+        for change in actual:
+            lines.append(f"- `{change.get('path')}`: `{change.get('before')}` -> `{change.get('after')}`")
+    if validation:
+        lines.extend(["", "## Validation Changes", ""])
+        for change in validation:
+            lines.append(f"- `{change.get('path')}`: `{change.get('before')}` -> `{change.get('after')}`")
+    if repairs:
+        lines.extend(["", "## System Repair Changes", ""])
+        for change in repairs:
+            lines.append(f"- {change}")
+    (output_path / "revision_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_blocked_revision_report_md(output_path: Path, report: dict[str, Any]) -> None:
+    lines = [
+        "# Blocked Revision Report",
+        "",
+        "**Status:** blocked",
+        f"**Part type:** {report.get('part_type')}",
+        f"**Part name:** {report.get('part_name')}",
+        f"**Blocked reason:** `{report.get('blocked_reason')}`",
+        "",
+        "No child CAD model was generated because the revision request produced no structured CAD IR changes.",
+        "",
+        "## Files",
+        "",
+    ]
+    for label, path in report.get("files", {}).items():
+        lines.append(f"- {label}: `{path}`")
+    (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _agent_create_dir_name(prompt: str) -> str:
@@ -553,12 +821,12 @@ def _compare_revision(
         "parent_run_id": parent_path.name,
         "child_run_id": child_path.name,
         "parent_artifacts": {
-            "input_ir": str(parent_path / "input_ir.json"),
-            "report": str(parent_path / "report.json") if parent_report else None,
+            "input_ir": _repo_relative_string(parent_path / "input_ir.json"),
+            "report": _repo_relative_string(parent_path / "report.json") if parent_report else None,
         },
         "child_artifacts": {
-            "input_ir": str(child_path / "input_ir.json"),
-            "report": str(child_path / "report.json") if child_report else None,
+            "input_ir": _repo_relative_string(child_path / "input_ir.json"),
+            "report": _repo_relative_string(child_path / "report.json") if child_report else None,
         },
         "requested_changes": [
             {
@@ -791,6 +1059,14 @@ def _require_repo_path(path: Path) -> Path:
     except ValueError as exc:
         raise ValueError(f"pipeline outputs must be written inside project root: {repo_root}") from exc
     return path
+
+
+def _repo_relative_string(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(PROJECT_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
 
 
 def _planning_context(cad_ir: CADIR) -> dict[str, Any]:

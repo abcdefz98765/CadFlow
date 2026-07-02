@@ -72,6 +72,12 @@ runs/<child_run_id>/
   logs/runtime.json
 ```
 
+If a revision prompt produces no structured CAD IR changes, the child run is
+blocked rather than regenerated. In that case it still records the request,
+intent, plan, patch, comparison, lineage, reports, revision report, and agent
+trace, but it must not create child `input_ir.json`, `model.py`, `model.step`,
+or `model.stl`.
+
 Some revision artifacts may be absent until the revision workflow is
 implemented. Their intended roles are:
 

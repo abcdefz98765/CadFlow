@@ -246,6 +246,7 @@ def test_agent_revision_pipeline_patches_parent_ir_and_records_lineage():
         "report.json",
         "agent_trace.json",
         "comparison.json",
+        "revision_report.md",
         "lineage.json",
         "model.step",
         "model.stl",
@@ -282,6 +283,68 @@ def test_agent_revision_pipeline_patches_parent_ir_and_records_lineage():
     assert lineage["revision_index"] == 1
     assert trace["agent_revision"]["stages"][-1] == "record_lineage"
     assert trace["agent_revision"]["revision_index"] == 1
+
+
+def test_agent_revision_pipeline_blocks_unsupported_prompt_without_model_generation():
+    parent_dir = Path.cwd() / "outputs" / "pytest_revision_blocked_parent_plate"
+    child_dir = Path.cwd() / "outputs" / "pytest_revision_blocked_child_plate"
+    for generated_artifact in ("input_ir.json", "model.py", "model.step", "model.stl"):
+        (child_dir / generated_artifact).unlink(missing_ok=True)
+    parent = run_ir_pipeline(
+        {
+            "part_type": "mounting_plate",
+            "part_name": "pytest_revision_blocked_parent_plate",
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5},
+            "features": {"holes": {"diameter": 4.5, "positions": "corner_4"}, "chamfer": {"size": 1}},
+            "outputs": ["step", "stl"],
+        },
+        output_dir=parent_dir,
+    )
+
+    result = run_agent_revision_pipeline(
+        parent["output_dir"],
+        "Make it look more futuristic.",
+        DesignPlannerFakeAgentAdapter(),
+        output_dir=child_dir,
+    )
+
+    assert result["status"] == "blocked"
+    assert result["revision_plan"]["status"] == "no_structured_changes"
+    assert result["patch"]["changes"] == []
+
+    for artifact in (
+        "revision_prompt.txt",
+        "revision_request.json",
+        "change_intent.json",
+        "revision_plan.json",
+        "patch.json",
+        "parent_input_ir.json",
+        "parent_report_snapshot.json",
+        "parent_agent_trace_snapshot.json",
+        "report.json",
+        "report.md",
+        "revision_report.md",
+        "comparison.json",
+        "lineage.json",
+        "agent_trace.json",
+    ):
+        assert (child_dir / artifact).exists()
+
+    for generated_artifact in ("input_ir.json", "model.py", "model.step", "model.stl"):
+        assert not (child_dir / generated_artifact).exists()
+
+    comparison = json.loads((child_dir / "comparison.json").read_text(encoding="utf-8"))
+    lineage = json.loads((child_dir / "lineage.json").read_text(encoding="utf-8"))
+    report = json.loads((child_dir / "report.json").read_text(encoding="utf-8"))
+    trace = json.loads((child_dir / "agent_trace.json").read_text(encoding="utf-8"))
+
+    assert comparison["status"] == "blocked"
+    assert comparison["requested_changes"] == []
+    assert comparison["actual_ir_changes"] == []
+    assert lineage["relationship"] == "revision_blocked"
+    assert report["status"] == "blocked"
+    assert "run_ir_pipeline" not in trace["agent_revision"]["stages"]
 
 
 def test_agent_revision_pipeline_supports_chained_native_revisions():

@@ -212,6 +212,15 @@ runs/<child_run_id>/
   logs/runtime.json
 ```
 
+If the revision prompt cannot be converted into structured CAD IR changes
+(`revision_plan.status` is not `ready_for_patch` or `patch.changes` is empty),
+the run is recorded as blocked instead of generating a misleading child model.
+Blocked revision runs still write `revision_request.json`, `change_intent.json`,
+`revision_plan.json`, `patch.json`, `comparison.json`, `lineage.json`,
+`report.json`, `report.md`, `revision_report.md`, and `agent_trace.json`.
+They do not write child `input_ir.json`, `model.py`, `model.step`, or
+`model.stl`.
+
 Revisions should create new child runs. They must not overwrite parent runs.
 
 `revision_request.json` records the user change request and parent context.
@@ -219,8 +228,9 @@ Revisions should create new child runs. They must not overwrite parent runs.
 the proposed edit strategy and target artifacts. `patch.json` records structured
 before/after changes where possible. `comparison.json` summarizes old vs new
 dimensions, features, validation status, and changed artifacts.
-`revision_report.md` is the human-readable summary. `lineage.json` records
-parent/child relationships.
+`revision_report.md` is the human-readable summary of parent, child, requested
+changes, actual IR changes, validation status, and system repair changes.
+`lineage.json` records parent/child relationships.
 
 ## Lineage Rules
 
