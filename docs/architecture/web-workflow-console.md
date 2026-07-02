@@ -147,7 +147,15 @@ For future HTTP routes, `WorkflowConsoleBackend` also exposes run-id based opera
 
 The route contract scaffold defines future method/path semantics without importing a web framework or starting an HTTP server. It also provides a small in-process dispatcher that accepts a route name plus path/body/query dictionaries and calls an explicit allowlist of by-id backend methods. The dispatcher removes local path fields such as `run_dir`, `root`, `path`, and `output_dir` from public route response data while preserving artifact content. Gate-decision payloads remain in `logs/runtime.json` for audit, but public metadata and route responses expose only compact payload summaries. Future FastAPI or other HTTP adapters must wrap the by-id backend methods only, such as `create_run_by_id`, `run_stage_by_id`, `read_artifact_by_id`, `write_artifact_by_id`, and `record_gate_decision_by_id`; direct local `run_dir` operations remain internal Python APIs.
 
-Readable artifacts remain limited to `prompt.txt`, `requirement.json`, `planning_artifact.json`, `input_ir.json`, `report.json`, `report.md`, `agent_trace.json`, and `logs/runtime.json`. Downloadable discovery remains limited to `model.step`, `model.stl`, `preview.png`, and `model.py`.
+Readable artifacts remain limited to workflow source, handoff, report, trace,
+and revision records: `prompt.txt`, `revision_prompt.txt`,
+`requirement.json`, `planning_artifact.json`, `input_ir.json`,
+`parent_input_ir.json`, parent snapshots, `revision_request.json`,
+`change_intent.json`, `revision_plan.json`, `patch.json`,
+`comparison.json`, `revision_report.md`, `lineage.json`, `report.json`,
+`report.md`, `agent_trace.json`, and `logs/runtime.json`. Downloadable
+discovery remains limited to `model.step`, `model.stl`, `preview.png`, and
+`model.py`.
 
 Editable artifacts are narrower than readable artifacts. The backend can write only `requirement.json`, `planning_artifact.json`, and `input_ir.json`; writes must be JSON objects, pass artifact-specific validation, and are recorded in `logs/runtime.json` under `workflow_console.artifact_edits`.
 

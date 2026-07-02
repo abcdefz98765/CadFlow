@@ -833,6 +833,30 @@ def test_backend_rejects_non_editable_artifact_write(tmp_path):
         backend.write_artifact_by_id("edit_run", "report.json", {"status": "success"})
 
 
+def test_backend_reads_revision_artifacts_without_making_them_editable(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    run_dir = tmp_path / "outputs" / "revision_run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "revision_request.json").write_text('{"artifact_type": "revision_request"}\n', encoding="utf-8")
+    (run_dir / "patch.json").write_text('{"changes": []}\n', encoding="utf-8")
+    (run_dir / "comparison.json").write_text('{"status": "blocked"}\n', encoding="utf-8")
+    (run_dir / "revision_report.md").write_text("# Revision Report\n", encoding="utf-8")
+    (run_dir / "lineage.json").write_text('{"relationship": "revision_blocked"}\n', encoding="utf-8")
+
+    artifact_names = {item["name"] for item in backend.list_artifacts_by_id("revision_run")}
+
+    assert {
+        "revision_request.json",
+        "patch.json",
+        "comparison.json",
+        "revision_report.md",
+        "lineage.json",
+    }.issubset(artifact_names)
+    assert backend.read_artifact_by_id("revision_run", "comparison.json")["content"]["status"] == "blocked"
+    with pytest.raises(ValueError, match="artifact is not editable"):
+        backend.write_artifact_by_id("revision_run", "patch.json", {"changes": []})
+
+
 def test_backend_rejects_artifact_write_traversal(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_run_by_id("edit_run", "Make a spacer.")
