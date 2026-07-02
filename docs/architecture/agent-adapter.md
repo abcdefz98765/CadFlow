@@ -96,6 +96,11 @@ name has been configured. The adapter passes timeout/retry options to the
 injected client in request metadata, but it does not read secret values, import a
 provider SDK, or perform network I/O by itself.
 
+Injected provider client failures are wrapped as `JsonContractProviderError`
+with only operation, category, and retryability. Raw provider exception text is
+not exposed because it may contain keys, environment names, prompts, transcripts,
+or local paths.
+
 ### 3. LLMApiAgentAdapter
 
 The LLM API adapter is the primary future user-facing mode, but it is not

@@ -82,6 +82,24 @@ class JsonContractProviderConfig:
         }
 
 
+class JsonContractProviderError(RuntimeError):
+    """Secret-safe wrapper for injected provider client failures."""
+
+    def __init__(self, operation: str, category: str, *, retryable: bool = False) -> None:
+        self.operation = operation
+        self.category = category
+        self.retryable = retryable
+        super().__init__(f"JSON contract provider failed during {operation}: {category}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "json_contract_provider_error",
+            "operation": self.operation,
+            "category": self.category,
+            "retryable": self.retryable,
+        }
+
+
 @runtime_checkable
 class JsonContractClient(Protocol):
     """Provider-neutral boundary for JSON contract generation."""
@@ -128,7 +146,7 @@ class JsonContractAgentAdapter(AgentAdapter):
 
     def parse_requirement(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         request = self._with_provider_options(_requirement_contract_request(prompt, context or {}))
-        raw_response = _call_json_client(self.client, request)
+        raw_response = _call_json_client(self.client, request, "parse_requirement")
         requirement = _extract_json_object(raw_response)
         validate_requirement_draft(requirement)
         return requirement
@@ -136,7 +154,7 @@ class JsonContractAgentAdapter(AgentAdapter):
     def create_plan(self, requirement: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         validate_requirement_draft(requirement)
         request = self._with_provider_options(_planning_contract_request(requirement, context or {}))
-        raw_response = _call_json_client(self.client, request)
+        raw_response = _call_json_client(self.client, request, "create_plan")
         planning_artifact = _extract_json_object(raw_response)
         validate_planning_draft(planning_artifact)
         return planning_artifact
@@ -148,7 +166,7 @@ class JsonContractAgentAdapter(AgentAdapter):
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request = self._with_provider_options(_revision_intent_contract_request(prompt, model_context, context or {}))
-        raw_response = _call_json_client(self.client, request)
+        raw_response = _call_json_client(self.client, request, "parse_revision_request")
         change_intent = _extract_json_object(raw_response)
         validate_adapter_result("parse_revision_request", change_intent)
         return change_intent
@@ -161,7 +179,7 @@ class JsonContractAgentAdapter(AgentAdapter):
     ) -> dict[str, Any]:
         validate_adapter_result("parse_revision_request", change_intent)
         request = self._with_provider_options(_revision_plan_contract_request(change_intent, model_context, context or {}))
-        raw_response = _call_json_client(self.client, request)
+        raw_response = _call_json_client(self.client, request, "create_revision_plan")
         revision_plan = _extract_json_object(raw_response)
         validate_adapter_result("create_revision_plan", revision_plan)
         return revision_plan
@@ -173,7 +191,7 @@ class JsonContractAgentAdapter(AgentAdapter):
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request = self._with_provider_options(_repair_contract_request(failure, ir, context or {}))
-        raw_response = _call_json_client(self.client, request)
+        raw_response = _call_json_client(self.client, request, "suggest_repair")
         repair_suggestion = _extract_json_object(raw_response)
         validate_repair_suggestion(repair_suggestion)
         return repair_suggestion
@@ -185,7 +203,7 @@ class JsonContractAgentAdapter(AgentAdapter):
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request = self._with_provider_options(_review_contract_request(report, trace, context or {}))
-        raw_response = _call_json_client(self.client, request)
+        raw_response = _call_json_client(self.client, request, "explain_review")
         review_explanation = _extract_json_object(raw_response)
         validate_review_explanation(review_explanation)
         return review_explanation
@@ -340,13 +358,39 @@ def _contract_context(context: dict[str, Any]) -> dict[str, Any]:
     return {key: context[key] for key in allowed_keys if key in context}
 
 
-def _call_json_client(client: JsonContractClient | JsonContractCallable, request: dict[str, Any]) -> Any:
+def _call_json_client(client: JsonContractClient | JsonContractCallable, request: dict[str, Any], operation: str) -> Any:
     generate = getattr(client, "generate_json_contract", None)
-    if callable(generate):
-        return generate(request)
-    if callable(client):
-        return client(request)
+    try:
+        if callable(generate):
+            return generate(request)
+        if callable(client):
+            return client(request)
+    except JsonContractProviderError:
+        raise
+    except Exception as exc:
+        raise JsonContractProviderError(
+            operation,
+            _provider_error_category(exc),
+            retryable=_provider_error_retryable(exc),
+        ) from None
     raise TypeError("JSON contract client must be callable or implement generate_json_contract(request)")
+
+
+def _provider_error_category(exc: Exception) -> str:
+    text = f"{type(exc).__name__} {exc}".lower()
+    if "timeout" in text or isinstance(exc, TimeoutError):
+        return "timeout"
+    if "rate" in text or "429" in text or "limit" in text:
+        return "rate_limited"
+    if "auth" in text or "credential" in text or "permission" in text or "401" in text or "403" in text:
+        return "auth_failed"
+    if "network" in text or "connection" in text or "dns" in text:
+        return "network_error"
+    return "client_error"
+
+
+def _provider_error_retryable(exc: Exception) -> bool:
+    return _provider_error_category(exc) in {"timeout", "rate_limited", "network_error"}
 
 
 def _extract_json_object(raw_response: Any) -> dict[str, Any]:

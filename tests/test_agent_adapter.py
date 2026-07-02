@@ -9,6 +9,7 @@ from ai_native_cad.agents import (
     DeterministicAgentAdapter,
     JsonContractAgentAdapter,
     JsonContractProviderConfig,
+    JsonContractProviderError,
 )
 from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
 from ai_native_cad.workflow_console.stage_runner import StageRunner
@@ -66,6 +67,18 @@ class OperationFakeJsonContractClient:
     def generate_json_contract(self, request):
         self.requests.append(request)
         return self.responses[request["operation"]]
+
+
+class FailingJsonContractClient:
+    provider_identity = {"provider": "fake/json", "api_key": "secret"}
+
+    def __init__(self, exc):
+        self.exc = exc
+        self.requests = []
+
+    def generate_json_contract(self, request):
+        self.requests.append(request)
+        raise self.exc
 
 
 def _valid_requirement_json():
@@ -455,6 +468,41 @@ def test_json_contract_provider_config_is_secret_free_and_request_scoped():
 def test_json_contract_provider_config_rejects_unsafe_values(config):
     with pytest.raises(ValueError):
         JsonContractProviderConfig.from_mapping(config)
+
+
+@pytest.mark.parametrize("exc,category,retryable", [
+    (TimeoutError("request timed out for sk-test-secret at D:/private/prompt.txt"), "timeout", True),
+    (RuntimeError("429 rate limit for CADFLOW_FAKE_API_KEY"), "rate_limited", True),
+    (RuntimeError("401 auth failed with key sk-test-secret"), "auth_failed", False),
+    (RuntimeError("provider crashed with transcript and D:/private/run"), "client_error", False),
+])
+def test_json_contract_provider_failures_are_wrapped_without_leaking_private_details(exc, category, retryable):
+    adapter = JsonContractAgentAdapter(FailingJsonContractClient(exc))
+
+    with pytest.raises(JsonContractProviderError) as raised:
+        adapter.parse_requirement("Make a spacer washer.")
+
+    error = raised.value
+    serialized = json.dumps(error.to_dict()) + str(error)
+    assert error.operation == "parse_requirement"
+    assert error.category == category
+    assert error.retryable is retryable
+    assert "sk-test-secret" not in serialized
+    assert "CADFLOW_FAKE_API_KEY" not in serialized
+    assert "D:/private" not in serialized
+    assert "transcript" not in serialized
+
+
+def test_json_contract_provider_error_shape_is_public_and_stable():
+    error = JsonContractProviderError("create_revision_plan", "timeout", retryable=True)
+
+    assert str(error) == "JSON contract provider failed during create_revision_plan: timeout"
+    assert error.to_dict() == {
+        "type": "json_contract_provider_error",
+        "operation": "create_revision_plan",
+        "category": "timeout",
+        "retryable": True,
+    }
 
 
 def test_json_contract_agent_adapter_requires_no_provider_sdk_or_network():
