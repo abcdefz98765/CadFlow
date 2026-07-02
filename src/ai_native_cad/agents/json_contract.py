@@ -7,6 +7,7 @@ from typing import Any, Callable, Protocol, runtime_checkable
 
 from ai_native_cad.agents.base import AgentAdapter
 from ai_native_cad.agents.validation import (
+    validate_adapter_result,
     validate_planning_draft,
     validate_repair_suggestion,
     validate_requirement_draft,
@@ -77,6 +78,31 @@ class JsonContractAgentAdapter(AgentAdapter):
         planning_artifact = _extract_json_object(raw_response)
         validate_planning_draft(planning_artifact)
         return planning_artifact
+
+    def parse_revision_request(
+        self,
+        prompt: str,
+        model_context: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        request = _revision_intent_contract_request(prompt, model_context, context or {})
+        raw_response = _call_json_client(self.client, request)
+        change_intent = _extract_json_object(raw_response)
+        validate_adapter_result("parse_revision_request", change_intent)
+        return change_intent
+
+    def create_revision_plan(
+        self,
+        change_intent: dict[str, Any],
+        model_context: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        validate_adapter_result("parse_revision_request", change_intent)
+        request = _revision_plan_contract_request(change_intent, model_context, context or {})
+        raw_response = _call_json_client(self.client, request)
+        revision_plan = _extract_json_object(raw_response)
+        validate_adapter_result("create_revision_plan", revision_plan)
+        return revision_plan
 
     def suggest_repair(
         self,
@@ -161,6 +187,59 @@ def _repair_contract_request(failure: dict[str, Any], ir: dict[str, Any], contex
             {
                 "role": "user",
                 "content": json.dumps({"failure": failure, "ir": ir}, sort_keys=True),
+            },
+        ],
+        "context": _contract_context(context),
+    }
+
+
+def _revision_intent_contract_request(
+    prompt: str,
+    model_context: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "operation": "parse_revision_request",
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Return only a JSON object matching CadFlow revision change intent. "
+                    "Do not include markdown, prose, CAD code, Python code, shell commands, or paths."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps({"prompt": prompt, "model_context": model_context}, sort_keys=True),
+            },
+        ],
+        "context": _contract_context(context),
+    }
+
+
+def _revision_plan_contract_request(
+    change_intent: dict[str, Any],
+    model_context: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "operation": "create_revision_plan",
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Return only a JSON object matching CadFlow revision_plan.json. "
+                    "Do not include markdown, prose, CAD code, Python code, shell commands, or paths."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {"change_intent": change_intent, "model_context": model_context},
+                    sort_keys=True,
+                ),
             },
         ],
         "context": _contract_context(context),

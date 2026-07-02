@@ -77,8 +77,9 @@ This mode is intentionally predictable and should remain dependency-light.
 JSON contract generation. It is not the default adapter and does not import a
 provider SDK.
 
-For this scaffold it supports the current narrow `AgentAdapter` operations:
-`parse_requirement(...)`, `create_plan(...)`, `suggest_repair(...)`, and
+For this scaffold it supports the current structured `AgentAdapter` operations:
+`parse_requirement(...)`, `create_plan(...)`, `parse_revision_request(...)`,
+`create_revision_plan(...)`, `suggest_repair(...)`, and
 `explain_review(...)`. Callers must explicitly inject a fake or
 provider-specific client at the boundary. The adapter builds a JSON-only
 contract request, parses the returned JSON object, and runs the matching local

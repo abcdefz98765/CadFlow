@@ -143,6 +143,40 @@ def _valid_review_json():
     })
 
 
+def _valid_revision_intent():
+    return {
+        "artifact_type": "revision_intent",
+        "version": "revision-intent-v0.1",
+        "requested_change": "Increase the thickness to 8 mm.",
+        "changes": [
+            {
+                "op": "replace",
+                "path": "dimensions.thickness",
+                "value": 8,
+                "reason": "User requested thickness change.",
+            }
+        ],
+        "confidence": "high",
+    }
+
+
+def _valid_revision_plan():
+    return {
+        "artifact_type": "revision_plan",
+        "version": "revision-plan-v0.1",
+        "status": "ready_for_patch",
+        "planned_operations": [
+            {
+                "op": "replace",
+                "path": "dimensions.thickness",
+                "value": 8,
+                "reason": "User requested thickness change.",
+            }
+        ],
+        "notes": [],
+    }
+
+
 def test_deterministic_agent_adapter_satisfies_contract_without_provider_config():
     adapter = DeterministicAgentAdapter()
 
@@ -227,6 +261,45 @@ def test_json_contract_agent_adapter_accepts_valid_fake_planning_output():
     assert fake_client.requests[0]["response_format"] == {"type": "json_object"}
     assert fake_client.requests[0]["messages"][0]["role"] == "system"
     assert "planning_artifact.json" in fake_client.requests[0]["messages"][0]["content"]
+
+
+def test_json_contract_agent_adapter_accepts_revision_contract_outputs():
+    fake_client = OperationFakeJsonContractClient({
+        "parse_revision_request": _valid_revision_intent(),
+        "create_revision_plan": _valid_revision_plan(),
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    model_context = {"current_ir": _valid_ir(), "parent_run_id": "parent_run"}
+
+    change_intent = adapter.parse_revision_request("Increase the thickness to 8 mm.", model_context)
+    revision_plan = adapter.create_revision_plan(change_intent, model_context)
+
+    assert change_intent["changes"][0]["path"] == "dimensions.thickness"
+    assert revision_plan["status"] == "ready_for_patch"
+    assert [request["operation"] for request in fake_client.requests] == [
+        "parse_revision_request",
+        "create_revision_plan",
+    ]
+    assert fake_client.requests[0]["response_format"] == {"type": "json_object"}
+    assert "revision change intent" in fake_client.requests[0]["messages"][0]["content"]
+    assert "revision_plan.json" in fake_client.requests[1]["messages"][0]["content"]
+
+
+@pytest.mark.parametrize("operation,response", [
+    ("parse_revision_request", {"artifact_type": "revision_intent", "python_code": "print('bypass')"}),
+    ("create_revision_plan", {"artifact_type": "revision_plan", "shell_command": "python model.py"}),
+])
+def test_json_contract_agent_adapter_rejects_revision_bypass_fields(operation, response):
+    fake_client = OperationFakeJsonContractClient({
+        "parse_revision_request": response if operation == "parse_revision_request" else _valid_revision_intent(),
+        "create_revision_plan": response if operation == "create_revision_plan" else _valid_revision_plan(),
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    model_context = {"current_ir": _valid_ir(), "parent_run_id": "parent_run"}
+
+    with pytest.raises(ValueError):
+        change_intent = adapter.parse_revision_request("Increase the thickness to 8 mm.", model_context)
+        adapter.create_revision_plan(change_intent, model_context)
 
 
 @pytest.mark.parametrize("response", [
