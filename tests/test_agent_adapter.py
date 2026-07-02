@@ -8,8 +8,12 @@ from ai_native_cad.agents import (
     DesignPlannerFakeAgentAdapter,
     DeterministicAgentAdapter,
     JsonContractAgentAdapter,
+    JsonProviderEndpoint,
     JsonContractProviderConfig,
     JsonContractProviderError,
+    OpenAICompatibleJsonContractClient,
+    OpenAIResponsesJsonContractClient,
+    make_json_contract_adapter_from_env,
 )
 from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
 from ai_native_cad.workflow_console.stage_runner import StageRunner
@@ -79,6 +83,36 @@ class FailingJsonContractClient:
     def generate_json_contract(self, request):
         self.requests.append(request)
         raise self.exc
+
+
+class FakeHTTPResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
+
+
+class RecordingUrlOpen:
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = []
+
+    def __call__(self, http_request, timeout=None):
+        self.calls.append({
+            "url": http_request.full_url,
+            "timeout": timeout,
+            "method": http_request.get_method(),
+            "headers": dict(http_request.header_items()),
+            "body": json.loads(http_request.data.decode("utf-8")),
+        })
+        return FakeHTTPResponse(self.payload)
 
 
 def _valid_requirement_json():
@@ -645,6 +679,133 @@ def test_json_contract_agent_adapter_requires_no_provider_sdk_or_network():
 
     assert len(fake_client.requests) == 1
     assert "openai" not in JsonContractAgentAdapter.__module__
+
+
+def test_openai_compatible_client_builds_deepseek_chat_request_without_leaking_identity(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-secret")
+    urlopen = RecordingUrlOpen({"choices": [{"message": {"content": _valid_requirement_json()}}]})
+    endpoint = JsonProviderEndpoint(
+        provider="deepseek",
+        model="deepseek-chat",
+        api_key_env_var="DEEPSEEK_API_KEY",
+        base_url="https://api.deepseek.com",
+        endpoint="/v1/chat/completions",
+        api_shape="chat_completions",
+        timeout_seconds=9,
+        max_retries=1,
+    )
+    client = OpenAICompatibleJsonContractClient(endpoint, urlopen=urlopen)
+    adapter = JsonContractAgentAdapter(
+        client,
+        config=JsonContractProviderConfig(
+            provider="deepseek",
+            model="deepseek-chat",
+            enabled=True,
+            timeout_seconds=9,
+            max_retries=1,
+            api_key_env_var="DEEPSEEK_API_KEY",
+        ),
+    )
+
+    requirement = adapter.parse_requirement("Make a spacer washer.")
+
+    call = urlopen.calls[0]
+    assert requirement["part_type"] == "spacer"
+    assert call["url"] == "https://api.deepseek.com/v1/chat/completions"
+    assert call["timeout"] == 9
+    assert call["method"] == "POST"
+    assert call["headers"]["Authorization"] == "Bearer deepseek-secret"
+    assert call["body"]["model"] == "deepseek-chat"
+    assert call["body"]["response_format"] == {"type": "json_object"}
+    assert call["body"]["messages"][0]["role"] == "system"
+    assert "DEEPSEEK_API_KEY" not in json.dumps(adapter.provider_identity)
+    assert "deepseek-secret" not in json.dumps(adapter.provider_identity)
+
+
+def test_openai_responses_client_builds_codex_request_without_leaking_identity(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-secret")
+    urlopen = RecordingUrlOpen({"output_text": _valid_requirement_json()})
+    endpoint = JsonProviderEndpoint(
+        provider="openai",
+        model="gpt-5.1-codex",
+        api_key_env_var="OPENAI_API_KEY",
+        base_url="https://api.openai.com",
+        endpoint="/v1/responses",
+        api_shape="responses",
+    )
+    client = OpenAIResponsesJsonContractClient(endpoint, urlopen=urlopen)
+    adapter = JsonContractAgentAdapter(
+        client,
+        config=JsonContractProviderConfig(
+            provider="openai",
+            model="gpt-5.1-codex",
+            enabled=True,
+            api_key_env_var="OPENAI_API_KEY",
+        ),
+    )
+
+    requirement = adapter.parse_requirement("Make a spacer washer.")
+
+    call = urlopen.calls[0]
+    assert requirement["part_type"] == "spacer"
+    assert call["url"] == "https://api.openai.com/v1/responses"
+    assert call["headers"]["Authorization"] == "Bearer openai-secret"
+    assert call["body"]["model"] == "gpt-5.1-codex"
+    assert call["body"]["text"]["format"] == {"type": "json_object"}
+    assert call["body"]["input"][0]["role"] == "system"
+    assert "OPENAI_API_KEY" not in json.dumps(adapter.provider_identity)
+    assert "openai-secret" not in json.dumps(adapter.provider_identity)
+
+
+def test_json_contract_provider_factory_selects_deepseek_from_environment(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-secret")
+    monkeypatch.setenv("CADFLOW_DEEPSEEK_MODEL", "deepseek-reasoner")
+    monkeypatch.setenv("CADFLOW_PROVIDER_TIMEOUT_SECONDS", "11")
+    urlopen = RecordingUrlOpen({"choices": [{"message": {"content": _valid_requirement_json()}}]})
+
+    adapter = make_json_contract_adapter_from_env("deepseek", urlopen=urlopen)
+    adapter.parse_requirement("Make a spacer washer.")
+
+    assert adapter.provider_identity["provider"] == "deepseek"
+    assert adapter.provider_identity["model"] == "deepseek-reasoner"
+    assert adapter.provider_identity["enabled"] is True
+    assert adapter.provider_identity["timeout_seconds"] == 11
+    assert "DEEPSEEK_API_KEY" not in json.dumps(adapter.provider_identity)
+    assert urlopen.calls[0]["body"]["model"] == "deepseek-reasoner"
+
+
+def test_json_contract_provider_factory_selects_openai_codex_from_environment(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-secret")
+    monkeypatch.setenv("CADFLOW_OPENAI_MODEL", "gpt-5.1-codex")
+    urlopen = RecordingUrlOpen({"output_text": _valid_requirement_json()})
+
+    adapter = make_json_contract_adapter_from_env("openai", urlopen=urlopen)
+    adapter.parse_requirement("Make a spacer washer.")
+
+    assert adapter.provider_identity["provider"] == "openai"
+    assert adapter.provider_identity["model"] == "gpt-5.1-codex"
+    assert adapter.provider_identity["api_shape"] == "responses"
+    assert urlopen.calls[0]["body"]["model"] == "gpt-5.1-codex"
+
+
+def test_provider_client_missing_api_key_is_wrapped_without_env_name(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    endpoint = JsonProviderEndpoint(
+        provider="deepseek",
+        model="deepseek-chat",
+        api_key_env_var="DEEPSEEK_API_KEY",
+        base_url="https://api.deepseek.com",
+        endpoint="/v1/chat/completions",
+        api_shape="chat_completions",
+    )
+    adapter = JsonContractAgentAdapter(OpenAICompatibleJsonContractClient(endpoint))
+
+    with pytest.raises(JsonContractProviderError) as raised:
+        adapter.parse_requirement("Make a spacer washer.")
+
+    serialized = str(raised.value) + json.dumps(raised.value.to_dict())
+    assert raised.value.category == "auth_failed"
+    assert "DEEPSEEK_API_KEY" not in serialized
 
 
 def test_stage_runner_can_use_json_contract_adapter_when_explicitly_injected(tmp_path):

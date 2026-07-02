@@ -9,6 +9,12 @@ from ai_native_cad.agents.json_contract import (
     JsonContractProviderConfig,
     JsonContractProviderError,
 )
+from ai_native_cad.agents.provider_clients import (
+    JsonProviderEndpoint,
+    OpenAICompatibleJsonContractClient,
+    OpenAIResponsesJsonContractClient,
+    make_json_contract_adapter_from_env,
+)
 from ai_native_cad.agents.validation import validate_adapter_result
 
 __all__ = [
@@ -19,5 +25,9 @@ __all__ = [
     "JsonContractClient",
     "JsonContractProviderConfig",
     "JsonContractProviderError",
+    "JsonProviderEndpoint",
+    "OpenAICompatibleJsonContractClient",
+    "OpenAIResponsesJsonContractClient",
+    "make_json_contract_adapter_from_env",
     "validate_adapter_result",
 ]

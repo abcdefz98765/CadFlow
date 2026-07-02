@@ -144,6 +144,36 @@ pip install -e ".[dev]"
 python -m pytest tests/ -q
 ```
 
+### Experimental provider-backed adapter
+
+The default workflow remains deterministic and offline. For provider debugging,
+construct a JSON-contract adapter explicitly:
+
+```python
+from ai_native_cad.agents import make_json_contract_adapter_from_env
+from ai_native_cad.workflow_console.stage_runner import StageRunner
+
+adapter = make_json_contract_adapter_from_env("deepseek")  # or "openai"
+runner = StageRunner(agent_adapter=adapter)
+result = runner.run_requirement("Make a spacer washer.")
+```
+
+Environment variables:
+
+```bash
+# DeepSeek, OpenAI-compatible chat completions
+set DEEPSEEK_API_KEY=...
+set CADFLOW_DEEPSEEK_MODEL=deepseek-chat
+
+# OpenAI / Codex-family model testing through Responses API
+set OPENAI_API_KEY=...
+set CADFLOW_OPENAI_MODEL=gpt-5.1-codex
+```
+
+The provider clients use standard-library HTTP calls and are opt-in only. API
+keys are read at request time and are not written into artifacts, runtime
+activity, provider identity, or JSON-contract context.
+
 ### Windows / CadQuery environment note
 
 CadQuery may be sensitive to Python environment conflicts. Prefer a clean virtual

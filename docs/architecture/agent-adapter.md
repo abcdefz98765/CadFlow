@@ -101,6 +101,27 @@ with only operation, category, and retryability. Raw provider exception text is
 not exposed because it may contain keys, environment names, prompts, transcripts,
 or local paths.
 
+Experimental real provider clients live behind the same injected-client
+boundary:
+
+- `OpenAICompatibleJsonContractClient` targets OpenAI-compatible
+  `/chat/completions` APIs and is the default DeepSeek path.
+- `OpenAIResponsesJsonContractClient` targets OpenAI `/responses` for
+  OpenAI/Codex-family model testing.
+- `make_json_contract_adapter_from_env("deepseek")` reads
+  `DEEPSEEK_API_KEY`, `CADFLOW_DEEPSEEK_MODEL`, optional
+  `CADFLOW_DEEPSEEK_BASE_URL`, and optional `CADFLOW_DEEPSEEK_ENDPOINT`.
+- `make_json_contract_adapter_from_env("openai")` reads `OPENAI_API_KEY`,
+  `CADFLOW_OPENAI_MODEL`, optional `CADFLOW_OPENAI_BASE_URL`, and optional
+  `CADFLOW_OPENAI_ENDPOINT`.
+- Shared optional controls are `CADFLOW_PROVIDER_TIMEOUT_SECONDS` and
+  `CADFLOW_PROVIDER_MAX_RETRIES`.
+
+These clients use Python standard-library HTTP calls, not provider SDKs. They
+read API keys only at request time and keep key values and key environment
+variable names out of provider identity, runtime activity, and JSON-contract
+requests. Tests use fake HTTP openers and do not make network calls.
+
 ### 3. LLMApiAgentAdapter
 
 The LLM API adapter is the primary future user-facing mode, but it is not
