@@ -109,6 +109,8 @@ Initial local UI slice complete; follow-up polish and review/output stage expans
 
 ## M1.12 / v0.5: LLM Agent Adapter Foundation
 
+Status: released in `v0.5.0` as a local deterministic foundation.
+
 Complete as a local/mock foundation; real provider calls remain future work.
 
 - Define a narrow structural `AgentAdapter` contract for requirement parsing, planning drafts, repair suggestions, and review explanations.

@@ -27,6 +27,8 @@ v0.4 is not a Web CAD editor. It is a Web Workflow Console for running and inspe
 
 ## v0.5
 
+Status: released as `v0.5.0` local deterministic, LLM-ready foundation.
+
 - LLM-first UX clarification.
 - AgentAdapter design planning.
 - Assumptions and `proceed_with_assumptions` workflow.
