@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
@@ -334,6 +335,8 @@ def _require_value(values: dict[str, Any], key: str) -> Any:
 def _public_route_data(value: Any) -> Any:
     if isinstance(value, list):
         return [_public_route_data(item) for item in value]
+    if isinstance(value, str):
+        return _public_string(value)
     if not isinstance(value, dict):
         return value
 
@@ -358,3 +361,12 @@ def _public_file_refs(files: dict[str, Any]) -> dict[str, str]:
         normalized = value.replace("\\", "/").rstrip("/")
         public[str(label)] = normalized.rsplit("/", 1)[-1]
     return public
+
+
+def _public_string(value: str) -> str:
+    try:
+        if Path(value).is_absolute():
+            return Path(value).name
+    except (OSError, ValueError):
+        pass
+    return value

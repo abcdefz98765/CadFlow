@@ -31,6 +31,16 @@ def _does_not_contain_keys(value, keys):
     return True
 
 
+def _does_not_contain_absolute_paths(value):
+    if isinstance(value, dict):
+        return all(_does_not_contain_absolute_paths(item) for item in value.values())
+    if isinstance(value, list):
+        return all(_does_not_contain_absolute_paths(item) for item in value)
+    if isinstance(value, str):
+        return not Path(value).is_absolute() and str(Path.cwd().resolve()) not in value
+    return True
+
+
 def test_stage_runner_runs_requirement_and_planning_to_artifacts(tmp_path):
     runner = StageRunner(project_root=tmp_path)
     output_dir = tmp_path / "outputs" / "console_requirement_planning"
@@ -251,6 +261,91 @@ def test_workflow_console_dispatch_runs_blocked_revision_by_safe_child_id():
     assert (child_dir / "comparison.json").exists()
     assert not (child_dir / "model.step").exists()
     assert not (child_dir / "model.stl").exists()
+
+
+def test_workflow_console_dispatch_runs_successful_revision_by_safe_child_id():
+    backend = WorkflowConsoleBackend()
+    suffix = uuid4().hex
+    parent_id = f"pytest_console_revision_success_parent_{suffix}"
+    child_id = f"pytest_console_revision_success_child_{suffix}"
+
+    create_response = dispatch_route(
+        backend,
+        "create_run",
+        path_params={"run_id": parent_id},
+        body={"prompt": "Generate an 80x40x5 mm mounting plate with four M4 holes in the corners."},
+    )
+    parent_response = dispatch_route(
+        backend,
+        "run_stage",
+        path_params={"run_id": parent_id, "stage": "text_pipeline"},
+    )
+    response = dispatch_route(
+        backend,
+        "run_revision",
+        path_params={"run_id": parent_id, "child_run_id": child_id},
+        body={"prompt": "Increase the thickness to 8 mm."},
+    )
+
+    assert create_response["ok"] is True
+    assert parent_response["ok"] is True
+    assert parent_response["data"]["result"]["status"] == "success"
+    assert response["ok"] is True
+    assert response["status_code"] == 201
+    assert response["data"]["run"]["run_id"] == child_id
+    assert response["data"]["result"]["status"] == "success"
+    assert _does_not_contain_keys(response["data"], {"path", "run_dir", "root", "output_dir"})
+    assert _does_not_contain_absolute_paths(response["data"])
+    assert all("/" not in value and "\\" not in value for value in response["data"]["result"]["files"].values())
+
+    child_dir = Path.cwd() / "outputs" / child_id
+    expected_artifacts = {
+        "revision_request.json",
+        "change_intent.json",
+        "revision_plan.json",
+        "patch.json",
+        "comparison.json",
+        "revision_report.md",
+        "lineage.json",
+        "report.json",
+        "agent_trace.json",
+    }
+    for name in expected_artifacts | {"model.step", "model.stl"}:
+        assert (child_dir / name).exists()
+
+    comparison = backend.read_artifact_by_id(child_id, "comparison.json")["content"]
+    revision_summary = response["data"]["run"]["report_summary"]["revision_summary"]
+
+    assert comparison["requested_changes"]
+    assert comparison["actual_ir_changes"]
+    assert revision_summary["relationship"] == "revision_child"
+    assert revision_summary["requested_change_count"] > 0
+    assert revision_summary["actual_ir_change_count"] > 0
+
+
+def test_backend_uses_next_default_revision_child_id():
+    backend = WorkflowConsoleBackend()
+    parent_id = f"pytest_default_revision_parent_{uuid4().hex}"
+    parent_dir = Path.cwd() / "outputs" / parent_id
+    parent_dir.mkdir(parents=True)
+    (Path.cwd() / "outputs" / f"{parent_id}_revision_1").mkdir()
+    (parent_dir / "input_ir.json").write_text(
+        json.dumps({
+            "part_type": "mounting_plate",
+            "part_name": parent_id,
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5},
+            "features": {"holes": {"diameter": 4.5, "positions": "corner_4"}},
+            "outputs": ["step", "stl"],
+        }) + "\n",
+        encoding="utf-8",
+    )
+
+    result = backend.run_revision_by_id(parent_id, None, "Make it more futuristic.")
+
+    assert result["run"]["run_id"] == f"{parent_id}_revision_2"
+    assert result["result"]["status"] == "blocked"
+    assert (Path.cwd() / "outputs" / f"{parent_id}_revision_2" / "revision_request.json").exists()
 
 
 def test_workflow_console_dispatch_exposes_path_free_gate_history_summary(tmp_path):

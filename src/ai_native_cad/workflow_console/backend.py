@@ -145,7 +145,7 @@ class WorkflowConsoleBackend:
     def run_revision_by_id(
         self,
         parent_run_id: str,
-        child_run_id: str,
+        child_run_id: str | None,
         revision_prompt: str,
         root: str | Path = "outputs",
         child_root: str | Path | None = None,
@@ -153,9 +153,11 @@ class WorkflowConsoleBackend:
         """Run a deterministic CadFlow-native revision from safe parent/child run ids."""
         if not isinstance(revision_prompt, str) or not revision_prompt.strip():
             raise ValueError("workflow console revision prompt must be a non-empty string")
-        self._require_safe_run_id(child_run_id)
         parent_path = self.resolve_run(parent_run_id, root=root)
         output_root = self._resolve_run_root(child_root if child_root is not None else root)
+        if child_run_id is None:
+            child_run_id = self._next_revision_child_run_id(parent_path.name, output_root)
+        self._require_safe_run_id(child_run_id)
         child_path = self._require_child_path(output_root, child_run_id)
         if child_path.exists():
             raise FileExistsError(f"workflow console revision child already exists: {child_run_id}")
@@ -168,6 +170,15 @@ class WorkflowConsoleBackend:
             output_dir=child_path,
         )
         return {"result": result, "run": self.read_run_metadata(child_path)}
+
+    def _next_revision_child_run_id(self, parent_run_id: str, output_root: Path) -> str:
+        self._require_safe_run_id(parent_run_id)
+        for index in range(1, 10_000):
+            candidate = f"{parent_run_id}_revision_{index}"
+            self._require_safe_run_id(candidate)
+            if not self._require_child_path(output_root, candidate).exists():
+                return candidate
+        raise FileExistsError(f"workflow console revision child id space is exhausted for: {parent_run_id}")
 
     def record_gate_decision_by_id(
         self,
