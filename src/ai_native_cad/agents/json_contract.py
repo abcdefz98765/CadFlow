@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from ai_native_cad.agents.base import AgentAdapter
@@ -215,6 +216,7 @@ class JsonContractAgentAdapter(AgentAdapter):
 
 
 def _requirement_contract_request(prompt: str, context: dict[str, Any]) -> dict[str, Any]:
+    sanitized_context = _contract_context(context)
     return {
         "operation": "parse_requirement",
         "response_format": {"type": "json_object"},
@@ -228,14 +230,16 @@ def _requirement_contract_request(prompt: str, context: dict[str, Any]) -> dict[
             },
             {
                 "role": "user",
-                "content": prompt,
+                "content": _sanitize_provider_string(prompt),
             },
         ],
-        "context": _contract_context(context),
+        "context": sanitized_context,
     }
 
 
 def _planning_contract_request(requirement: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    sanitized_context = _contract_context(context)
+    sanitized_requirement = _sanitize_provider_payload(requirement)
     return {
         "operation": "create_plan",
         "response_format": {"type": "json_object"},
@@ -249,14 +253,17 @@ def _planning_contract_request(requirement: dict[str, Any], context: dict[str, A
             },
             {
                 "role": "user",
-                "content": json.dumps(requirement, sort_keys=True),
+                "content": json.dumps(sanitized_requirement, sort_keys=True),
             },
         ],
-        "context": _contract_context(context),
+        "context": sanitized_context,
     }
 
 
 def _repair_contract_request(failure: dict[str, Any], ir: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    sanitized_context = _contract_context(context)
+    sanitized_failure = _sanitize_provider_payload(failure)
+    sanitized_ir = _sanitize_provider_payload(ir)
     return {
         "operation": "suggest_repair",
         "response_format": {"type": "json_object"},
@@ -271,10 +278,10 @@ def _repair_contract_request(failure: dict[str, Any], ir: dict[str, Any], contex
             },
             {
                 "role": "user",
-                "content": json.dumps({"failure": failure, "ir": ir}, sort_keys=True),
+                "content": json.dumps({"failure": sanitized_failure, "ir": sanitized_ir}, sort_keys=True),
             },
         ],
-        "context": _contract_context(context),
+        "context": sanitized_context,
     }
 
 
@@ -283,6 +290,8 @@ def _revision_intent_contract_request(
     model_context: dict[str, Any],
     context: dict[str, Any],
 ) -> dict[str, Any]:
+    sanitized_context = _contract_context(context)
+    sanitized_model_context = _sanitize_provider_payload(model_context)
     return {
         "operation": "parse_revision_request",
         "response_format": {"type": "json_object"},
@@ -296,10 +305,13 @@ def _revision_intent_contract_request(
             },
             {
                 "role": "user",
-                "content": json.dumps({"prompt": prompt, "model_context": model_context}, sort_keys=True),
+                "content": json.dumps(
+                    {"prompt": _sanitize_provider_string(prompt), "model_context": sanitized_model_context},
+                    sort_keys=True,
+                ),
             },
         ],
-        "context": _contract_context(context),
+        "context": sanitized_context,
     }
 
 
@@ -308,6 +320,9 @@ def _revision_plan_contract_request(
     model_context: dict[str, Any],
     context: dict[str, Any],
 ) -> dict[str, Any]:
+    sanitized_context = _contract_context(context)
+    sanitized_change_intent = _sanitize_provider_payload(change_intent, preserve_cad_paths=True)
+    sanitized_model_context = _sanitize_provider_payload(model_context)
     return {
         "operation": "create_revision_plan",
         "response_format": {"type": "json_object"},
@@ -322,16 +337,19 @@ def _revision_plan_contract_request(
             {
                 "role": "user",
                 "content": json.dumps(
-                    {"change_intent": change_intent, "model_context": model_context},
+                    {"change_intent": sanitized_change_intent, "model_context": sanitized_model_context},
                     sort_keys=True,
                 ),
             },
         ],
-        "context": _contract_context(context),
+        "context": sanitized_context,
     }
 
 
 def _review_contract_request(report: dict[str, Any], trace: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    sanitized_context = _contract_context(context)
+    sanitized_report = _sanitize_provider_payload(report)
+    sanitized_trace = _sanitize_provider_payload(trace)
     return {
         "operation": "explain_review",
         "response_format": {"type": "json_object"},
@@ -346,16 +364,104 @@ def _review_contract_request(report: dict[str, Any], trace: dict[str, Any], cont
             },
             {
                 "role": "user",
-                "content": json.dumps({"report": report, "trace": trace}, sort_keys=True),
+                "content": json.dumps({"report": sanitized_report, "trace": sanitized_trace}, sort_keys=True),
             },
         ],
-        "context": _contract_context(context),
+        "context": sanitized_context,
     }
 
 
 def _contract_context(context: dict[str, Any]) -> dict[str, Any]:
     allowed_keys = ("overrides", "workflow_stage", "target_contract")
-    return {key: context[key] for key in allowed_keys if key in context}
+    return {
+        key: _sanitize_provider_payload(context[key], preserve_cad_paths=True)
+        for key in allowed_keys
+        if key in context
+    }
+
+
+_ABSOLUTE_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:[A-Za-z]:[\\/][^\s\"'{}[\],]+|/[Uu]sers/[^\s\"'{}[\],]+|/home/[^\s\"'{}[\],]+)"
+)
+_API_ENV_VAR_RE = re.compile(
+    r"\b[A-Z][A-Z0-9_]*(?:API[_-]?KEY|SECRET|TOKEN|PASSWORD|ACCESS[_-]?KEY)[A-Z0-9_]*\b"
+)
+_SECRET_VALUE_RE = re.compile(r"\b(?:sk|pk|pat|ghp|gho|ghu|ghs|xoxb|xoxp)-[A-Za-z0-9_-]{8,}\b")
+_SENSITIVE_KEY_TOKENS = (
+    "api_key",
+    "apikey",
+    "access_key",
+    "secret",
+    "token",
+    "password",
+    "credential",
+)
+_RUNTIME_KEY_TOKENS = (
+    "transcript",
+    "chat_log",
+    "chatlog",
+    "runtime_log",
+    "runtime_logs",
+    "runtime",
+    "log_text",
+    "logs",
+    "agent_trace",
+)
+_FILESYSTEM_KEY_NAMES = {
+    "run_dir",
+    "output_dir",
+    "output_root",
+    "project_root",
+    "root_run_id",
+    "workspace_root",
+    "root",
+}
+
+
+def _sanitize_provider_payload(value: Any, *, preserve_cad_paths: bool = False) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if _provider_payload_key_is_private(key_text, item, preserve_cad_paths=preserve_cad_paths):
+                continue
+            sanitized[key] = _sanitize_provider_payload(item, preserve_cad_paths=preserve_cad_paths)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_provider_payload(item, preserve_cad_paths=preserve_cad_paths) for item in value]
+    if isinstance(value, tuple):
+        return [_sanitize_provider_payload(item, preserve_cad_paths=preserve_cad_paths) for item in value]
+    if isinstance(value, str):
+        return _sanitize_provider_string(value)
+    return value
+
+
+def _provider_payload_key_is_private(key: str, value: Any, *, preserve_cad_paths: bool) -> bool:
+    lowered = key.lower()
+    if any(token in lowered for token in _SENSITIVE_KEY_TOKENS):
+        return True
+    if any(token in lowered for token in _RUNTIME_KEY_TOKENS):
+        return True
+    if lowered.endswith("_env_var") or lowered.endswith("_env"):
+        return True
+    if lowered == "path":
+        return not (preserve_cad_paths and isinstance(value, str) and _looks_like_cad_field_path(value))
+    if lowered in _FILESYSTEM_KEY_NAMES or lowered.endswith("_dir") or lowered.endswith("_root"):
+        return True
+    if lowered.endswith("_path"):
+        return True
+    return False
+
+
+def _looks_like_cad_field_path(value: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", value))
+
+
+def _sanitize_provider_string(value: str) -> str:
+    value = _ABSOLUTE_PATH_RE.sub("[redacted-local-path]", value)
+    value = _API_ENV_VAR_RE.sub("[redacted-api-env-var]", value)
+    value = _SECRET_VALUE_RE.sub("[redacted-secret]", value)
+    return value
 
 
 def _call_json_client(client: JsonContractClient | JsonContractCallable, request: dict[str, Any], operation: str) -> Any:

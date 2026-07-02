@@ -191,6 +191,10 @@ def _valid_revision_plan():
     }
 
 
+def _request_user_payload(request):
+    return json.loads(request["messages"][1]["content"])
+
+
 def test_deterministic_agent_adapter_satisfies_contract_without_provider_config():
     adapter = DeterministicAgentAdapter()
 
@@ -454,6 +458,134 @@ def test_json_contract_provider_config_is_secret_free_and_request_scoped():
     }
     assert "CADFLOW_FAKE_API_KEY" not in json.dumps(adapter.provider_identity)
     assert fake_client.requests[0]["provider_options"] == {"timeout_seconds": 12, "max_retries": 2}
+
+
+def test_json_contract_agent_adapter_sanitizes_context_before_provider_request():
+    fake_client = FakeJsonContractClient(_valid_requirement_json())
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    adapter.parse_requirement(
+        "Make a spacer at D:/private/prompt.txt using sk-test-secret123456.",
+        context={
+            "workflow_stage": "requirement",
+            "target_contract": "requirement_v0",
+            "output_dir": r"D:\private\outputs\run",
+            "root_run_id": "root_run",
+            "overrides": {
+                "dimensions": {"thickness": 8},
+                "geometry_authority": "selected_parts.resolved_decisions",
+                "api_key": "sk-test-secret123456",
+                "api_key_env_var": "CADFLOW_FAKE_API_KEY",
+                "local_path": r"D:\private\part.step",
+                "runtime_logs": ["raw provider log"],
+                "chat_log": "raw chat",
+            },
+        },
+    )
+
+    request = fake_client.requests[0]
+    serialized = json.dumps(request, sort_keys=True)
+
+    assert request["context"] == {
+        "overrides": {
+            "dimensions": {"thickness": 8},
+            "geometry_authority": "selected_parts.resolved_decisions",
+        },
+        "workflow_stage": "requirement",
+        "target_contract": "requirement_v0",
+    }
+    assert "[redacted-local-path]" in request["messages"][1]["content"]
+    assert "[redacted-secret]" in request["messages"][1]["content"]
+    assert "D:/private" not in serialized
+    assert "D:\\private" not in serialized
+    assert "sk-test-secret123456" not in serialized
+    assert "CADFLOW_FAKE_API_KEY" not in serialized
+    assert "api_key" not in serialized
+    assert "output_dir" not in serialized
+    assert "runtime_logs" not in serialized
+    assert "chat_log" not in serialized
+
+
+def test_json_contract_agent_adapter_sanitizes_requirement_payload_before_planning_request():
+    fake_client = FakeJsonContractClient(_valid_planning_json())
+    adapter = JsonContractAgentAdapter(fake_client)
+    requirement = _valid_requirement()
+    requirement.update({
+        "api_token": "sk-test-secret123456",
+        "source_path": r"D:\private\requirement.json",
+        "notes": ["review CADFLOW_FAKE_API_KEY later", "keep the spacer thickness"],
+    })
+
+    adapter.create_plan(requirement)
+
+    payload = _request_user_payload(fake_client.requests[0])
+    serialized = json.dumps(fake_client.requests[0], sort_keys=True)
+
+    assert payload["part_type"] == "spacer"
+    assert payload["dimensions"]["thickness"] == 20
+    assert payload["notes"] == ["review [redacted-api-env-var] later", "keep the spacer thickness"]
+    assert "api_token" not in payload
+    assert "source_path" not in payload
+    assert "sk-test-secret123456" not in serialized
+    assert "D:\\private" not in serialized
+    assert "CADFLOW_FAKE_API_KEY" not in serialized
+
+
+def test_json_contract_agent_adapter_sanitizes_revision_model_context_before_provider_request():
+    fake_client = OperationFakeJsonContractClient({
+        "parse_revision_request": _valid_revision_intent(),
+        "create_revision_plan": _valid_revision_plan(),
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    model_context = {
+        "parent_run_id": "parent_run",
+        "parent_run_dir": r"D:\MyCode\llm2cad\outputs\parent_run",
+        "input_ir": _valid_ir(),
+        "report": {
+            "status": "success",
+            "files": {"step": r"D:\MyCode\llm2cad\outputs\parent_run\part.step"},
+        },
+        "agent_trace": {"raw_transcript": "private chat"},
+        "runtime_logs": ["raw runtime log"],
+        "password": "not-for-provider",
+    }
+    context = {
+        "workflow_stage": "agent_revision",
+        "target_contract": "cadflow_native_revision_v0.6",
+        "output_dir": r"D:\MyCode\llm2cad\outputs\child_run",
+        "overrides": {"features": {"holes": {"diameter": 5}}, "token": "secret-token"},
+    }
+
+    change_intent = adapter.parse_revision_request(
+        "Increase thickness. See D:/private/revision.txt and CADFLOW_FAKE_API_KEY.",
+        model_context,
+        context=context,
+    )
+    adapter.create_revision_plan(change_intent, model_context, context=context)
+
+    intent_payload = _request_user_payload(fake_client.requests[0])
+    plan_payload = _request_user_payload(fake_client.requests[1])
+    serialized = json.dumps(fake_client.requests, sort_keys=True)
+
+    assert intent_payload["model_context"]["input_ir"]["part_type"] == "mounting_plate"
+    assert intent_payload["model_context"]["report"]["status"] == "success"
+    assert intent_payload["model_context"]["report"]["files"]["step"] == "[redacted-local-path]"
+    assert plan_payload["change_intent"]["changes"][0]["path"] == "dimensions.thickness"
+    assert fake_client.requests[0]["context"] == {
+        "overrides": {"features": {"holes": {"diameter": 5}}},
+        "workflow_stage": "agent_revision",
+        "target_contract": "cadflow_native_revision_v0.6",
+    }
+    assert "parent_run_dir" not in serialized
+    assert "output_dir" not in serialized
+    assert "agent_trace" not in serialized
+    assert "runtime_logs" not in serialized
+    assert "raw_transcript" not in serialized
+    assert "password" not in serialized
+    assert "token" not in serialized
+    assert "D:/private" not in serialized
+    assert "D:\\MyCode" not in serialized
+    assert "CADFLOW_FAKE_API_KEY" not in serialized
 
 
 @pytest.mark.parametrize("config", [
