@@ -60,6 +60,7 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         "list_runs",
         "read_run_metadata_by_id",
         "run_stage_by_id",
+        "run_revision_by_id",
         "list_artifacts_by_id",
         "read_artifact_by_id",
         "write_artifact_by_id",
@@ -116,6 +117,8 @@ def test_workflow_console_route_contract_includes_edit_and_gate_routes():
     assert ROUTE_SPECS_BY_NAME["write_artifact"].backend_operation == "write_artifact_by_id"
     assert ROUTE_SPECS_BY_NAME["record_gate_decision"].method == "POST"
     assert ROUTE_SPECS_BY_NAME["record_gate_decision"].backend_operation == "record_gate_decision_by_id"
+    assert ROUTE_SPECS_BY_NAME["run_revision"].method == "POST"
+    assert ROUTE_SPECS_BY_NAME["run_revision"].backend_operation == "run_revision_by_id"
 
 
 def test_workflow_console_internal_error_shape_does_not_leak_local_paths():
@@ -205,6 +208,47 @@ def test_workflow_console_dispatch_exposes_path_free_stage_history(tmp_path):
     assert response["data"]["stage_history"][0]["stage"] == "created"
     assert response["data"]["stage_history"][1]["stage"] == "requirement"
     assert _does_not_contain_keys(response["data"]["stage_history"], {"path", "run_dir", "root", "output_dir"})
+
+
+def test_workflow_console_dispatch_runs_blocked_revision_by_safe_child_id():
+    backend = WorkflowConsoleBackend()
+    suffix = uuid4().hex
+    parent_id = f"pytest_console_revision_parent_{suffix}"
+    child_id = f"pytest_console_revision_child_{suffix}"
+    parent_dir = Path.cwd() / "outputs" / parent_id
+    parent_dir.mkdir(parents=True, exist_ok=False)
+    (parent_dir / "input_ir.json").write_text(
+        json.dumps({
+            "part_type": "mounting_plate",
+            "part_name": parent_id,
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5},
+            "features": {"holes": {"diameter": 4.5, "positions": "corner_4"}},
+            "outputs": ["step", "stl"],
+        }) + "\n",
+        encoding="utf-8",
+    )
+
+    response = dispatch_route(
+        backend,
+        "run_revision",
+        path_params={"run_id": parent_id, "child_run_id": child_id},
+        body={"prompt": "Make it more futuristic."},
+    )
+
+    assert response["ok"] is True
+    assert response["status_code"] == 201
+    assert response["data"]["result"]["status"] == "blocked"
+    assert response["data"]["run"]["run_id"] == child_id
+    assert response["data"]["run"]["report_summary"]["revision_summary"]["relationship"] == "revision_blocked"
+    assert response["data"]["run"]["downloadables"] == []
+    assert _does_not_contain_keys(response["data"], {"path", "run_dir", "root", "output_dir"})
+
+    child_dir = Path.cwd() / "outputs" / child_id
+    assert (child_dir / "revision_request.json").exists()
+    assert (child_dir / "comparison.json").exists()
+    assert not (child_dir / "model.step").exists()
+    assert not (child_dir / "model.stl").exists()
 
 
 def test_workflow_console_dispatch_exposes_path_free_gate_history_summary(tmp_path):

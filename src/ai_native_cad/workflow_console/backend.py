@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_native_cad.cad_ir.validator import validate_ir
-from ai_native_cad.pipeline.runner import PROJECT_ROOT
+from ai_native_cad.pipeline.runner import PROJECT_ROOT, run_agent_revision_pipeline
 from ai_native_cad.workflow_console.stage_runner import (
     READABLE_ARTIFACTS,
     STATUS_BLOCKED,
@@ -141,6 +141,33 @@ class WorkflowConsoleBackend:
     ) -> dict[str, Any]:
         """Run a supported deterministic stage for a path-safe run id."""
         return self.run_stage(self.resolve_run(run_id, root=root), stage, prompt=prompt, context=context)
+
+    def run_revision_by_id(
+        self,
+        parent_run_id: str,
+        child_run_id: str,
+        revision_prompt: str,
+        root: str | Path = "outputs",
+        child_root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Run a deterministic CadFlow-native revision from safe parent/child run ids."""
+        if not isinstance(revision_prompt, str) or not revision_prompt.strip():
+            raise ValueError("workflow console revision prompt must be a non-empty string")
+        self._require_safe_run_id(child_run_id)
+        parent_path = self.resolve_run(parent_run_id, root=root)
+        output_root = self._resolve_run_root(child_root if child_root is not None else root)
+        child_path = self._require_child_path(output_root, child_run_id)
+        if child_path.exists():
+            raise FileExistsError(f"workflow console revision child already exists: {child_run_id}")
+        if child_path == parent_path:
+            raise ValueError("workflow console revision child must not overwrite the parent run")
+        result = run_agent_revision_pipeline(
+            parent_path,
+            revision_prompt,
+            self.stage_runner.agent_adapter,
+            output_dir=child_path,
+        )
+        return {"result": result, "run": self.read_run_metadata(child_path)}
 
     def record_gate_decision_by_id(
         self,

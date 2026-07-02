@@ -49,6 +49,13 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="Run a supported deterministic workflow stage for a safe run id.",
     ),
     RouteSpec(
+        name="run_revision",
+        method="POST",
+        path="/workflow/runs/{run_id}/revisions/{child_run_id}",
+        backend_operation="run_revision_by_id",
+        description="Run a CadFlow-native revision into a safe child run id.",
+    ),
+    RouteSpec(
         name="list_artifacts",
         method="GET",
         path="/workflow/runs/{run_id}/artifacts",
@@ -208,6 +215,21 @@ def _run_stage(
     )
 
 
+def _run_revision(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.run_revision_by_id(
+        _require_value(path_params, "run_id"),
+        _require_value(path_params, "child_run_id"),
+        _require_value(body, "prompt"),
+        root=query.get("root", "outputs"),
+        child_root=query.get("child_root"),
+    )
+
+
 def _list_artifacts(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -279,6 +301,7 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "list_runs": _list_runs,
     "read_run_metadata": _read_run_metadata,
     "run_stage": _run_stage,
+    "run_revision": _run_revision,
     "list_artifacts": _list_artifacts,
     "read_artifact": _read_artifact,
     "write_artifact": _write_artifact,
@@ -288,7 +311,7 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
 
 
 def _success_status_code(route_name: str) -> int:
-    if route_name in {"create_run", "record_gate_decision"}:
+    if route_name in {"create_run", "run_revision", "record_gate_decision"}:
         return 201
     return 200
 
