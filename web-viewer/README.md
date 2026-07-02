@@ -22,7 +22,7 @@ http://127.0.0.1:8765/workflow-console.html
 
 当前支持 runs list/select、prompt-only create run、运行 Requirement/Planning/Part Modeling/full text pipeline、查看 artifact、编辑允许的 JSON handoff artifact、记录 gate decision、列出 STEP/STL/preview/model.py 下载项，并在有 `model.stl` 时嵌入 STL 预览。
 
-Provider 面板只配置当前本地 server 进程的非密钥选项：`local/mock`、`deepseek`、`openai api`、model、timeout、retries。API key 必须通过 server 启动前的环境变量提供；页面不接收、不保存、不发送 API key。
+Provider 面板只配置当前本地 server 进程的非密钥选项：`local/mock`、`deepseek`、`openai api`、model、timeout、retries。API key 必须通过 server 启动前的环境变量提供；页面不接收、不保存、不发送 API key。`Test` 按钮会发送一个最小 JSON contract 请求来检查当前 provider/API/model 是否可用，但不会写 workflow artifact。
 
 它不是浏览器 CAD 编辑器；workflow state 仍以 artifact files 和 `logs/runtime.json` 为准。
 

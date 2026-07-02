@@ -50,6 +50,13 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="Configure the in-process workflow-console provider without secrets.",
     ),
     RouteSpec(
+        name="test_provider_connection",
+        method="POST",
+        path="/workflow/provider/test",
+        backend_operation="test_provider_connection",
+        description="Run a minimal provider connectivity check without writing workflow artifacts.",
+    ),
+    RouteSpec(
         name="read_run_metadata",
         method="GET",
         path="/workflow/runs/{run_id}",
@@ -239,6 +246,15 @@ def _configure_provider(
     )
 
 
+def _test_provider_connection(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.test_provider_connection()
+
+
 def _run_stage(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -340,6 +356,7 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "list_runs": _list_runs,
     "read_provider_config": _read_provider_config,
     "configure_provider": _configure_provider,
+    "test_provider_connection": _test_provider_connection,
     "read_run_metadata": _read_run_metadata,
     "run_stage": _run_stage,
     "run_revision": _run_revision,

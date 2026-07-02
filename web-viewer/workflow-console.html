@@ -206,6 +206,19 @@
     min-width: 0;
   }
 
+  .provider-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .provider-check {
+    min-height: 18px;
+    color: var(--muted);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
   .create-row {
     display: grid;
     grid-template-columns: 1fr 88px;
@@ -612,7 +625,11 @@
           <input id="provider-timeout" type="number" min="1" max="300" step="1" placeholder="timeout">
           <input id="provider-retries" type="number" min="0" max="5" step="1" placeholder="retries">
         </div>
-        <button id="configure-provider">Apply</button>
+        <div class="provider-actions">
+          <button id="configure-provider">Apply</button>
+          <button id="test-provider">Test</button>
+        </div>
+        <div id="provider-check" class="provider-check">Not tested</div>
       </div>
     </section>
 
@@ -746,6 +763,7 @@ const state = {
   bridgeStatus: "Checking local bridge",
   previewInteractive: false,
   activeInspectorTab: "summary",
+  providerCheck: null,
 };
 
 const el = (id) => document.getElementById(id);
@@ -890,11 +908,29 @@ function renderProviderConfig() {
   el("provider-model").value = model;
   el("provider-timeout").value = identity.timeout_seconds || "";
   el("provider-retries").value = identity.max_retries ?? "";
+  renderProviderCheck();
 }
 
 function activeProviderIsLocal() {
   const identity = (state.providerConfig && state.providerConfig.provider_identity) || {};
   return !identity.provider || identity.provider === "local/mock" || identity.provider === "local";
+}
+
+function renderProviderCheck() {
+  const check = state.providerCheck;
+  if (!check) {
+    el("provider-check").textContent = "Not tested";
+    return;
+  }
+  const identity = check.provider_identity || {};
+  const provider = identity.model ? `${identity.provider}/${identity.model}` : (identity.provider || "provider");
+  if (check.status === "ok") {
+    const contract = check.contract && check.contract.part_type ? ` · ${check.contract.part_type}` : "";
+    el("provider-check").textContent = `OK · ${provider}${contract}`;
+  } else {
+    const error = check.error ? (check.error.category || check.error.type || "failed") : "failed";
+    el("provider-check").textContent = `Failed · ${provider} · ${error}`;
+  }
 }
 
 function renderRuns() {
@@ -1396,14 +1432,29 @@ async function configureProvider() {
   if (retriesValue) body.max_retries = Number(retriesValue);
   await withBusy("Configuring provider", async () => {
     state.providerConfig = await api("configure_provider", { body });
+    state.providerCheck = null;
     renderProviderConfig();
     log(`Configured provider ${provider}.`);
+  });
+}
+
+async function testProviderConnection() {
+  if (state.busy) return;
+  await withBusy("Testing provider", async () => {
+    state.providerCheck = await api("test_provider_connection");
+    renderProviderCheck();
+    if (state.providerCheck.status === "ok") {
+      log("Provider test succeeded.");
+    } else {
+      log("Provider test failed.");
+    }
   });
 }
 
 el("prompt").addEventListener("input", updateRunIdSuggestion);
 el("create-run").addEventListener("click", createRun);
 el("configure-provider").addEventListener("click", configureProvider);
+el("test-provider").addEventListener("click", testProviderConnection);
 el("refresh-runs").addEventListener("click", () => loadRuns(false));
 el("reload-run").addEventListener("click", reloadRun);
 el("run-full").addEventListener("click", runFullPipeline);

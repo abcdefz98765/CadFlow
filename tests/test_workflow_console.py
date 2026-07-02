@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_native_cad.agents import DeterministicAgentAdapter, JsonContractAgentAdapter
+from ai_native_cad.agents import DeterministicAgentAdapter, JsonContractAgentAdapter, JsonContractProviderError
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
 from ai_native_cad.workflow_console import (
     EDITABLE_ARTIFACTS,
@@ -41,6 +41,26 @@ def _does_not_contain_absolute_paths(value):
     return True
 
 
+class ProviderCheckAdapter(DeterministicAgentAdapter):
+    provider_identity = {
+        "provider": "fake/json",
+        "adapter": "json_contract",
+        "model": "fake-model",
+        "api_key_config": "env_var_name_configured",
+    }
+
+    def parse_requirement(self, prompt, context=None):
+        return {
+            "part_type": "spacer",
+            "dimensions": {"outer_diameter": 12, "inner_diameter": 6, "thickness": 4},
+        }
+
+
+class FailingProviderCheckAdapter(ProviderCheckAdapter):
+    def parse_requirement(self, prompt, context=None):
+        raise JsonContractProviderError("parse_requirement", "auth_failed", retryable=False)
+
+
 def test_stage_runner_runs_requirement_and_planning_to_artifacts(tmp_path):
     runner = StageRunner(project_root=tmp_path)
     output_dir = tmp_path / "outputs" / "console_requirement_planning"
@@ -73,6 +93,7 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         "read_run_metadata_by_id",
         "run_stage_by_id",
         "run_revision_by_id",
+        "test_provider_connection",
         "list_artifacts_by_id",
         "read_artifact_by_id",
         "write_artifact_by_id",
@@ -83,7 +104,12 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
     assert {spec.backend_operation for spec in ROUTE_SPECS} == expected_operations
     assert all(
         spec.backend_operation.endswith("_by_id")
-        or spec.backend_operation in {"list_runs", "read_provider_config", "configure_provider"}
+        or spec.backend_operation in {
+            "list_runs",
+            "read_provider_config",
+            "configure_provider",
+            "test_provider_connection",
+        }
         for spec in ROUTE_SPECS
     )
     assert "run_dir" not in {spec.backend_operation for spec in ROUTE_SPECS}
@@ -136,6 +162,8 @@ def test_workflow_console_route_contract_includes_edit_and_gate_routes():
     assert ROUTE_SPECS_BY_NAME["read_provider_config"].backend_operation == "read_provider_config"
     assert ROUTE_SPECS_BY_NAME["configure_provider"].method == "POST"
     assert ROUTE_SPECS_BY_NAME["configure_provider"].backend_operation == "configure_provider"
+    assert ROUTE_SPECS_BY_NAME["test_provider_connection"].method == "POST"
+    assert ROUTE_SPECS_BY_NAME["test_provider_connection"].backend_operation == "test_provider_connection"
 
 
 def test_workflow_console_internal_error_shape_does_not_leak_local_paths():
@@ -260,6 +288,51 @@ def test_backend_can_restore_local_mock_provider(tmp_path):
     assert isinstance(backend.stage_runner.agent_adapter, DeterministicAgentAdapter)
     assert restored["provider_identity"]["provider"] == "local/mock"
     assert restored["provider_identity"]["network"] == "disabled"
+
+
+def test_workflow_console_provider_connection_test_succeeds_with_configured_adapter(tmp_path):
+    backend = WorkflowConsoleBackend(
+        project_root=tmp_path,
+        provider_adapter_factory=lambda *args, **kwargs: ProviderCheckAdapter(),
+    )
+    backend.configure_provider("deepseek", model="fake-model")
+
+    response = dispatch_route(backend, "test_provider_connection")
+
+    assert response["ok"] is True
+    assert response["data"]["status"] == "ok"
+    assert response["data"]["provider_identity"]["provider"] == "fake/json"
+    assert response["data"]["contract"] == {
+        "part_type": "spacer",
+        "dimension_keys": ["inner_diameter", "outer_diameter", "thickness"],
+    }
+    assert "api_key" not in json.dumps(response["data"])
+
+
+def test_workflow_console_provider_connection_test_reports_secret_safe_failure(tmp_path):
+    backend = WorkflowConsoleBackend(
+        project_root=tmp_path,
+        provider_adapter_factory=lambda *args, **kwargs: FailingProviderCheckAdapter(),
+    )
+    backend.configure_provider("deepseek", model="fake-model")
+
+    response = dispatch_route(backend, "test_provider_connection")
+
+    assert response["ok"] is True
+    assert response["data"]["status"] == "failed"
+    assert response["data"]["error"]["category"] == "auth_failed"
+    assert "DEEPSEEK_API_KEY" not in json.dumps(response["data"])
+
+
+def test_workflow_console_provider_connection_test_accepts_local_mock(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    response = dispatch_route(backend, "test_provider_connection")
+
+    assert response["ok"] is True
+    assert response["data"]["status"] == "ok"
+    assert response["data"]["operation"] == "local_provider_check"
+    assert response["data"]["provider_identity"]["provider"] == "local/mock"
 
 
 def test_workflow_console_dispatch_exposes_path_free_stage_history(tmp_path):
@@ -1412,9 +1485,13 @@ def test_workflow_console_static_ui_exposes_required_local_workflow_controls():
         "provider-model",
         "provider-timeout",
         "provider-retries",
+        "test-provider",
+        "testProviderConnection",
+        "provider-check",
         "configureProvider",
         'api("read_provider_config"',
         'api("configure_provider"',
+        'api("test_provider_connection"',
         "stage_history",
         "gate_history",
         "stageHistoryByStage",

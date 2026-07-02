@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ai_native_cad.agents import DeterministicAgentAdapter, make_json_contract_adapter_from_env
+from ai_native_cad.agents import DeterministicAgentAdapter, JsonContractProviderError
+from ai_native_cad.agents import make_json_contract_adapter_from_env
 from ai_native_cad.cad_ir.validator import validate_ir
 from ai_native_cad.pipeline.runner import PROJECT_ROOT, run_agent_revision_pipeline
 from ai_native_cad.workflow_console.stage_runner import (
@@ -52,10 +53,12 @@ class WorkflowConsoleBackend:
         project_root: str | Path | None = None,
         run_roots: tuple[str | Path, ...] | None = None,
         stage_runner: StageRunner | None = None,
+        provider_adapter_factory: Any | None = None,
     ) -> None:
         self.project_root = Path(project_root or PROJECT_ROOT).resolve()
         self.run_roots = tuple(Path(root) for root in (run_roots or ("outputs", "runs")))
         self.stage_runner = stage_runner or StageRunner(self.project_root)
+        self._provider_adapter_factory = provider_adapter_factory or make_json_contract_adapter_from_env
 
     def read_provider_config(self) -> dict[str, Any]:
         """Return the active console adapter identity without secrets."""
@@ -78,7 +81,7 @@ class WorkflowConsoleBackend:
         if normalized in {"local", "local/mock", "mock", "deterministic"}:
             self.stage_runner.agent_adapter = DeterministicAgentAdapter()
         elif normalized in {"deepseek", "openai", "oai"}:
-            self.stage_runner.agent_adapter = make_json_contract_adapter_from_env(
+            self.stage_runner.agent_adapter = self._provider_adapter_factory(
                 normalized,
                 model=model,
                 timeout_seconds=timeout_seconds,
@@ -87,6 +90,51 @@ class WorkflowConsoleBackend:
         else:
             raise ValueError(f"unsupported workflow console provider: {provider}")
         return self.read_provider_config()
+
+    def test_provider_connection(self) -> dict[str, Any]:
+        """Run a minimal provider check without writing workflow artifacts."""
+        adapter = self.stage_runner.agent_adapter
+        identity = _compact_adapter_identity(dict(getattr(adapter, "provider_identity", {}) or {}))
+        provider = identity.get("provider") or "local/mock"
+        if provider == "local/mock":
+            return {
+                "status": "ok",
+                "provider_identity": identity,
+                "operation": "local_provider_check",
+            }
+        try:
+            requirement = adapter.parse_requirement(
+                "Provider connectivity check. Return a spacer requirement for OD 12 mm, ID 6 mm, thickness 4 mm.",
+                context={
+                    "workflow_stage": "provider_check",
+                    "target_contract": "requirement_connectivity_check",
+                },
+            )
+        except JsonContractProviderError as exc:
+            return {
+                "status": "failed",
+                "provider_identity": identity,
+                "operation": "parse_requirement",
+                "error": exc.to_dict(),
+            }
+        except Exception:
+            return {
+                "status": "failed",
+                "provider_identity": identity,
+                "operation": "parse_requirement",
+                "error": {"type": "provider_connection_error", "category": "client_error", "retryable": False},
+            }
+        return {
+            "status": "ok",
+            "provider_identity": identity,
+            "operation": "parse_requirement",
+            "contract": {
+                "part_type": requirement.get("part_type"),
+                "dimension_keys": sorted(requirement.get("dimensions", {}).keys())
+                if isinstance(requirement.get("dimensions"), dict)
+                else [],
+            },
+        }
 
     def list_runs(self) -> list[dict[str, Any]]:
         """List existing run directories under outputs/ and runs/."""

@@ -130,7 +130,10 @@ The local Web Workflow Console exposes non-secret provider selection for the
 current server process. Its Provider panel can switch between local/mock,
 DeepSeek, and OpenAI API modes and can set model, timeout, and retry values. It
 does not accept API keys in the browser; provider credentials remain environment
-variables.
+variables. The panel also exposes a `Test` action that sends a minimal
+JSON-contract request through the active provider adapter and returns only a
+sanitized status, provider identity, operation, and compact contract summary.
+The check does not write run artifacts.
 
 ### 3. LLMApiAgentAdapter
 

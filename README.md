@@ -182,7 +182,9 @@ available to that API project.
 In the Web Workflow Console, the Provider panel can switch between `local/mock`,
 `deepseek`, and `openai api` for the current local server process. The page only
 accepts non-secret provider settings; API keys must remain in environment
-variables before the server starts.
+variables before the server starts. Use the Provider panel's `Test` button to
+run a minimal JSON-contract connectivity check before running workflow stages;
+the check does not write workflow artifacts.
 
 ### Windows / CadQuery environment note
 
