@@ -6,7 +6,12 @@ import json
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from ai_native_cad.agents.base import AgentAdapter
-from ai_native_cad.agents.validation import validate_planning_draft, validate_requirement_draft
+from ai_native_cad.agents.validation import (
+    validate_planning_draft,
+    validate_repair_suggestion,
+    validate_requirement_draft,
+    validate_review_explanation,
+)
 
 
 JsonContractCallable = Callable[[dict[str, Any]], Any]
@@ -29,7 +34,7 @@ class JsonContractAgentAdapter(AgentAdapter):
 
     The adapter does not import an LLM SDK and does not perform network I/O by
     itself. A caller must explicitly inject a client/callable that returns a
-    JSON requirement or planning contract.
+    JSON contract for one AgentAdapter operation.
     """
 
     def __init__(
@@ -79,7 +84,11 @@ class JsonContractAgentAdapter(AgentAdapter):
         ir: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        raise NotImplementedError("JsonContractAgentAdapter currently supports parse_requirement only")
+        request = _repair_contract_request(failure, ir, context or {})
+        raw_response = _call_json_client(self.client, request)
+        repair_suggestion = _extract_json_object(raw_response)
+        validate_repair_suggestion(repair_suggestion)
+        return repair_suggestion
 
     def explain_review(
         self,
@@ -87,7 +96,11 @@ class JsonContractAgentAdapter(AgentAdapter):
         trace: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        raise NotImplementedError("JsonContractAgentAdapter currently supports parse_requirement only")
+        request = _review_contract_request(report, trace, context or {})
+        raw_response = _call_json_client(self.client, request)
+        review_explanation = _extract_json_object(raw_response)
+        validate_review_explanation(review_explanation)
+        return review_explanation
 
 
 def _requirement_contract_request(prompt: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -126,6 +139,50 @@ def _planning_contract_request(requirement: dict[str, Any], context: dict[str, A
             {
                 "role": "user",
                 "content": json.dumps(requirement, sort_keys=True),
+            },
+        ],
+        "context": _contract_context(context),
+    }
+
+
+def _repair_contract_request(failure: dict[str, Any], ir: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "operation": "suggest_repair",
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Return only a JSON object matching the CadFlow repair suggestion contract. "
+                    "It must contain analysis and repair objects. Do not include markdown, prose, "
+                    "CAD code, Python code, shell commands, or paths."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps({"failure": failure, "ir": ir}, sort_keys=True),
+            },
+        ],
+        "context": _contract_context(context),
+    }
+
+
+def _review_contract_request(report: dict[str, Any], trace: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "operation": "explain_review",
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Return only a JSON object matching the CadFlow review explanation contract. "
+                    "It must contain status and summary fields. Do not include markdown, prose, "
+                    "CAD code, Python code, shell commands, or paths."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps({"report": report, "trace": trace}, sort_keys=True),
             },
         ],
         "context": _contract_context(context),

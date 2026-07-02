@@ -99,6 +99,45 @@ def _valid_planning_json():
     return json.dumps(DeterministicAgentAdapter().create_plan(_valid_requirement()))
 
 
+def _valid_ir():
+    return {
+        "part_type": "mounting_plate",
+        "part_name": "repairable_plate",
+        "unit": "mm",
+        "dimensions": {"length": 30, "width": 20, "thickness": 4},
+        "features": {"holes": {"diameter": 5, "positions": "corner_4", "offset_from_edge": 1}},
+        "outputs": ["step", "stl"],
+    }
+
+
+def _valid_repair_json():
+    return json.dumps({
+        "analysis": {"affected_feature": "holes", "root_cause": "holes too close to edge"},
+        "repair": {
+            "strategy": "increase_spacing",
+            "repaired_ir": {
+                "part_type": "mounting_plate",
+                "part_name": "repairable_plate",
+                "unit": "mm",
+                "dimensions": {"length": 30, "width": 20, "thickness": 4},
+                "features": {"holes": {"diameter": 5, "positions": "corner_4", "offset_from_edge": 4}},
+                "outputs": ["step", "stl"],
+            },
+        },
+        "mode": "json_contract",
+    })
+
+
+def _valid_review_json():
+    return json.dumps({
+        "status": "success",
+        "summary": "spacer generated successfully with STEP as the primary CAD artifact.",
+        "errors": [],
+        "warnings": [],
+        "mode": "json_contract",
+    })
+
+
 def test_deterministic_agent_adapter_satisfies_contract_without_provider_config():
     adapter = DeterministicAgentAdapter()
 
@@ -202,6 +241,63 @@ def test_json_contract_agent_adapter_rejects_invalid_planning_output(response):
         adapter.create_plan(_valid_requirement())
 
 
+def test_json_contract_agent_adapter_accepts_valid_fake_repair_output():
+    fake_client = FakeJsonContractClient(_valid_repair_json())
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    repair = adapter.suggest_repair(
+        {"affected_feature": "holes", "suggested_ir_fix": {"strategy": "increase_spacing"}},
+        _valid_ir(),
+    )
+
+    assert repair["analysis"]["affected_feature"] == "holes"
+    assert repair["repair"]["repaired_ir"]["features"]["holes"]["offset_from_edge"] == 4
+    assert fake_client.requests[0]["operation"] == "suggest_repair"
+    assert fake_client.requests[0]["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.parametrize("response", [
+    "[]",
+    {"analysis": [], "repair": {}},
+    {"analysis": {}, "repair": {"repaired_ir": {"part_type": "mounting_plate"}}},
+    {"analysis": {}, "repair": {"python_code": "print('bypass')"}},
+])
+def test_json_contract_agent_adapter_rejects_invalid_repair_output(response):
+    adapter = JsonContractAgentAdapter(FakeJsonContractClient(response))
+
+    with pytest.raises(ValueError):
+        adapter.suggest_repair({"affected_feature": "holes"}, _valid_ir())
+
+
+def test_json_contract_agent_adapter_accepts_valid_fake_review_output():
+    fake_client = FakeJsonContractClient(_valid_review_json())
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    review = adapter.explain_review(
+        {"status": "success", "success": True, "part_name": "spacer"},
+        {"total_attempts": 1},
+    )
+
+    assert review["status"] == "success"
+    assert "STEP" in review["summary"]
+    assert fake_client.requests[0]["operation"] == "explain_review"
+    assert fake_client.requests[0]["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.parametrize("response", [
+    "[]",
+    {"status": "", "summary": "missing status"},
+    {"status": "failed", "summary": ""},
+    {"status": "failed", "summary": "bad", "warnings": {}},
+    {"status": "failed", "summary": "bad", "shell_command": "python model.py"},
+])
+def test_json_contract_agent_adapter_rejects_invalid_review_output(response):
+    adapter = JsonContractAgentAdapter(FakeJsonContractClient(response))
+
+    with pytest.raises(ValueError):
+        adapter.explain_review({"status": "failed"}, {"total_attempts": 1})
+
+
 @pytest.mark.parametrize("response", ["[]", "not json", {"part_type": "spacer", "dimensions": []}])
 def test_json_contract_agent_adapter_rejects_invalid_or_non_object_output(response):
     adapter = JsonContractAgentAdapter(FakeJsonContractClient(response))
@@ -277,6 +373,31 @@ def test_stage_runner_can_use_json_contract_adapter_for_planning_when_explicitly
     assert [request["operation"] for request in fake_client.requests] == ["parse_requirement", "create_plan"]
     assert activity["operation"] == "create_plan"
     assert activity["provider_identity"]["provider"] == "fake/json"
+
+
+def test_json_contract_agent_adapter_supports_all_contract_operations_with_fake_client():
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": _valid_requirement_json(),
+        "create_plan": _valid_planning_json(),
+        "suggest_repair": _valid_repair_json(),
+        "explain_review": _valid_review_json(),
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    requirement = adapter.parse_requirement("Make a spacer washer.")
+    planning = adapter.create_plan(requirement)
+    repair = adapter.suggest_repair({"affected_feature": "holes"}, _valid_ir())
+    review = adapter.explain_review({"status": "success"}, {"total_attempts": 1})
+
+    assert planning["artifact_type"] == "planning"
+    assert repair["repair"]["strategy"] == "increase_spacing"
+    assert review["status"] == "success"
+    assert [request["operation"] for request in fake_client.requests] == [
+        "parse_requirement",
+        "create_plan",
+        "suggest_repair",
+        "explain_review",
+    ]
 
 
 def test_stage_runner_keeps_deterministic_agent_adapter_as_default(tmp_path):
