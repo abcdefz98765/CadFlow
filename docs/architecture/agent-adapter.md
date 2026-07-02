@@ -53,6 +53,11 @@ The current codebase may implement only the smaller deterministic subset. The
 expanded interface above documents the product direction for iterative CAD
 workflows.
 
+Provider-backed adapters should not become one large all-purpose prompt. They
+should route each operation through a stage-specific agent role, skill guide,
+selected knowledge summary, and operation contract guide. The detailed design is
+in `docs/architecture/agent-skill-knowledge.md`.
+
 ## Adapter Modes
 
 ### 1. DeterministicAgentAdapter
@@ -178,6 +183,10 @@ OpenCode/Codex CLI is a developer assistant for evolving the repository, not the
 
 - Natural-language understanding belongs in the agent layer.
 - Deterministic execution belongs in the CadFlow Python API.
+- Provider requests must include CadFlow-owned skill and contract context for
+  the current operation.
+- Stage-specific knowledge is selected explicitly; the full repository
+  knowledge base is not sent by default.
 - Agent outputs must become validated JSON contracts before execution.
 - The execution layer must not consume unconstrained free-form agent text.
 - LLMs may propose design decisions, assumptions, candidate plans, revision

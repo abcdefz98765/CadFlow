@@ -40,10 +40,9 @@ inputs through Model Intake before choosing a create or revise workflow.
 ### Agent Layer
 
 - `AgentAdapter`
-- `LLMRequirementAgent`
-- `LLMPlanningAgent`
-- `RepairAdvisorAgent`
-- `ReviewExplainerAgent`
+- stage agents such as `RequirementAgent`, `PlanningAgent`,
+  `RepairAgent`, `ReviewAgent`, `RevisionIntentAgent`, and
+  `RevisionPlanAgent`
 - `DeterministicFallbackAgent`
 
 This layer turns user language and workflow context into structured JSON. Agent output is advisory until it passes schema and workflow validation.
@@ -51,6 +50,11 @@ This layer turns user language and workflow context into structured JSON. Agent 
 For iterative CAD, the agent layer also parses revision requests, proposes
 change intent, drafts revision plans, proposes assumptions, and explains old/new
 differences. CadFlow validates and normalizes these proposals before execution.
+
+Provider-backed agents should be narrow and stage-specific. Each stage agent
+uses a CadFlow-owned skill guide plus selected knowledge and an operation
+contract guide before it calls an external provider. See
+`docs/architecture/agent-skill-knowledge.md`.
 
 ### Workflow Layer
 
@@ -120,4 +124,5 @@ These responsibilities should not collapse into each other. The Web Console shou
 - `docs/architecture/model-intake.md`
 - `docs/architecture/workflow-contract.md`
 - `docs/architecture/agent-adapter.md`
+- `docs/architecture/agent-skill-knowledge.md`
 - `docs/architecture/web-workflow-console.md`

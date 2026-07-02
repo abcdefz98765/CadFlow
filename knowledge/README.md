@@ -11,3 +11,10 @@ Step-specific knowledge should live under the owning skill:
 
 Keep this directory lightweight. Add global knowledge only when multiple skills
 need the same source of truth.
+
+Provider requests should not include the whole knowledge tree. The provider
+context assembler should select a compact global summary plus stage-specific
+knowledge only when it is relevant to the current operation.
+
+See `docs/architecture/agent-skill-knowledge.md` for the agent/skill/knowledge
+context design.
