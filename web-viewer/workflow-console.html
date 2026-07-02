@@ -191,6 +191,21 @@
     gap: 8px;
   }
 
+  .provider-form {
+    display: grid;
+    gap: 8px;
+  }
+
+  .provider-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(72px, 96px);
+    gap: 8px;
+  }
+
+  .provider-grid input {
+    min-width: 0;
+  }
+
   .create-row {
     display: grid;
     grid-template-columns: 1fr 88px;
@@ -583,6 +598,26 @@
 
     <section class="section">
       <div class="section-header">
+        <h2>Provider</h2>
+        <span id="provider-state" class="meta">local/mock</span>
+      </div>
+      <div class="section-body provider-form">
+        <select id="provider-select">
+          <option value="local">local/mock</option>
+          <option value="deepseek">deepseek</option>
+          <option value="openai">openai api</option>
+        </select>
+        <input id="provider-model" placeholder="model">
+        <div class="provider-grid">
+          <input id="provider-timeout" type="number" min="1" max="300" step="1" placeholder="timeout">
+          <input id="provider-retries" type="number" min="0" max="5" step="1" placeholder="retries">
+        </div>
+        <button id="configure-provider">Apply</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
         <h2>Run History</h2>
         <button id="refresh-runs">Refresh</button>
       </div>
@@ -706,6 +741,7 @@ const state = {
   selectedArtifact: null,
   selectedContent: null,
   metadata: null,
+  providerConfig: null,
   busy: false,
   bridgeStatus: "Checking local bridge",
   previewInteractive: false,
@@ -828,6 +864,37 @@ async function loadRuns(selectFirst = true) {
     setBridgeState(false, error.message);
     showError(error.message);
   }
+}
+
+async function loadProviderConfig() {
+  try {
+    state.providerConfig = await api("read_provider_config");
+    renderProviderConfig();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+function renderProviderConfig() {
+  const identity = (state.providerConfig && state.providerConfig.provider_identity) || {};
+  const provider = identity.provider || "local/mock";
+  const model = identity.model || "";
+  el("provider-state").textContent = [provider, model].filter(Boolean).join(" · ");
+  if (provider === "local/mock" || provider === "local") {
+    el("provider-select").value = "local";
+  } else if (provider === "deepseek") {
+    el("provider-select").value = "deepseek";
+  } else if (provider === "openai") {
+    el("provider-select").value = "openai";
+  }
+  el("provider-model").value = model;
+  el("provider-timeout").value = identity.timeout_seconds || "";
+  el("provider-retries").value = identity.max_retries ?? "";
+}
+
+function activeProviderIsLocal() {
+  const identity = (state.providerConfig && state.providerConfig.provider_identity) || {};
+  return !identity.provider || identity.provider === "local/mock" || identity.provider === "local";
 }
 
 function renderRuns() {
@@ -1259,14 +1326,24 @@ async function runStage(stage) {
 async function runFullPipeline() {
   if (!state.selectedRunId || state.busy) return;
   await withBusy("Running full pipeline", async () => {
-    log(`Running full text pipeline for ${state.selectedRunId}.`);
-    await api("run_stage", {
-      path_params: { run_id: state.selectedRunId, stage: "text_pipeline" },
-      body: {},
-    });
+    if (activeProviderIsLocal()) {
+      log(`Running full text pipeline for ${state.selectedRunId}.`);
+      await api("run_stage", {
+        path_params: { run_id: state.selectedRunId, stage: "text_pipeline" },
+        body: {},
+      });
+    } else {
+      log(`Running staged provider pipeline for ${state.selectedRunId}.`);
+      for (const stage of ["requirement", "planning", "part_modeling", "review", "outputs"]) {
+        await api("run_stage", {
+          path_params: { run_id: state.selectedRunId, stage },
+          body: {},
+        });
+      }
+    }
     await loadRuns(false);
     await reloadRun();
-    log("Finished full text pipeline.");
+    log("Finished pipeline.");
   });
 }
 
@@ -1307,8 +1384,26 @@ async function recordGate() {
   });
 }
 
+async function configureProvider() {
+  if (state.busy) return;
+  const provider = el("provider-select").value;
+  const model = el("provider-model").value.trim();
+  const timeoutValue = el("provider-timeout").value.trim();
+  const retriesValue = el("provider-retries").value.trim();
+  const body = { provider };
+  if (model) body.model = model;
+  if (timeoutValue) body.timeout_seconds = Number(timeoutValue);
+  if (retriesValue) body.max_retries = Number(retriesValue);
+  await withBusy("Configuring provider", async () => {
+    state.providerConfig = await api("configure_provider", { body });
+    renderProviderConfig();
+    log(`Configured provider ${provider}.`);
+  });
+}
+
 el("prompt").addEventListener("input", updateRunIdSuggestion);
 el("create-run").addEventListener("click", createRun);
+el("configure-provider").addEventListener("click", configureProvider);
 el("refresh-runs").addEventListener("click", () => loadRuns(false));
 el("reload-run").addEventListener("click", reloadRun);
 el("run-full").addEventListener("click", runFullPipeline);
@@ -1327,6 +1422,7 @@ document.querySelectorAll("[data-inspector-tab]").forEach((button) => {
 
 clearArtifact();
 setInspectorTab(state.activeInspectorTab);
+loadProviderConfig();
 loadRuns();
 </script>
 </body>

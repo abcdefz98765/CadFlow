@@ -129,7 +129,7 @@ def make_json_contract_adapter_from_env(
 
     Supported providers:
     - `deepseek`: OpenAI-compatible chat completions.
-    - `openai`: OpenAI Responses API, suitable for Codex-family model testing.
+    - `openai`: OpenAI Responses API using the API project's quota.
     """
 
     from ai_native_cad.agents.json_contract import JsonContractAgentAdapter, JsonContractProviderConfig
@@ -179,7 +179,7 @@ def _openai_responses_endpoint(
 ) -> JsonProviderEndpoint:
     return JsonProviderEndpoint(
         provider="openai",
-        model=model or os.environ.get("CADFLOW_OPENAI_MODEL", "gpt-5.1-codex"),
+        model=model or os.environ.get("CADFLOW_OPENAI_MODEL", "gpt-5.1"),
         api_key_env_var="OPENAI_API_KEY",
         base_url=os.environ.get("CADFLOW_OPENAI_BASE_URL", "https://api.openai.com"),
         endpoint=os.environ.get("CADFLOW_OPENAI_ENDPOINT", "/v1/responses"),

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ai_native_cad.agents import DeterministicAgentAdapter, make_json_contract_adapter_from_env
 from ai_native_cad.cad_ir.validator import validate_ir
 from ai_native_cad.pipeline.runner import PROJECT_ROOT, run_agent_revision_pipeline
 from ai_native_cad.workflow_console.stage_runner import (
@@ -55,6 +56,37 @@ class WorkflowConsoleBackend:
         self.project_root = Path(project_root or PROJECT_ROOT).resolve()
         self.run_roots = tuple(Path(root) for root in (run_roots or ("outputs", "runs")))
         self.stage_runner = stage_runner or StageRunner(self.project_root)
+
+    def read_provider_config(self) -> dict[str, Any]:
+        """Return the active console adapter identity without secrets."""
+        return {
+            "provider_identity": _compact_adapter_identity(
+                dict(getattr(self.stage_runner.agent_adapter, "provider_identity", {}) or {})
+            ),
+        }
+
+    def configure_provider(
+        self,
+        provider: str,
+        model: str | None = None,
+        timeout_seconds: int | None = None,
+        max_retries: int | None = None,
+    ) -> dict[str, Any]:
+        """Switch the in-process console adapter without accepting secrets."""
+        _validate_provider_config_inputs(provider, model, timeout_seconds, max_retries)
+        normalized = provider.lower().strip()
+        if normalized in {"local", "local/mock", "mock", "deterministic"}:
+            self.stage_runner.agent_adapter = DeterministicAgentAdapter()
+        elif normalized in {"deepseek", "openai", "oai"}:
+            self.stage_runner.agent_adapter = make_json_contract_adapter_from_env(
+                normalized,
+                model=model,
+                timeout_seconds=timeout_seconds,
+                max_retries=max_retries,
+            )
+        else:
+            raise ValueError(f"unsupported workflow console provider: {provider}")
+        return self.read_provider_config()
 
     def list_runs(self) -> list[dict[str, Any]]:
         """List existing run directories under outputs/ and runs/."""
@@ -675,17 +707,20 @@ def _compact_adapter_activity(activity: Any) -> dict[str, Any] | None:
     if not isinstance(activity, dict):
         return None
     provider_identity = activity.get("provider_identity")
-    compact_identity = {}
-    if isinstance(provider_identity, dict):
-        for key, value in provider_identity.items():
-            safe_key = _safe_summary_text(key)
-            safe_value = _safe_adapter_identity_value(value)
-            if safe_key is not None and safe_value is not None:
-                compact_identity[safe_key] = safe_value
     return {
         "operation": _safe_summary_text(activity.get("operation")) or "unknown",
-        "provider_identity": compact_identity,
+        "provider_identity": _compact_adapter_identity(provider_identity if isinstance(provider_identity, dict) else {}),
     }
+
+
+def _compact_adapter_identity(identity: dict[str, Any]) -> dict[str, Any]:
+    compact_identity = {}
+    for key, value in identity.items():
+        safe_key = _safe_summary_text(key)
+        safe_value = _safe_adapter_identity_value(value)
+        if safe_key is not None and safe_value is not None:
+            compact_identity[safe_key] = safe_value
+    return compact_identity
 
 
 def _compact_payload_summary(payload: Any) -> dict[str, Any]:
@@ -726,6 +761,32 @@ def _safe_adapter_identity_value(value: Any) -> str | int | float | bool | None:
     if ":\\" in value or "\\\\" in value:
         return None
     return value[:160]
+
+
+def _validate_provider_config_inputs(
+    provider: str,
+    model: str | None,
+    timeout_seconds: int | None,
+    max_retries: int | None,
+) -> None:
+    if not isinstance(provider, str) or not provider.strip():
+        raise ValueError("workflow console provider must be a non-empty string")
+    if _contains_secret_marker(provider):
+        raise ValueError("workflow console provider config must not include secrets")
+    if model is not None:
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("workflow console provider model must be a non-empty string when set")
+        if _contains_secret_marker(model):
+            raise ValueError("workflow console provider config must not include secrets")
+    if timeout_seconds is not None and (not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 300):
+        raise ValueError("workflow console provider timeout_seconds must be between 1 and 300")
+    if max_retries is not None and (not isinstance(max_retries, int) or not 0 <= max_retries <= 5):
+        raise ValueError("workflow console provider max_retries must be between 0 and 5")
+
+
+def _contains_secret_marker(value: str) -> bool:
+    lowered = value.lower()
+    return any(marker in lowered for marker in ("password", "secret", "token", "api_key", "apikey", "bearer "))
 
 
 def _compact_field_collection(items: list[dict[str, Any]]) -> dict[str, Any]:

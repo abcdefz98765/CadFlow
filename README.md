@@ -165,14 +165,24 @@ Environment variables:
 set DEEPSEEK_API_KEY=...
 set CADFLOW_DEEPSEEK_MODEL=deepseek-chat
 
-# OpenAI / Codex-family model testing through Responses API
+# OpenAI API model testing through Responses API
 set OPENAI_API_KEY=...
-set CADFLOW_OPENAI_MODEL=gpt-5.1-codex
+set CADFLOW_OPENAI_MODEL=gpt-5.1
 ```
 
 The provider clients use standard-library HTTP calls and are opt-in only. API
 keys are read at request time and are not written into artifacts, runtime
 activity, provider identity, or JSON-contract context.
+
+The OpenAI path uses the OpenAI API and consumes the API project's quota or
+billing. It does not use ChatGPT or Codex product quotas. To test a Codex-family
+model, set `CADFLOW_OPENAI_MODEL` or the Web Console model field to a model name
+available to that API project.
+
+In the Web Workflow Console, the Provider panel can switch between `local/mock`,
+`deepseek`, and `openai api` for the current local server process. The page only
+accepts non-secret provider settings; API keys must remain in environment
+variables before the server starts.
 
 ### Windows / CadQuery environment note
 

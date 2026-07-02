@@ -36,6 +36,20 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="List workflow runs under configured run roots.",
     ),
     RouteSpec(
+        name="read_provider_config",
+        method="GET",
+        path="/workflow/provider",
+        backend_operation="read_provider_config",
+        description="Read the active workflow-console provider identity.",
+    ),
+    RouteSpec(
+        name="configure_provider",
+        method="POST",
+        path="/workflow/provider",
+        backend_operation="configure_provider",
+        description="Configure the in-process workflow-console provider without secrets.",
+    ),
+    RouteSpec(
         name="read_run_metadata",
         method="GET",
         path="/workflow/runs/{run_id}",
@@ -201,6 +215,30 @@ def _read_run_metadata(
     return backend.read_run_metadata_by_id(_require_value(path_params, "run_id"), root=query.get("root"))
 
 
+def _read_provider_config(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.read_provider_config()
+
+
+def _configure_provider(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    return backend.configure_provider(
+        _require_value(body, "provider"),
+        model=body.get("model"),
+        timeout_seconds=body.get("timeout_seconds"),
+        max_retries=body.get("max_retries"),
+    )
+
+
 def _run_stage(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -300,6 +338,8 @@ RouteHandler = Callable[
 _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "create_run": _create_run,
     "list_runs": _list_runs,
+    "read_provider_config": _read_provider_config,
+    "configure_provider": _configure_provider,
     "read_run_metadata": _read_run_metadata,
     "run_stage": _run_stage,
     "run_revision": _run_revision,
@@ -330,6 +370,18 @@ def _require_value(values: dict[str, Any], key: str) -> Any:
     if value is None:
         raise ValueError(f"workflow console route is missing required value: {key}")
     return value
+
+
+def _reject_secret_fields(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            lowered = str(key).lower()
+            if any(marker in lowered for marker in ("password", "secret", "token", "api_key", "apikey", "bearer")):
+                raise ValueError("workflow console provider config must not include secrets")
+            _reject_secret_fields(item)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_secret_fields(item)
 
 
 def _public_route_data(value: Any) -> Any:

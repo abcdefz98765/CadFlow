@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_native_cad.agents import DeterministicAgentAdapter
+from ai_native_cad.agents import DeterministicAgentAdapter, JsonContractAgentAdapter
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
 from ai_native_cad.workflow_console import (
     EDITABLE_ARTIFACTS,
@@ -66,8 +66,10 @@ def test_stage_runner_runs_requirement_and_planning_to_artifacts(tmp_path):
 
 def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
     expected_operations = {
+        "configure_provider",
         "create_run_by_id",
         "list_runs",
+        "read_provider_config",
         "read_run_metadata_by_id",
         "run_stage_by_id",
         "run_revision_by_id",
@@ -80,7 +82,8 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
 
     assert {spec.backend_operation for spec in ROUTE_SPECS} == expected_operations
     assert all(
-        spec.backend_operation.endswith("_by_id") or spec.backend_operation == "list_runs"
+        spec.backend_operation.endswith("_by_id")
+        or spec.backend_operation in {"list_runs", "read_provider_config", "configure_provider"}
         for spec in ROUTE_SPECS
     )
     assert "run_dir" not in {spec.backend_operation for spec in ROUTE_SPECS}
@@ -129,6 +132,10 @@ def test_workflow_console_route_contract_includes_edit_and_gate_routes():
     assert ROUTE_SPECS_BY_NAME["record_gate_decision"].backend_operation == "record_gate_decision_by_id"
     assert ROUTE_SPECS_BY_NAME["run_revision"].method == "POST"
     assert ROUTE_SPECS_BY_NAME["run_revision"].backend_operation == "run_revision_by_id"
+    assert ROUTE_SPECS_BY_NAME["read_provider_config"].method == "GET"
+    assert ROUTE_SPECS_BY_NAME["read_provider_config"].backend_operation == "read_provider_config"
+    assert ROUTE_SPECS_BY_NAME["configure_provider"].method == "POST"
+    assert ROUTE_SPECS_BY_NAME["configure_provider"].backend_operation == "configure_provider"
 
 
 def test_workflow_console_internal_error_shape_does_not_leak_local_paths():
@@ -199,6 +206,60 @@ def test_workflow_console_dispatch_writes_artifact_and_records_gate_decision(tmp
     assert _does_not_contain_keys(decision["data"], {"path", "run_dir", "root", "output_dir"})
     assert runtime["artifact_edit_count"] == 1
     assert runtime["gate_decision_count"] == 1
+
+
+def test_workflow_console_dispatch_configures_provider_without_secret_fields(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    configured = dispatch_route(
+        backend,
+        "configure_provider",
+        body={
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "timeout_seconds": 12,
+            "max_retries": 2,
+        },
+    )
+    read = dispatch_route(backend, "read_provider_config")
+
+    assert configured["ok"] is True
+    assert configured["data"]["provider_identity"]["provider"] == "deepseek"
+    assert configured["data"]["provider_identity"]["model"] == "deepseek-chat"
+    assert configured["data"]["provider_identity"]["timeout_seconds"] == 12
+    assert configured["data"]["provider_identity"]["max_retries"] == 2
+    assert "DEEPSEEK_API_KEY" not in json.dumps(configured["data"])
+    assert isinstance(backend.stage_runner.agent_adapter, JsonContractAgentAdapter)
+    assert read["data"] == configured["data"]
+
+
+def test_workflow_console_provider_config_rejects_browser_secrets(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    response = dispatch_route(
+        backend,
+        "configure_provider",
+        body={
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "api_key": "secret-token",
+        },
+    )
+
+    assert response["status_code"] == 400
+    assert response["error"]["type"] == "bad_request"
+    assert "secret-token" not in json.dumps(response)
+
+
+def test_backend_can_restore_local_mock_provider(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    backend.configure_provider("openai", model="gpt-5.1", timeout_seconds=20, max_retries=1)
+    restored = backend.configure_provider("local")
+
+    assert isinstance(backend.stage_runner.agent_adapter, DeterministicAgentAdapter)
+    assert restored["provider_identity"]["provider"] == "local/mock"
+    assert restored["provider_identity"]["network"] == "disabled"
 
 
 def test_workflow_console_dispatch_exposes_path_free_stage_history(tmp_path):
@@ -1346,6 +1407,14 @@ def test_workflow_console_static_ui_exposes_required_local_workflow_controls():
         "data-inspector-tab",
         "Inspector",
         "STL Preview",
+        "Provider",
+        "provider-select",
+        "provider-model",
+        "provider-timeout",
+        "provider-retries",
+        "configureProvider",
+        'api("read_provider_config"',
+        'api("configure_provider"',
         "stage_history",
         "gate_history",
         "stageHistoryByStage",

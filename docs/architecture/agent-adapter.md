@@ -106,8 +106,8 @@ boundary:
 
 - `OpenAICompatibleJsonContractClient` targets OpenAI-compatible
   `/chat/completions` APIs and is the default DeepSeek path.
-- `OpenAIResponsesJsonContractClient` targets OpenAI `/responses` for
-  OpenAI/Codex-family model testing.
+- `OpenAIResponsesJsonContractClient` targets OpenAI `/responses` using an
+  OpenAI API project.
 - `make_json_contract_adapter_from_env("deepseek")` reads
   `DEEPSEEK_API_KEY`, `CADFLOW_DEEPSEEK_MODEL`, optional
   `CADFLOW_DEEPSEEK_BASE_URL`, and optional `CADFLOW_DEEPSEEK_ENDPOINT`.
@@ -121,6 +121,16 @@ These clients use Python standard-library HTTP calls, not provider SDKs. They
 read API keys only at request time and keep key values and key environment
 variable names out of provider identity, runtime activity, and JSON-contract
 requests. Tests use fake HTTP openers and do not make network calls.
+
+The OpenAI path consumes OpenAI API quota or billing, not ChatGPT or Codex
+product quotas. Codex-family model testing is possible only when the configured
+OpenAI API project has access to the requested model.
+
+The local Web Workflow Console exposes non-secret provider selection for the
+current server process. Its Provider panel can switch between local/mock,
+DeepSeek, and OpenAI API modes and can set model, timeout, and retry values. It
+does not accept API keys in the browser; provider credentials remain environment
+variables.
 
 ### 3. LLMApiAgentAdapter
 
