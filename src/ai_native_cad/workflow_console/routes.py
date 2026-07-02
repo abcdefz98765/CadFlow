@@ -337,11 +337,24 @@ def _public_route_data(value: Any) -> Any:
     if not isinstance(value, dict):
         return value
 
-    public = {
-        key: _public_route_data(item)
-        for key, item in value.items()
-        if key not in {"path", "run_dir", "root", "output_dir", "payload"}
-    }
+    public = {}
+    for key, item in value.items():
+        if key in {"path", "run_dir", "root", "output_dir", "payload"}:
+            continue
+        if key == "files" and isinstance(item, dict):
+            public[key] = _public_file_refs(item)
+            continue
+        public[key] = _public_route_data(item)
     if "content" in value:
         public["content"] = value["content"]
+    return public
+
+
+def _public_file_refs(files: dict[str, Any]) -> dict[str, str]:
+    public = {}
+    for label, value in files.items():
+        if not isinstance(value, str):
+            continue
+        normalized = value.replace("\\", "/").rstrip("/")
+        public[str(label)] = normalized.rsplit("/", 1)[-1]
     return public

@@ -242,6 +242,8 @@ def test_workflow_console_dispatch_runs_blocked_revision_by_safe_child_id():
     assert response["data"]["run"]["run_id"] == child_id
     assert response["data"]["run"]["report_summary"]["revision_summary"]["relationship"] == "revision_blocked"
     assert response["data"]["run"]["downloadables"] == []
+    assert response["data"]["result"]["files"]["revision_request"] == "revision_request.json"
+    assert all("/" not in value and "\\" not in value for value in response["data"]["result"]["files"].values())
     assert _does_not_contain_keys(response["data"], {"path", "run_dir", "root", "output_dir"})
 
     child_dir = Path.cwd() / "outputs" / child_id
