@@ -101,6 +101,30 @@ success + 2 expected blocked means all supported eval cases passed and
 unsupported/unsafe cases blocked correctly. It does not claim production
 readiness.
 
+### Provider Normalized Design Create Pipeline
+
+`run_provider_normalized_design_create_pipeline(...)` is a small normalized
+design-planner MVP. It extends the provider-backed path with local design
+artifacts while keeping execution constrained:
+
+```text
+prompt
+  -> provider extraction of design intent / constraints / assumptions
+  -> local compiler creates intent.json
+  -> local compiler creates design_brief.json
+  -> local compiler creates candidate_plans.json
+  -> deterministic candidate selection
+  -> local planning_artifact.json
+  -> deterministic CAD IR conversion
+  -> run_ir_pipeline(...)
+```
+
+The provider may contribute design-level signals, but the official
+`intent.json`, `design_brief.json`, `candidate_plans.json`, `selected_plan.json`,
+`requirement.json`, `planning_artifact.json`, and `input_ir.json` artifacts are
+compiled and validated by CadFlow. Provider-generated CAD IR and
+CadQuery/Python code are not accepted.
+
 ### Text Pipeline Fallback
 
 `examples/prompt_pipeline/` is a debug and exploration path from natural

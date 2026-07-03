@@ -18,7 +18,11 @@ from ai_native_cad.agents import (
 from ai_native_cad.agents.provider_context import knowledge_summary_for, provider_messages_for
 from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
 import ai_native_cad.cadquery.executor as cadquery_executor
-from ai_native_cad.pipeline import run_provider_create_pipeline, run_provider_normalized_create_pipeline
+from ai_native_cad.pipeline import (
+    run_provider_create_pipeline,
+    run_provider_normalized_create_pipeline,
+    run_provider_normalized_design_create_pipeline,
+)
 import ai_native_cad.pipeline.runner as pipeline_runner
 from ai_native_cad.workflow_console.stage_runner import StageRunner
 
@@ -1321,6 +1325,154 @@ def test_provider_normalized_create_pipeline_is_explicit_and_records_mode(tmp_pa
     runtime = json.loads((output_dir / "logs" / "runtime.json").read_text(encoding="utf-8"))
     assert report["provider_create"]["provider_contract_mode"] == "extract_then_compile"
     assert runtime["provider_create"]["workflow_mode"] == "normalized_provider_create"
+
+
+def test_provider_normalized_design_create_pipeline_writes_local_design_artifacts(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": {
+            "part_type": "mounting_plate",
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5},
+            "features": {"holes": {"count": 4, "diameter": 4.5, "positions": "corner_4"}},
+            "assumptions": ["Use standard clearance for M4 holes."],
+        },
+        "create_plan": {
+            "artifact_type": "planning",
+            "route": {},
+            "selected_parts": [],
+            "flow_gate_status": {},
+        },
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_normalized_design_create"
+
+    result = run_provider_normalized_design_create_pipeline(
+        "Make an 80x40x5 mm mounting plate with four M4 holes.",
+        adapter,
+        output_dir=output_dir,
+    )
+
+    assert result["status"] == "success"
+    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement"]
+    assert fake_client.requests[0]["context"]["workflow_stage"] == "provider_normalized_design_create"
+    assert fake_client.requests[0]["context"]["provider_contract_mode"] == "extract_then_compile"
+    assert result["intent"]["artifact_type"] == "intent"
+    assert result["design_brief"]["artifact_type"] == "design_brief"
+    assert result["candidate_plans"][0]["candidate_id"] == "A"
+    assert result["selected_plan"]["candidate_id"] == "A"
+    assert result["requirement"]["part_type"] == "mounting_plate"
+    assert result["planning_artifact"]["artifact_type"] == "planning"
+    assert result["input_ir"]["part_type"] == "mounting_plate"
+    assert result["provider_normalized_design_create"]["workflow_mode"] == "normalized_design_create"
+    for artifact in (
+        "prompt.txt",
+        "intent.json",
+        "design_brief.json",
+        "candidate_plans.json",
+        "selected_plan.json",
+        "requirement.json",
+        "planning_artifact.json",
+        "input_ir.json",
+        "report.json",
+        "report.md",
+        "agent_trace.json",
+    ):
+        assert (output_dir / artifact).exists()
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    assert report["provider_normalized_design_create"]["selected_candidate"] == "A"
+    assert trace["provider_normalized_design_create"]["provider_role"] == "extract_design_signals_only"
+
+
+def test_provider_normalized_design_create_ignores_provider_ir_code_and_arbitrary_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": {
+            "part_type": "mounting_plate",
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5, "unsafe_extra": 999},
+            "features": {
+                "holes": {"count": 4, "diameter": 4.5, "positions": "corner_4"},
+                "laser": {"power": 1000},
+            },
+            "intent_json": {"artifact_type": "intent", "recognized_part_type": "gear"},
+            "design_brief": {"part_type": "gear"},
+            "candidate_plans": [{"cad_ir": {"part_type": "gear"}}],
+            "input_ir": {"part_type": "gear", "dimensions": {"teeth": 24}},
+            "cadquery_code": "import cadquery as cq",
+            "python_code": "print('provider code must not run')",
+        },
+        "create_plan": {
+            "artifact_type": "planning",
+            "selected_parts": [],
+            "cadquery_code": "import cadquery as cq",
+        },
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_normalized_design_no_ir"
+
+    result = run_provider_normalized_design_create_pipeline(
+        "Make an 80x40x5 mm mounting plate with four M4 holes.",
+        adapter,
+        output_dir=output_dir,
+    )
+
+    assert result["status"] == "success"
+    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement"]
+    assert result["intent"]["recognized_part_type"] == "mounting_plate"
+    assert result["design_brief"]["part_type"] == "mounting_plate"
+    assert result["input_ir"]["dimensions"] == {"length": 80, "thickness": 5, "width": 40}
+    assert all("cad_ir" not in candidate for candidate in result["candidate_plans"])
+    serialized = json.dumps({
+        "intent": result["intent"],
+        "design_brief": result["design_brief"],
+        "candidate_plans": result["candidate_plans"],
+        "selected_plan": result["selected_plan"],
+        "requirement": result["requirement"],
+        "planning_artifact": result["planning_artifact"],
+        "input_ir": result["input_ir"],
+    }, sort_keys=True)
+    assert "unsafe_extra" not in serialized
+    assert "laser" not in serialized
+    assert "cadquery_code" not in serialized
+    assert "python_code" not in serialized
+    assert "\"part_type\": \"gear\"" not in serialized
+
+
+@pytest.mark.parametrize(
+    ("prompt", "provider_requirement"),
+    [
+        ("Make a 24 tooth gear.", {"part_type": "gear", "dimensions": {"teeth": 24}}),
+        (
+            "Make a production-ready load-bearing aerospace bracket.",
+            {"part_type": "bracket", "dimensions": {"length": 80, "width": 40, "height": 30}},
+        ),
+    ],
+)
+def test_provider_normalized_design_create_keeps_expected_unsupported_or_unsafe_cases_blocked(
+    prompt,
+    provider_requirement,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": provider_requirement,
+        "create_plan": _valid_planning_json(),
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_normalized_design_blocked"
+
+    result = run_provider_normalized_design_create_pipeline(prompt, adapter, output_dir=output_dir)
+
+    assert result["status"] == "blocked_provider_validation"
+    assert result["blocked_stage"] == "requirement"
+    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement"]
+    assert not (output_dir / "intent.json").exists()
+    assert not (output_dir / "input_ir.json").exists()
 
 
 def test_normalized_create_uses_local_compiler_and_rejects_provider_ir_or_code(tmp_path, monkeypatch):

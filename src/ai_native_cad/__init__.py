@@ -7,6 +7,7 @@ from ai_native_cad.pipeline import (
     run_agent_revision_pipeline,
     run_ir_pipeline,
     run_provider_create_pipeline,
+    run_provider_normalized_design_create_pipeline,
     run_provider_normalized_create_pipeline,
     run_text_pipeline,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "run_agent_revision_pipeline",
     "run_ir_pipeline",
     "run_provider_create_pipeline",
+    "run_provider_normalized_design_create_pipeline",
     "run_provider_normalized_create_pipeline",
     "run_text_pipeline",
     "run_workflow",

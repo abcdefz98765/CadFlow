@@ -9,7 +9,7 @@ from typing import Any
 
 from ai_native_cad.agents.base import AgentAdapter
 from ai_native_cad.agents.json_contract import JsonContractProviderError
-from ai_native_cad.agents.validation import validate_input_ir_draft
+from ai_native_cad.agents.validation import validate_adapter_result, validate_input_ir_draft
 from ai_native_cad.cad_ir.parser import ir_from_planning_artifact
 from ai_native_cad.cad_ir.schema import CADIR
 from ai_native_cad.cad_ir.validator import validate_ir
@@ -225,6 +225,170 @@ def run_provider_normalized_create_pipeline(
         fallback_mode=fallback_mode,
         provider_contract_mode="extract_then_compile",
     )
+
+
+def run_provider_normalized_design_create_pipeline(
+    prompt: str,
+    adapter: AgentAdapter,
+    output_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+    selected_candidate: str | None = None,
+) -> dict[str, Any]:
+    """Run provider-backed normalized design planning into deterministic CAD.
+
+    The provider extracts requirement-level design signals only. CadFlow locally
+    compiles intent, design brief, candidate plans, selected plan, requirement,
+    planning artifact, CAD IR, and CAD execution artifacts.
+    """
+
+    provider_contract_mode = "extract_then_compile"
+    output_path = _resolve_output_dir(_agent_create_dir_name(prompt), output_root, output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    (output_path / "prompt.txt").write_text(prompt.strip() + "\n", encoding="utf-8")
+    context = {
+        "workflow_stage": "provider_normalized_design_create",
+        "target_contract": "provider_normalized_design_create_v0.1",
+        "provider_contract_mode": provider_contract_mode,
+        "output_dir": str(output_path),
+    }
+    provider_traces: list[dict[str, Any]] = []
+
+    try:
+        requirement = adapter.parse_requirement(prompt, context=context)
+    except JsonContractProviderError as exc:
+        trace = _provider_stage_trace(adapter, "parse_requirement", validation_status="not_run", error_category=exc.category)
+        provider_traces.append(trace)
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_requirement",
+            blocked_stage="requirement",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            error_category=exc.category,
+            provider_contract_mode=provider_contract_mode,
+        )
+    except Exception:
+        trace = _provider_stage_trace(
+            adapter,
+            "parse_requirement",
+            validation_status="failed",
+            error_category="local_validation_failed",
+        )
+        provider_traces.append(trace)
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_validation",
+            blocked_stage="requirement",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            error_category="local_validation_failed",
+            provider_contract_mode=provider_contract_mode,
+        )
+
+    _write_json(output_path / "requirement.json", requirement)
+    provider_traces.append(_provider_stage_trace(adapter, "parse_requirement", validation_status="passed"))
+    requirement_decision = requirement.get("requirement_status", {}).get("flow_decision", {})
+    if not is_proceed_action(requirement_decision.get("action")):
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_requirement",
+            blocked_stage="requirement",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            requirement=requirement,
+            error_category="requirement_gate_blocked",
+            provider_contract_mode=provider_contract_mode,
+        )
+
+    intent = _compile_normalized_design_intent(prompt, requirement)
+    validate_adapter_result("interpret_user_intent", intent)
+    _write_json(output_path / "intent.json", intent)
+
+    design_brief = _compile_normalized_design_brief(intent, requirement)
+    validate_adapter_result("propose_design_brief", design_brief)
+    _write_json(output_path / "design_brief.json", design_brief)
+
+    candidate_plans = _compile_normalized_candidate_plans(design_brief, requirement)
+    if not candidate_plans:
+        raise ValueError("normalized design compiler must produce candidate plans")
+    _write_json(output_path / "candidate_plans.json", candidate_plans)
+
+    selected_plan = _select_candidate_plan(candidate_plans, selected_candidate)
+    _write_json(output_path / "selected_plan.json", selected_plan)
+
+    try:
+        planning_artifact = create_planning_artifact(requirement)
+        validate_adapter_result("create_plan", planning_artifact)
+    except Exception:
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_validation",
+            blocked_stage="planning",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            requirement=requirement,
+            error_category="local_validation_failed",
+            provider_contract_mode=provider_contract_mode,
+        )
+    _write_json(output_path / "planning_artifact.json", planning_artifact)
+
+    planning_decision = planning_artifact.get("flow_gate_status", {}).get("rework_decision", {})
+    if not is_proceed_action(planning_decision.get("action")):
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_planning",
+            blocked_stage="planning",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            requirement=requirement,
+            planning_artifact=planning_artifact,
+            error_category="planning_gate_blocked",
+            provider_contract_mode=provider_contract_mode,
+        )
+
+    try:
+        ir = ir_from_planning_artifact(planning_artifact)
+        input_ir = ir.to_dict()
+        validate_input_ir_draft(input_ir)
+    except Exception:
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_validation",
+            blocked_stage="cad_ir",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            requirement=requirement,
+            planning_artifact=planning_artifact,
+            error_category="cad_ir_validation_failed",
+            provider_contract_mode=provider_contract_mode,
+        )
+    _write_json(output_path / "input_ir.json", input_ir)
+
+    result = run_ir_pipeline(input_ir, output_dir=output_path)
+    metadata = _provider_normalized_design_create_metadata(
+        adapter=adapter,
+        provider_traces=provider_traces,
+        status=result.get("status", "unknown"),
+        selected_candidate=selected_plan.get("candidate_id") or selected_plan.get("label"),
+        candidate_count=len(candidate_plans),
+    )
+    _merge_provider_normalized_design_create_metadata(output_path, metadata)
+    files = _collect_files(output_path)
+    result.update({
+        "intent": intent,
+        "design_brief": design_brief,
+        "candidate_plans": candidate_plans,
+        "selected_plan": selected_plan,
+        "requirement": requirement,
+        "planning_artifact": planning_artifact,
+        "input_ir": input_ir,
+        "provider_normalized_design_create": metadata,
+        "files": files,
+    })
+    trace_path = output_path / "agent_trace.json"
+    if trace_path.exists():
+        result["agent_trace"] = json.loads(trace_path.read_text(encoding="utf-8"))
+    return result
 
 
 def run_agent_create_pipeline(
@@ -948,6 +1112,167 @@ def _write_blocked_revision_report_md(output_path: Path, report: dict[str, Any])
     (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _compile_normalized_design_intent(prompt: str, requirement: dict[str, Any]) -> dict[str, Any]:
+    intent = requirement.get("intent", {})
+    return {
+        "artifact_type": "intent",
+        "version": "intent-v0.1",
+        "prompt_summary": " ".join(prompt.strip().split())[:240],
+        "object_goal": intent.get("object_goal", requirement.get("part_type")),
+        "scope": intent.get("scope", "part"),
+        "use_case": intent.get("use_case", "unspecified"),
+        "recognized_part_type": requirement["part_type"],
+        "unit": requirement.get("unit", "mm"),
+        "requested_outputs": list(requirement.get("outputs", ["step", "stl"])),
+        "interpreted_constraints": {
+            "dimensions": json.loads(json.dumps(requirement.get("dimensions", {}))),
+            "features": json.loads(json.dumps(requirement.get("features", {}))),
+            "check_level": requirement.get("check_level", "L0"),
+        },
+        "assumptions": list(requirement.get("assumptions", [])),
+        "open_questions": list(requirement.get("follow_up_questions", [])),
+        "source": {
+            "compiler": "cadflow_normalized_design_v0.1",
+            "provider_role": "extraction_only",
+            "requirement_artifact": "requirement.json",
+        },
+    }
+
+
+def _compile_normalized_design_brief(intent: dict[str, Any], requirement: dict[str, Any]) -> dict[str, Any]:
+    cad_brief = requirement.get("cad_brief", {})
+    interpreted = intent.get("interpreted_constraints", {})
+    return {
+        "artifact_type": "design_brief",
+        "version": "design-brief-v0.1",
+        "part_type": requirement["part_type"],
+        "design_goal": {
+            "object_goal": intent.get("object_goal", requirement["part_type"]),
+            "scope": intent.get("scope", "part"),
+            "use_case": intent.get("use_case", "unspecified"),
+        },
+        "functional_requirements": _normalized_functional_requirements(requirement),
+        "geometry_constraints": {
+            "unit": requirement.get("unit", "mm"),
+            "dimensions": json.loads(json.dumps(interpreted.get("dimensions", {}))),
+            "features": json.loads(json.dumps(interpreted.get("features", {}))),
+        },
+        "validation_targets": json.loads(json.dumps(cad_brief.get("validation_targets", []))),
+        "assumptions": list(requirement.get("assumptions", [])),
+        "risk_notes": _normalized_design_risk_notes(requirement),
+        "candidate_strategy": "generate template-backed local candidates and select deterministically",
+        "source": {
+            "compiler": "cadflow_normalized_design_v0.1",
+            "intent_artifact": "intent.json",
+            "requirement_artifact": "requirement.json",
+        },
+    }
+
+
+def _compile_normalized_candidate_plans(
+    design_brief: dict[str, Any],
+    requirement: dict[str, Any],
+) -> list[dict[str, Any]]:
+    base_decisions = {
+        "part_type": requirement["part_type"],
+        "part_name": requirement.get("instance_name") or requirement.get("part_name") or requirement["part_type"],
+        "unit": requirement.get("unit", "mm"),
+        "dimensions": json.loads(json.dumps(requirement.get("dimensions", {}))),
+        "features": json.loads(json.dumps(requirement.get("features", {}))),
+        "outputs": list(requirement.get("outputs", ["step", "stl"])),
+        "check_level": requirement.get("check_level", "L0"),
+    }
+    candidates = [
+        {
+            "candidate_id": "A",
+            "label": "local_template_resolved",
+            "summary": "Use the supported CadFlow template matching the normalized requirement.",
+            "selected_by_default": True,
+            "part_type": requirement["part_type"],
+            "resolved_decisions": json.loads(json.dumps(base_decisions)),
+            "design_rationale": [
+                "Provider output is treated as extraction only.",
+                "CadFlow local planning and CAD IR conversion remain execution authority.",
+            ],
+            "risk_notes": list(design_brief.get("risk_notes", [])),
+            "tradeoffs": ["Template-backed topology is intentionally conservative for this MVP."],
+            "source": {
+                "compiler": "cadflow_normalized_design_v0.1",
+                "design_brief_artifact": "design_brief.json",
+            },
+        }
+    ]
+    alternate = _alternate_normalized_candidate(base_decisions)
+    if alternate:
+        candidates.append(alternate)
+    return candidates
+
+
+def _alternate_normalized_candidate(base_decisions: dict[str, Any]) -> dict[str, Any] | None:
+    part_type = base_decisions.get("part_type")
+    if part_type not in {"mounting_plate", "spacer", "simple_bracket"}:
+        return None
+    resolved = json.loads(json.dumps(base_decisions))
+    resolved["part_name"] = f"{resolved.get('part_name', part_type)}_alternate"
+    risk_notes = ["Alternate candidate records a conservative local design option; it is not selected by default."]
+    if part_type == "mounting_plate":
+        features = resolved.setdefault("features", {})
+        features.setdefault("chamfer", {"size": 0.5})
+    elif part_type == "spacer":
+        dimensions = resolved.setdefault("dimensions", {})
+        if isinstance(dimensions.get("outer_diameter"), (int, float)):
+            dimensions["outer_diameter"] = round(float(dimensions["outer_diameter"]) + 2.0, 3)
+    return {
+        "candidate_id": "B",
+        "label": "local_conservative_alternate",
+        "summary": "Keep the same part family and dimensions authority while recording a conservative option.",
+        "selected_by_default": False,
+        "part_type": part_type,
+        "resolved_decisions": resolved,
+        "design_rationale": [
+            "Shows design-level alternatives without granting provider CAD IR authority.",
+            "Selection remains deterministic and local.",
+        ],
+        "risk_notes": risk_notes,
+        "tradeoffs": ["Not selected by default in the MVP."],
+        "source": {
+            "compiler": "cadflow_normalized_design_v0.1",
+            "design_brief_artifact": "design_brief.json",
+        },
+    }
+
+
+def _normalized_functional_requirements(requirement: dict[str, Any]) -> list[dict[str, Any]]:
+    requirements = [{
+        "kind": "primary_shape",
+        "part_type": requirement["part_type"],
+        "reason": "normalized to a supported CadFlow part family",
+    }]
+    for name, value in sorted(requirement.get("features", {}).items()):
+        requirements.append({
+            "kind": "feature",
+            "feature": name,
+            "value": json.loads(json.dumps(value)),
+            "reason": "compiled from normalized requirement features",
+        })
+    return requirements
+
+
+def _normalized_design_risk_notes(requirement: dict[str, Any]) -> list[dict[str, Any]]:
+    notes = []
+    for item in requirement.get("missing_information", []):
+        if isinstance(item, dict):
+            notes.append({
+                "kind": "missing_information",
+                "field": item.get("field"),
+                "severity": item.get("severity", "unknown"),
+            })
+    for item in requirement.get("assumptions", []):
+        if isinstance(item, str):
+            notes.append({"kind": "assumption", "note": item})
+    return notes
+
+
 def _agent_create_dir_name(prompt: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "_", prompt.lower()).strip("_")
     return f"agent_create_{slug[:48] or 'prompt'}"
@@ -1400,6 +1725,95 @@ def _write_provider_create_runtime(output_dir: Path, metadata: dict[str, Any], *
         },
         "stage_count": 1,
     }
+    _write_json(runtime_path, runtime)
+
+
+def _provider_normalized_design_create_metadata(
+    *,
+    adapter: AgentAdapter,
+    provider_traces: list[dict[str, Any]],
+    status: str,
+    selected_candidate: str | None,
+    candidate_count: int,
+) -> dict[str, Any]:
+    return {
+        "workflow": "provider_normalized_design_create",
+        "version": "provider-normalized-design-create-v0.1",
+        "provider_contract_mode": "extract_then_compile",
+        "workflow_mode": "normalized_design_create",
+        "status": status,
+        "adapter": _safe_provider_identity(adapter),
+        "provider_role": "extract_design_signals_only",
+        "local_authority": [
+            "intent.json",
+            "design_brief.json",
+            "candidate_plans.json",
+            "selected_plan.json",
+            "requirement.json",
+            "planning_artifact.json",
+            "input_ir.json",
+            "run_ir_pipeline",
+        ],
+        "stages": [
+            "prompt",
+            "provider_extraction",
+            "compile_intent",
+            "compile_design_brief",
+            "compile_candidate_plans",
+            "select_candidate",
+            "local_requirement_planning",
+            "planning_to_cad_ir",
+            "run_ir_pipeline",
+        ],
+        "artifacts": {
+            "prompt": "prompt.txt",
+            "intent": "intent.json",
+            "design_brief": "design_brief.json",
+            "candidate_plans": "candidate_plans.json",
+            "selected_plan": "selected_plan.json",
+            "requirement": "requirement.json",
+            "planning_artifact": "planning_artifact.json",
+            "input_ir": "input_ir.json",
+        },
+        "selected_candidate": selected_candidate,
+        "candidate_count": candidate_count,
+        "provider_request_traces": provider_traces,
+    }
+
+
+def _merge_provider_normalized_design_create_metadata(output_dir: Path, metadata: dict[str, Any]) -> None:
+    trace_path = output_dir / "agent_trace.json"
+    if trace_path.exists():
+        trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    else:
+        trace = {}
+    trace["provider_normalized_design_create"] = metadata
+    trace_path.write_text(json.dumps(trace, indent=2) + "\n", encoding="utf-8")
+
+    report_path = output_dir / "report.json"
+    if report_path.exists():
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        report["provider_normalized_design_create"] = metadata
+        report["files"] = _collect_files(output_dir)
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+    report_md_path = output_dir / "report.md"
+    if report_md_path.exists():
+        report_md = report_md_path.read_text(encoding="utf-8")
+        report_md += (
+            "\n## Provider Normalized Design Create\n\n"
+            f"- Provider contract mode: `{metadata.get('provider_contract_mode')}`\n"
+            f"- Workflow mode: `{metadata.get('workflow_mode')}`\n"
+            f"- Selected candidate: `{metadata.get('selected_candidate')}`\n"
+            f"- Candidate count: {metadata.get('candidate_count')}\n"
+            "- Provider role: extraction/advisory only; CadFlow compiles and validates official artifacts locally.\n"
+        )
+        report_md_path.write_text(report_md, encoding="utf-8")
+
+    runtime_path = output_dir / "logs" / "runtime.json"
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime = _read_json_if_present(runtime_path)
+    runtime["provider_normalized_design_create"] = metadata
     _write_json(runtime_path, runtime)
 
 
