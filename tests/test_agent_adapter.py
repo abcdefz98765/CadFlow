@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -886,6 +887,98 @@ def test_json_contract_provider_error_shape_is_public_and_stable():
     }
 
 
+def test_provider_smoke_env_file_parser_loads_simple_pairs_and_ignores_comments():
+    from examples.provider_smoke.env_file import parse_env_file
+
+    values = parse_env_file(
+        """
+        # local provider credentials
+        \ufeffDEEPSEEK_API_KEY=from-file
+
+        export CADFLOW_DEEPSEEK_MODEL=deepseek-chat
+        INVALID LINE
+        QUOTED_VALUE="quoted"
+        """
+    )
+
+    assert values == {
+        "DEEPSEEK_API_KEY": "from-file",
+        "CADFLOW_DEEPSEEK_MODEL": "deepseek-chat",
+        "QUOTED_VALUE": "quoted",
+    }
+
+
+def test_provider_smoke_env_file_loader_preserves_process_env_precedence(tmp_path, monkeypatch):
+    from examples.provider_smoke.env_file import load_env_file
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DEEPSEEK_API_KEY=from-file\nCADFLOW_DEEPSEEK_MODEL=file-model\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "from-process")
+    monkeypatch.delenv("CADFLOW_DEEPSEEK_MODEL", raising=False)
+
+    loaded = load_env_file(env_file)
+
+    assert "DEEPSEEK_API_KEY" not in loaded
+    assert loaded == {"CADFLOW_DEEPSEEK_MODEL": "file-model"}
+    assert os.environ["DEEPSEEK_API_KEY"] == "from-process"
+    assert os.environ["CADFLOW_DEEPSEEK_MODEL"] == "file-model"
+
+
+def test_provider_smoke_env_file_cli_uses_fake_adapter_without_leaking_secret(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from examples.provider_smoke import parse_requirement_smoke
+
+    secret = "env-file-secret-value-123"
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"DEEPSEEK_API_KEY={secret}\n", encoding="utf-8")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    calls = []
+
+    class FakeAdapter:
+        provider_identity = {"provider": "deepseek", "model": "fake-model", "api_key": secret}
+
+        @property
+        def last_provider_request_trace(self):
+            return {
+                "operation": "parse_requirement",
+                "provider_identity": {"provider": "deepseek", "model": "fake-model"},
+                "knowledge_ids": ["requirement_check_level_missing_information"],
+                "message_count": 4,
+            }
+
+        def parse_requirement(self, prompt, context=None):
+            calls.append({"prompt": prompt, "context": context})
+            return {"part_type": "mounting_plate"}
+
+    def fake_make_adapter(provider, model=None):
+        assert provider == "deepseek"
+        assert os.environ["DEEPSEEK_API_KEY"] == secret
+        return FakeAdapter()
+
+    monkeypatch.setattr(parse_requirement_smoke, "make_json_contract_adapter_from_env", fake_make_adapter)
+
+    exit_code = parse_requirement_smoke.main([
+        "--provider",
+        "deepseek",
+        "--env-file",
+        str(env_file),
+    ])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert len(calls) == 1
+    assert secret not in output
+    assert "DEEPSEEK_API_KEY" not in output
+    assert "Authorization" not in output
+    assert "Make an 80x40x5" not in output
+
+
 def test_provider_smoke_script_handles_missing_credentials_without_leaking_env_names(monkeypatch, capsys):
     from examples.provider_smoke import parse_requirement_smoke
 
@@ -1174,6 +1267,258 @@ def test_provider_create_eval_script_handles_missing_credentials_without_network
     assert "messages" not in output
 
 
+def test_normalized_design_eval_script_handles_missing_credentials_without_secret_leak(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from examples.provider_smoke import normalized_design_eval
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+
+    exit_code = normalized_design_eval.main([
+        "--provider",
+        "deepseek",
+        "--output-dir",
+        str(tmp_path / "normalized_design_eval_missing_credentials"),
+    ])
+
+    output = capsys.readouterr().out
+    status = json.loads(output)
+    assert exit_code == 2
+    assert status["provider"] == "deepseek"
+    assert status["case_count"] == len(normalized_design_eval.DEFAULT_CASES)
+    assert status["blocked_count"] == len(normalized_design_eval.DEFAULT_CASES)
+    assert status["failed_count"] == 0
+    assert "provider_error.auth_failed" in json.dumps(status)
+    assert "DEEPSEEK_API_KEY" not in output
+    assert "Authorization" not in output
+    assert "messages" not in output
+
+
+def test_normalized_design_eval_aggregates_classifications(tmp_path):
+    from examples.provider_smoke import normalized_design_eval
+
+    class FakeAdapter:
+        provider_identity = {"provider": "fake/json", "model": "fake-model"}
+
+    cases = [
+        {"case_id": "success_case", "category": "complex_single_part", "prompt": "Make a camera mounting plate."},
+        {
+            "case_id": "hinge_case",
+            "category": "multi_part_assembly_intent",
+            "prompt": "Design a simple hinge bracket assembly with two leaves and a pin.",
+        },
+        {"case_id": "odd_block", "category": "complex_single_part", "prompt": "Make an odd unsupported plate."},
+        {"case_id": "runner_failure", "category": "complex_single_part", "prompt": "Make a part that raises."},
+    ]
+
+    def fake_runner(prompt, adapter, output_dir=None):
+        if "raises" in prompt:
+            raise RuntimeError("raw provider response should not be recorded")
+        if "hinge" in prompt:
+            return {
+                "status": "blocked_provider_validation",
+                "blocked_stage": "planning",
+                "error_category": "planning_gate_blocked",
+                "design_brief": {"design_goal": {"scope": "assembly"}},
+            }
+        if "unsupported plate" in prompt:
+            return {
+                "status": "blocked_provider_validation",
+                "blocked_stage": "cad_ir",
+                "error_category": "cad_ir_validation_failed",
+                "design_brief": {"design_goal": {"scope": "single_part"}},
+            }
+        return {
+            "status": "success",
+            "success": True,
+            "design_brief": {"design_goal": {"scope": "single_part"}},
+            "candidate_plans": [{"candidate_id": "A"}],
+            "selected_plan": {"candidate_id": "A"},
+        }
+
+    result = normalized_design_eval.run_normalized_design_eval(
+        adapter=FakeAdapter(),
+        provider="fake/json",
+        output_dir=tmp_path / "eval",
+        cases=cases,
+        runner=fake_runner,
+    )
+
+    summary = result["summary"]
+    records = {case["case_id"]: case for case in result["cases"]}
+    assert summary["success_count"] == 1
+    assert summary["expected_blocked_count"] == 1
+    assert summary["unexpected_blocked_count"] == 1
+    assert summary["failed_count"] == 1
+    assert records["success_case"]["classification"] == "success"
+    assert records["hinge_case"]["classification"] == "expected_blocked"
+    assert records["odd_block"]["classification"] == "unexpected_blocked"
+    assert records["runner_failure"]["classification"] == "failed"
+
+
+def test_normalized_design_eval_records_assembly_metadata_from_compiled_artifacts(tmp_path):
+    from examples.provider_smoke import normalized_design_eval
+
+    class FakeAdapter:
+        provider_identity = {"provider": "fake/json", "model": "fake-model"}
+
+    def fake_runner(prompt, adapter, output_dir=None):
+        return {
+            "status": "blocked_provider_planning",
+            "blocked_stage": "planning",
+            "error_category": "planning_gate_blocked",
+            "intent": {"scope": "assembly"},
+            "design_brief": {
+                "design_goal": {"scope": "assembly"},
+                "parts": [{"name": "leaf_a"}, {"name": "leaf_b"}, {"name": "pin"}],
+                "interfaces": [{"kind": "pin_joint"}],
+                "risk_notes": [{"kind": "unsupported_scope"}],
+            },
+            "candidate_plans": [{"candidate_id": "A"}, {"candidate_id": "B"}],
+            "selected_plan": {
+                "candidate_id": "B",
+                "resolved_decisions": {
+                    "fasteners": [{"kind": "pin"}],
+                    "clearance_notes": ["Leave rotational fit clearance."],
+                },
+            },
+            "planning_artifact": {
+                "selected_parts": [{"name": "leaf_a"}, {"name": "leaf_b"}, {"name": "pin"}],
+                "fit_interfaces": [{"kind": "pin_joint"}],
+            },
+        }
+
+    result = normalized_design_eval.run_normalized_design_eval(
+        adapter=FakeAdapter(),
+        provider="fake/json",
+        output_dir=tmp_path / "eval",
+        cases=[{
+            "case_id": "hinge_bracket_assembly",
+            "category": "multi_part_assembly_intent",
+            "prompt": "Design a simple hinge bracket assembly with two leaves and a pin.",
+        }],
+        runner=fake_runner,
+    )
+
+    case = result["cases"][0]
+    assert case["detected_scope"] == "assembly"
+    assert case["part_count_estimate"] == 3
+    assert case["part_list_present"] is True
+    assert case["interfaces_present"] is True
+    assert case["fasteners_present"] is True
+    assert case["clearance_or_fit_notes_present"] is True
+    assert case["risk_notes_present"] is True
+    assert case["candidate_plan_count"] == 2
+    assert case["selected_candidate"] == "B"
+
+
+def test_normalized_design_eval_classifies_expected_blocked_cases(tmp_path):
+    from examples.provider_smoke import normalized_design_eval
+
+    class FakeAdapter:
+        provider_identity = {"provider": "fake/json", "model": "fake-model"}
+
+    def fake_runner(prompt, adapter, output_dir=None):
+        return {
+            "status": "blocked_provider_validation",
+            "blocked_stage": "requirement",
+            "error_category": "local_validation_failed",
+        }
+
+    result = normalized_design_eval.run_normalized_design_eval(
+        adapter=FakeAdapter(),
+        provider="fake/json",
+        output_dir=tmp_path / "eval",
+        cases=[
+            {
+                "case_id": "gearbox_exact_teeth",
+                "category": "expected_blocked_over_scoped",
+                "prompt": "Design a gearbox with two gears and exact tooth profiles.",
+            },
+            {
+                "case_id": "medical_implant_bracket",
+                "category": "expected_blocked_over_scoped",
+                "prompt": "Design a medical implant bracket.",
+            },
+        ],
+        runner=fake_runner,
+    )
+
+    cases = {case["case_id"]: case for case in result["cases"]}
+    assert result["summary"]["expected_blocked_count"] == 2
+    assert cases["gearbox_exact_teeth"]["detected_scope"] == "unsupported"
+    assert "unsupported.exact_gear_tooth_profiles" in cases["gearbox_exact_teeth"]["diagnostic_codes"]
+    assert cases["medical_implant_bracket"]["detected_scope"] == "safety_critical"
+    assert "blocked_policy.safety_critical" in cases["medical_implant_bracket"]["diagnostic_codes"]
+
+
+def test_normalized_design_eval_writes_privacy_safe_reports(tmp_path):
+    from examples.provider_smoke import normalized_design_eval
+
+    class FakeAdapter:
+        provider_identity = {
+            "provider": "fake/json",
+            "model": "fake-model",
+            "api_key": "fake-secret-value-123456",
+        }
+
+    def fake_runner(prompt, adapter, output_dir=None):
+        return {
+            "status": "blocked_provider_validation",
+            "blocked_stage": "cad_ir",
+            "error_category": "cad_ir_validation_failed",
+            "output_dir": r"D:\private\provider\run",
+            "provider_response": "raw provider response",
+            "runtime_logs": ["raw runtime log"],
+            "transcript": "raw chat transcript",
+            "provider_normalized_design_create": {
+                "provider_request_traces": [{
+                    "messages": ["raw provider message"],
+                    "provider_response": "raw provider response",
+                }],
+            },
+            "design_brief": {
+                "risk_notes": [{"kind": "missing_information"}],
+                "provider_response": "raw provider response",
+            },
+            "candidate_plans": [{"candidate_id": "A", "cad_ir": {"part_type": "gear"}}],
+            "selected_plan": {"candidate_id": "A", "python_code": "print('do not record')"},
+            "input_ir": {"part_type": "mounting_plate"},
+        }
+
+    eval_dir = tmp_path / "eval"
+    normalized_design_eval.run_normalized_design_eval(
+        adapter=FakeAdapter(),
+        provider="fake/json",
+        output_dir=eval_dir,
+        cases=[{
+            "case_id": "privacy_case",
+            "category": "complex_single_part",
+            "prompt": "Make a camera mounting plate with four holes.",
+        }],
+        runner=fake_runner,
+    )
+
+    serialized = "\n".join(
+        (eval_dir / artifact).read_text(encoding="utf-8")
+        for artifact in ("eval_cases.json", "eval_summary.json", "eval_report.md")
+    )
+    assert "fake-secret-value-123456" not in serialized
+    assert "D:\\private" not in serialized
+    assert "D:" not in serialized
+    assert "raw provider message" not in serialized
+    assert "raw provider response" not in serialized
+    assert "raw runtime log" not in serialized
+    assert "raw chat transcript" not in serialized
+    assert "transcript" not in serialized
+    assert "python_code" not in serialized
+    assert "\"cad_ir\":" not in serialized
+    assert "\"part_type\": \"gear\"" not in serialized
+
+
 def test_provider_create_flow_calls_requirement_and_planning_and_writes_artifacts(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
@@ -1443,18 +1788,20 @@ def test_provider_normalized_design_create_ignores_provider_ir_code_and_arbitrar
 
 
 @pytest.mark.parametrize(
-    ("prompt", "provider_requirement"),
+    ("prompt", "provider_requirement", "expected_code"),
     [
-        ("Make a 24 tooth gear.", {"part_type": "gear", "dimensions": {"teeth": 24}}),
+        ("Make a 24 tooth gear.", {"part_type": "gear", "dimensions": {"teeth": 24}}, "unsupported_part_type.gear"),
         (
             "Make a production-ready load-bearing aerospace bracket.",
             {"part_type": "bracket", "dimensions": {"length": 80, "width": 40, "height": 30}},
+            "blocked_policy.safety_scope_blocked",
         ),
     ],
 )
 def test_provider_normalized_design_create_keeps_expected_unsupported_or_unsafe_cases_blocked(
     prompt,
     provider_requirement,
+    expected_code,
     tmp_path,
     monkeypatch,
 ):
@@ -1468,11 +1815,17 @@ def test_provider_normalized_design_create_keeps_expected_unsupported_or_unsafe_
 
     result = run_provider_normalized_design_create_pipeline(prompt, adapter, output_dir=output_dir)
 
-    assert result["status"] == "blocked_provider_validation"
+    assert result["status"] == "blocked_provider_requirement"
     assert result["blocked_stage"] == "requirement"
     assert [request["operation"] for request in fake_client.requests] == ["parse_requirement"]
+    assert (output_dir / "requirement.json").exists()
     assert not (output_dir / "intent.json").exists()
     assert not (output_dir / "input_ir.json").exists()
+    requirement = json.loads((output_dir / "requirement.json").read_text(encoding="utf-8"))
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    assert requirement["requirement_status"]["complete_for_generation"] is False
+    assert expected_code in requirement["requirement_status"]["diagnostic_codes"]
+    assert expected_code in report["diagnostic_codes"]
 
 
 def test_normalized_create_uses_local_compiler_and_rejects_provider_ir_or_code(tmp_path, monkeypatch):
@@ -1547,21 +1900,24 @@ def test_strict_provider_create_records_compliance_mode_and_does_not_fallback(tm
 
 
 @pytest.mark.parametrize(
-    ("prompt", "provider_requirement"),
+    ("prompt", "provider_requirement", "expected_code"),
     [
         (
             "Make a 24 tooth gear.",
             {"part_type": "gear", "dimensions": {"teeth": 24}},
+            "unsupported_part_type.gear",
         ),
         (
             "Make a production-ready load-bearing aerospace bracket.",
             {"part_type": "bracket", "dimensions": {"length": 80, "width": 40, "height": 30}},
+            "blocked_policy.safety_scope_blocked",
         ),
     ],
 )
 def test_provider_normalized_create_keeps_expected_unsupported_or_unsafe_cases_blocked(
     prompt,
     provider_requirement,
+    expected_code,
     tmp_path,
     monkeypatch,
 ):
@@ -1575,11 +1931,17 @@ def test_provider_normalized_create_keeps_expected_unsupported_or_unsafe_cases_b
 
     result = run_provider_normalized_create_pipeline(prompt, adapter, output_dir=output_dir)
 
-    assert result["status"] == "blocked_provider_validation"
+    assert result["status"] == "blocked_provider_requirement"
     assert result["blocked_stage"] == "requirement"
     assert [request["operation"] for request in fake_client.requests] == ["parse_requirement"]
     assert result["provider_create"]["provider_contract_mode"] == "extract_then_compile"
+    assert (output_dir / "requirement.json").exists()
     assert not (output_dir / "input_ir.json").exists()
+    requirement = json.loads((output_dir / "requirement.json").read_text(encoding="utf-8"))
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    assert requirement["requirement_status"]["complete_for_generation"] is False
+    assert expected_code in requirement["requirement_status"]["diagnostic_codes"]
+    assert expected_code in report["diagnostic_codes"]
 
 
 def test_provider_requirement_compiler_maps_prompt_scoped_bracket_alias():
@@ -1608,11 +1970,133 @@ def test_provider_requirement_compiler_does_not_map_unsafe_generic_bracket():
     })
     adapter = JsonContractAgentAdapter(fake_client)
 
-    with pytest.raises(ValueError, match="unsupported provider part_type: bracket"):
+    requirement = adapter.parse_requirement(
+        "Make a production-ready load-bearing aerospace bracket.",
+        context={"provider_contract_mode": "extract_then_compile"},
+    )
+
+    assert requirement["requirement_status"]["complete_for_generation"] is False
+    assert "blocked_policy.safety_scope_blocked" in requirement["requirement_status"]["diagnostic_codes"]
+
+
+def test_provider_requirement_compiler_blocks_assembly_without_single_part_cad():
+    fake_client = FakeJsonContractClient({
+        "part_type": "phone_holder",
+        "scope": "assembly",
+        "dimensions": {},
+        "features": {},
+        "input_ir": {"part_type": "mounting_plate"},
+        "cadquery_code": "import cadquery as cq",
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    requirement = adapter.parse_requirement(
+        "Design a small adjustable phone holder made of a base, vertical support, and clamp.",
+        context={"provider_contract_mode": "extract_then_compile"},
+    )
+
+    assert requirement["part_type"] == "phone_holder"
+    assert requirement["intent"]["scope"] == "assembly"
+    assert requirement["requirement_status"]["complete_for_generation"] is False
+    assert "compiler.assembly_requires_assembly_planning" in requirement["requirement_status"]["diagnostic_codes"]
+    serialized = json.dumps(requirement, sort_keys=True)
+    assert "input_ir" not in serialized
+    assert "cadquery_code" not in serialized
+    assert "import cadquery" not in serialized
+
+
+def test_provider_requirement_compiler_reports_specific_invalid_dimension_diagnostic():
+    from ai_native_cad.agents.json_contract import ProviderRequirementCompilerError
+
+    fake_client = FakeJsonContractClient({
+        "part_type": "mounting_plate",
+        "dimensions": ["length", 80],
+        "features": {},
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    with pytest.raises(ProviderRequirementCompilerError) as raised:
         adapter.parse_requirement(
-            "Make a production-ready load-bearing aerospace bracket.",
+            "Make a mounting plate.",
             context={"provider_contract_mode": "extract_then_compile"},
         )
+
+    assert raised.value.diagnostic_codes == ["requirement_validation.invalid_dimensions"]
+
+
+def test_provider_normalized_design_create_reports_specific_compiler_diagnostic_for_invalid_dimensions(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": {
+            "part_type": "mounting_plate",
+            "dimensions": ["length", 80],
+            "features": {},
+        },
+        "create_plan": _valid_planning_json(),
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_normalized_design_invalid_dimensions"
+
+    result = run_provider_normalized_design_create_pipeline(
+        "Make a mounting plate.",
+        adapter,
+        output_dir=output_dir,
+    )
+
+    assert result["status"] == "blocked_provider_validation"
+    assert result["blocked_stage"] == "requirement"
+    assert "requirement_validation.invalid_dimensions" in result["diagnostic_codes"]
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    assert "requirement_validation.invalid_dimensions" in report["diagnostic_codes"]
+
+
+def test_provider_requirement_blocked_artifact_does_not_record_provider_private_fields():
+    fake_client = FakeJsonContractClient({
+        "part_type": "gear",
+        "dimensions": {"teeth": 24},
+        "api_key": "secret-value",
+        "provider_response": "raw response",
+        "transcript": "raw transcript",
+        "local_path": r"D:\private\file.step",
+        "python_code": "print('no')",
+        "cad_ir": {"part_type": "gear"},
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    requirement = adapter.parse_requirement(
+        "Make a 24 tooth gear.",
+        context={"provider_contract_mode": "extract_then_compile"},
+    )
+
+    serialized = json.dumps(requirement, sort_keys=True)
+    assert "unsupported_part_type.gear" in serialized
+    assert "secret-value" not in serialized
+    assert "raw response" not in serialized
+    assert "raw transcript" not in serialized
+    assert "D:\\private" not in serialized
+    assert "python_code" not in serialized
+    assert "cad_ir" not in serialized
+
+
+def test_provider_requirement_compiler_enriches_mounting_plate_hole_diameter_from_template():
+    fake_client = FakeJsonContractClient({
+        "part_type": "mounting_plate",
+        "dimensions": {"length": 100, "width": 80, "thickness": 5},
+        "features": {"holes": {"count": 4, "positions": "corner_4"}},
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    requirement = adapter.parse_requirement(
+        "Make a camera mounting plate with tripod hole, four corner holes, and chamfered edges.",
+        context={"provider_contract_mode": "extract_then_compile"},
+    )
+
+    assert requirement["features"]["holes"]["diameter"] == 4.5
+    assert requirement["features"]["holes"]["type"] == "through_hole"
+    assert requirement["requirement_status"]["complete_for_generation"] is True
 
 
 def test_provider_requirement_compiler_keeps_circular_button_diameter_consistent():

@@ -17,6 +17,11 @@ if str(SRC_ROOT) not in sys.path:
 from ai_native_cad.agents import make_json_contract_adapter_from_env
 from ai_native_cad.pipeline import run_provider_create_pipeline
 
+try:
+    from examples.provider_smoke.env_file import load_env_file
+except ModuleNotFoundError:
+    from env_file import load_env_file
+
 
 SMOKE_PROMPT = "Make an 80x40x5 mm mounting plate with four M4 holes."
 
@@ -26,8 +31,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--provider", default="deepseek", choices=("deepseek", "openai"))
     parser.add_argument("--model", default=None)
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--env-file", default=None, help="Optional manual KEY=VALUE env file. Process env wins.")
     args = parser.parse_args(argv)
 
+    load_env_file(args.env_file)
     adapter = make_json_contract_adapter_from_env(args.provider, model=args.model)
     result = run_provider_create_pipeline(SMOKE_PROMPT, adapter, output_dir=args.output_dir)
     metadata = result.get("provider_create", {})

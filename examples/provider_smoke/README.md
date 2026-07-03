@@ -9,6 +9,22 @@ environment:
 python examples/provider_smoke/parse_requirement_smoke.py --provider deepseek
 ```
 
+Credentials are read from the process environment by default. Manual scripts
+also accept a simple env file:
+
+```bash
+python examples/provider_smoke/normalized_design_eval.py --provider deepseek --env-file .env
+```
+
+The env file parser supports simple `KEY=VALUE` lines, ignores blank lines and
+comments, and does not print loaded values. Existing process environment values
+take precedence over env-file values. DeepSeek uses `DEEPSEEK_API_KEY`; the
+OpenAI-compatible Responses path uses `OPENAI_API_KEY`. Optional provider
+settings include `CADFLOW_DEEPSEEK_MODEL`, `CADFLOW_DEEPSEEK_BASE_URL`,
+`CADFLOW_DEEPSEEK_ENDPOINT`, `CADFLOW_OPENAI_MODEL`,
+`CADFLOW_OPENAI_BASE_URL`, `CADFLOW_OPENAI_ENDPOINT`,
+`CADFLOW_PROVIDER_TIMEOUT_SECONDS`, and `CADFLOW_PROVIDER_MAX_RETRIES`.
+
 Provider-backed Requirement + Planning create workflow:
 
 ```bash
@@ -66,3 +82,17 @@ readiness.
 The script prints sanitized request status metadata only. It does not print API
 keys, provider messages, raw prompts, provider response bodies, local paths, or
 runtime logs.
+
+Manual complex design / assembly boundary evaluation:
+
+```bash
+python examples/provider_smoke/normalized_design_eval.py --provider deepseek
+```
+
+This runs a fixed small prompt set through
+`run_provider_normalized_design_create_pipeline(...)` and writes
+`eval_cases.json`, `eval_summary.json`, and `eval_report.md`. The eval is
+manual-only and is meant to inspect design-level artifacts, multi-part intent,
+assembly-like scope, unsupported requests, and safety-critical blocks. It does
+not add assembly CAD generation, gear templates, provider-generated CAD IR, or
+provider-generated code.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from ai_native_cad.agents.base import AgentAdapter
@@ -105,6 +106,14 @@ class JsonContractProviderError(RuntimeError):
             "category": self.category,
             "retryable": self.retryable,
         }
+
+
+class ProviderRequirementCompilerError(ValueError):
+    """Sanitized requirement compiler failure with stable diagnostic codes."""
+
+    def __init__(self, codes: list[str], message: str = "provider requirement compiler failed") -> None:
+        self.diagnostic_codes = [_safe_diagnostic_code(code) for code in codes if isinstance(code, str)]
+        super().__init__(message)
 
 
 @runtime_checkable
@@ -405,23 +414,61 @@ def _compile_provider_requirement(prompt: str, provider_requirement: dict[str, A
     from ai_native_cad.requirements import RequirementAgent
 
     if not isinstance(provider_requirement, dict):
-        raise ValueError("provider requirement extraction must be a JSON object")
+        raise ProviderRequirementCompilerError(["requirement_validation.invalid_provider_extraction"])
 
     overrides: dict[str, Any] = {}
     part_type = _normalized_part_type(provider_requirement.get("part_type"), prompt=prompt)
+    scope = _normalized_scope(provider_requirement, prompt)
+    safety_codes = _safety_scope_codes(provider_requirement, prompt)
+    if safety_codes:
+        return _blocked_provider_requirement(
+            prompt,
+            provider_requirement,
+            part_type=part_type or "blocked_request",
+            scope=scope,
+            diagnostic_codes=safety_codes,
+        )
+    if scope == "assembly":
+        return _blocked_provider_requirement(
+            prompt,
+            provider_requirement,
+            part_type=part_type or "assembly_request",
+            scope=scope,
+            diagnostic_codes=["compiler.assembly_requires_assembly_planning"],
+        )
+    if scope == "multi_part":
+        return _blocked_provider_requirement(
+            prompt,
+            provider_requirement,
+            part_type=part_type or "multi_part_request",
+            scope=scope,
+            diagnostic_codes=["compiler.multi_part_requires_assembly_planning"],
+        )
     if part_type is not None:
         if part_type not in set(list_parts()):
-            raise ValueError(f"unsupported provider part_type: {part_type}")
+            return _blocked_provider_requirement(
+                prompt,
+                provider_requirement,
+                part_type=part_type,
+                scope=scope,
+                diagnostic_codes=[f"unsupported_part_type.{_safe_diagnostic_code(part_type)}"],
+            )
         overrides["part_type"] = part_type
     dimensions = _normalized_dimensions(provider_requirement.get("dimensions"), part_type=part_type)
     if dimensions:
         overrides["dimensions"] = dimensions
+    elif "dimensions" in provider_requirement and not isinstance(provider_requirement.get("dimensions"), dict):
+        raise ProviderRequirementCompilerError(["requirement_validation.invalid_dimensions"])
     features = _normalized_features(provider_requirement.get("features"), part_type=part_type)
     if features:
         overrides["features"] = features
+    elif "features" in provider_requirement and not isinstance(provider_requirement.get("features"), (dict, list)):
+        raise ProviderRequirementCompilerError(["requirement_validation.invalid_features"])
     unit = provider_requirement.get("unit")
     if isinstance(unit, str) and unit.strip().lower() in {"mm", "millimeter", "millimeters", "millimetre", "millimetres"}:
         overrides["unit"] = "mm"
+    elif unit is not None and not isinstance(unit, str):
+        raise ProviderRequirementCompilerError(["requirement_validation.invalid_units"])
     outputs = provider_requirement.get("outputs")
     if isinstance(outputs, list):
         safe_outputs = [item.lower() for item in outputs if isinstance(item, str) and item.lower() in {"step", "stl"}]
@@ -436,7 +483,133 @@ def _compile_provider_requirement(prompt: str, provider_requirement: dict[str, A
         if safe_assumptions:
             overrides["assumptions"] = safe_assumptions
 
-    return RequirementAgent().parse(prompt, overrides=overrides)
+    requirement = RequirementAgent().parse(prompt, overrides=overrides)
+    _normalize_compiled_requirement_features(requirement)
+    _attach_provider_compiler_diagnostics(requirement, ["compiler.provider_requirement_compiled"])
+    return requirement
+
+
+def _blocked_provider_requirement(
+    prompt: str,
+    provider_requirement: dict[str, Any],
+    *,
+    part_type: str,
+    scope: str,
+    diagnostic_codes: list[str],
+) -> dict[str, Any]:
+    safe_part_type = _safe_diagnostic_code(part_type) or "blocked_request"
+    safe_scope = scope if scope in {"single_part", "multi_part", "assembly", "unsupported", "safety_critical"} else "unsupported"
+    codes = [_safe_diagnostic_code(code) for code in diagnostic_codes if isinstance(code, str)]
+    requirement = {
+        "part_type": safe_part_type,
+        "unit": "mm",
+        "dimensions": {},
+        "features": {},
+        "outputs": ["step", "stl"],
+        "check_level": "L0",
+        "intent": {
+            "object_goal": safe_part_type,
+            "scope": safe_scope,
+            "use_case": "blocked_provider_requirement",
+        },
+        "assumptions": [],
+        "missing_information": [
+            {
+                "field": "scope",
+                "question": "This request needs a workflow stage that is not enabled for automatic part generation.",
+                "severity": "critical",
+                "ask_user": False,
+                "message": "Provider extraction was compiled into a blocked requirement artifact.",
+                "category": "provider_requirement_compiler",
+                "source": "provider_compiler",
+                "code": code,
+            }
+            for code in codes
+        ],
+        "follow_up_questions": [],
+        "follow_up_requests": [],
+        "requirement_status": {
+            "complete_for_generation": False,
+            "needs_user_input": False,
+            "blocking_fields": ["scope"],
+            "missing_count": len(codes) or 1,
+            "follow_up_count": 0,
+            "diagnostic_codes": codes,
+            "flow_decision": {
+                "action": "return",
+                "from_stage": "requirement",
+                "to_stage": "requirement",
+                "owner_stage": "requirement",
+                "reasons": [
+                    {
+                        "code": code,
+                        "field": "scope",
+                        "message": "Request is blocked or routed before CAD generation.",
+                    }
+                    for code in codes
+                ],
+            },
+        },
+        "cad_brief": {
+            "part_type": safe_part_type,
+            "validation_targets": [],
+            "clarification_summary": {
+                "diagnostics": [
+                    {"code": code, "field": "scope", "severity": "critical"}
+                    for code in codes
+                ],
+                "missing_information": [],
+            },
+        },
+        "source": {
+            "parser": {
+                "version": "provider-requirement-compiler-v0.2",
+                "extracted_dimensions": [],
+                "extracted_features": [],
+                "diagnostics": [
+                    {"code": code, "field": "scope", "severity": "critical"}
+                    for code in codes
+                ],
+            },
+            "provider_compiler": {
+                "version": "provider-requirement-compiler-v0.2",
+                "provider_role": "extraction_only",
+                "scope": safe_scope,
+                "diagnostic_codes": codes,
+            },
+        },
+    }
+    return requirement
+
+
+def _attach_provider_compiler_diagnostics(requirement: dict[str, Any], diagnostic_codes: list[str]) -> None:
+    codes = [_safe_diagnostic_code(code) for code in diagnostic_codes if isinstance(code, str)]
+    requirement.setdefault("source", {})
+    requirement["source"]["provider_compiler"] = {
+        "version": "provider-requirement-compiler-v0.2",
+        "provider_role": "extraction_only",
+        "diagnostic_codes": codes,
+    }
+    status = requirement.setdefault("requirement_status", {})
+    status["diagnostic_codes"] = sorted(set(status.get("diagnostic_codes", []) + codes))
+
+
+def _normalize_compiled_requirement_features(requirement: dict[str, Any]) -> None:
+    if requirement.get("part_type") != "mounting_plate":
+        return
+    features = requirement.get("features")
+    if not isinstance(features, dict):
+        return
+    holes = features.get("holes")
+    mounting_holes = features.get("mounting_holes")
+    if not isinstance(holes, dict) or not isinstance(mounting_holes, dict):
+        return
+    if "diameter" not in holes and isinstance(mounting_holes.get("diameter"), (int, float)):
+        holes["diameter"] = mounting_holes["diameter"]
+    if "type" not in holes and isinstance(mounting_holes.get("type"), str):
+        holes["type"] = mounting_holes["type"]
+    if "offset_from_edge" not in holes and isinstance(mounting_holes.get("offset_from_edge"), (int, float)):
+        holes["offset_from_edge"] = mounting_holes["offset_from_edge"]
 
 
 def _compile_provider_planning(requirement: dict[str, Any]) -> dict[str, Any]:
@@ -449,7 +622,8 @@ def _compile_provider_planning(requirement: dict[str, Any]) -> dict[str, Any]:
 
 def _normalized_part_type(value: Any, *, prompt: str = "") -> str | None:
     if not isinstance(value, str) or not value.strip():
-        return None
+        inferred = _part_type_from_prompt(prompt)
+        return inferred
     normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
     aliases = {
         "washer": "spacer",
@@ -461,10 +635,76 @@ def _normalized_part_type(value: Any, *, prompt: str = "") -> str | None:
         "round_button": "circular_button",
         "plate": "mounting_plate",
         "pcb_plate": "mounting_plate",
+        "camera_plate": "mounting_plate",
+        "camera_mounting_plate": "mounting_plate",
+        "electronics_enclosure": "enclosure_base",
+        "electronics_enclosure_base": "enclosure_base",
+        "enclosure": "enclosure_base",
+        "base": "enclosure_base" if "enclosure" in prompt.lower() else "mounting_plate",
+        "phone_stand": "phone_stand",
+        "gearbox": "gear",
     }
     if normalized == "bracket" and _looks_like_simple_bracket_prompt(prompt):
         return "simple_bracket"
     return aliases.get(normalized, normalized)
+
+
+def _part_type_from_prompt(prompt: str) -> str | None:
+    lowered = prompt.lower()
+    if "gearbox" in lowered or "gear" in lowered:
+        return "gear"
+    if "phone stand" in lowered or "phone holder" in lowered:
+        return "phone_stand"
+    if "camera" in lowered and "plate" in lowered:
+        return "mounting_plate"
+    if "enclosure" in lowered and "lid" not in lowered:
+        return "enclosure_base"
+    if "mounting plate" in lowered or "plate" in lowered:
+        return "mounting_plate"
+    if "bracket" in lowered:
+        return "simple_bracket" if _looks_like_simple_bracket_prompt(prompt) else "wall_bracket"
+    return None
+
+
+def _normalized_scope(provider_requirement: dict[str, Any], prompt: str) -> str:
+    scope_value = provider_requirement.get("scope")
+    if not isinstance(scope_value, str):
+        intent = provider_requirement.get("intent")
+        if isinstance(intent, dict):
+            scope_value = intent.get("scope")
+    scope_text = str(scope_value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    lowered = prompt.lower()
+    if _safety_scope_codes(provider_requirement, prompt):
+        return "safety_critical"
+    if "gearbox" in lowered or "exact tooth" in lowered or "exact teeth" in lowered:
+        return "unsupported"
+    if scope_text in {"assembly", "assembled", "assembly_like"}:
+        return "assembly"
+    if scope_text in {"multi_part", "multipart", "multiple_parts"}:
+        return "multi_part"
+    if any(token in lowered for token in (" assembly", "hinge", "two leaves", " pin", "drone arm assembly")):
+        return "assembly"
+    if any(token in lowered for token in ("two-part", "two part", "base and lid", "made of a base", "vertical support", "clamp")):
+        return "multi_part"
+    if scope_text in {"unsupported", "safety_critical", "single_part"}:
+        return scope_text
+    return "single_part"
+
+
+def _safety_scope_codes(provider_requirement: dict[str, Any], prompt: str) -> list[str]:
+    text = " ".join([
+        prompt.lower(),
+        str(provider_requirement.get("use_case", "")).lower(),
+        str(provider_requirement.get("safety_class", "")).lower(),
+    ])
+    codes: list[str] = []
+    if "medical implant" in text or ("medical" in text and "implant" in text):
+        codes.append("blocked_policy.safety_scope_blocked")
+        codes.append("scope.medical_implant")
+    if "aerospace" in text or "drone arm" in text or "load-bearing" in text or "production" in text:
+        codes.append("blocked_policy.safety_scope_blocked")
+        codes.append("blocked_policy.over_scoped_engineering_request")
+    return sorted(set(codes))
 
 
 def _looks_like_simple_bracket_prompt(prompt: str) -> bool:
@@ -586,6 +826,11 @@ def _normalized_feature_value(value: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(raw_value, (str, bool)):
             feature[key] = raw_value
     return feature
+
+
+def _safe_diagnostic_code(value: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", value.strip()).strip("_")
+    return safe or "unknown"
 
 
 def _number_or_none(value: Any) -> float | int | None:

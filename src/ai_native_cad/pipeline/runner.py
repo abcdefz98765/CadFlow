@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_native_cad.agents.base import AgentAdapter
-from ai_native_cad.agents.json_contract import JsonContractProviderError
+from ai_native_cad.agents.json_contract import JsonContractProviderError, ProviderRequirementCompilerError
 from ai_native_cad.agents.validation import validate_adapter_result, validate_input_ir_draft
 from ai_native_cad.cad_ir.parser import ir_from_planning_artifact
 from ai_native_cad.cad_ir.schema import CADIR
@@ -69,6 +69,24 @@ def run_provider_create_pipeline(
             error_category=exc.category,
             provider_contract_mode=provider_contract_mode,
         )
+    except ProviderRequirementCompilerError as exc:
+        trace = _provider_stage_trace(
+            adapter,
+            "parse_requirement",
+            validation_status="failed",
+            error_category="local_validation_failed",
+        )
+        provider_traces.append(trace)
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_validation",
+            blocked_stage="requirement",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            error_category="local_validation_failed",
+            provider_contract_mode=provider_contract_mode,
+            diagnostic_codes=exc.diagnostic_codes,
+        )
     except Exception:
         trace = _provider_stage_trace(
             adapter,
@@ -101,6 +119,7 @@ def run_provider_create_pipeline(
             requirement=requirement,
             error_category="requirement_gate_blocked",
             provider_contract_mode=provider_contract_mode,
+            diagnostic_codes=_requirement_diagnostic_codes(requirement),
         )
 
     try:
@@ -267,6 +286,24 @@ def run_provider_normalized_design_create_pipeline(
             error_category=exc.category,
             provider_contract_mode=provider_contract_mode,
         )
+    except ProviderRequirementCompilerError as exc:
+        trace = _provider_stage_trace(
+            adapter,
+            "parse_requirement",
+            validation_status="failed",
+            error_category="local_validation_failed",
+        )
+        provider_traces.append(trace)
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_validation",
+            blocked_stage="requirement",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            error_category="local_validation_failed",
+            provider_contract_mode=provider_contract_mode,
+            diagnostic_codes=exc.diagnostic_codes,
+        )
     except Exception:
         trace = _provider_stage_trace(
             adapter,
@@ -298,6 +335,7 @@ def run_provider_normalized_design_create_pipeline(
             requirement=requirement,
             error_category="requirement_gate_blocked",
             provider_contract_mode=provider_contract_mode,
+            diagnostic_codes=_requirement_diagnostic_codes(requirement),
         )
 
     intent = _compile_normalized_design_intent(prompt, requirement)
@@ -1512,6 +1550,44 @@ def _safe_provider_identity(adapter: AgentAdapter) -> dict[str, Any]:
     return safe
 
 
+def _safe_diagnostic_codes(codes: list[str]) -> list[str]:
+    safe_codes = []
+    for code in codes:
+        if not isinstance(code, str):
+            continue
+        safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", code.strip()).strip("_")
+        if not safe:
+            continue
+        lower = safe.lower()
+        if any(token in lower for token in ("key", "secret", "token", "password", "transcript", "message", "response", "log", "path", "env")):
+            continue
+        safe_codes.append(safe)
+    return sorted(set(safe_codes))
+
+
+def _requirement_diagnostic_codes(requirement: dict[str, Any]) -> list[str]:
+    codes: list[str] = []
+    status = requirement.get("requirement_status")
+    if isinstance(status, dict):
+        value = status.get("diagnostic_codes")
+        if isinstance(value, list):
+            codes.extend(str(item) for item in value if isinstance(item, str))
+        decision = status.get("flow_decision")
+        if isinstance(decision, dict):
+            for reason in decision.get("reasons", []):
+                if isinstance(reason, dict) and isinstance(reason.get("code"), str):
+                    codes.append(reason["code"])
+    for item in requirement.get("missing_information", []):
+        if isinstance(item, dict) and isinstance(item.get("code"), str):
+            codes.append(item["code"])
+    source = requirement.get("source")
+    if isinstance(source, dict):
+        compiler = source.get("provider_compiler")
+        if isinstance(compiler, dict) and isinstance(compiler.get("diagnostic_codes"), list):
+            codes.extend(str(item) for item in compiler["diagnostic_codes"] if isinstance(item, str))
+    return _safe_diagnostic_codes(codes)
+
+
 def _provider_stage_trace(
     adapter: AgentAdapter,
     operation: str,
@@ -1550,6 +1626,7 @@ def _provider_create_metadata(
     pipeline_status: str,
     error_category: str | None = None,
     blocked_stage: str | None = None,
+    diagnostic_codes: list[str] | None = None,
 ) -> dict[str, Any]:
     metadata = {
         "workflow": "provider_create",
@@ -1583,6 +1660,8 @@ def _provider_create_metadata(
         metadata["error_category"] = error_category
     if blocked_stage:
         metadata["blocked_stage"] = blocked_stage
+    if diagnostic_codes:
+        metadata["diagnostic_codes"] = _safe_diagnostic_codes(diagnostic_codes)
     return metadata
 
 
@@ -1626,7 +1705,9 @@ def _write_blocked_provider_create_result(
     provider_contract_mode: str,
     requirement: dict[str, Any] | None = None,
     planning_artifact: dict[str, Any] | None = None,
+    diagnostic_codes: list[str] | None = None,
 ) -> dict[str, Any]:
+    diagnostic_codes = _safe_diagnostic_codes(diagnostic_codes or [])
     requirement_status = "passed" if requirement is not None else "not_run"
     planning_status = "passed" if planning_artifact is not None else "not_run"
     if blocked_stage == "requirement":
@@ -1644,6 +1725,7 @@ def _write_blocked_provider_create_result(
         pipeline_status="not_run",
         error_category=error_category,
         blocked_stage=blocked_stage,
+        diagnostic_codes=diagnostic_codes,
     )
     trace = {
         "total_attempts": 0,
@@ -1662,6 +1744,7 @@ def _write_blocked_provider_create_result(
         "status": status,
         "blocked_stage": blocked_stage,
         "error_category": error_category,
+        "diagnostic_codes": diagnostic_codes,
         "cad_ir_created": (output_path / "input_ir.json").exists(),
         "part_modeling_started": False,
         "provider_create": metadata,
@@ -1684,6 +1767,7 @@ def _write_blocked_provider_create_result(
         "success": False,
         "blocked_stage": blocked_stage,
         "error_category": error_category,
+        "diagnostic_codes": diagnostic_codes,
         "output_dir": str(output_path),
         "requirement": requirement,
         "planning_artifact": planning_artifact,

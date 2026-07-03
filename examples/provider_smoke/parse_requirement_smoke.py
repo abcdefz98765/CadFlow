@@ -20,6 +20,11 @@ if str(SRC_ROOT) not in sys.path:
 
 from ai_native_cad.agents import JsonContractProviderError, make_json_contract_adapter_from_env
 
+try:
+    from examples.provider_smoke.env_file import load_env_file
+except ModuleNotFoundError:
+    from env_file import load_env_file
+
 
 SMOKE_PROMPT = "Make an 80x40x5 mm mounting plate with four M4 holes."
 
@@ -28,9 +33,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run a manual provider parse_requirement smoke test.")
     parser.add_argument("--provider", default="deepseek", choices=("deepseek", "openai"))
     parser.add_argument("--model", default=None)
+    parser.add_argument("--env-file", default=None, help="Optional manual KEY=VALUE env file. Process env wins.")
     args = parser.parse_args(argv)
 
     try:
+        load_env_file(args.env_file)
         adapter = make_json_contract_adapter_from_env(args.provider, model=args.model)
         requirement = adapter.parse_requirement(SMOKE_PROMPT, context={"workflow_stage": "requirement"})
     except JsonContractProviderError as exc:

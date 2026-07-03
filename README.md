@@ -144,6 +144,21 @@ pip install -e ".[dev]"
 python -m pytest tests/ -q
 ```
 
+In constrained Windows/CadQuery/tool-timeout environments, the monolithic
+pytest command can exceed the runner timeout even when the tests are healthy.
+Use the command above for normal local testing. If the runner times out, run
+the same suite split by file or small file groups, for example:
+
+```bash
+python -m pytest tests/test_agent_adapter.py -q
+python -m pytest tests/test_ir_pipeline.py tests/test_runner.py -q
+python -m pytest tests/test_workflow.py tests/test_workflow_console.py tests/test_requirement_parser.py -q
+python -m pytest tests/test_exporter.py tests/test_design_checks.py tests/test_benchmarks.py tests/test_assembly_validator.py tests/test_agent_loop.py -q
+```
+
+The split fallback should not change test selection or expectations; it only
+keeps long-running CAD-related files inside short command time limits.
+
 ### Experimental provider-backed adapter
 
 The default workflow remains deterministic and offline. For provider debugging,
