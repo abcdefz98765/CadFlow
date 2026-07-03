@@ -150,6 +150,8 @@ assembly_plan.json
   -> select one supported candidate part
   -> part_create_request.json
   -> ready_for_review or blocked_no_candidate_part
+  -> part_request_review.json
+  -> approved, needs_revision, or blocked
 ```
 
 `part_create_request.json` is locally compiled and sanitized. It records one
@@ -162,6 +164,17 @@ diagnostic codes such as `part_request.created`,
 `run_ir_pipeline(...)`, does not write per-part `input_ir.json`, and does not
 generate STEP/STL or CadQuery/Python code. Actual part-level CAD generation
 remains future work.
+
+`run_part_request_review_pipeline(...)` adds a local review gate before any
+future part-level generation. It writes `part_request_review.json`,
+`report.json`, `report.md`, and `agent_trace.json`. The review approves only
+requests with a selected non-reference, non-blocked part, a reviewable
+`part_brief`, no provider-generated CAD IR or code, no arbitrary provider
+fields, and either preserved interface constraints or an explicit context where
+interfaces are not needed. Incomplete assembly-derived requests return
+`needs_revision`; reference-only, unsupported, safety-critical, or
+provider-executable requests return `blocked`. This gate still does not call
+`run_ir_pipeline(...)`, write `input_ir.json`, or generate CAD artifacts.
 
 ### Text Pipeline Fallback
 

@@ -915,6 +915,7 @@ def _collect_files(output_dir: Path, *, repo_relative: bool = False) -> dict[str
         "planning_artifact.json": "planning_artifact",
         "assembly_plan.json": "assembly_plan",
         "part_create_request.json": "part_create_request",
+        "part_request_review.json": "part_request_review",
         "input_ir.json": "input_ir",
         "model.py": "model_py",
         "model.step": "step",
@@ -1904,6 +1905,160 @@ def run_assembly_part_request_pipeline(
     }
 
 
+def review_part_create_request(part_create_request: dict[str, Any], *, source_artifact: str = "part_create_request.json") -> dict[str, Any]:
+    """Review a planning-only part create request before future generation."""
+
+    part_id = _safe_artifact_id(part_create_request.get("part_id")) if part_create_request.get("part_id") else None
+    blocked_reason_codes = _part_request_blocked_reason_codes(part_create_request)
+    checks = {
+        "has_part_brief": _has_reviewable_part_brief(part_create_request),
+        "has_interface_constraints": _has_part_request_interface_constraints(part_create_request),
+        "is_reference_only": (
+            "part_request.reference_only_not_selectable" in blocked_reason_codes
+            or part_create_request.get("part_status") == "reference_only"
+            or part_create_request.get("generation_strategy") == "reference_only"
+        ),
+        "is_blocked": (
+            bool(blocked_reason_codes)
+            or str(part_create_request.get("status", "")).startswith("blocked")
+            or part_create_request.get("part_status") == "blocked"
+            or part_create_request.get("generation_strategy") == "blocked"
+        ),
+        "has_provider_generated_code": _contains_provider_generated_code(part_create_request),
+        "has_provider_generated_cad_ir": _contains_provider_generated_cad_ir(part_create_request),
+        "has_arbitrary_provider_fields": _contains_arbitrary_provider_fields(part_create_request),
+        "has_clear_related_parts": _has_clear_related_parts(part_create_request),
+    }
+
+    diagnostic_codes = ["part_request.review_created"]
+    blocked_reasons: list[dict[str, str]] = []
+    revision_notes: list[str] = []
+    status = "approved"
+    review_result = "approved_for_single_part_planning"
+
+    if checks["is_reference_only"]:
+        status = "blocked"
+        review_result = "blocked_reference_only"
+        diagnostic_codes.append("part_request.blocked_reference_only")
+        blocked_reasons.append({"code": "part_request.blocked_reference_only"})
+    elif checks["is_blocked"] or _has_unsupported_blocked_reason(blocked_reason_codes):
+        status = "blocked"
+        review_result = "blocked_unsupported_part"
+        diagnostic_codes.append("part_request.blocked_unsupported_part")
+        blocked_reasons.append({"code": "part_request.blocked_unsupported_part"})
+
+    if checks["has_provider_generated_code"] or checks["has_arbitrary_provider_fields"]:
+        status = "blocked"
+        review_result = "blocked_provider_generated_code"
+        diagnostic_codes.append("part_request.blocked_provider_generated_code")
+        blocked_reasons.append({"code": "part_request.blocked_provider_generated_code"})
+    if checks["has_provider_generated_cad_ir"]:
+        status = "blocked"
+        review_result = "blocked_provider_generated_cad_ir"
+        diagnostic_codes.append("part_request.blocked_provider_generated_cad_ir")
+        blocked_reasons.append({"code": "part_request.blocked_provider_generated_cad_ir"})
+
+    if status != "blocked":
+        if not checks["has_part_brief"]:
+            status = "needs_revision"
+            review_result = "needs_revision_missing_part_brief"
+            diagnostic_codes.append("part_request.needs_revision_missing_part_brief")
+            revision_notes.append("Part brief is missing or too vague for review.")
+        if not checks["has_interface_constraints"] and _is_assembly_derived_part_request(part_create_request):
+            status = "needs_revision"
+            review_result = "needs_revision_missing_interface_constraints"
+            diagnostic_codes.append("part_request.needs_revision_missing_interface_constraints")
+            revision_notes.append("Assembly-derived part request needs interface constraints or an explicit no-interface context.")
+        if not checks["has_clear_related_parts"] and _is_assembly_derived_part_request(part_create_request):
+            status = "needs_revision"
+            review_result = "needs_revision_missing_interface_constraints"
+            diagnostic_codes.append("part_request.needs_revision_missing_interface_constraints")
+            revision_notes.append("Related assembly parts are unclear.")
+        if status == "approved":
+            diagnostic_codes.append("part_request.approved_for_single_part_planning")
+
+    return {
+        "artifact_type": "part_request_review",
+        "schema_version": "0.1",
+        "source_artifact": _safe_part_request_source_artifact_name(source_artifact),
+        "part_id": part_id,
+        "status": status,
+        "review_result": review_result,
+        "checks": checks,
+        "diagnostic_codes": _safe_diagnostic_codes(diagnostic_codes),
+        "blocked_reasons": _dedupe_reason_codes(blocked_reasons),
+        "revision_notes": [_safe_short_text(note, fallback="Review note.") for note in revision_notes],
+    }
+
+
+def run_part_request_review_pipeline(
+    part_create_request: dict[str, Any] | str | Path,
+    *,
+    output_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Write a planning-only review artifact for a part create request."""
+
+    loaded_request, source_artifact, default_output = _load_part_create_request_input(part_create_request)
+    output_path = _resolve_output_dir("part_request_review", output_root, output_dir or default_output)
+    output_path.mkdir(parents=True, exist_ok=True)
+    review = review_part_create_request(loaded_request, source_artifact=source_artifact)
+    _write_json(output_path / "part_request_review.json", review)
+    status = review["status"]
+    trace = {
+        "total_attempts": 0,
+        "steps": [
+            {
+                "attempt": 0,
+                "status": status,
+                "stage": "part_request_review",
+                "diagnostic_codes": review.get("diagnostic_codes", []),
+            }
+        ],
+        "final_selected_candidate": review.get("part_id") if status == "approved" else None,
+        "part_request_review": {
+            "workflow": "part_request_review",
+            "version": "part-request-review-v0.1",
+            "status": status,
+            "local_authority": ["part_create_request.json", "part_request_review.json"],
+            "stages": ["load_part_create_request", "review_part_create_request"],
+            "artifacts": {"source": source_artifact, "part_request_review": "part_request_review.json"},
+            "cad_ir_created": False,
+            "part_modeling_started": False,
+            "diagnostic_codes": review.get("diagnostic_codes", []),
+        },
+    }
+    _write_json(output_path / "agent_trace.json", trace)
+    report = {
+        "success": status == "approved",
+        "status": status,
+        "blocked_stage": "part_request_review" if status == "blocked" else None,
+        "diagnostic_codes": review.get("diagnostic_codes", []),
+        "source_artifact": review.get("source_artifact"),
+        "part_id": review.get("part_id"),
+        "review_result": review.get("review_result"),
+        "cad_ir_created": False,
+        "part_modeling_started": False,
+        "part_request_review": review,
+        "files": _collect_files(output_path, repo_relative=True),
+    }
+    _write_json(output_path / "report.json", report)
+    _write_part_request_review_report_md(output_path, report, review)
+    files = _collect_files(output_path, repo_relative=True)
+    report["files"] = files
+    _write_json(output_path / "report.json", report)
+    return {
+        "status": status,
+        "success": status == "approved",
+        "output_dir": str(output_path),
+        "part_request_review": review,
+        "agent_trace": trace,
+        "files": files,
+        "report_json": str(output_path / "report.json"),
+        "report_md": str(output_path / "report.md"),
+    }
+
+
 def _is_selectable_assembly_part(part: dict[str, Any]) -> bool:
     part_id = _safe_artifact_id(part.get("part_id"))
     if part_id in {"pin", "screw", "bolt", "nut", "washer", "fastener"}:
@@ -2012,6 +2167,164 @@ def _safe_source_artifact_name(value: Any) -> str:
     if name != "assembly_plan.json":
         return "assembly_plan.json"
     return name
+
+
+def _load_part_create_request_input(part_create_request: dict[str, Any] | str | Path) -> tuple[dict[str, Any], str, Path | None]:
+    if isinstance(part_create_request, dict):
+        return part_create_request, "part_create_request.json", None
+    path = Path(part_create_request)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path = _require_repo_path(path.resolve())
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError("part_create_request must be a JSON object")
+    return loaded, path.name, path.parent
+
+
+def _safe_part_request_source_artifact_name(value: Any) -> str:
+    name = Path(str(value or "part_create_request.json")).name
+    if name != "part_create_request.json":
+        return "part_create_request.json"
+    return name
+
+
+def _part_request_blocked_reason_codes(part_create_request: dict[str, Any]) -> list[str]:
+    codes: list[str] = []
+    for reason in part_create_request.get("blocked_reasons", []):
+        if isinstance(reason, dict) and isinstance(reason.get("code"), str):
+            codes.append(reason["code"])
+    for code in part_create_request.get("diagnostic_codes", []):
+        if isinstance(code, str) and ("blocked" in code or "reference_only" in code):
+            codes.append(code)
+    return _safe_diagnostic_codes(codes)
+
+
+def _has_reviewable_part_brief(part_create_request: dict[str, Any]) -> bool:
+    brief = part_create_request.get("part_brief")
+    if not isinstance(brief, str):
+        return False
+    normalized = _safe_short_text(brief, fallback="", max_length=180).lower()
+    vague = {
+        "",
+        "part",
+        "component",
+        "assembly component",
+        "assembly candidate part prepared for review.",
+    }
+    return len(normalized) >= 16 and normalized not in vague
+
+
+def _has_part_request_interface_constraints(part_create_request: dict[str, Any]) -> bool:
+    constraints = part_create_request.get("interface_constraints")
+    if not isinstance(constraints, list) or not constraints:
+        return False
+    for constraint in constraints:
+        if not isinstance(constraint, dict):
+            continue
+        if constraint.get("kind") and constraint.get("related_part_id"):
+            return True
+    return False
+
+
+def _is_assembly_derived_part_request(part_create_request: dict[str, Any]) -> bool:
+    context = part_create_request.get("preserved_assembly_context")
+    if not isinstance(context, dict):
+        return True
+    scope = context.get("assembly_scope")
+    related_parts = context.get("related_parts")
+    return scope in {"multi_part", "assembly"} or (isinstance(related_parts, list) and bool(related_parts))
+
+
+def _has_clear_related_parts(part_create_request: dict[str, Any]) -> bool:
+    context = part_create_request.get("preserved_assembly_context")
+    if not isinstance(context, dict):
+        return False
+    related_parts = context.get("related_parts")
+    if not isinstance(related_parts, list):
+        return False
+    return all(isinstance(part, str) and bool(_safe_artifact_id(part)) for part in related_parts)
+
+
+def _has_unsupported_blocked_reason(codes: list[str]) -> bool:
+    return any("unsupported" in code or "blocked_part" in code or "safety" in code for code in codes)
+
+
+def _contains_provider_generated_code(value: Any) -> bool:
+    code_keys = {"python_code", "cadquery_code", "model_py", "model.py", "shell_command"}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if key_text in code_keys or "cadquery" in key_text or "python_code" in key_text:
+                return True
+            if _contains_provider_generated_code(item):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_provider_generated_code(item) for item in value)
+    elif isinstance(value, str):
+        lowered = value.lower()
+        return "import cadquery" in lowered or "cq." in lowered or "python model.py" in lowered
+    return False
+
+
+def _contains_provider_generated_cad_ir(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if key_text in {"cad_ir", "input_ir", "provider_cad_ir"}:
+                return True
+            if _contains_provider_generated_cad_ir(item):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_provider_generated_cad_ir(item) for item in value)
+    return False
+
+
+def _contains_arbitrary_provider_fields(value: Any) -> bool:
+    allowed_provider_keys = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if key_text.startswith("provider") and key_text not in allowed_provider_keys:
+                return True
+            if key_text in {"raw_response", "raw_transcript", "messages", "transcript"}:
+                return True
+            if _contains_arbitrary_provider_fields(item):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_arbitrary_provider_fields(item) for item in value)
+    return False
+
+
+def _dedupe_reason_codes(reasons: list[dict[str, str]]) -> list[dict[str, str]]:
+    codes = _safe_diagnostic_codes([
+        reason["code"]
+        for reason in reasons
+        if isinstance(reason, dict) and isinstance(reason.get("code"), str)
+    ])
+    return [{"code": code} for code in codes]
+
+
+def _write_part_request_review_report_md(
+    output_path: Path,
+    report: dict[str, Any],
+    review: dict[str, Any],
+) -> None:
+    lines = [
+        "# Part Request Review Report",
+        "",
+        f"**Status:** {report.get('status')}",
+        f"**Review result:** `{review.get('review_result')}`",
+        "",
+        "`part_request_review.json` is a planning/review artifact only. CadFlow did not generate CAD IR, "
+        "`input_ir.json`, STEP, STL, or CadQuery/Python code.",
+        "",
+        "## Diagnostics",
+        "",
+    ]
+    for code in review.get("diagnostic_codes", []):
+        lines.append(f"- `{code}`")
+    (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_part_request_report_md(

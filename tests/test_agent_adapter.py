@@ -20,7 +20,9 @@ from ai_native_cad.agents.provider_context import knowledge_summary_for, provide
 from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
 import ai_native_cad.cadquery.executor as cadquery_executor
 from ai_native_cad.pipeline import (
+    review_part_create_request,
     run_assembly_part_request_pipeline,
+    run_part_request_review_pipeline,
     run_provider_create_pipeline,
     run_provider_normalized_create_pipeline,
     run_provider_normalized_design_create_pipeline,
@@ -2296,6 +2298,210 @@ def test_part_create_request_is_sanitized_and_contains_no_provider_cad_or_privat
     assert "D:\\" not in serialized
     assert "api_key" not in serialized
     assert "transcript" not in serialized
+
+
+def _valid_part_create_request():
+    return pipeline_runner.create_part_request_from_assembly_plan(_part_request_assembly_plan())
+
+
+def test_part_request_review_pipeline_approves_valid_candidate_request(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    called = {"run_ir_pipeline": False}
+
+    def fake_run_ir_pipeline(*args, **kwargs):
+        called["run_ir_pipeline"] = True
+        raise AssertionError("part request review MVP must not run CAD execution")
+
+    monkeypatch.setattr(pipeline_runner, "run_ir_pipeline", fake_run_ir_pipeline)
+    output_dir = tmp_path / "outputs" / "part_request_review"
+    request_path = output_dir / "part_create_request.json"
+    output_dir.mkdir(parents=True)
+    request_path.write_text(json.dumps(_valid_part_create_request()), encoding="utf-8")
+
+    result = run_part_request_review_pipeline(request_path, output_dir=output_dir)
+
+    assert result["status"] == "approved"
+    assert result["success"] is True
+    assert called["run_ir_pipeline"] is False
+    assert (output_dir / "part_request_review.json").exists()
+    assert (output_dir / "report.json").exists()
+    assert (output_dir / "report.md").exists()
+    assert (output_dir / "agent_trace.json").exists()
+    assert not (output_dir / "input_ir.json").exists()
+    assert not (output_dir / "model.step").exists()
+    assert not (output_dir / "model.stl").exists()
+
+    review = json.loads((output_dir / "part_request_review.json").read_text(encoding="utf-8"))
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    assert review == result["part_request_review"]
+    assert review["artifact_type"] == "part_request_review"
+    assert review["schema_version"] == "0.1"
+    assert review["source_artifact"] == "part_create_request.json"
+    assert review["part_id"] == "base"
+    assert review["status"] == "approved"
+    assert review["review_result"] == "approved_for_single_part_planning"
+    assert review["checks"] == {
+        "has_part_brief": True,
+        "has_interface_constraints": True,
+        "is_reference_only": False,
+        "is_blocked": False,
+        "has_provider_generated_code": False,
+        "has_provider_generated_cad_ir": False,
+        "has_arbitrary_provider_fields": False,
+        "has_clear_related_parts": True,
+    }
+    assert "part_request.review_created" in review["diagnostic_codes"]
+    assert "part_request.approved_for_single_part_planning" in review["diagnostic_codes"]
+    assert review["blocked_reasons"] == []
+    assert review["revision_notes"] == []
+    assert report["cad_ir_created"] is False
+    assert report["part_modeling_started"] is False
+    assert trace["part_request_review"]["cad_ir_created"] is False
+    assert "run_ir_pipeline" not in json.dumps(trace, sort_keys=True)
+
+
+def test_part_request_review_missing_part_brief_needs_revision(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    request = _valid_part_create_request()
+    request["part_brief"] = "part"
+
+    result = run_part_request_review_pipeline(request, output_dir=tmp_path / "outputs" / "review_missing_brief")
+
+    review = result["part_request_review"]
+    assert result["status"] == "needs_revision"
+    assert review["review_result"] == "needs_revision_missing_part_brief"
+    assert review["checks"]["has_part_brief"] is False
+    assert "part_request.needs_revision_missing_part_brief" in review["diagnostic_codes"]
+    assert review["revision_notes"]
+
+
+def test_part_request_review_missing_assembly_interfaces_needs_revision(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    request = _valid_part_create_request()
+    request["interface_constraints"] = []
+
+    result = run_part_request_review_pipeline(request, output_dir=tmp_path / "outputs" / "review_missing_interfaces")
+
+    review = result["part_request_review"]
+    assert result["status"] == "needs_revision"
+    assert review["review_result"] == "needs_revision_missing_interface_constraints"
+    assert review["checks"]["has_interface_constraints"] is False
+    assert "part_request.needs_revision_missing_interface_constraints" in review["diagnostic_codes"]
+
+
+@pytest.mark.parametrize(
+    ("part_request_payload", "expected_code", "expected_result"),
+    [
+        (
+            {
+                **_valid_part_create_request(),
+                "part_id": "screws",
+                "status": "blocked_no_candidate_part",
+                "blocked_reasons": [{"code": "part_request.reference_only_not_selectable"}],
+                "diagnostic_codes": ["part_request.reference_only_not_selectable"],
+            },
+            "part_request.blocked_reference_only",
+            "blocked_reference_only",
+        ),
+        (
+            {
+                **_valid_part_create_request(),
+                "part_id": "gear",
+                "status": "blocked_no_candidate_part",
+                "blocked_reasons": [{"code": "part_request.blocked_part_not_selectable"}],
+                "diagnostic_codes": ["part_request.blocked_part_not_selectable"],
+            },
+            "part_request.blocked_unsupported_part",
+            "blocked_unsupported_part",
+        ),
+    ],
+)
+def test_part_request_review_blocks_reference_only_and_unsupported_requests(
+    tmp_path,
+    monkeypatch,
+    part_request_payload,
+    expected_code,
+    expected_result,
+):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+
+    result = run_part_request_review_pipeline(part_request_payload, output_dir=tmp_path / "outputs" / expected_result)
+
+    review = result["part_request_review"]
+    assert result["status"] == "blocked"
+    assert review["review_result"] == expected_result
+    assert expected_code in review["diagnostic_codes"]
+    assert {"code": expected_code} in review["blocked_reasons"]
+    assert not (Path(result["output_dir"]) / "input_ir.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected_code", "check_name"),
+    [
+        ({"python_code": "import cadquery as cq"}, "part_request.blocked_provider_generated_code", "has_provider_generated_code"),
+        ({"cad_ir": {"part_type": "spacer"}}, "part_request.blocked_provider_generated_cad_ir", "has_provider_generated_cad_ir"),
+        ({"provider_response": {"raw": "secret provider payload"}}, "part_request.blocked_provider_generated_code", "has_arbitrary_provider_fields"),
+    ],
+)
+def test_part_request_review_blocks_provider_generated_or_arbitrary_provider_fields(
+    tmp_path,
+    monkeypatch,
+    extra,
+    expected_code,
+    check_name,
+):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    request = {**_valid_part_create_request(), **extra}
+
+    result = run_part_request_review_pipeline(request, output_dir=tmp_path / "outputs" / f"review_{check_name}")
+
+    review = result["part_request_review"]
+    assert result["status"] == "blocked"
+    assert review["checks"][check_name] is True
+    assert expected_code in review["diagnostic_codes"]
+    assert {"code": expected_code} in review["blocked_reasons"]
+
+
+def test_part_request_review_artifact_is_sanitized(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    request = {
+        **_valid_part_create_request(),
+        "provider_response": {"raw": "secret provider payload"},
+        "raw_transcript": "private transcript",
+        "api_key": "secret",
+        "local_path": r"D:\private\run",
+        "python_code": "import cadquery as cq",
+        "cad_ir": {"part_type": "spacer"},
+    }
+    output_dir = tmp_path / "outputs" / "review_privacy"
+
+    result = run_part_request_review_pipeline(request, output_dir=output_dir)
+
+    review = json.loads((output_dir / "part_request_review.json").read_text(encoding="utf-8"))
+    serialized = json.dumps({
+        "result": result,
+        "review": review,
+        "report": json.loads((output_dir / "report.json").read_text(encoding="utf-8")),
+        "trace": json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8")),
+    }, sort_keys=True)
+    review_serialized = json.dumps(review, sort_keys=True)
+    assert "secret provider payload" not in serialized
+    assert "private transcript" not in serialized
+    assert "api_key" not in serialized
+    assert "D:\\private" not in serialized
+    assert "python_code" not in review_serialized
+    assert "\"cad_ir\": {" not in review_serialized
+    assert "import cadquery" not in serialized.lower()
+
+
+def test_part_request_review_exports_are_available():
+    import ai_native_cad.pipeline as pipeline
+
+    assert pipeline.review_part_create_request is review_part_create_request
+    assert pipeline.run_part_request_review_pipeline is run_part_request_review_pipeline
+    assert "review_part_create_request" in pipeline.__all__
+    assert "run_part_request_review_pipeline" in pipeline.__all__
 
 
 @pytest.mark.parametrize(

@@ -107,3 +107,7 @@ An assembly plan can also be compiled into `part_create_request.json` with
 candidate part for review and preserves relevant interface constraints. It is
 still planning-only: it does not mean CadFlow generated the part CAD, and it
 does not write per-part `input_ir.json`, STEP/STL, or provider-generated code.
+
+`run_part_request_review_pipeline(...)` can then write
+`part_request_review.json` with `approved`, `needs_revision`, or `blocked`
+status. This is also planning/review only and does not start CAD execution.
