@@ -147,6 +147,29 @@ JSON-contract request through the active provider adapter and returns only a
 sanitized status, provider identity, operation, and compact contract summary.
 The check does not write run artifacts.
 
+Provider-backed create has two explicit runtime modes:
+
+- `strict`: direct provider-to-CadFlow-contract mode. The provider must return
+  valid `requirement.json` and `planning_artifact.json` contracts. This is
+  useful for provider/schema compliance testing, and it is not the recommended
+  default user path.
+- `extract_then_compile`: product-oriented normalized workflow mode. The
+  provider extracts structured intent, fields, and constraints; CadFlow locally
+  compiles and validates internal requirement/planning contracts, converts those
+  contracts deterministically to CAD IR, and then runs `run_ir_pipeline`.
+
+Use `run_provider_normalized_create_pipeline(...)` for the recommended
+provider-backed create workflow. It does not accept provider-generated CAD IR,
+provider-generated CadQuery/Python code, or arbitrary provider fields as
+generation authority. `run_provider_create_pipeline(...)` remains available in
+strict mode for provider contract compliance testing and must not silently
+fallback.
+
+The current fixed provider eval result of 8/10 pipeline success + 2 expected
+blocked in `extract_then_compile` means all supported eval cases passed and
+unsupported/unsafe cases blocked correctly. It does not claim production
+readiness.
+
 ### 3. LLMApiAgentAdapter
 
 The LLM API adapter is still the future product-level adapter, but the

@@ -11,6 +11,7 @@ __all__ = [
     "contract_guide_for",
     "knowledge_summary_for",
     "provider_messages_for",
+    "provider_request_trace_summary",
     "sanitize_provider_payload",
     "sanitize_provider_string",
     "system_prompt_for",
@@ -63,9 +64,17 @@ _OPERATION_STAGE = {
 _CONTRACT_GUIDES = {
     "parse_requirement": (
         "Operation contract: parse_requirement. Return a requirement.json object with part_type "
-        "and dimensions. Optional fields include unit, features, assumptions, missing_information, "
-        "follow_up_questions, follow_up_requests, and requirement_status. Use requirement_status "
-        "to show whether generation can proceed or user input is needed."
+        "and dimensions. dimensions MUST be a JSON object. features MUST be a JSON object, never "
+        "an array; use nested objects such as {\"holes\": {\"count\": 4, \"diameter\": 4}}. "
+        "Optional fields include unit, features, assumptions, missing_information, "
+        "follow_up_questions, follow_up_requests, and requirement_status. requirement_status MUST "
+        "be a JSON object when present, never a string; include complete_for_generation, "
+        "needs_user_input, blocking_fields, missing_count, and follow_up_count. Return this shape: "
+        "{\"part_type\":\"...\",\"unit\":\"mm\",\"dimensions\":{},\"features\":{},"
+        "\"assumptions\":[],\"missing_information\":[],\"follow_up_questions\":[],"
+        "\"follow_up_requests\":[],\"requirement_status\":{\"complete_for_generation\":true,"
+        "\"needs_user_input\":false,\"blocking_fields\":[],\"missing_count\":0,"
+        "\"follow_up_count\":0}}."
     ),
     "create_plan": (
         "Operation contract: create_plan. Return planning_artifact.json with artifact_type='planning', "
@@ -231,6 +240,35 @@ def provider_messages_for(
     ]
 
 
+def provider_request_trace_summary(
+    *,
+    operation: str,
+    provider_identity: dict[str, Any],
+    message_count: int,
+    payload_shape: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return privacy-safe metadata describing a provider request shape."""
+
+    knowledge = knowledge_summary_for(operation, context)
+    safe_identity = _safe_trace_provider_identity(provider_identity)
+    selected = knowledge["selected"]
+    return {
+        "operation": operation,
+        "stage": knowledge["stage"],
+        "provider_identity": safe_identity,
+        "message_count": message_count,
+        "context_shape": {
+            "has_global_rules": True,
+            "has_stage_skill": True,
+            "has_contract_guide": True,
+            "selected_knowledge_count": len(selected),
+        },
+        "knowledge_ids": [str(item["id"]) for item in selected if isinstance(item, dict) and "id" in item],
+        "payload_shape": _safe_payload_shape(payload_shape),
+    }
+
+
 def sanitize_provider_payload(value: Any, *, preserve_cad_paths: bool = False) -> Any:
     """Remove provider-private fields and redact private string content."""
 
@@ -333,3 +371,44 @@ def _sanitize_provider_string(value: str) -> str:
     value = _API_ENV_VAR_RE.sub("[redacted-api-env-var]", value)
     value = _SECRET_VALUE_RE.sub("[redacted-secret]", value)
     return value
+
+
+def _safe_trace_provider_identity(identity: dict[str, Any]) -> dict[str, Any]:
+    blocked_tokens = (
+        "key",
+        "secret",
+        "token",
+        "password",
+        "credential",
+        "prompt",
+        "message",
+        "transcript",
+        "response",
+        "path",
+        "env",
+    )
+    sanitized: dict[str, Any] = {}
+    for key, value in identity.items():
+        lowered = str(key).lower()
+        if any(token in lowered for token in blocked_tokens):
+            continue
+        if isinstance(value, str):
+            sanitized[key] = _sanitize_provider_string(value)
+        elif isinstance(value, (int, float, bool)) or value is None:
+            sanitized[key] = value
+    return sanitized
+
+
+def _safe_payload_shape(payload_shape: dict[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    kind = payload_shape.get("kind")
+    if isinstance(kind, str):
+        safe["kind"] = _sanitize_provider_string(kind)
+    top_level_keys = payload_shape.get("top_level_keys")
+    if isinstance(top_level_keys, list):
+        safe["top_level_keys"] = [
+            _sanitize_provider_string(str(key))
+            for key in top_level_keys
+            if isinstance(key, (str, int, float, bool))
+        ]
+    return safe

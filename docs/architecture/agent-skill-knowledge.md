@@ -16,6 +16,22 @@ Workflow stage
 The provider is replaceable. CadFlow owns context assembly, privacy filtering,
 local validation, artifact persistence, gates, and deterministic execution.
 
+For provider-backed create, the recommended product path is the explicit
+normalized workflow:
+
+```text
+prompt
+  -> provider extraction
+  -> local requirement/planning compiler
+  -> deterministic CAD IR conversion
+  -> run_ir_pipeline
+```
+
+This is exposed as `run_provider_normalized_create_pipeline(...)` and maps to
+`extract_then_compile` mode internally. Strict provider contract mode remains
+available for compliance testing, where provider outputs must directly satisfy
+CadFlow contracts and no silent fallback is allowed.
+
 ## Concepts
 
 ### Agent

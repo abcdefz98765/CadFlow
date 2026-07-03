@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_native_cad.agents.base import AgentAdapter
+from ai_native_cad.agents.json_contract import JsonContractProviderError
 from ai_native_cad.agents.validation import validate_input_ir_draft
 from ai_native_cad.cad_ir.parser import ir_from_planning_artifact
 from ai_native_cad.cad_ir.schema import CADIR
@@ -19,6 +20,211 @@ from ai_native_cad.requirements import RequirementAgent
 from ai_native_cad.workflow_control import cad_ir_to_part_modeling_decision, is_proceed_action
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def run_provider_create_pipeline(
+    prompt: str,
+    adapter: AgentAdapter,
+    output_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+    fallback_mode: str = "none",
+    provider_contract_mode: str = "strict",
+) -> dict[str, Any]:
+    """Run provider Requirement + Planning into deterministic CAD generation.
+
+    The provider participates only in parse_requirement and create_plan. CAD IR
+    conversion and CAD execution stay local and validated. The default
+    ``strict`` mode is a provider contract compliance path: provider outputs
+    must already satisfy CadFlow contracts and are not silently compiled.
+    """
+
+    if fallback_mode not in {"none", "explicit"}:
+        raise ValueError("fallback_mode must be 'none' or 'explicit'")
+    if provider_contract_mode not in {"strict", "extract_then_compile"}:
+        raise ValueError("provider_contract_mode must be 'strict' or 'extract_then_compile'")
+
+    output_path = _resolve_output_dir(_agent_create_dir_name(prompt), output_root, output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    (output_path / "prompt.txt").write_text(prompt.strip() + "\n", encoding="utf-8")
+    context = {
+        "workflow_stage": "provider_create",
+        "target_contract": "provider_requirement_planning_create_v0.1",
+        "output_dir": str(output_path),
+    }
+    if provider_contract_mode == "extract_then_compile":
+        context["provider_contract_mode"] = provider_contract_mode
+    provider_traces: list[dict[str, Any]] = []
+
+    try:
+        requirement = adapter.parse_requirement(prompt, context=context)
+    except JsonContractProviderError as exc:
+        trace = _provider_stage_trace(adapter, "parse_requirement", validation_status="not_run", error_category=exc.category)
+        provider_traces.append(trace)
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_requirement",
+            blocked_stage="requirement",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            error_category=exc.category,
+            provider_contract_mode=provider_contract_mode,
+        )
+    except Exception:
+        trace = _provider_stage_trace(
+            adapter,
+            "parse_requirement",
+            validation_status="failed",
+            error_category="local_validation_failed",
+        )
+        provider_traces.append(trace)
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_validation",
+            blocked_stage="requirement",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            error_category="local_validation_failed",
+            provider_contract_mode=provider_contract_mode,
+        )
+
+    _write_json(output_path / "requirement.json", requirement)
+    requirement_decision = requirement.get("requirement_status", {}).get("flow_decision", {})
+    requirement_trace = _provider_stage_trace(adapter, "parse_requirement", validation_status="passed")
+    provider_traces.append(requirement_trace)
+    if not is_proceed_action(requirement_decision.get("action")):
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_requirement",
+            blocked_stage="requirement",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            requirement=requirement,
+            error_category="requirement_gate_blocked",
+            provider_contract_mode=provider_contract_mode,
+        )
+
+    try:
+        planning_artifact = adapter.create_plan(requirement, context=context)
+    except JsonContractProviderError as exc:
+        trace = _provider_stage_trace(adapter, "create_plan", validation_status="not_run", error_category=exc.category)
+        provider_traces.append(trace)
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_planning",
+            blocked_stage="planning",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            requirement=requirement,
+            error_category=exc.category,
+            provider_contract_mode=provider_contract_mode,
+        )
+    except Exception:
+        trace = _provider_stage_trace(
+            adapter,
+            "create_plan",
+            validation_status="failed",
+            error_category="local_validation_failed",
+        )
+        provider_traces.append(trace)
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_validation",
+            blocked_stage="planning",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            requirement=requirement,
+            error_category="local_validation_failed",
+            provider_contract_mode=provider_contract_mode,
+        )
+
+    _write_json(output_path / "planning_artifact.json", planning_artifact)
+    planning_trace = _provider_stage_trace(adapter, "create_plan", validation_status="passed")
+    provider_traces.append(planning_trace)
+    planning_decision = planning_artifact.get("flow_gate_status", {}).get("rework_decision", {})
+    if not is_proceed_action(planning_decision.get("action")):
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_planning",
+            blocked_stage="planning",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            requirement=requirement,
+            planning_artifact=planning_artifact,
+            error_category="planning_gate_blocked",
+            provider_contract_mode=provider_contract_mode,
+        )
+
+    try:
+        ir = ir_from_planning_artifact(planning_artifact)
+        input_ir = ir.to_dict()
+        validate_input_ir_draft(input_ir)
+    except Exception:
+        return _write_blocked_provider_create_result(
+            output_path=output_path,
+            status="blocked_provider_validation",
+            blocked_stage="cad_ir",
+            adapter=adapter,
+            provider_traces=provider_traces,
+            requirement=requirement,
+            planning_artifact=planning_artifact,
+            error_category="cad_ir_validation_failed",
+            provider_contract_mode=provider_contract_mode,
+        )
+
+    _write_json(output_path / "input_ir.json", input_ir)
+    result = run_ir_pipeline(input_ir, output_dir=output_path)
+    metadata = _provider_create_metadata(
+        adapter=adapter,
+        provider_traces=provider_traces,
+        status=result.get("status", "unknown"),
+        provider_contract_mode=provider_contract_mode,
+        requirement_status="passed",
+        planning_status="passed",
+        ir_validation_status="passed",
+        pipeline_status=result.get("status", "unknown"),
+    )
+    _merge_provider_create_metadata(output_path, metadata)
+    _write_provider_create_runtime(output_path, metadata, status=result.get("status", "unknown"))
+    files = _collect_files(output_path)
+    result.update({
+        "requirement": requirement,
+        "planning_artifact": planning_artifact,
+        "input_ir": input_ir,
+        "provider_create": metadata,
+        "files": files,
+    })
+    trace_path = output_path / "agent_trace.json"
+    if trace_path.exists():
+        result["agent_trace"] = json.loads(trace_path.read_text(encoding="utf-8"))
+    return result
+
+
+def run_provider_normalized_create_pipeline(
+    prompt: str,
+    adapter: AgentAdapter,
+    output_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+    fallback_mode: str = "none",
+) -> dict[str, Any]:
+    """Run the recommended provider-backed normalized create workflow.
+
+    Workflow:
+    prompt -> provider extraction -> local requirement/planning compiler ->
+    deterministic CAD IR conversion -> run_ir_pipeline.
+
+    Provider output is treated as extracted intent/fields/constraints. CadFlow
+    owns the internal requirement/planning contracts, CAD IR conversion, and CAD
+    execution. This entry point never accepts provider-generated CAD IR or code.
+    """
+
+    return run_provider_create_pipeline(
+        prompt,
+        adapter,
+        output_dir=output_dir,
+        output_root=output_root,
+        fallback_mode=fallback_mode,
+        provider_contract_mode="extract_then_compile",
+    )
 
 
 def run_agent_create_pipeline(
@@ -971,7 +1177,7 @@ def _safe_provider_identity(adapter: AgentAdapter) -> dict[str, Any]:
     identity = getattr(adapter, "provider_identity", {})
     if not isinstance(identity, dict):
         return {}
-    blocked_tokens = ("key", "secret", "token", "password", "prompt", "transcript", "path")
+    blocked_tokens = ("key", "secret", "token", "password", "prompt", "transcript", "path", "env")
     safe: dict[str, Any] = {}
     for key, value in identity.items():
         if any(token in str(key).lower() for token in blocked_tokens):
@@ -979,6 +1185,222 @@ def _safe_provider_identity(adapter: AgentAdapter) -> dict[str, Any]:
         if isinstance(value, (str, int, float, bool)) or value is None:
             safe[key] = value
     return safe
+
+
+def _provider_stage_trace(
+    adapter: AgentAdapter,
+    operation: str,
+    *,
+    validation_status: str,
+    error_category: str | None = None,
+) -> dict[str, Any]:
+    trace = getattr(adapter, "last_provider_request_trace", None)
+    if isinstance(trace, dict):
+        safe_trace = json.loads(json.dumps(trace))
+    else:
+        safe_trace = {
+            "operation": operation,
+            "stage": "requirement" if operation == "parse_requirement" else "planning",
+            "provider_identity": _safe_provider_identity(adapter),
+            "message_count": 0,
+            "context_shape": {},
+            "knowledge_ids": [],
+            "payload_shape": {},
+        }
+    safe_trace["validation_status"] = validation_status
+    if error_category:
+        safe_trace["error_category"] = error_category
+    return safe_trace
+
+
+def _provider_create_metadata(
+    *,
+    adapter: AgentAdapter,
+    provider_traces: list[dict[str, Any]],
+    status: str,
+    provider_contract_mode: str,
+    requirement_status: str,
+    planning_status: str,
+    ir_validation_status: str,
+    pipeline_status: str,
+    error_category: str | None = None,
+    blocked_stage: str | None = None,
+) -> dict[str, Any]:
+    metadata = {
+        "workflow": "provider_create",
+        "version": "provider-requirement-planning-create-v0.1",
+        "provider_contract_mode": provider_contract_mode,
+        "workflow_mode": "normalized_provider_create"
+        if provider_contract_mode == "extract_then_compile"
+        else "provider_contract_compliance",
+        "status": status,
+        "adapter": _safe_provider_identity(adapter),
+        "stages": [
+            "prompt",
+            "parse_requirement",
+            "create_plan",
+            "planning_to_cad_ir",
+            "run_ir_pipeline",
+        ],
+        "artifacts": {
+            "prompt": "prompt.txt",
+            "requirement": "requirement.json",
+            "planning_artifact": "planning_artifact.json",
+            "input_ir": "input_ir.json",
+        },
+        "requirement_status": requirement_status,
+        "planning_status": planning_status,
+        "ir_validation_status": ir_validation_status,
+        "pipeline_status": pipeline_status,
+        "provider_request_traces": provider_traces,
+    }
+    if error_category:
+        metadata["error_category"] = error_category
+    if blocked_stage:
+        metadata["blocked_stage"] = blocked_stage
+    return metadata
+
+
+def _merge_provider_create_metadata(output_dir: Path, metadata: dict[str, Any]) -> None:
+    trace_path = output_dir / "agent_trace.json"
+    if trace_path.exists():
+        trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    else:
+        trace = {}
+    trace["provider_create"] = metadata
+    trace_path.write_text(json.dumps(trace, indent=2) + "\n", encoding="utf-8")
+
+    report_path = output_dir / "report.json"
+    if report_path.exists():
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        report["provider_create"] = metadata
+        report["files"] = _collect_files(output_dir)
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+    report_md_path = output_dir / "report.md"
+    if report_md_path.exists():
+        report_md = report_md_path.read_text(encoding="utf-8")
+        report_md += (
+            "\n## Provider Create Workflow\n\n"
+            f"- Requirement status: `{metadata.get('requirement_status')}`\n"
+            f"- Planning status: `{metadata.get('planning_status')}`\n"
+            f"- IR validation status: `{metadata.get('ir_validation_status')}`\n"
+            f"- Pipeline status: `{metadata.get('pipeline_status')}`\n"
+        )
+        report_md_path.write_text(report_md, encoding="utf-8")
+
+
+def _write_blocked_provider_create_result(
+    *,
+    output_path: Path,
+    status: str,
+    blocked_stage: str,
+    adapter: AgentAdapter,
+    provider_traces: list[dict[str, Any]],
+    error_category: str,
+    provider_contract_mode: str,
+    requirement: dict[str, Any] | None = None,
+    planning_artifact: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    requirement_status = "passed" if requirement is not None else "not_run"
+    planning_status = "passed" if planning_artifact is not None else "not_run"
+    if blocked_stage == "requirement":
+        requirement_status = "failed"
+    elif blocked_stage == "planning":
+        planning_status = "failed"
+    metadata = _provider_create_metadata(
+        adapter=adapter,
+        provider_traces=provider_traces,
+        status=status,
+        provider_contract_mode=provider_contract_mode,
+        requirement_status=requirement_status,
+        planning_status=planning_status,
+        ir_validation_status="not_run" if blocked_stage != "cad_ir" else "failed",
+        pipeline_status="not_run",
+        error_category=error_category,
+        blocked_stage=blocked_stage,
+    )
+    trace = {
+        "total_attempts": 0,
+        "steps": [{
+            "attempt": 0,
+            "status": "blocked",
+            "stage": blocked_stage,
+            "error_category": error_category,
+        }],
+        "final_selected_candidate": None,
+        "provider_create": metadata,
+    }
+    _write_json(output_path / "agent_trace.json", trace)
+    report = {
+        "success": False,
+        "status": status,
+        "blocked_stage": blocked_stage,
+        "error_category": error_category,
+        "cad_ir_created": (output_path / "input_ir.json").exists(),
+        "part_modeling_started": False,
+        "provider_create": metadata,
+        "files": _collect_files(output_path),
+    }
+    if requirement is not None:
+        report["requirement_status"] = requirement.get("requirement_status", {})
+        report["part_type"] = requirement.get("part_type")
+        report["part_name"] = requirement.get("instance_name") or requirement.get("part_name") or requirement.get("part_type")
+    if planning_artifact is not None:
+        report["planning_gate_status"] = planning_artifact.get("flow_gate_status")
+    _write_json(output_path / "report.json", report)
+    _write_blocked_provider_create_report_md(output_path, report)
+    files = _collect_files(output_path)
+    report["files"] = files
+    _write_json(output_path / "report.json", report)
+    _write_provider_create_runtime(output_path, metadata, status=status)
+    return {
+        "status": status,
+        "success": False,
+        "blocked_stage": blocked_stage,
+        "error_category": error_category,
+        "output_dir": str(output_path),
+        "requirement": requirement,
+        "planning_artifact": planning_artifact,
+        "provider_create": metadata,
+        "agent_trace": trace,
+        "files": files,
+        "report_json": str(output_path / "report.json"),
+        "report_md": str(output_path / "report.md"),
+    }
+
+
+def _write_blocked_provider_create_report_md(output_path: Path, report: dict[str, Any]) -> None:
+    lines = [
+        "# Provider Create Report",
+        "",
+        f"**Status:** {report.get('status')}",
+        f"**Blocked stage:** {report.get('blocked_stage')}",
+        f"**Error category:** `{report.get('error_category')}`",
+        "",
+        "Provider-backed create stopped before CAD execution.",
+    ]
+    (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_provider_create_runtime(output_dir: Path, metadata: dict[str, Any], *, status: str) -> None:
+    runtime_path = output_dir / "logs" / "runtime.json"
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime = _read_json_if_present(runtime_path)
+    runtime["provider_create"] = metadata
+    runtime["workflow_console"] = {
+        "latest_stage": {
+            "stage": "provider_create",
+            "status": status,
+            "adapter_activity": {
+                "operation": "provider_create",
+                "provider_identity": metadata.get("adapter", {}),
+                "request_trace_summaries": metadata.get("provider_request_traces", []),
+            },
+        },
+        "stage_count": 1,
+    }
+    _write_json(runtime_path, runtime)
 
 
 def _merge_agent_create_metadata(output_dir: Path, planning_metadata: dict[str, Any]) -> None:

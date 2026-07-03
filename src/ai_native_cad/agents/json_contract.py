@@ -10,6 +10,7 @@ from ai_native_cad.agents.base import AgentAdapter
 from ai_native_cad.agents.provider_context import (
     contract_guide_for,
     provider_messages_for,
+    provider_request_trace_summary,
     sanitize_provider_payload,
     sanitize_provider_string,
 )
@@ -141,6 +142,7 @@ class JsonContractAgentAdapter(AgentAdapter):
             self._config = config
         else:
             self._config = JsonContractProviderConfig.from_mapping(config)
+        self._last_provider_request_trace: dict[str, Any] | None = None
 
     @property
     def provider_identity(self) -> dict[str, Any]:
@@ -150,19 +152,38 @@ class JsonContractAgentAdapter(AgentAdapter):
             identity.update(_sanitize_provider_identity(client_identity))
         return identity
 
+    @property
+    def last_provider_request_trace(self) -> dict[str, Any] | None:
+        if self._last_provider_request_trace is None:
+            return None
+        return dict(self._last_provider_request_trace)
+
     def parse_requirement(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
-        request = self._with_provider_options(_requirement_contract_request(prompt, context or {}))
+        context = context or {}
+        request = self._with_provider_options(_requirement_contract_request(prompt, context))
         raw_response = _call_json_client(self.client, request, "parse_requirement")
-        requirement = _extract_json_object(raw_response)
+        provider_requirement = _extract_json_object(raw_response)
+        requirement = (
+            _compile_provider_requirement(prompt, provider_requirement)
+            if _uses_provider_contract_compiler(context)
+            else provider_requirement
+        )
         validate_requirement_draft(requirement)
         return requirement
 
     def create_plan(self, requirement: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+        context = context or {}
         validate_requirement_draft(requirement)
-        request = self._with_provider_options(_planning_contract_request(requirement, context or {}))
+        request = self._with_provider_options(_planning_contract_request(requirement, context))
         raw_response = _call_json_client(self.client, request, "create_plan")
         planning_artifact = _extract_json_object(raw_response)
-        validate_planning_draft(planning_artifact)
+        try:
+            validate_planning_draft(planning_artifact)
+        except Exception:
+            if not _uses_provider_contract_compiler(context):
+                raise
+            planning_artifact = _compile_provider_planning(requirement)
+            validate_planning_draft(planning_artifact)
         return planning_artifact
 
     def parse_revision_request(
@@ -217,6 +238,14 @@ class JsonContractAgentAdapter(AgentAdapter):
     def _with_provider_options(self, request: dict[str, Any]) -> dict[str, Any]:
         request = dict(request)
         request["provider_options"] = self._config.request_options()
+        request["request_trace_summary"] = provider_request_trace_summary(
+            operation=str(request["operation"]),
+            provider_identity=self.provider_identity,
+            message_count=len(request.get("messages", [])),
+            payload_shape=request.get("payload_shape", {}),
+            context=request.get("context"),
+        )
+        self._last_provider_request_trace = dict(request["request_trace_summary"])
         return request
 
 
@@ -232,6 +261,7 @@ def _requirement_contract_request(prompt: str, context: dict[str, Any]) -> dict[
             context=sanitized_context,
         ),
         "context": sanitized_context,
+        "payload_shape": {"kind": "prompt_payload", "top_level_keys": ["prompt"]},
     }
 
 
@@ -248,6 +278,7 @@ def _planning_contract_request(requirement: dict[str, Any], context: dict[str, A
             context=sanitized_context,
         ),
         "context": sanitized_context,
+        "payload_shape": _payload_shape_for("requirement_payload", sanitized_requirement),
     }
 
 
@@ -265,6 +296,7 @@ def _repair_contract_request(failure: dict[str, Any], ir: dict[str, Any], contex
             context=sanitized_context,
         ),
         "context": sanitized_context,
+        "payload_shape": {"kind": "repair_payload", "top_level_keys": ["failure", "ir"]},
     }
 
 
@@ -285,6 +317,7 @@ def _revision_intent_contract_request(
             context=sanitized_context,
         ),
         "context": sanitized_context,
+        "payload_shape": {"kind": "revision_intent_payload", "top_level_keys": ["model_context", "prompt"]},
     }
 
 
@@ -306,6 +339,7 @@ def _revision_plan_contract_request(
             context=sanitized_context,
         ),
         "context": sanitized_context,
+        "payload_shape": {"kind": "revision_plan_payload", "top_level_keys": ["change_intent", "model_context"]},
     }
 
 
@@ -323,16 +357,23 @@ def _review_contract_request(report: dict[str, Any], trace: dict[str, Any], cont
             context=sanitized_context,
         ),
         "context": sanitized_context,
+        "payload_shape": {"kind": "review_payload", "top_level_keys": ["report", "trace"]},
     }
 
 
 def _contract_context(context: dict[str, Any]) -> dict[str, Any]:
-    allowed_keys = ("overrides", "workflow_stage", "target_contract")
+    allowed_keys = ("overrides", "workflow_stage", "target_contract", "provider_contract_mode")
     return {
         key: sanitize_provider_payload(context[key], preserve_cad_paths=True)
         for key in allowed_keys
         if key in context
     }
+
+
+def _payload_shape_for(kind: str, payload: Any) -> dict[str, Any]:
+    if isinstance(payload, dict):
+        return {"kind": kind, "top_level_keys": sorted(str(key) for key in payload)}
+    return {"kind": kind, "top_level_keys": []}
 
 
 def _call_json_client(client: JsonContractClient | JsonContractCallable, request: dict[str, Any], operation: str) -> Any:
@@ -351,6 +392,217 @@ def _call_json_client(client: JsonContractClient | JsonContractCallable, request
             retryable=_provider_error_retryable(exc),
         ) from None
     raise TypeError("JSON contract client must be callable or implement generate_json_contract(request)")
+
+
+def _uses_provider_contract_compiler(context: dict[str, Any]) -> bool:
+    return context.get("provider_contract_mode") == "extract_then_compile"
+
+
+def _compile_provider_requirement(prompt: str, provider_requirement: dict[str, Any]) -> dict[str, Any]:
+    """Compile provider-extracted fields into the local requirement contract."""
+
+    from ai_native_cad.generator import list_parts
+    from ai_native_cad.requirements import RequirementAgent
+
+    if not isinstance(provider_requirement, dict):
+        raise ValueError("provider requirement extraction must be a JSON object")
+
+    overrides: dict[str, Any] = {}
+    part_type = _normalized_part_type(provider_requirement.get("part_type"), prompt=prompt)
+    if part_type is not None:
+        if part_type not in set(list_parts()):
+            raise ValueError(f"unsupported provider part_type: {part_type}")
+        overrides["part_type"] = part_type
+    dimensions = _normalized_dimensions(provider_requirement.get("dimensions"), part_type=part_type)
+    if dimensions:
+        overrides["dimensions"] = dimensions
+    features = _normalized_features(provider_requirement.get("features"), part_type=part_type)
+    if features:
+        overrides["features"] = features
+    unit = provider_requirement.get("unit")
+    if isinstance(unit, str) and unit.strip().lower() in {"mm", "millimeter", "millimeters", "millimetre", "millimetres"}:
+        overrides["unit"] = "mm"
+    outputs = provider_requirement.get("outputs")
+    if isinstance(outputs, list):
+        safe_outputs = [item.lower() for item in outputs if isinstance(item, str) and item.lower() in {"step", "stl"}]
+        if safe_outputs:
+            overrides["outputs"] = sorted(set(safe_outputs))
+    check_level = provider_requirement.get("check_level")
+    if isinstance(check_level, str) and check_level.strip():
+        overrides["check_level"] = check_level
+    assumptions = provider_requirement.get("assumptions")
+    if isinstance(assumptions, list):
+        safe_assumptions = [item for item in assumptions if isinstance(item, str) and item.strip()]
+        if safe_assumptions:
+            overrides["assumptions"] = safe_assumptions
+
+    return RequirementAgent().parse(prompt, overrides=overrides)
+
+
+def _compile_provider_planning(requirement: dict[str, Any]) -> dict[str, Any]:
+    """Compile a validated requirement into local planning when provider shape drifts."""
+
+    from ai_native_cad.planning import create_planning_artifact
+
+    return create_planning_artifact(requirement)
+
+
+def _normalized_part_type(value: Any, *, prompt: str = "") -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "washer": "spacer",
+        "spacer_washer": "spacer",
+        "right_angle_bracket": "simple_bracket",
+        "l_bracket": "simple_bracket",
+        "angle_bracket": "simple_bracket",
+        "button": "circular_button",
+        "round_button": "circular_button",
+        "plate": "mounting_plate",
+        "pcb_plate": "mounting_plate",
+    }
+    if normalized == "bracket" and _looks_like_simple_bracket_prompt(prompt):
+        return "simple_bracket"
+    return aliases.get(normalized, normalized)
+
+
+def _looks_like_simple_bracket_prompt(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return (
+        "simple" in lowered
+        or "right-angle" in lowered
+        or "right angle" in lowered
+        or "l-bracket" in lowered
+        or "l bracket" in lowered
+    )
+
+
+def _normalized_dimensions(value: Any, *, part_type: str | None) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    dimensions: dict[str, Any] = {}
+    aliases = _dimension_aliases(part_type)
+    supported = _supported_dimension_names(part_type)
+    for raw_key, raw_value in value.items():
+        if not isinstance(raw_key, str):
+            continue
+        key = raw_key.strip().lower().replace("-", "_").replace(" ", "_")
+        key = aliases.get(key, key)
+        number = _number_or_none(raw_value)
+        if number is not None and (supported is None or key in supported):
+            dimensions[key] = number
+    if part_type == "circular_button":
+        if "body_diameter" in dimensions and "button_diameter" not in dimensions:
+            dimensions["button_diameter"] = dimensions["body_diameter"]
+        if "body_height" in dimensions and "button_height" not in dimensions:
+            dimensions["button_height"] = dimensions["body_height"]
+    return dimensions
+
+
+def _dimension_aliases(part_type: str | None) -> dict[str, str]:
+    common = {
+        "diameter": "body_diameter" if part_type == "circular_button" else "outer_diameter",
+        "height": "body_height" if part_type == "circular_button" else "thickness",
+        "thick": "thickness",
+    }
+    by_part = {
+        "spacer": {"od": "outer_diameter", "id": "inner_diameter", "inner_dia": "inner_diameter", "outer_dia": "outer_diameter"},
+        "circular_button": {"tall": "body_height", "button_dia": "button_diameter", "button_height": "button_height"},
+        "simple_bracket": {"length": "base_length", "width": "base_width", "tall": "height"},
+        "enclosure_base": {"length": "outer_length", "width": "outer_width", "depth": "outer_width", "height": "outer_height"},
+    }
+    aliases = dict(common)
+    aliases.update(by_part.get(part_type or "", {}))
+    return aliases
+
+
+def _supported_dimension_names(part_type: str | None) -> set[str] | None:
+    return {
+        "mounting_plate": {"length", "width", "thickness"},
+        "spacer": {"outer_diameter", "inner_diameter", "thickness"},
+        "simple_bracket": {"base_length", "base_width", "height", "thickness"},
+        "wall_bracket": {"base_width", "base_depth", "wall_height", "material_thickness"},
+        "circular_button": {"body_diameter", "body_height", "button_diameter", "button_height"},
+        "enclosure_base": {"outer_length", "outer_width", "outer_height", "wall_thickness"},
+        "enclosure_lid": {"length", "width", "thickness"},
+    }.get(part_type or "")
+
+
+def _normalized_features(value: Any, *, part_type: str | None) -> dict[str, Any]:
+    supported = _supported_feature_names(part_type)
+    if isinstance(value, dict):
+        return {
+            str(key): _normalized_feature_value(item)
+            for key, item in value.items()
+            if isinstance(key, str) and isinstance(item, dict) and (supported is None or key in supported)
+        }
+    if not isinstance(value, list):
+        return {}
+    features: dict[str, Any] = {}
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or item.get("type") or item.get("name") or "").lower()
+        if "hole" in kind or item.get("count") or item.get("diameter") or item.get("diameter_mm"):
+            key = "base_holes" if part_type == "simple_bracket" else "holes"
+            if supported is None or key in supported:
+                features[key] = _normalized_feature_value(item)
+    return features
+
+
+def _supported_feature_names(part_type: str | None) -> set[str] | None:
+    return {
+        "mounting_plate": {"holes", "mounting_holes", "chamfer"},
+        "spacer": set(),
+        "simple_bracket": {"holes", "base_holes", "fillet"},
+        "wall_bracket": {"base_holes", "wall_hole", "fillet"},
+        "circular_button": {
+            "switch_pocket",
+            "actuator_post",
+            "contact_slots",
+            "wire_exit",
+            "anti_slip_feet",
+            "edge_finish",
+        },
+        "enclosure_base": {"bosses", "bottom_cutout", "fillet"},
+        "enclosure_lid": {"holes", "chamfer"},
+    }.get(part_type or "")
+
+
+def _normalized_feature_value(value: dict[str, Any]) -> dict[str, Any]:
+    feature: dict[str, Any] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key).strip().lower().replace("-", "_").replace(" ", "_")
+        if key in {"kind", "name"}:
+            continue
+        if key == "diameter_mm":
+            key = "diameter"
+        if key == "pattern" and isinstance(raw_value, str) and raw_value.lower() == "corner":
+            feature["positions"] = "corner_4"
+        number = _number_or_none(raw_value)
+        if number is not None:
+            feature[key] = number
+        elif isinstance(raw_value, (str, bool)):
+            feature[key] = raw_value
+    return feature
+
+
+def _number_or_none(value: Any) -> float | int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+        return int(number) if number.is_integer() else number
+    return None
 
 
 def _provider_error_category(exc: Exception) -> str:

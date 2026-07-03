@@ -61,6 +61,46 @@ The planning artifacts are distinct:
 under `agent_create` so the Web Workflow Console can display planning stages
 without inventing a separate state store.
 
+### Provider Normalized Create Pipeline
+
+`run_provider_normalized_create_pipeline(...)` is the recommended
+provider-backed create workflow option.
+
+```text
+prompt
+  -> provider extraction
+  -> local requirement/planning compiler
+  -> deterministic CAD IR conversion
+  -> run_ir_pipeline(...)
+  -> report.json/report.md/agent_trace.json
+```
+
+This path is explicit `extract_then_compile` mode. The provider extracts
+structured intent, fields, and constraints; CadFlow compiles and validates
+`requirement.json` and `planning_artifact.json` locally before CAD IR
+conversion. Provider-generated CAD IR, provider-generated CadQuery/Python code,
+and arbitrary provider fields are not accepted as generation authority.
+
+`run_provider_create_pipeline(...)` remains available in `strict` mode for
+provider contract compliance testing:
+
+```text
+strict:
+  Direct provider-to-CadFlow-contract mode.
+  Useful for provider/schema compliance testing.
+  Not the recommended default user path.
+
+extract_then_compile:
+  Provider extracts structured intent/fields/constraints.
+  CadFlow compiles and validates internal contracts locally.
+  Recommended provider-backed create workflow path.
+```
+
+The fixed provider eval interpretation is intentionally narrow: 8/10 pipeline
+success + 2 expected blocked means all supported eval cases passed and
+unsupported/unsafe cases blocked correctly. It does not claim production
+readiness.
+
 ### Text Pipeline Fallback
 
 `examples/prompt_pipeline/` is a debug and exploration path from natural

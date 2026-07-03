@@ -17,6 +17,9 @@ from ai_native_cad.agents import (
 )
 from ai_native_cad.agents.provider_context import knowledge_summary_for, provider_messages_for
 from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
+import ai_native_cad.cadquery.executor as cadquery_executor
+from ai_native_cad.pipeline import run_provider_create_pipeline, run_provider_normalized_create_pipeline
+import ai_native_cad.pipeline.runner as pipeline_runner
 from ai_native_cad.workflow_console.stage_runner import StageRunner
 
 
@@ -290,6 +293,8 @@ def test_parse_requirement_provider_request_is_requirement_scoped():
 
     assert "Stage skill: requirement" in system_text
     assert "requirement_check_level_missing_information" in system_text
+    assert "features MUST be a JSON object" in system_text
+    assert "requirement_status MUST be a JSON object" in system_text
     assert "revision_supported_changes" not in system_text
     assert "revision_patch_contract" not in system_text
     assert "assembly" not in system_text.lower()
@@ -576,6 +581,87 @@ def test_json_contract_provider_config_is_secret_free_and_request_scoped():
     assert fake_client.requests[0]["provider_options"] == {"timeout_seconds": 12, "max_retries": 2}
 
 
+def test_json_contract_agent_adapter_records_provider_request_trace_summary():
+    fake_client = FakeJsonContractClient(
+        _valid_requirement_json(),
+        provider_identity={
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "api_key_env_var": "DEEPSEEK_API_KEY",
+            "prompt": "private prompt",
+            "local_path": r"D:\private\prompt.txt",
+        },
+    )
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    adapter.parse_requirement("Make a spacer washer.")
+
+    trace = adapter.last_provider_request_trace
+    assert trace == fake_client.requests[0]["request_trace_summary"]
+    assert trace["operation"] == "parse_requirement"
+    assert trace["stage"] == "requirement"
+    assert trace["provider_identity"] == {
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "adapter": "json_contract",
+        "network": "client_injected",
+        "enabled": False,
+        "timeout_seconds": 30,
+        "max_retries": 0,
+    }
+    assert trace["message_count"] == 4
+    assert trace["context_shape"] == {
+        "has_global_rules": True,
+        "has_stage_skill": True,
+        "has_contract_guide": True,
+        "selected_knowledge_count": 1,
+    }
+    assert trace["knowledge_ids"] == ["requirement_check_level_missing_information"]
+    assert trace["payload_shape"] == {"kind": "prompt_payload", "top_level_keys": ["prompt"]}
+
+
+def test_provider_request_trace_summary_excludes_sensitive_content():
+    fake_client = FakeJsonContractClient(
+        _valid_requirement_json(),
+        provider_identity={
+            "provider": "fake/json",
+            "model": "fake-requirement-v1",
+            "api_key": "fake-secret-value-123456",
+            "api_key_env_var": "CADFLOW_FAKE_API_KEY",
+            "provider_response": {"content": "raw provider body"},
+            "transcript": "raw chat transcript",
+            "workspace_path": r"D:\MyCode\llm2cad\secret",
+        },
+    )
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    adapter.parse_requirement(
+        r"Make a spacer at D:\private\prompt.txt using CADFLOW_FAKE_API_KEY and fake-secret-value-123456.",
+        context={
+            "workflow_stage": "requirement",
+            "overrides": {
+                "runtime_logs": ["raw runtime log"],
+                "provider_response": "raw provider body",
+                "api_key_env_var": "CADFLOW_FAKE_API_KEY",
+                "output_dir": r"D:\private\outputs",
+            },
+        },
+    )
+
+    serialized = json.dumps(adapter.last_provider_request_trace, sort_keys=True)
+    assert "Make a spacer" not in serialized
+    assert "messages" not in serialized
+    assert "raw provider body" not in serialized
+    assert "raw runtime log" not in serialized
+    assert "raw chat transcript" not in serialized
+    assert "fake-secret-value-123456" not in serialized
+    assert "CADFLOW_FAKE_API_KEY" not in serialized
+    assert "D:\\private" not in serialized
+    assert "D:\\MyCode" not in serialized
+    assert "api_key" not in serialized
+    assert "api_key_env_var" not in serialized
+
+
 def test_json_contract_agent_adapter_sanitizes_context_before_provider_request():
     fake_client = FakeJsonContractClient(_valid_requirement_json())
     adapter = JsonContractAgentAdapter(fake_client)
@@ -796,6 +882,655 @@ def test_json_contract_provider_error_shape_is_public_and_stable():
     }
 
 
+def test_provider_smoke_script_handles_missing_credentials_without_leaking_env_names(monkeypatch, capsys):
+    from examples.provider_smoke import parse_requirement_smoke
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    exit_code = parse_requirement_smoke.main(["--provider", "deepseek"])
+
+    output = capsys.readouterr().out
+    status = json.loads(output)
+    assert exit_code == 2
+    assert status["provider"] == "deepseek"
+    assert status["operation"] == "parse_requirement"
+    assert status["validation_status"] == "not_run"
+    assert status["status"] == "missing_provider_credentials"
+    assert status["selected_knowledge_ids"] == ["requirement_check_level_missing_information"]
+    assert status["message_count"] == 4
+    assert "DEEPSEEK_API_KEY" not in output
+    assert "Authorization" not in output
+    assert "Make an 80x40x5" not in output
+    assert "messages" not in output
+
+
+def test_provider_create_smoke_script_handles_missing_credentials_without_leaking_env_names(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from examples.provider_smoke import create_workflow_smoke
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+
+    exit_code = create_workflow_smoke.main([
+        "--provider",
+        "deepseek",
+        "--output-dir",
+        str(tmp_path / "outputs" / "provider_create_smoke_missing_credentials"),
+    ])
+
+    output = capsys.readouterr().out
+    status = json.loads(output)
+    assert exit_code == 2
+    assert status["provider"] == "deepseek"
+    assert status["requirement_status"] == "failed"
+    assert status["planning_status"] == "not_run"
+    assert status["ir_validation_status"] == "not_run"
+    assert status["pipeline_status"] == "not_run"
+    assert status["error_category"] == "auth_failed"
+    assert "DEEPSEEK_API_KEY" not in output
+    assert "Authorization" not in output
+    assert "Make an 80x40x5" not in output
+    assert "messages" not in output
+
+
+def test_provider_create_eval_aggregates_successful_and_blocked_cases(tmp_path):
+    from examples.provider_smoke import provider_create_eval
+
+    class FakeAdapter:
+        provider_identity = {"provider": "fake/json", "model": "fake-model"}
+
+    cases = [
+        {"case_id": "success_case", "prompt": "Make a spacer washer."},
+        {"case_id": "blocked_case", "prompt": "Make a mounting plate without dimensions."},
+    ]
+
+    def fake_runner(prompt, adapter, output_dir=None, provider_contract_mode="strict"):
+        if "without dimensions" in prompt:
+            return {
+                "status": "blocked_provider_requirement",
+                "blocked_stage": "requirement",
+                "error_category": "requirement_gate_blocked",
+                "output_dir": str(output_dir),
+                "provider_create": {
+                    "status": "blocked_provider_requirement",
+                    "requirement_status": "failed",
+                    "planning_status": "not_run",
+                    "ir_validation_status": "not_run",
+                    "pipeline_status": "not_run",
+                    "blocked_stage": "requirement",
+                    "error_category": "requirement_gate_blocked",
+                    "provider_request_traces": [{
+                        "operation": "parse_requirement",
+                        "message_count": 4,
+                        "knowledge_ids": ["requirement_check_level_missing_information"],
+                    }],
+                },
+            }
+        return {
+            "status": "success",
+            "output_dir": str(output_dir),
+            "provider_create": {
+                "status": "success",
+                "requirement_status": "passed",
+                "planning_status": "passed",
+                "ir_validation_status": "passed",
+                "pipeline_status": "success",
+                "provider_request_traces": [
+                    {"operation": "parse_requirement", "message_count": 4, "knowledge_ids": ["requirement_check_level_missing_information"]},
+                    {"operation": "create_plan", "message_count": 4, "knowledge_ids": ["planning_design_analysis"]},
+                ],
+            },
+        }
+
+    result = provider_create_eval.run_provider_create_eval(
+        adapter=FakeAdapter(),
+        provider="fake/json",
+        output_dir=tmp_path / "eval",
+        cases=cases,
+        runner=fake_runner,
+    )
+
+    summary = result["summary"]
+    assert summary["case_count"] == 2
+    assert summary["requirement_valid_count"] == 1
+    assert summary["planning_valid_count"] == 1
+    assert summary["ir_conversion_success_count"] == 1
+    assert summary["pipeline_success_count"] == 1
+    assert summary["blocked_count"] == 1
+    assert summary["expected_blocked_count"] == 0
+    assert summary["unexpected_blocked_count"] == 1
+    assert summary["failed_count"] == 0
+    assert result["cases"][1]["outcome"] == "unexpected_blocked"
+    assert result["cases"][1]["blocked_stage"] == "requirement"
+    assert result["cases"][0]["provider_trace_summary"]["operations"] == ["parse_requirement", "create_plan"]
+
+
+def test_provider_create_eval_writes_artifacts_without_private_details(tmp_path):
+    from examples.provider_smoke import provider_create_eval
+
+    class FakeAdapter:
+        provider_identity = {
+            "provider": "fake/json",
+            "model": "fake-model",
+            "api_key": "fake-secret-value-123456",
+        }
+
+    def fake_runner(prompt, adapter, output_dir=None, provider_contract_mode="strict"):
+        return {
+            "status": "blocked_provider_validation",
+            "blocked_stage": "cad_ir",
+            "error_category": "cad_ir_validation_failed",
+            "output_dir": r"D:\private\provider\run",
+            "provider_response": "raw provider response",
+            "runtime_logs": ["raw runtime log"],
+            "transcript": "raw chat transcript",
+            "provider_create": {
+                "status": "blocked_provider_validation",
+                "requirement_status": "passed",
+                "planning_status": "passed",
+                "ir_validation_status": "failed",
+                "pipeline_status": "not_run",
+                "blocked_stage": "cad_ir",
+                "error_category": "cad_ir_validation_failed",
+                "provider_request_traces": [{
+                    "operation": "parse_requirement",
+                    "message_count": 4,
+                    "knowledge_ids": [
+                        "requirement_check_level_missing_information",
+                        "CADFLOW_FAKE_API_KEY",
+                    ],
+                    "messages": ["raw provider message"],
+                    "provider_response": "raw provider response",
+                }],
+            },
+        }
+
+    eval_dir = tmp_path / "eval"
+    result = provider_create_eval.run_provider_create_eval(
+        adapter=FakeAdapter(),
+        provider="fake/json",
+        output_dir=eval_dir,
+        cases=[{"case_id": "privacy_case", "prompt": "Make a spacer washer."}],
+        runner=fake_runner,
+    )
+
+    for artifact in ("eval_cases.json", "eval_summary.json", "eval_report.md"):
+        assert (eval_dir / artifact).exists()
+    serialized = "\n".join(
+        (eval_dir / artifact).read_text(encoding="utf-8")
+        for artifact in ("eval_cases.json", "eval_summary.json", "eval_report.md")
+    )
+    assert result["cases"][0]["output_dir"] == "[redacted-path]"
+    assert "fake-secret-value-123456" not in serialized
+    assert "CADFLOW_FAKE_API_KEY" not in serialized
+    assert "D:\\private" not in serialized
+    assert "D:" not in serialized
+    assert "raw provider message" not in serialized
+    assert "raw provider response" not in serialized
+    assert "raw runtime log" not in serialized
+    assert "raw chat transcript" not in serialized
+    assert "transcript" not in serialized
+
+
+def test_provider_create_eval_labels_modes_and_expected_blocked_cases(tmp_path):
+    from examples.provider_smoke import provider_create_eval
+
+    class FakeAdapter:
+        provider_identity = {"provider": "fake/json", "model": "fake-model"}
+
+    def fake_runner(prompt, adapter, output_dir=None, provider_contract_mode="strict"):
+        if "gear" in prompt:
+            return {
+                "status": "blocked_provider_validation",
+                "blocked_stage": "requirement",
+                "error_category": "local_validation_failed",
+                "output_dir": str(output_dir),
+                "provider_create": {
+                    "requirement_status": "failed",
+                    "planning_status": "not_run",
+                    "ir_validation_status": "not_run",
+                    "pipeline_status": "not_run",
+                    "blocked_stage": "requirement",
+                    "error_category": "local_validation_failed",
+                    "provider_request_traces": [],
+                },
+            }
+        return {
+            "status": "blocked_provider_validation",
+            "blocked_stage": "cad_ir",
+            "error_category": "cad_ir_validation_failed",
+            "output_dir": str(output_dir),
+            "provider_create": {
+                "requirement_status": "passed",
+                "planning_status": "passed",
+                "ir_validation_status": "failed",
+                "pipeline_status": "not_run",
+                "blocked_stage": "cad_ir",
+                "error_category": "cad_ir_validation_failed",
+                "provider_request_traces": [],
+            },
+        }
+
+    eval_dir = tmp_path / "eval"
+    result = provider_create_eval.run_provider_create_eval(
+        adapter=FakeAdapter(),
+        provider="fake/json",
+        output_dir=eval_dir,
+        provider_contract_mode="extract_then_compile",
+        cases=[
+            {"case_id": "gear_24_teeth", "prompt": "Make a gear with 24 teeth."},
+            {"case_id": "button_battery_enclosure_base", "prompt": "Make a small enclosure base for a button and battery."},
+        ],
+        runner=fake_runner,
+    )
+
+    cases = {case["case_id"]: case for case in result["cases"]}
+    report = (eval_dir / "eval_report.md").read_text(encoding="utf-8")
+    assert result["summary"]["provider_contract_mode"] == "extract_then_compile"
+    assert result["summary"]["expected_blocked_count"] == 1
+    assert result["summary"]["unexpected_blocked_count"] == 1
+    assert cases["gear_24_teeth"]["outcome"] == "expected_blocked"
+    assert "unsupported_part_type.gear" in cases["gear_24_teeth"]["validation_error_codes"]
+    assert cases["button_battery_enclosure_base"]["outcome"] == "unexpected_blocked"
+    assert "cad_ir_validation.failed" in cases["button_battery_enclosure_base"]["validation_error_codes"]
+    assert "product-oriented normalized workflow mode" in report
+    assert "Strict failures do not automatically imply product workflow failure" in report
+
+
+def test_provider_create_eval_script_handles_missing_credentials_without_network_or_secret_leak(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from examples.provider_smoke import provider_create_eval
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+
+    exit_code = provider_create_eval.main([
+        "--provider",
+        "deepseek",
+        "--output-dir",
+        str(tmp_path / "eval_missing_credentials"),
+    ])
+
+    output = capsys.readouterr().out
+    status = json.loads(output)
+    assert exit_code == 2
+    assert status["provider"] == "deepseek"
+    assert status["case_count"] == len(provider_create_eval.DEFAULT_CASES)
+    assert status["blocked_count"] == len(provider_create_eval.DEFAULT_CASES)
+    assert status["failed_count"] == 0
+    assert "DEEPSEEK_API_KEY" not in output
+    assert "Authorization" not in output
+    assert "Make an 80x40x5" not in output
+    assert "messages" not in output
+
+
+def test_provider_create_flow_calls_requirement_and_planning_and_writes_artifacts(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": _valid_requirement_json(),
+        "create_plan": _valid_planning_json(),
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_create_success"
+
+    result = run_provider_create_pipeline("Make a spacer washer.", adapter, output_dir=output_dir)
+
+    assert result["status"] == "success"
+    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement", "create_plan"]
+    assert result["input_ir"]["part_type"] == "spacer"
+    for artifact in ("prompt.txt", "requirement.json", "planning_artifact.json", "input_ir.json", "report.json", "agent_trace.json"):
+        assert (output_dir / artifact).exists()
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    runtime = json.loads((output_dir / "logs" / "runtime.json").read_text(encoding="utf-8"))
+    provider_traces = trace["provider_create"]["provider_request_traces"]
+    assert report["provider_create"]["requirement_status"] == "passed"
+    assert report["provider_create"]["planning_status"] == "passed"
+    assert report["provider_create"]["ir_validation_status"] == "passed"
+    assert [item["operation"] for item in provider_traces] == ["parse_requirement", "create_plan"]
+    assert provider_traces[0]["validation_status"] == "passed"
+    assert provider_traces[1]["validation_status"] == "passed"
+    assert runtime["provider_create"]["provider_request_traces"][0]["message_count"] == 4
+
+
+def test_provider_create_invalid_requirement_blocks_before_planning(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": {"part_type": "", "dimensions": {}},
+        "create_plan": _valid_planning_json(),
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_create_invalid_requirement"
+
+    result = run_provider_create_pipeline("Make a spacer washer.", adapter, output_dir=output_dir)
+
+    assert result["status"] == "blocked_provider_validation"
+    assert result["blocked_stage"] == "requirement"
+    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement"]
+    assert not (output_dir / "requirement.json").exists()
+    assert not (output_dir / "planning_artifact.json").exists()
+    assert not (output_dir / "input_ir.json").exists()
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    assert report["error_category"] == "local_validation_failed"
+    assert report["part_modeling_started"] is False
+
+
+def test_provider_create_invalid_planning_blocks_in_strict_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": _valid_requirement_json(),
+        "create_plan": {
+            "artifact_type": "plan",
+            "route": {},
+            "selected_parts": [],
+            "flow_gate_status": {},
+        },
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_create_invalid_planning"
+
+    result = run_provider_create_pipeline("Make a spacer washer.", adapter, output_dir=output_dir)
+
+    assert result["status"] == "blocked_provider_validation"
+    assert result["blocked_stage"] == "planning"
+    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement", "create_plan"]
+    assert (output_dir / "requirement.json").exists()
+    assert not (output_dir / "planning_artifact.json").exists()
+    assert not (output_dir / "input_ir.json").exists()
+
+
+def test_provider_create_compiles_provider_requirement_and_explicitly_falls_back_to_local_planning(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": {
+            "part_type": "mounting_plate",
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5},
+            "features": [
+                {"kind": "holes", "count": 4, "diameter_mm": 4.5, "pattern": "corner"},
+            ],
+            "requirement_status": "ready",
+        },
+        "create_plan": {
+            "artifact_type": "plan",
+            "route": {},
+            "selected_parts": [],
+            "flow_gate_status": {},
+        },
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_create_compiled"
+
+    result = run_provider_create_pipeline(
+        "Make an 80x40x5 mm mounting plate with four M4 holes.",
+        adapter,
+        output_dir=output_dir,
+        provider_contract_mode="extract_then_compile",
+    )
+
+    assert result["status"] == "success"
+    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement", "create_plan"]
+    assert result["requirement"]["features"]["holes"]["count"] == 4
+    assert result["requirement"]["requirement_status"]["complete_for_generation"] is True
+    assert (output_dir / "requirement.json").exists()
+    assert (output_dir / "planning_artifact.json").exists()
+    assert (output_dir / "input_ir.json").exists()
+
+
+def test_provider_normalized_create_pipeline_is_explicit_and_records_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": {
+            "part_type": "mounting_plate",
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5},
+            "features": {"holes": {"count": 4, "diameter": 4.5, "positions": "corner_4"}},
+        },
+        "create_plan": {
+            "artifact_type": "plan",
+            "route": {},
+            "selected_parts": [],
+            "flow_gate_status": {},
+        },
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_normalized_create"
+
+    result = run_provider_normalized_create_pipeline(
+        "Make an 80x40x5 mm mounting plate with four M4 holes.",
+        adapter,
+        output_dir=output_dir,
+    )
+
+    assert result["status"] == "success"
+    assert fake_client.requests[0]["context"]["provider_contract_mode"] == "extract_then_compile"
+    assert fake_client.requests[1]["context"]["provider_contract_mode"] == "extract_then_compile"
+    provider_create = result["provider_create"]
+    assert provider_create["provider_contract_mode"] == "extract_then_compile"
+    assert provider_create["workflow_mode"] == "normalized_provider_create"
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    runtime = json.loads((output_dir / "logs" / "runtime.json").read_text(encoding="utf-8"))
+    assert report["provider_create"]["provider_contract_mode"] == "extract_then_compile"
+    assert runtime["provider_create"]["workflow_mode"] == "normalized_provider_create"
+
+
+def test_normalized_create_uses_local_compiler_and_rejects_provider_ir_or_code(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": {
+            "part_type": "mounting_plate",
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5, "unsafe_extra": 999},
+            "features": {
+                "holes": {"count": 4, "diameter": 4.5, "positions": "corner_4"},
+                "laser": {"power": 1000},
+            },
+            "input_ir": {"part_type": "gear", "dimensions": {"teeth": 24}},
+            "cadquery_code": "import cadquery as cq",
+            "python_code": "print('provider code must not run')",
+        },
+        "create_plan": {
+            "artifact_type": "plan",
+            "selected_parts": [],
+            "input_ir": {"part_type": "gear", "dimensions": {"teeth": 24}},
+            "cadquery_code": "import cadquery as cq",
+        },
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_normalized_no_ir"
+
+    result = run_provider_normalized_create_pipeline(
+        "Make an 80x40x5 mm mounting plate with four M4 holes.",
+        adapter,
+        output_dir=output_dir,
+    )
+
+    assert result["status"] == "success"
+    assert result["input_ir"]["part_type"] == "mounting_plate"
+    assert result["input_ir"]["dimensions"] == {"length": 80, "thickness": 5, "width": 40}
+    assert "unsafe_extra" not in result["input_ir"]["dimensions"]
+    assert "laser" not in result["input_ir"]["features"]
+    serialized = json.dumps({
+        "requirement": result["requirement"],
+        "planning_artifact": result["planning_artifact"],
+        "input_ir": result["input_ir"],
+    }, sort_keys=True)
+    assert "cadquery_code" not in serialized
+    assert "python_code" not in serialized
+    assert "\"part_type\": \"gear\"" not in serialized
+
+
+def test_strict_provider_create_records_compliance_mode_and_does_not_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": _valid_requirement_json(),
+        "create_plan": {
+            "artifact_type": "plan",
+            "selected_parts": [],
+            "input_ir": {"part_type": "spacer"},
+            "cadquery_code": "import cadquery as cq",
+        },
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_strict_no_fallback"
+
+    result = run_provider_create_pipeline("Make a spacer washer.", adapter, output_dir=output_dir)
+
+    assert result["status"] == "blocked_provider_validation"
+    assert result["blocked_stage"] == "planning"
+    assert not (output_dir / "planning_artifact.json").exists()
+    assert not (output_dir / "input_ir.json").exists()
+    assert result["provider_create"]["provider_contract_mode"] == "strict"
+    assert result["provider_create"]["workflow_mode"] == "provider_contract_compliance"
+
+
+@pytest.mark.parametrize(
+    ("prompt", "provider_requirement"),
+    [
+        (
+            "Make a 24 tooth gear.",
+            {"part_type": "gear", "dimensions": {"teeth": 24}},
+        ),
+        (
+            "Make a production-ready load-bearing aerospace bracket.",
+            {"part_type": "bracket", "dimensions": {"length": 80, "width": 40, "height": 30}},
+        ),
+    ],
+)
+def test_provider_normalized_create_keeps_expected_unsupported_or_unsafe_cases_blocked(
+    prompt,
+    provider_requirement,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": provider_requirement,
+        "create_plan": _valid_planning_json(),
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_normalized_blocked"
+
+    result = run_provider_normalized_create_pipeline(prompt, adapter, output_dir=output_dir)
+
+    assert result["status"] == "blocked_provider_validation"
+    assert result["blocked_stage"] == "requirement"
+    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement"]
+    assert result["provider_create"]["provider_contract_mode"] == "extract_then_compile"
+    assert not (output_dir / "input_ir.json").exists()
+
+
+def test_provider_requirement_compiler_maps_prompt_scoped_bracket_alias():
+    fake_client = FakeJsonContractClient({
+        "part_type": "bracket",
+        "dimensions": {"length": 40, "width": 20, "height": 30, "thickness": 4},
+        "features": {"holes": {"count": 2, "diameter": 4}},
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    requirement = adapter.parse_requirement(
+        "Make a simple right-angle bracket with two mounting holes.",
+        context={"provider_contract_mode": "extract_then_compile"},
+    )
+
+    assert requirement["part_type"] == "simple_bracket"
+    assert requirement["dimensions"]["base_length"] == 40
+    assert requirement["features"]["base_holes"]["count"] == 2
+
+
+def test_provider_requirement_compiler_does_not_map_unsafe_generic_bracket():
+    fake_client = FakeJsonContractClient({
+        "part_type": "bracket",
+        "dimensions": {},
+        "features": {},
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    with pytest.raises(ValueError, match="unsupported provider part_type: bracket"):
+        adapter.parse_requirement(
+            "Make a production-ready load-bearing aerospace bracket.",
+            context={"provider_contract_mode": "extract_then_compile"},
+        )
+
+
+def test_provider_requirement_compiler_keeps_circular_button_diameter_consistent():
+    fake_client = FakeJsonContractClient({
+        "part_type": "circular_button",
+        "dimensions": {"diameter": 18, "height": 4},
+        "features": {},
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    requirement = adapter.parse_requirement(
+        "Make a circular button 18 mm diameter and 4 mm tall.",
+        context={"provider_contract_mode": "extract_then_compile"},
+    )
+
+    assert requirement["dimensions"]["body_diameter"] == 18
+    assert requirement["dimensions"]["button_diameter"] == 18
+
+
+def test_provider_requirement_compiler_filters_unsupported_enclosure_fields():
+    fake_client = FakeJsonContractClient({
+        "part_type": "enclosure_base",
+        "dimensions": {"length": 100, "width": 50, "depth": 50, "height": 20, "wall_thickness": 2},
+        "features": {
+            "battery_compartment": {"width": 30, "height": 10, "depth": 20},
+            "button_hole": {"diameter": 12, "depth": 5},
+            "bosses": {"diameter": 6, "height": 5},
+        },
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    requirement = adapter.parse_requirement(
+        "Make a small enclosure base for a button and battery.",
+        context={"provider_contract_mode": "extract_then_compile"},
+    )
+
+    assert requirement["dimensions"]["outer_length"] == 100
+    assert requirement["dimensions"]["outer_width"] == 50
+    assert "depth" not in requirement["dimensions"]
+    assert "battery_compartment" not in requirement["features"]
+    assert "button_hole" not in requirement["features"]
+    assert "bosses" in requirement["features"]
+
+
+def test_provider_create_provider_failure_is_categorized_without_raw_exception_leak(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    fake_client = FailingJsonContractClient(
+        RuntimeError(r"credential failed for CADFLOW_FAKE_API_KEY fake-secret-value-123456 at D:\private\run")
+    )
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_create_provider_failure"
+
+    result = run_provider_create_pipeline("Make a spacer washer.", adapter, output_dir=output_dir)
+
+    assert result["status"] == "blocked_provider_requirement"
+    assert result["error_category"] == "auth_failed"
+    serialized = json.dumps({
+        "result": result,
+        "report": json.loads((output_dir / "report.json").read_text(encoding="utf-8")),
+        "trace": json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8")),
+        "runtime": json.loads((output_dir / "logs" / "runtime.json").read_text(encoding="utf-8")),
+    }, sort_keys=True)
+    assert "credential failed" not in serialized
+    assert "CADFLOW_FAKE_API_KEY" not in serialized
+    assert "fake-secret-value-123456" not in serialized
+    assert "D:\\private" not in serialized
+    assert "messages" not in serialized
+    assert "Make a spacer" not in serialized
+
+
 def test_json_contract_agent_adapter_requires_no_provider_sdk_or_network():
     fake_client = FakeJsonContractClient(_valid_requirement_json())
     adapter = JsonContractAgentAdapter(fake_client)
@@ -946,6 +1681,11 @@ def test_stage_runner_can_use_json_contract_adapter_when_explicitly_injected(tmp
     assert json.loads((output_dir / "requirement.json").read_text(encoding="utf-8")) == result["requirement"]
     assert activity["provider_identity"]["adapter"] == "json_contract"
     assert activity["provider_identity"]["provider"] == "fake/json"
+    assert activity["request_trace_summary"]["operation"] == "parse_requirement"
+    assert activity["request_trace_summary"]["payload_shape"] == {
+        "kind": "prompt_payload",
+        "top_level_keys": ["prompt"],
+    }
 
 
 def test_stage_runner_can_use_json_contract_adapter_for_planning_when_explicitly_injected(tmp_path):

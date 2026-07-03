@@ -334,10 +334,14 @@ class StageRunner:
 
     def _adapter_activity(self, operation: str) -> dict[str, Any]:
         identity = dict(getattr(self.agent_adapter, "provider_identity", {}) or {})
-        return {
+        activity = {
             "operation": operation,
             "provider_identity": _sanitize_adapter_identity(identity),
         }
+        trace = getattr(self.agent_adapter, "last_provider_request_trace", None)
+        if isinstance(trace, dict):
+            activity["request_trace_summary"] = trace
+        return activity
 
 
 def _safe_run_name(value: str) -> str:

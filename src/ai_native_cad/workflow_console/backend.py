@@ -755,9 +755,49 @@ def _compact_adapter_activity(activity: Any) -> dict[str, Any] | None:
     if not isinstance(activity, dict):
         return None
     provider_identity = activity.get("provider_identity")
-    return {
+    compact = {
         "operation": _safe_summary_text(activity.get("operation")) or "unknown",
         "provider_identity": _compact_adapter_identity(provider_identity if isinstance(provider_identity, dict) else {}),
+    }
+    trace = _compact_provider_request_trace(activity.get("request_trace_summary"))
+    if trace is not None:
+        compact["request_trace_summary"] = trace
+    return compact
+
+
+def _compact_provider_request_trace(trace: Any) -> dict[str, Any] | None:
+    if not isinstance(trace, dict):
+        return None
+    provider_identity = trace.get("provider_identity")
+    context_shape = trace.get("context_shape")
+    payload_shape = trace.get("payload_shape")
+    compact = {
+        "operation": _safe_summary_text(trace.get("operation")) or "unknown",
+        "stage": _safe_summary_text(trace.get("stage")) or "unknown",
+        "provider_identity": _compact_adapter_identity(provider_identity if isinstance(provider_identity, dict) else {}),
+        "message_count": trace.get("message_count") if isinstance(trace.get("message_count"), int) else 0,
+        "context_shape": _compact_trace_context_shape(context_shape if isinstance(context_shape, dict) else {}),
+        "knowledge_ids": _compact_text_list(trace.get("knowledge_ids")).get("items", []),
+        "payload_shape": _compact_trace_payload_shape(payload_shape if isinstance(payload_shape, dict) else {}),
+    }
+    return compact
+
+
+def _compact_trace_context_shape(shape: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "has_global_rules": bool(shape.get("has_global_rules")),
+        "has_stage_skill": bool(shape.get("has_stage_skill")),
+        "has_contract_guide": bool(shape.get("has_contract_guide")),
+        "selected_knowledge_count": (
+            shape["selected_knowledge_count"] if isinstance(shape.get("selected_knowledge_count"), int) else 0
+        ),
+    }
+
+
+def _compact_trace_payload_shape(shape: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "kind": _safe_summary_text(shape.get("kind")) or "unknown",
+        "top_level_keys": _compact_text_list(shape.get("top_level_keys")).get("items", []),
     }
 
 
