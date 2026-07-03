@@ -134,11 +134,34 @@ Those capabilities remain future work, and the workflow must not fabricate
 `input_ir.json` for an unsupported assembly request.
 
 Assembly plans use a deliberately small, non-executable surface. Parts expose
-only `part_id`, `role`, and `generation_strategy`. Interfaces expose only
-`from`, `to`, `kind`, and `notes`, with `kind` constrained to known advisory
-labels such as `screw_fastened`, `pinned_joint`, `sliding_fit`, `snap_fit`,
-`stacked`, or `unknown`. Reports include sanitized quality counts for assembly
-plans, parts, interfaces, fasteners, risk notes, and blocked reason codes.
+only `part_id`, `role`, `generation_strategy`, `part_status`,
+`supported_candidate`, `part_brief`, and `blocked_reasons`. Interfaces expose
+only `from`, `to`, `kind`, and `notes`, with `kind` constrained to known
+advisory labels such as `screw_fastened`, `pinned_joint`, `sliding_fit`,
+`snap_fit`, `stacked`, or `unknown`. Reports include sanitized quality counts
+for assembly plans, parts, interfaces, fasteners, risk notes, and blocked
+reason codes.
+
+`run_assembly_part_request_pipeline(...)` is the planning-only bridge from an
+existing `assembly_plan.json` toward future single-part generation:
+
+```text
+assembly_plan.json
+  -> select one supported candidate part
+  -> part_create_request.json
+  -> ready_for_review or blocked_no_candidate_part
+```
+
+`part_create_request.json` is locally compiled and sanitized. It records one
+candidate part, relevant interface constraints, preserved assembly context, and
+diagnostic codes such as `part_request.created`,
+`part_request.no_candidate_part`,
+`part_request.reference_only_not_selectable`,
+`part_request.blocked_part_not_selectable`, and
+`part_request.interface_constraints_preserved`. It does not call
+`run_ir_pipeline(...)`, does not write per-part `input_ir.json`, and does not
+generate STEP/STL or CadQuery/Python code. Actual part-level CAD generation
+remains future work.
 
 ### Text Pipeline Fallback
 

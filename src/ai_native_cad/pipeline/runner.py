@@ -914,6 +914,7 @@ def _collect_files(output_dir: Path, *, repo_relative: bool = False) -> dict[str
         "requirement.json": "requirement",
         "planning_artifact.json": "planning_artifact",
         "assembly_plan.json": "assembly_plan",
+        "part_create_request.json": "part_create_request",
         "input_ir.json": "input_ir",
         "model.py": "model_py",
         "model.step": "step",
@@ -1755,6 +1756,289 @@ def _count_assembly_part_field(parts: Any, field: str) -> dict[str, int]:
             continue
         counts[value] = counts.get(value, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def create_part_request_from_assembly_plan(
+    assembly_plan: dict[str, Any],
+    *,
+    part_id: str | None = None,
+    source_artifact: str = "assembly_plan.json",
+) -> dict[str, Any]:
+    """Compile a sanitized planning request for one assembly candidate part."""
+
+    parts = assembly_plan.get("parts") if isinstance(assembly_plan.get("parts"), list) else []
+    requested_part_id = _safe_artifact_id(part_id) if part_id else None
+    selected_part: dict[str, Any] | None = None
+    blocked_code: str | None = None
+
+    if requested_part_id:
+        requested_part = next(
+            (
+                part
+                for part in parts
+                if isinstance(part, dict) and _safe_artifact_id(part.get("part_id")) == requested_part_id
+            ),
+            None,
+        )
+        if requested_part and _is_selectable_assembly_part(requested_part):
+            selected_part = requested_part
+        elif requested_part and requested_part.get("part_status") == "reference_only":
+            blocked_code = "part_request.reference_only_not_selectable"
+        elif requested_part and requested_part.get("part_status") == "blocked":
+            blocked_code = "part_request.blocked_part_not_selectable"
+        else:
+            blocked_code = "part_request.no_candidate_part"
+    else:
+        for part in parts:
+            if isinstance(part, dict) and _is_selectable_assembly_part(part):
+                selected_part = part
+                break
+        if selected_part is None:
+            blocked_code = "part_request.no_candidate_part"
+
+    if selected_part is None:
+        return _blocked_part_create_request(
+            assembly_plan,
+            requested_part_id=requested_part_id,
+            source_artifact=source_artifact,
+            diagnostic_code=blocked_code or "part_request.no_candidate_part",
+        )
+
+    selected_part_id = _safe_artifact_id(selected_part.get("part_id"))
+    interface_constraints = _part_request_interface_constraints(assembly_plan, selected_part_id)
+    diagnostic_codes = ["part_request.created"]
+    if interface_constraints:
+        diagnostic_codes.append("part_request.interface_constraints_preserved")
+    return {
+        "artifact_type": "part_create_request",
+        "schema_version": "0.1",
+        "source_artifact": _safe_source_artifact_name(source_artifact),
+        "part_id": selected_part_id,
+        "part_role": _safe_short_text(selected_part.get("role"), fallback="assembly component"),
+        "part_brief": _safe_short_text(
+            selected_part.get("part_brief"),
+            fallback="Assembly candidate part prepared for review.",
+            max_length=180,
+        ),
+        "generation_mode": "single_part_candidate",
+        "status": "ready_for_review",
+        "interface_constraints": interface_constraints,
+        "preserved_assembly_context": _part_request_assembly_context(assembly_plan, selected_part_id),
+        "blocked_reasons": [],
+        "diagnostic_codes": diagnostic_codes,
+    }
+
+
+def run_assembly_part_request_pipeline(
+    assembly_plan: dict[str, Any] | str | Path,
+    *,
+    output_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+    part_id: str | None = None,
+) -> dict[str, Any]:
+    """Write a planning-only part create request from an assembly plan."""
+
+    loaded_plan, source_artifact, default_output = _load_assembly_plan_input(assembly_plan)
+    output_path = _resolve_output_dir("part_create_request", output_root, output_dir or default_output)
+    output_path.mkdir(parents=True, exist_ok=True)
+    request = create_part_request_from_assembly_plan(
+        loaded_plan,
+        part_id=part_id,
+        source_artifact=source_artifact,
+    )
+    _write_json(output_path / "part_create_request.json", request)
+    status = request.get("status") if isinstance(request.get("status"), str) else "blocked_no_candidate_part"
+    success = status == "ready_for_review"
+    trace = {
+        "total_attempts": 0,
+        "steps": [
+            {
+                "attempt": 0,
+                "status": "ready_for_review" if success else "blocked",
+                "stage": "assembly_part_request",
+                "diagnostic_codes": request.get("diagnostic_codes", []),
+            }
+        ],
+        "final_selected_candidate": request.get("part_id") if success else None,
+        "assembly_part_request": {
+            "workflow": "assembly_part_request",
+            "version": "part-create-request-v0.1",
+            "status": status,
+            "local_authority": ["assembly_plan.json", "part_create_request.json"],
+            "stages": ["load_assembly_plan", "select_candidate_part", "compile_part_create_request"],
+            "artifacts": {"source": source_artifact, "part_create_request": "part_create_request.json"},
+            "cad_ir_created": False,
+            "part_modeling_started": False,
+            "diagnostic_codes": request.get("diagnostic_codes", []),
+        },
+    }
+    _write_json(output_path / "agent_trace.json", trace)
+    report = {
+        "success": success,
+        "status": status,
+        "blocked_stage": None if success else "assembly_part_request",
+        "diagnostic_codes": request.get("diagnostic_codes", []),
+        "source_artifact": request.get("source_artifact"),
+        "part_id": request.get("part_id"),
+        "part_request_status": status,
+        "interface_constraint_count": len(request.get("interface_constraints", [])),
+        "cad_ir_created": False,
+        "part_modeling_started": False,
+        "part_create_request": request,
+        "files": _collect_files(output_path, repo_relative=True),
+    }
+    _write_json(output_path / "report.json", report)
+    _write_part_request_report_md(output_path, report, request)
+    files = _collect_files(output_path, repo_relative=True)
+    report["files"] = files
+    _write_json(output_path / "report.json", report)
+    return {
+        "status": status,
+        "success": success,
+        "output_dir": str(output_path),
+        "part_create_request": request,
+        "agent_trace": trace,
+        "files": files,
+        "report_json": str(output_path / "report.json"),
+        "report_md": str(output_path / "report.md"),
+    }
+
+
+def _is_selectable_assembly_part(part: dict[str, Any]) -> bool:
+    part_id = _safe_artifact_id(part.get("part_id"))
+    if part_id in {"pin", "screw", "bolt", "nut", "washer", "fastener"}:
+        return False
+    return (
+        part.get("supported_candidate") is True
+        and part.get("part_status") == "candidate_for_single_part_generation"
+        and part.get("generation_strategy") != "blocked"
+    )
+
+
+def _blocked_part_create_request(
+    assembly_plan: dict[str, Any],
+    *,
+    requested_part_id: str | None,
+    source_artifact: str,
+    diagnostic_code: str,
+) -> dict[str, Any]:
+    safe_code = _safe_diagnostic_codes([diagnostic_code])[0]
+    return {
+        "artifact_type": "part_create_request",
+        "schema_version": "0.1",
+        "source_artifact": _safe_source_artifact_name(source_artifact),
+        "part_id": requested_part_id,
+        "part_role": "",
+        "part_brief": "",
+        "generation_mode": "single_part_candidate",
+        "status": "blocked_no_candidate_part",
+        "interface_constraints": [],
+        "preserved_assembly_context": _part_request_assembly_context(assembly_plan, requested_part_id),
+        "blocked_reasons": [{"code": safe_code}],
+        "diagnostic_codes": [safe_code],
+    }
+
+
+def _part_request_interface_constraints(assembly_plan: dict[str, Any], selected_part_id: str) -> list[dict[str, str]]:
+    constraints: list[dict[str, str]] = []
+    interfaces = assembly_plan.get("interfaces") if isinstance(assembly_plan.get("interfaces"), list) else []
+    for interface in interfaces:
+        if not isinstance(interface, dict):
+            continue
+        from_id = _safe_artifact_id(interface.get("from"))
+        to_id = _safe_artifact_id(interface.get("to"))
+        if selected_part_id not in {from_id, to_id}:
+            continue
+        related_part_id = to_id if selected_part_id == from_id else from_id
+        constraints.append({
+            "kind": _part_request_constraint_kind(interface.get("kind")),
+            "related_part_id": related_part_id,
+            "notes": _safe_short_text(interface.get("notes"), fallback="Assembly interface preserved for review."),
+        })
+    return constraints
+
+
+def _part_request_constraint_kind(value: Any) -> str:
+    kind = _normalized_assembly_interface_kind(value)
+    return {
+        "screw_fastened": "screw_alignment",
+        "pinned_joint": "pin_alignment",
+        "sliding_fit": "sliding_fit",
+        "snap_fit": "snap_fit",
+        "stacked": "contact_alignment",
+        "unknown": "assembly_interface",
+    }[kind]
+
+
+def _part_request_assembly_context(assembly_plan: dict[str, Any], selected_part_id: str | None) -> dict[str, Any]:
+    scope = assembly_plan.get("scope") if assembly_plan.get("scope") in {"multi_part", "assembly"} else "multi_part"
+    related_parts: list[str] = []
+    parts = assembly_plan.get("parts") if isinstance(assembly_plan.get("parts"), list) else []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        candidate = _safe_artifact_id(part.get("part_id"))
+        if candidate != selected_part_id and candidate not in related_parts:
+            related_parts.append(candidate)
+    fasteners = assembly_plan.get("fasteners") if isinstance(assembly_plan.get("fasteners"), list) else []
+    for fastener in fasteners:
+        if not isinstance(fastener, dict):
+            continue
+        kind = _safe_artifact_id(fastener.get("kind") or "fastener")
+        label = f"{kind}s" if not kind.endswith("s") else kind
+        if label not in related_parts:
+            related_parts.append(label)
+    return {
+        "assembly_scope": scope,
+        "related_parts": related_parts,
+    }
+
+
+def _load_assembly_plan_input(assembly_plan: dict[str, Any] | str | Path) -> tuple[dict[str, Any], str, Path | None]:
+    if isinstance(assembly_plan, dict):
+        return assembly_plan, "assembly_plan.json", None
+    path = Path(assembly_plan)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path = _require_repo_path(path.resolve())
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError("assembly_plan must be a JSON object")
+    return loaded, path.name, path.parent
+
+
+def _safe_source_artifact_name(value: Any) -> str:
+    name = Path(str(value or "assembly_plan.json")).name
+    if name != "assembly_plan.json":
+        return "assembly_plan.json"
+    return name
+
+
+def _write_part_request_report_md(
+    output_path: Path,
+    report: dict[str, Any],
+    request: dict[str, Any],
+) -> None:
+    lines = [
+        "# Assembly Part Request Report",
+        "",
+        f"**Status:** {report.get('status')}",
+        "",
+        "`part_create_request.json` is a review/planning artifact only. CadFlow did not generate CAD IR, "
+        "per-part `input_ir.json`, STEP, STL, or CadQuery/Python code.",
+        "",
+        "## Part Request",
+        "",
+        f"- Part ID: `{request.get('part_id')}`",
+        f"- Generation mode: `{request.get('generation_mode')}`",
+        f"- Interface constraints: {len(request.get('interface_constraints', []))}",
+        "",
+        "## Diagnostics",
+        "",
+    ]
+    for code in request.get("diagnostic_codes", []):
+        lines.append(f"- `{code}`")
+    (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _safe_count_map(value: Any, *, allowed: set[str], fallback: dict[str, int]) -> dict[str, int]:

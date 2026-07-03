@@ -20,6 +20,7 @@ from ai_native_cad.agents.provider_context import knowledge_summary_for, provide
 from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
 import ai_native_cad.cadquery.executor as cadquery_executor
 from ai_native_cad.pipeline import (
+    run_assembly_part_request_pipeline,
     run_provider_create_pipeline,
     run_provider_normalized_create_pipeline,
     run_provider_normalized_design_create_pipeline,
@@ -2120,6 +2121,181 @@ def test_assembly_plan_part_decomposition_blocks_unsupported_parts_without_gener
     assert "cadquery_code" not in serialized
     assert "python_code" not in serialized
     assert "input_ir" not in serialized
+
+
+def _part_request_assembly_plan():
+    return {
+        "artifact_type": "assembly_plan",
+        "schema_version": "0.1",
+        "scope": "multi_part",
+        "status": "blocked_before_part_generation",
+        "parts": [
+            {
+                "part_id": "base",
+                "role": "main housing base",
+                "generation_strategy": "future_part_pipeline",
+                "part_status": "candidate_for_single_part_generation",
+                "supported_candidate": True,
+                "part_brief": "Base component with PCB standoffs and screw bosses.",
+                "blocked_reasons": [],
+                "provider_extra": "must not pass through",
+                "cad_ir": {"part_type": "enclosure_base"},
+                "python_code": "import cadquery as cq",
+            },
+            {
+                "part_id": "lid",
+                "role": "cover component",
+                "generation_strategy": "future_part_pipeline",
+                "part_status": "candidate_for_single_part_generation",
+                "supported_candidate": True,
+                "part_brief": "Lid component.",
+                "blocked_reasons": [],
+            },
+            {
+                "part_id": "screws",
+                "role": "reference screws",
+                "generation_strategy": "reference_only",
+                "part_status": "reference_only",
+                "supported_candidate": False,
+                "part_brief": "Reference hardware.",
+                "blocked_reasons": [],
+            },
+            {
+                "part_id": "gear",
+                "role": "drive gear",
+                "generation_strategy": "blocked",
+                "part_status": "blocked",
+                "supported_candidate": False,
+                "part_brief": "Unsupported gear.",
+                "blocked_reasons": [{"code": "unsupported_part_family"}],
+            },
+        ],
+        "interfaces": [
+            {"from": "base", "to": "lid", "kind": "screw_fastened", "notes": "Screw holes should align with lid."},
+            {"from": "screws", "to": "base", "kind": "unknown", "notes": "Reference screw envelope only."},
+            {"from": "lid", "to": "gear", "kind": "provider_kind", "notes": "provider-only detail"},
+        ],
+        "fasteners": [{"kind": "screw", "quantity": 4, "raw_provider_notes": "secret"}],
+        "provider_response": {"raw": "must not pass through"},
+    }
+
+
+def test_part_create_request_pipeline_writes_candidate_request_without_cad_generation(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    called = {"run_ir_pipeline": False}
+
+    def fake_run_ir_pipeline(*args, **kwargs):
+        called["run_ir_pipeline"] = True
+        raise AssertionError("part request MVP must not run CAD execution")
+
+    monkeypatch.setattr(pipeline_runner, "run_ir_pipeline", fake_run_ir_pipeline)
+    output_dir = tmp_path / "outputs" / "part_request"
+    assembly_path = output_dir / "assembly_plan.json"
+    output_dir.mkdir(parents=True)
+    assembly_path.write_text(json.dumps(_part_request_assembly_plan()), encoding="utf-8")
+
+    result = run_assembly_part_request_pipeline(assembly_path, output_dir=output_dir)
+
+    assert result["status"] == "ready_for_review"
+    assert called["run_ir_pipeline"] is False
+    assert (output_dir / "part_create_request.json").exists()
+    assert (output_dir / "report.json").exists()
+    assert (output_dir / "report.md").exists()
+    assert (output_dir / "agent_trace.json").exists()
+    assert not (output_dir / "input_ir.json").exists()
+    assert not (output_dir / "base" / "input_ir.json").exists()
+    assert not (output_dir / "model.step").exists()
+    assert not (output_dir / "model.stl").exists()
+
+    request = json.loads((output_dir / "part_create_request.json").read_text(encoding="utf-8"))
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    assert request == result["part_create_request"]
+    assert request["artifact_type"] == "part_create_request"
+    assert request["schema_version"] == "0.1"
+    assert request["source_artifact"] == "assembly_plan.json"
+    assert request["part_id"] == "base"
+    assert request["part_role"] == "main housing base"
+    assert request["generation_mode"] == "single_part_candidate"
+    assert request["status"] == "ready_for_review"
+    assert request["blocked_reasons"] == []
+    assert "part_request.created" in request["diagnostic_codes"]
+    assert "part_request.interface_constraints_preserved" in request["diagnostic_codes"]
+    assert {
+        "kind": "screw_alignment",
+        "related_part_id": "lid",
+        "notes": "Screw holes should align with lid.",
+    } in request["interface_constraints"]
+    assert request["preserved_assembly_context"]["assembly_scope"] == "multi_part"
+    assert request["preserved_assembly_context"]["related_parts"] == ["lid", "screws", "gear"]
+    assert report["cad_ir_created"] is False
+    assert report["part_modeling_started"] is False
+    assert trace["assembly_part_request"]["cad_ir_created"] is False
+    assert "run_ir_pipeline" not in json.dumps(trace, sort_keys=True)
+
+
+@pytest.mark.parametrize(
+    ("part_id", "expected_code"),
+    [
+        ("screws", "part_request.reference_only_not_selectable"),
+        ("gear", "part_request.blocked_part_not_selectable"),
+    ],
+)
+def test_part_create_request_rejects_reference_only_and_blocked_parts(tmp_path, monkeypatch, part_id, expected_code):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    output_dir = tmp_path / "outputs" / f"part_request_{part_id}"
+
+    result = run_assembly_part_request_pipeline(_part_request_assembly_plan(), output_dir=output_dir, part_id=part_id)
+
+    request = result["part_create_request"]
+    assert result["status"] == "blocked_no_candidate_part"
+    assert request["status"] == "blocked_no_candidate_part"
+    assert request["part_id"] == part_id
+    assert request["blocked_reasons"] == [{"code": expected_code}]
+    assert request["diagnostic_codes"] == [expected_code]
+    assert not (output_dir / "input_ir.json").exists()
+
+
+def test_part_create_request_no_candidate_produces_blocked_request(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    plan = _part_request_assembly_plan()
+    plan["parts"] = [part for part in plan["parts"] if part["part_status"] != "candidate_for_single_part_generation"]
+    output_dir = tmp_path / "outputs" / "part_request_no_candidate"
+
+    result = run_assembly_part_request_pipeline(plan, output_dir=output_dir)
+
+    request = result["part_create_request"]
+    assert result["status"] == "blocked_no_candidate_part"
+    assert request["part_id"] is None
+    assert request["blocked_reasons"] == [{"code": "part_request.no_candidate_part"}]
+    assert request["interface_constraints"] == []
+    assert not (output_dir / "input_ir.json").exists()
+
+
+def test_part_create_request_is_sanitized_and_contains_no_provider_cad_or_private_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    output_dir = tmp_path / "outputs" / "part_request_privacy"
+
+    result = run_assembly_part_request_pipeline(_part_request_assembly_plan(), output_dir=output_dir)
+
+    request = json.loads((output_dir / "part_create_request.json").read_text(encoding="utf-8"))
+    serialized = json.dumps({
+        "result": result,
+        "request": request,
+        "report": json.loads((output_dir / "report.json").read_text(encoding="utf-8")),
+        "trace": json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8")),
+    }, sort_keys=True)
+    request_serialized = json.dumps(request, sort_keys=True)
+    assert "provider_extra" not in serialized
+    assert "provider_response" not in serialized
+    assert "raw_provider_notes" not in serialized
+    assert "must not pass through" not in serialized
+    assert "cad_ir" not in request_serialized
+    assert "python_code" not in request_serialized
+    assert "cadquery" not in request_serialized.lower()
+    assert "D:\\" not in serialized
+    assert "api_key" not in serialized
+    assert "transcript" not in serialized
 
 
 @pytest.mark.parametrize(

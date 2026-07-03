@@ -101,3 +101,9 @@ For normalized design create runs, multi-part or assembly prompts may now write
 `assembly_plan.json`. That file is a sanitized planning artifact only; it
 records normalized parts, interfaces, quality counts, and blocked reasons, then
 stops before CAD IR, multi-part CAD, constraints, or STEP assembly generation.
+
+An assembly plan can also be compiled into `part_create_request.json` with
+`run_assembly_part_request_pipeline(...)`. That artifact selects one supported
+candidate part for review and preserves relevant interface constraints. It is
+still planning-only: it does not mean CadFlow generated the part CAD, and it
+does not write per-part `input_ir.json`, STEP/STL, or provider-generated code.
