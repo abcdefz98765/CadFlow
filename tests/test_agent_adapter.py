@@ -1163,7 +1163,7 @@ def test_reviewed_part_single_create_smoke_runs_one_sanitized_fake_flow(tmp_path
 
 
 def test_reviewed_part_single_create_smoke_selects_one_candidate_only():
-    from examples.provider_smoke.reviewed_part_single_create_smoke import select_one_candidate_part_id
+    from examples.provider_smoke.reviewed_part_single_create_smoke import select_one_candidate_part_id, selection_diagnostics
 
     assembly_plan = {
         "parts": [
@@ -1182,6 +1182,102 @@ def test_reviewed_part_single_create_smoke_selects_one_candidate_only():
     }
 
     assert select_one_candidate_part_id(assembly_plan) == "base"
+    diagnostics = selection_diagnostics(assembly_plan)
+    assert diagnostics["part_count"] == 3
+    assert diagnostics["candidate_part_count"] == 2
+    assert diagnostics["reference_only_count"] == 1
+    assert diagnostics["blocked_part_count"] == 0
+    assert diagnostics["candidate_part_ids"] == ["base", "lid"]
+    assert diagnostics["part_status_counts"] == {
+        "candidate_for_single_part_generation": 2,
+        "reference_only": 1,
+    }
+
+
+def test_reviewed_part_single_create_smoke_no_candidate_summary_includes_sanitized_selection_diagnostics(tmp_path, monkeypatch):
+    from examples.provider_smoke import reviewed_part_single_create_smoke as smoke
+
+    class FakeAdapter:
+        provider_identity = {"provider": "fake/json", "model": "fake-model", "api_key": "secret-value"}
+
+    def fake_design(prompt, adapter, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "assembly_plan.json").write_text(json.dumps({
+            "artifact_type": "assembly_plan",
+            "scope": "multi_part",
+            "parts": [
+                {
+                    "part_id": "base",
+                    "part_status": "planned_only",
+                    "generation_strategy": "future_part_pipeline",
+                    "supported_candidate": False,
+                    "blocked_reasons": [{"code": "needs_review"}],
+                    "raw_response": "do not print",
+                },
+                {
+                    "part_id": "screws",
+                    "part_status": "reference_only",
+                    "generation_strategy": "reference_only",
+                    "supported_candidate": False,
+                    "blocked_reasons": [],
+                },
+                {
+                    "part_id": "gear",
+                    "part_status": "blocked",
+                    "generation_strategy": "blocked",
+                    "supported_candidate": False,
+                    "blocked_reasons": [{"code": "unsupported_part_family"}],
+                },
+            ],
+            "quality": {"blocked_reason_codes": ["assembly_generation_not_supported_yet"]},
+            "provider_response": {"transcript": "do not print"},
+        }), encoding="utf-8")
+        return {
+            "status": "blocked_multi_part_generation_not_supported",
+            "diagnostic_codes": ["assembly.plan_created"],
+        }
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("no candidate should stop before part request/review/handoff/bridge")
+
+    monkeypatch.setattr(smoke, "run_provider_normalized_design_create_pipeline", fake_design)
+    monkeypatch.setattr(smoke, "run_assembly_part_request_pipeline", fail_if_called)
+    monkeypatch.setattr(smoke, "run_part_request_review_pipeline", fail_if_called)
+    monkeypatch.setattr(smoke, "run_reviewed_part_handoff_pipeline", fail_if_called)
+    monkeypatch.setattr(smoke, "run_reviewed_part_single_create_pipeline", fail_if_called)
+
+    summary = smoke.run_reviewed_part_single_create_smoke(
+        FakeAdapter(),
+        "fake",
+        tmp_path / "outputs" / "manual_smoke",
+    )
+
+    output = json.dumps(summary, sort_keys=True)
+    assert summary["assembly_plan_created"] is True
+    assert summary["selected_part_id"] is None
+    assert summary["no_batch_generation"] is True
+    assert summary["no_assembly_generation"] is True
+    assert summary["no_assembly_constraints_solved"] is True
+    assert summary["selection_diagnostics"] == {
+        "part_count": 3,
+        "candidate_part_count": 0,
+        "reference_only_count": 1,
+        "blocked_part_count": 1,
+        "part_status_counts": {"blocked": 1, "planned_only": 1, "reference_only": 1},
+        "generation_strategy_counts": {"blocked": 1, "future_part_pipeline": 1, "reference_only": 1},
+        "candidate_part_ids": [],
+        "blocked_reason_codes": [
+            "assembly_generation_not_supported_yet",
+            "needs_review",
+            "unsupported_part_family",
+        ],
+    }
+    assert "secret-value" not in output
+    assert str(tmp_path) not in output
+    assert "raw_response" not in output
+    assert "transcript" not in output
+    assert "do not print" not in output
 
 
 def test_reviewed_part_single_create_smoke_missing_credentials_are_sanitized(monkeypatch, capsys):
@@ -2241,6 +2337,16 @@ def test_provider_normalized_design_create_writes_assembly_plan_without_cad_exec
     assert "python_code" not in serialized
     assert "unsafe_extra" not in serialized
     assert "provider value" not in serialized
+    if "two-part electronics enclosure" in prompt:
+        parts_by_id = {part["part_id"]: part for part in assembly_plan["parts"]}
+        assert parts_by_id["base"]["part_status"] == "candidate_for_single_part_generation"
+        assert parts_by_id["base"]["supported_candidate"] is True
+        assert parts_by_id["lid"]["part_status"] == "candidate_for_single_part_generation"
+        assert parts_by_id["lid"]["supported_candidate"] is True
+        assert all(part["part_id"] != "screws" for part in assembly_plan["parts"])
+        assert assembly_plan["fasteners"] == [{"kind": "screw", "quantity": 4}]
+        assert assembly_plan["quality"]["part_candidate_count"] == 2
+        assert assembly_plan["quality"]["part_reference_only_count"] == 0
 
 
 def test_assembly_plan_normalization_is_stable_sanitized_and_non_executable():

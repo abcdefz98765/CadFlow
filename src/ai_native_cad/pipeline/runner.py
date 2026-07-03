@@ -1566,8 +1566,8 @@ def _classify_assembly_plan_part(*, part_id: str, role: str, prompt: str) -> dic
             part_brief=f"{role.capitalize()} is unsupported by the current single-part pipeline.",
             blocked_reasons=["unsupported_part_family"],
         )
-    if part_id in {"pin", "screw", "bolt", "nut", "washer", "fastener"} or any(
-        token in text for token in ("hinge pin", "screw", "bolt", "fastener")
+    if part_id in {"pin", "pins", "screw", "screws", "bolt", "bolts", "nut", "nuts", "washer", "washers", "fastener", "fasteners"} or any(
+        token in part_text for token in ("hinge pin", "screw", "bolt", "fastener")
     ):
         return _assembly_part_classification(
             generation_strategy="reference_only",

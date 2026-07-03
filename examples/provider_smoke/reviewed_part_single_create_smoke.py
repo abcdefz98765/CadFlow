@@ -131,6 +131,53 @@ def select_one_candidate_part_id(assembly_plan: dict[str, Any]) -> str | None:
     return selected[0] if selected else None
 
 
+def selection_diagnostics(assembly_plan: dict[str, Any]) -> dict[str, Any]:
+    parts = assembly_plan.get("parts") if isinstance(assembly_plan.get("parts"), list) else []
+    part_status_counts: dict[str, int] = {}
+    generation_strategy_counts: dict[str, int] = {}
+    candidate_part_ids: list[str] = []
+    blocked_reason_codes: set[str] = set()
+    reference_only_count = 0
+    blocked_part_count = 0
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        part_id = _safe_artifact_id(part.get("part_id"))
+        status = _safe_status(part.get("part_status"))
+        strategy = _safe_status(part.get("generation_strategy"))
+        if status:
+            part_status_counts[status] = part_status_counts.get(status, 0) + 1
+        if strategy:
+            generation_strategy_counts[strategy] = generation_strategy_counts.get(strategy, 0) + 1
+        if status == "reference_only":
+            reference_only_count += 1
+        if status == "blocked":
+            blocked_part_count += 1
+        if part.get("supported_candidate") is True:
+            candidate_part_ids.append(part_id)
+        for reason in part.get("blocked_reasons", []):
+            if not isinstance(reason, dict):
+                continue
+            code = _safe_status(reason.get("code"))
+            if code:
+                blocked_reason_codes.add(code)
+    quality = assembly_plan.get("quality") if isinstance(assembly_plan.get("quality"), dict) else {}
+    for code in quality.get("blocked_reason_codes", []):
+        safe = _safe_status(code)
+        if safe:
+            blocked_reason_codes.add(safe)
+    return {
+        "part_count": len([part for part in parts if isinstance(part, dict)]),
+        "candidate_part_count": len(candidate_part_ids),
+        "reference_only_count": reference_only_count,
+        "blocked_part_count": blocked_part_count,
+        "part_status_counts": dict(sorted(part_status_counts.items())),
+        "generation_strategy_counts": dict(sorted(generation_strategy_counts.items())),
+        "candidate_part_ids": sorted(candidate_part_ids),
+        "blocked_reason_codes": sorted(blocked_reason_codes),
+    }
+
+
 def _summary_from_results(
     identity: dict[str, Any],
     *,
@@ -147,9 +194,6 @@ def _summary_from_results(
     assembly_plan_created = isinstance(assembly_plan, dict)
     child_run_name = _safe_child_run_name(bridge_result)
     child_dir = bridge_dir / child_run_name if bridge_dir is not None and child_run_name else None
-    selected_count = 1 if selected_part_id else 0
-    if isinstance(assembly_plan, dict):
-        selected_count = 1 if selected_part_id else 0
     summary.update({
         "assembly_plan_created": assembly_plan_created,
         "selected_part_id": selected_part_id,
@@ -161,7 +205,7 @@ def _summary_from_results(
         "child_run_name": child_run_name,
         "step_created": bool(child_dir and (child_dir / "model.step").exists()),
         "stl_created": bool(child_dir and (child_dir / "model.stl").exists()),
-        "no_batch_generation": selected_count == 1 and _count_child_run_dirs(bridge_dir) <= 1,
+        "no_batch_generation": _count_child_run_dirs(bridge_dir) <= 1,
         "no_assembly_generation": _no_assembly_generation(bridge_dir),
         "no_assembly_constraints_solved": _no_assembly_constraints_solved(bridge_dir),
         "diagnostic_codes": _collect_diagnostic_codes(
@@ -172,6 +216,8 @@ def _summary_from_results(
             bridge_result,
         ),
     })
+    if isinstance(assembly_plan, dict) and selected_part_id is None:
+        summary["selection_diagnostics"] = selection_diagnostics(assembly_plan)
     error_category = (bridge_result or design_result or {}).get("error_category")
     if isinstance(error_category, str):
         summary["error_category"] = _safe_status(error_category)
