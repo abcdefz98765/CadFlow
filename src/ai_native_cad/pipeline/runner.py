@@ -917,6 +917,7 @@ def _collect_files(output_dir: Path, *, repo_relative: bool = False) -> dict[str
         "part_create_request.json": "part_create_request",
         "part_request_review.json": "part_request_review",
         "reviewed_part_handoff.json": "reviewed_part_handoff",
+        "part_execution_request.json": "part_execution_request",
         "input_ir.json": "input_ir",
         "model.py": "model_py",
         "model.step": "step",
@@ -2257,6 +2258,125 @@ def run_reviewed_part_handoff_pipeline(
     }
 
 
+def run_reviewed_part_single_create_pipeline(
+    reviewed_part_handoff: dict[str, Any] | str | Path,
+    adapter: AgentAdapter,
+    *,
+    output_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Explicitly execute one reviewed part handoff through normalized create."""
+
+    handoff, source_handoff, default_output = _load_reviewed_part_handoff_input(reviewed_part_handoff)
+    output_path = _resolve_output_dir("reviewed_part_single_create", output_root, output_dir or default_output)
+    output_path.mkdir(parents=True, exist_ok=True)
+    sanitized_handoff = _sanitize_reviewed_part_handoff(handoff, source_handoff=source_handoff)
+    _write_json(output_path / "reviewed_part_handoff.json", sanitized_handoff)
+
+    safety = _reviewed_part_single_create_safety(sanitized_handoff, handoff)
+    if safety["status"] != "ready":
+        return _write_blocked_reviewed_part_single_create_result(
+            output_path=output_path,
+            handoff=sanitized_handoff,
+            source_handoff=source_handoff,
+            status=safety["status"],
+            diagnostic_codes=safety["diagnostic_codes"],
+            blocked_reasons=safety["blocked_reasons"],
+        )
+
+    execution_request = _compile_part_execution_request(sanitized_handoff, source_handoff=source_handoff)
+    _write_json(output_path / "part_execution_request.json", execution_request)
+    child_output_dir = output_path / execution_request["child_run_id"]
+    child_result = run_provider_normalized_create_pipeline(
+        execution_request["prompt"],
+        adapter,
+        output_dir=child_output_dir,
+    )
+    lineage = _reviewed_part_single_create_lineage(
+        output_path=output_path,
+        child_output_dir=child_output_dir,
+        handoff=sanitized_handoff,
+        source_handoff=source_handoff,
+    )
+    _write_json(output_path / "lineage.json", lineage)
+
+    metadata = {
+        "workflow": "reviewed_part_single_create",
+        "version": "reviewed-part-single-create-v0.1",
+        "status": child_result.get("status", "unknown"),
+        "part_id": sanitized_handoff.get("part_id"),
+        "local_authority": [
+            "reviewed_part_handoff.json",
+            "part_execution_request.json",
+            "run_provider_normalized_create_pipeline",
+            "lineage.json",
+        ],
+        "stages": [
+            "load_reviewed_part_handoff",
+            "validate_review_gate",
+            "compile_single_part_execution_request",
+            "run_provider_normalized_create_pipeline",
+            "record_lineage",
+        ],
+        "artifacts": {
+            "reviewed_part_handoff": "reviewed_part_handoff.json",
+            "part_execution_request": "part_execution_request.json",
+            "child_run_dir": _repo_relative_string(child_output_dir),
+            "lineage": "lineage.json",
+        },
+        "cad_ir_created": (child_output_dir / "input_ir.json").exists(),
+        "part_modeling_started": child_result.get("status") == "success",
+        "diagnostic_codes": ["reviewed_part_single_create.started"],
+    }
+    trace = {
+        "total_attempts": 1,
+        "steps": [
+            {
+                "attempt": 0,
+                "status": child_result.get("status", "unknown"),
+                "stage": "reviewed_part_single_create",
+                "diagnostic_codes": metadata["diagnostic_codes"],
+            }
+        ],
+        "final_selected_candidate": sanitized_handoff.get("part_id"),
+        "reviewed_part_single_create": metadata,
+    }
+    _write_json(output_path / "agent_trace.json", trace)
+    report = {
+        "success": child_result.get("status") == "success",
+        "status": child_result.get("status", "unknown"),
+        "blocked_stage": None if child_result.get("status") == "success" else "single_part_create",
+        "diagnostic_codes": metadata["diagnostic_codes"],
+        "part_id": sanitized_handoff.get("part_id"),
+        "source_handoff": "reviewed_part_handoff.json",
+        "child_run_dir": _repo_relative_string(child_output_dir),
+        "cad_ir_created": metadata["cad_ir_created"],
+        "part_modeling_started": metadata["part_modeling_started"],
+        "reviewed_part_single_create": metadata,
+        "lineage": lineage,
+        "files": _collect_files(output_path, repo_relative=True),
+    }
+    _write_json(output_path / "report.json", report)
+    _write_reviewed_part_single_create_report_md(output_path, report)
+    files = _collect_files(output_path, repo_relative=True)
+    report["files"] = files
+    _write_json(output_path / "report.json", report)
+    return {
+        "status": child_result.get("status", "unknown"),
+        "success": child_result.get("status") == "success",
+        "output_dir": str(output_path),
+        "child_output_dir": str(child_output_dir),
+        "reviewed_part_handoff": sanitized_handoff,
+        "part_execution_request": execution_request,
+        "child_result": child_result,
+        "lineage": lineage,
+        "agent_trace": trace,
+        "files": files,
+        "report_json": str(output_path / "report.json"),
+        "report_md": str(output_path / "report.md"),
+    }
+
+
 def _is_selectable_assembly_part(part: dict[str, Any]) -> bool:
     part_id = _safe_artifact_id(part.get("part_id"))
     if part_id in {"pin", "screw", "bolt", "nut", "washer", "fastener"}:
@@ -2393,6 +2513,19 @@ def _load_part_request_review_input(part_request_review: dict[str, Any] | str | 
     return loaded, path.name, path.parent
 
 
+def _load_reviewed_part_handoff_input(reviewed_part_handoff: dict[str, Any] | str | Path) -> tuple[dict[str, Any], str, Path | None]:
+    if isinstance(reviewed_part_handoff, dict):
+        return reviewed_part_handoff, "reviewed_part_handoff.json", None
+    path = Path(reviewed_part_handoff)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path = _require_repo_path(path.resolve())
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError("reviewed_part_handoff must be a JSON object")
+    return loaded, path.name, path.parent
+
+
 def _safe_part_request_source_artifact_name(value: Any) -> str:
     name = Path(str(value or "part_create_request.json")).name
     if name != "part_create_request.json":
@@ -2404,6 +2537,13 @@ def _safe_part_request_review_source_artifact_name(value: Any) -> str:
     name = Path(str(value or "part_request_review.json")).name
     if name != "part_request_review.json":
         return "part_request_review.json"
+    return name
+
+
+def _safe_reviewed_part_handoff_source_artifact_name(value: Any) -> str:
+    name = Path(str(value or "reviewed_part_handoff.json")).name
+    if name != "reviewed_part_handoff.json":
+        return "reviewed_part_handoff.json"
     return name
 
 
@@ -2461,6 +2601,169 @@ def _reviewed_part_handoff_assembly_context(part_create_request: dict[str, Any])
         if safe_part and safe_part not in related_parts:
             related_parts.append(safe_part)
     return {"assembly_scope": scope, "related_parts": related_parts}
+
+
+def _sanitize_reviewed_part_handoff(handoff: dict[str, Any], *, source_handoff: str) -> dict[str, Any]:
+    return {
+        "artifact_type": "reviewed_part_handoff",
+        "schema_version": "0.1",
+        "source_part_request": _safe_part_request_source_artifact_name(handoff.get("source_part_request")),
+        "source_review": _safe_part_request_review_source_artifact_name(handoff.get("source_review")),
+        "source_handoff": _safe_reviewed_part_handoff_source_artifact_name(source_handoff),
+        "part_id": _safe_artifact_id(handoff.get("part_id")) if handoff.get("part_id") else None,
+        "status": handoff.get("status") if isinstance(handoff.get("status"), str) else "blocked_review_not_approved",
+        "single_part_prompt": _safe_short_text(handoff.get("single_part_prompt"), fallback="", max_length=240),
+        "part_brief": _safe_short_text(handoff.get("part_brief"), fallback="", max_length=180),
+        "interface_constraints": _reviewed_part_handoff_interface_constraints(handoff),
+        "preserved_assembly_context": _reviewed_part_handoff_assembly_context(handoff),
+        "diagnostic_codes": _safe_diagnostic_codes([
+            code for code in handoff.get("diagnostic_codes", []) if isinstance(code, str)
+        ]),
+        "blocked_reasons": _dedupe_reason_codes([
+            reason for reason in handoff.get("blocked_reasons", []) if isinstance(reason, dict)
+        ]),
+    }
+
+
+def _reviewed_part_single_create_safety(sanitized_handoff: dict[str, Any], raw_handoff: dict[str, Any]) -> dict[str, Any]:
+    diagnostic_codes: list[str] = []
+    blocked_reasons: list[dict[str, str]] = []
+    status = "ready"
+
+    def block(next_status: str, code: str) -> None:
+        nonlocal status
+        if status == "ready":
+            status = next_status
+        diagnostic_codes.append(code)
+        blocked_reasons.append({"code": code})
+
+    if sanitized_handoff.get("status") != "ready_for_single_part_planning":
+        block("blocked_handoff_not_ready", "reviewed_part_single_create.blocked_handoff_not_ready")
+    if not _has_reviewable_part_brief(sanitized_handoff):
+        block("blocked_missing_part_brief", "reviewed_part_single_create.blocked_missing_part_brief")
+    if _is_assembly_derived_part_request(sanitized_handoff) and (
+        not _has_part_request_interface_constraints(sanitized_handoff)
+        or not _has_clear_related_parts(sanitized_handoff)
+    ):
+        block("needs_revision_missing_interface_constraints", "reviewed_part_single_create.needs_revision_missing_interface_constraints")
+    if sanitized_handoff.get("part_id") in {"screw", "screws", "bolt", "bolts", "nut", "nuts", "washer", "washers", "fastener", "fasteners"}:
+        block("blocked_reference_only_part", "reviewed_part_single_create.blocked_reference_only_part")
+    if sanitized_handoff.get("blocked_reasons"):
+        block("blocked_unsupported_part", "reviewed_part_single_create.blocked_unsupported_part")
+    if _contains_provider_generated_code(raw_handoff):
+        block("blocked_provider_generated_code", "reviewed_part_single_create.provider_code_rejected")
+    if _contains_provider_generated_cad_ir(raw_handoff):
+        block("blocked_provider_generated_cad_ir", "reviewed_part_single_create.provider_cad_ir_rejected")
+    if _contains_arbitrary_provider_fields(raw_handoff):
+        block("blocked_arbitrary_provider_fields", "reviewed_part_single_create.provider_code_rejected")
+    if _handoff_requests_multi_part_or_assembly_generation(sanitized_handoff):
+        block("blocked_multi_part_or_assembly_request", "reviewed_part_single_create.blocked_multi_part_or_assembly_request")
+    if _handoff_requests_safety_critical_scope(sanitized_handoff):
+        block("blocked_safety_critical_scope", "reviewed_part_single_create.blocked_safety_critical_scope")
+
+    if status == "ready":
+        diagnostic_codes.append("reviewed_part_single_create.ready")
+    return {
+        "status": status,
+        "diagnostic_codes": _safe_diagnostic_codes(diagnostic_codes),
+        "blocked_reasons": _dedupe_reason_codes(blocked_reasons),
+    }
+
+
+def _compile_part_execution_request(handoff: dict[str, Any], *, source_handoff: str) -> dict[str, Any]:
+    part_id = _safe_artifact_id(handoff.get("part_id"))
+    return {
+        "artifact_type": "part_execution_request",
+        "schema_version": "0.1",
+        "source_handoff": _safe_reviewed_part_handoff_source_artifact_name(source_handoff),
+        "part_id": part_id,
+        "execution_mode": "single_part_only",
+        "child_run_id": f"single_part_{part_id}",
+        "prompt": _reviewed_part_single_create_prompt(handoff),
+        "diagnostic_codes": ["reviewed_part_single_create.execution_request_created"],
+    }
+
+
+def _reviewed_part_single_create_prompt(handoff: dict[str, Any]) -> str:
+    part_id = _safe_artifact_id(handoff.get("part_id"))
+    lines = [
+        f'Create a single CAD part for part_id "{part_id}".',
+        "",
+        "Part brief:",
+        _safe_short_text(handoff.get("part_brief"), fallback="Single reviewed CAD part.", max_length=180),
+        "",
+        "External interface constraints to preserve:",
+    ]
+    constraints = handoff.get("interface_constraints") if isinstance(handoff.get("interface_constraints"), list) else []
+    if constraints:
+        for constraint in constraints:
+            if isinstance(constraint, dict):
+                note = _safe_short_text(
+                    constraint.get("notes"),
+                    fallback=f"Preserve {constraint.get('kind', 'assembly interface')} with {constraint.get('related_part_id', 'related part')}.",
+                    max_length=160,
+                )
+                lines.append(f"- {note}")
+    else:
+        lines.append("- No assembly interfaces were supplied.")
+    lines.extend([
+        "",
+        "This is a single-part generation request derived from reviewed planning context.",
+        "Do not generate other parts or a combined model.",
+    ])
+    return "\n".join(lines)
+
+
+def _reviewed_part_single_create_lineage(
+    *,
+    output_path: Path,
+    child_output_dir: Path,
+    handoff: dict[str, Any],
+    source_handoff: str,
+) -> dict[str, Any]:
+    return {
+        "artifact_type": "lineage",
+        "version": "lineage-v0.1",
+        "relationship": "reviewed_part_single_create_child",
+        "part_id": handoff.get("part_id"),
+        "assembly_plan_artifact": "assembly_plan.json",
+        "part_create_request_artifact": handoff.get("source_part_request") or "part_create_request.json",
+        "part_request_review_artifact": handoff.get("source_review") or "part_request_review.json",
+        "reviewed_part_handoff_artifact": _safe_reviewed_part_handoff_source_artifact_name(source_handoff),
+        "execution_request_artifact": "part_execution_request.json",
+        "parent_run_id": output_path.name,
+        "parent_run_dir": _repo_relative_string(output_path),
+        "child_run_id": child_output_dir.name,
+        "child_run_dir": _repo_relative_string(child_output_dir),
+    }
+
+
+def _handoff_requests_multi_part_or_assembly_generation(handoff: dict[str, Any]) -> bool:
+    text = " ".join([
+        str(handoff.get("single_part_prompt") or ""),
+        str(handoff.get("part_brief") or ""),
+    ]).lower()
+    blocked_phrases = [
+        "generate an assembly",
+        "generate assembly",
+        "create an assembly",
+        "create assembly",
+        "generate all parts",
+        "all assembly parts",
+        "batch generate",
+        "multi-part cad",
+        "multipart cad",
+        "step assembly",
+    ]
+    return any(phrase in text for phrase in blocked_phrases)
+
+
+def _handoff_requests_safety_critical_scope(handoff: dict[str, Any]) -> bool:
+    text = " ".join([
+        str(handoff.get("single_part_prompt") or ""),
+        str(handoff.get("part_brief") or ""),
+    ]).lower()
+    return any(phrase in text for phrase in ("safety-critical", "load-bearing aerospace", "life support", "medical implant"))
 
 
 def _part_request_blocked_reason_codes(part_create_request: dict[str, Any]) -> list[str]:
@@ -2619,6 +2922,91 @@ def _write_reviewed_part_handoff_report_md(
         "",
     ]
     for code in handoff.get("diagnostic_codes", []):
+        lines.append(f"- `{code}`")
+    (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_blocked_reviewed_part_single_create_result(
+    *,
+    output_path: Path,
+    handoff: dict[str, Any],
+    source_handoff: str,
+    status: str,
+    diagnostic_codes: list[str],
+    blocked_reasons: list[dict[str, str]],
+) -> dict[str, Any]:
+    trace = {
+        "total_attempts": 0,
+        "steps": [
+            {
+                "attempt": 0,
+                "status": "blocked" if not status.startswith("needs_revision") else "needs_revision",
+                "stage": "reviewed_part_single_create",
+                "diagnostic_codes": diagnostic_codes,
+            }
+        ],
+        "final_selected_candidate": None,
+        "reviewed_part_single_create": {
+            "workflow": "reviewed_part_single_create",
+            "version": "reviewed-part-single-create-v0.1",
+            "status": status,
+            "part_id": handoff.get("part_id"),
+            "local_authority": ["reviewed_part_handoff.json"],
+            "stages": ["load_reviewed_part_handoff", "validate_review_gate"],
+            "artifacts": {"reviewed_part_handoff": _safe_reviewed_part_handoff_source_artifact_name(source_handoff)},
+            "cad_ir_created": False,
+            "part_modeling_started": False,
+            "diagnostic_codes": diagnostic_codes,
+        },
+    }
+    _write_json(output_path / "agent_trace.json", trace)
+    report = {
+        "success": False,
+        "status": status,
+        "blocked_stage": "reviewed_part_single_create",
+        "diagnostic_codes": diagnostic_codes,
+        "blocked_reasons": blocked_reasons,
+        "part_id": handoff.get("part_id"),
+        "source_handoff": "reviewed_part_handoff.json",
+        "cad_ir_created": False,
+        "part_modeling_started": False,
+        "reviewed_part_handoff": handoff,
+        "files": _collect_files(output_path, repo_relative=True),
+    }
+    _write_json(output_path / "report.json", report)
+    _write_reviewed_part_single_create_report_md(output_path, report)
+    files = _collect_files(output_path, repo_relative=True)
+    report["files"] = files
+    _write_json(output_path / "report.json", report)
+    return {
+        "status": status,
+        "success": False,
+        "blocked_stage": "reviewed_part_single_create",
+        "diagnostic_codes": diagnostic_codes,
+        "blocked_reasons": blocked_reasons,
+        "output_dir": str(output_path),
+        "reviewed_part_handoff": handoff,
+        "agent_trace": trace,
+        "files": files,
+        "report_json": str(output_path / "report.json"),
+        "report_md": str(output_path / "report.md"),
+    }
+
+
+def _write_reviewed_part_single_create_report_md(output_path: Path, report: dict[str, Any]) -> None:
+    lines = [
+        "# Reviewed Part Single Create Report",
+        "",
+        f"**Status:** {report.get('status')}",
+        f"**Part ID:** `{report.get('part_id')}`",
+        "",
+        "This bridge executes exactly one reviewed single-part handoff through the normalized provider create pipeline.",
+        "It does not generate an assembly, generate all parts, solve assembly constraints, or export a STEP assembly.",
+        "",
+        "## Diagnostics",
+        "",
+    ]
+    for code in report.get("diagnostic_codes", []):
         lines.append(f"- `{code}`")
     (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

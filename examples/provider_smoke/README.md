@@ -117,3 +117,9 @@ Approved reviews can be compiled into `reviewed_part_handoff.json` with
 part brief, interface constraints, and assembly context for a future explicit
 single-part planning step. It still does not write `input_ir.json`, STEP/STL, or
 provider-generated code.
+
+`run_reviewed_part_single_create_pipeline(...)` is the opt-in execution bridge
+from one ready `reviewed_part_handoff.json` to the existing normalized
+single-part create pipeline. It creates one child single-part run and records
+lineage back to the assembly planning artifacts. It does not generate all parts,
+create an assembly, add assembly constraints, or export a STEP assembly.

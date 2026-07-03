@@ -154,6 +154,8 @@ assembly_plan.json
   -> approved, needs_revision, or blocked
   -> reviewed_part_handoff.json
   -> ready_for_single_part_planning or blocked/needs_revision
+  -> explicit reviewed single-part create
+  -> one child normalized single-part CAD run
 ```
 
 `part_create_request.json` is locally compiled and sanitized. It records one
@@ -187,6 +189,19 @@ reference-only parts, unsupported/blocked parts, missing assembly interfaces, or
 provider-generated CAD IR/code remain blocked or `needs_revision`. This handoff
 is still planning-only and does not call `run_ir_pipeline(...)`, write
 `input_ir.json`, or generate STEP/STL artifacts.
+
+`run_reviewed_part_single_create_pipeline(...)` is the first explicit execution
+bridge from a reviewed assembly-derived part handoff into CAD generation. It
+accepts exactly one `reviewed_part_handoff.json`, requires status
+`ready_for_single_part_planning`, compiles a local `part_execution_request.json`,
+then calls the existing `run_provider_normalized_create_pipeline(...)` for one
+child single-part run directory. The bridge writes `lineage.json`,
+`report.json`, `report.md`, and `agent_trace.json` that link back to
+`assembly_plan.json`, `part_create_request.json`, `part_request_review.json`,
+and `reviewed_part_handoff.json`. Non-ready, unsafe, reference-only, blocked,
+unsupported, multi-part, or assembly-shaped handoffs are blocked before provider
+or CAD execution. This bridge does not batch parts, generate assemblies, solve
+assembly constraints, or export STEP assemblies.
 
 ### Text Pipeline Fallback
 

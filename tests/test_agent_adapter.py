@@ -25,6 +25,7 @@ from ai_native_cad.pipeline import (
     run_assembly_part_request_pipeline,
     run_part_request_review_pipeline,
     run_reviewed_part_handoff_pipeline,
+    run_reviewed_part_single_create_pipeline,
     run_provider_create_pipeline,
     run_provider_normalized_create_pipeline,
     run_provider_normalized_design_create_pipeline,
@@ -2719,13 +2720,257 @@ def test_reviewed_part_handoff_approved_review_with_missing_interfaces_needs_rev
     assert not (Path(result["output_dir"]) / "input_ir.json").exists()
 
 
+def _valid_reviewed_part_handoff():
+    request = _valid_part_create_request()
+    return pipeline_runner.create_reviewed_part_handoff(request, review_part_create_request(request))
+
+
+def test_reviewed_part_single_create_ready_handoff_invokes_normalized_single_part_create(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": {
+            "part_type": "mounting_plate",
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5},
+            "features": {"holes": {"count": 4, "diameter": 4.5, "positions": "corner_4"}},
+        },
+        "create_plan": {
+            "artifact_type": "plan",
+            "route": {},
+            "selected_parts": [],
+            "flow_gate_status": {},
+        },
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "reviewed_part_single_create"
+
+    result = run_reviewed_part_single_create_pipeline(
+        _valid_reviewed_part_handoff(),
+        adapter,
+        output_dir=output_dir,
+    )
+
+    child_dir = output_dir / "single_part_base"
+    assert result["status"] == "success"
+    assert result["success"] is True
+    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement", "create_plan"]
+    assert (output_dir / "reviewed_part_handoff.json").exists()
+    assert (output_dir / "part_execution_request.json").exists()
+    assert (output_dir / "lineage.json").exists()
+    assert (output_dir / "report.json").exists()
+    assert (output_dir / "agent_trace.json").exists()
+    assert (child_dir / "input_ir.json").exists()
+    assert (child_dir / "model.step").exists()
+    assert (child_dir / "model.stl").exists()
+    assert not (output_dir / "input_ir.json").exists()
+    assert not (output_dir / "model.step").exists()
+    assert not (output_dir / "model.stl").exists()
+
+    execution_request = json.loads((output_dir / "part_execution_request.json").read_text(encoding="utf-8"))
+    prompt = execution_request["prompt"]
+    assert execution_request["execution_mode"] == "single_part_only"
+    assert execution_request["child_run_id"] == "single_part_base"
+    assert 'part_id "base"' in prompt
+    assert "Base component with PCB standoffs and screw bosses." in prompt
+    assert "Screw holes should align with lid." in prompt
+    assert "Do not generate other parts or a combined model." in prompt
+    assert "generate all parts" not in prompt.lower()
+    assert "step assembly" not in prompt.lower()
+    assert "assembly" not in prompt.lower()
+    assert _request_user_message(fake_client.requests[0])["content"] == prompt
+
+    lineage = json.loads((output_dir / "lineage.json").read_text(encoding="utf-8"))
+    assert lineage["relationship"] == "reviewed_part_single_create_child"
+    assert lineage["assembly_plan_artifact"] == "assembly_plan.json"
+    assert lineage["part_create_request_artifact"] == "part_create_request.json"
+    assert lineage["part_request_review_artifact"] == "part_request_review.json"
+    assert lineage["reviewed_part_handoff_artifact"] == "reviewed_part_handoff.json"
+    assert lineage["child_run_id"] == "single_part_base"
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    assert report["reviewed_part_single_create"]["stages"] == [
+        "load_reviewed_part_handoff",
+        "validate_review_gate",
+        "compile_single_part_execution_request",
+        "run_provider_normalized_create_pipeline",
+        "record_lineage",
+    ]
+    assert trace["reviewed_part_single_create"]["part_id"] == "base"
+
+
+def test_reviewed_part_single_create_non_ready_handoff_does_not_execute(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    called = {"normalized_create": False}
+
+    def fake_normalized_create(*args, **kwargs):
+        called["normalized_create"] = True
+        raise AssertionError("non-ready handoff must not execute")
+
+    monkeypatch.setattr(pipeline_runner, "run_provider_normalized_create_pipeline", fake_normalized_create)
+    handoff = _valid_reviewed_part_handoff()
+    handoff["status"] = "blocked_review_not_approved"
+    adapter = JsonContractAgentAdapter(OperationFakeJsonContractClient({}))
+    output_dir = tmp_path / "outputs" / "blocked_single_create"
+
+    result = run_reviewed_part_single_create_pipeline(handoff, adapter, output_dir=output_dir)
+
+    assert result["status"] == "blocked_handoff_not_ready"
+    assert called["normalized_create"] is False
+    assert (output_dir / "reviewed_part_handoff.json").exists()
+    assert (output_dir / "report.json").exists()
+    assert (output_dir / "agent_trace.json").exists()
+    assert not (output_dir / "part_execution_request.json").exists()
+    assert not (output_dir / "input_ir.json").exists()
+    assert not (output_dir / "model.step").exists()
+    assert not (output_dir / "model.stl").exists()
+
+
+@pytest.mark.parametrize(
+    ("handoff_update", "expected_status", "expected_code"),
+    [
+        (
+            {"part_id": "screws"},
+            "blocked_reference_only_part",
+            "reviewed_part_single_create.blocked_reference_only_part",
+        ),
+        (
+            {"blocked_reasons": [{"code": "part_handoff.blocked_unsupported_part"}]},
+            "blocked_unsupported_part",
+            "reviewed_part_single_create.blocked_unsupported_part",
+        ),
+        (
+            {"part_brief": "part"},
+            "blocked_missing_part_brief",
+            "reviewed_part_single_create.blocked_missing_part_brief",
+        ),
+        (
+            {"interface_constraints": []},
+            "needs_revision_missing_interface_constraints",
+            "reviewed_part_single_create.needs_revision_missing_interface_constraints",
+        ),
+    ],
+)
+def test_reviewed_part_single_create_rejects_reference_blocked_and_incomplete_handoffs(
+    tmp_path,
+    monkeypatch,
+    handoff_update,
+    expected_status,
+    expected_code,
+):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    called = {"normalized_create": False}
+
+    def fake_normalized_create(*args, **kwargs):
+        called["normalized_create"] = True
+        raise AssertionError("unsafe handoff must not execute")
+
+    monkeypatch.setattr(pipeline_runner, "run_provider_normalized_create_pipeline", fake_normalized_create)
+    handoff = {**_valid_reviewed_part_handoff(), **handoff_update}
+    adapter = JsonContractAgentAdapter(OperationFakeJsonContractClient({}))
+
+    result = run_reviewed_part_single_create_pipeline(
+        handoff,
+        adapter,
+        output_dir=tmp_path / "outputs" / expected_status,
+    )
+
+    assert result["status"] == expected_status
+    assert called["normalized_create"] is False
+    assert expected_code in result["diagnostic_codes"]
+    assert not (Path(result["output_dir"]) / "part_execution_request.json").exists()
+    assert not (Path(result["output_dir"]) / "input_ir.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected_status", "expected_code"),
+    [
+        ({"python_code": "import cadquery as cq"}, "blocked_provider_generated_code", "reviewed_part_single_create.provider_code_rejected"),
+        ({"cad_ir": {"part_type": "spacer"}}, "blocked_provider_generated_cad_ir", "reviewed_part_single_create.provider_cad_ir_rejected"),
+        ({"provider_response": {"raw": "secret provider payload"}}, "blocked_arbitrary_provider_fields", "reviewed_part_single_create.provider_code_rejected"),
+        ({"part_brief": "Generate an assembly with all assembly parts."}, "blocked_multi_part_or_assembly_request", "reviewed_part_single_create.blocked_multi_part_or_assembly_request"),
+    ],
+)
+def test_reviewed_part_single_create_rejects_provider_fields_and_assembly_requests(
+    tmp_path,
+    monkeypatch,
+    extra,
+    expected_status,
+    expected_code,
+):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    called = {"normalized_create": False}
+
+    def fake_normalized_create(*args, **kwargs):
+        called["normalized_create"] = True
+        raise AssertionError("unsafe handoff must not execute")
+
+    monkeypatch.setattr(pipeline_runner, "run_provider_normalized_create_pipeline", fake_normalized_create)
+    handoff = {**_valid_reviewed_part_handoff(), **extra}
+    adapter = JsonContractAgentAdapter(OperationFakeJsonContractClient({}))
+    output_dir = tmp_path / "outputs" / expected_status
+
+    result = run_reviewed_part_single_create_pipeline(handoff, adapter, output_dir=output_dir)
+
+    serialized_outputs = json.dumps({
+        "handoff": json.loads((output_dir / "reviewed_part_handoff.json").read_text(encoding="utf-8")),
+        "report": json.loads((output_dir / "report.json").read_text(encoding="utf-8")),
+        "trace": json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8")),
+    }, sort_keys=True)
+    assert result["status"] == expected_status
+    assert called["normalized_create"] is False
+    assert expected_code in result["diagnostic_codes"]
+    assert "secret provider payload" not in serialized_outputs
+    assert "python_code" not in serialized_outputs
+    assert "\"cad_ir\": {" not in serialized_outputs
+    assert "import cadquery" not in serialized_outputs.lower()
+
+
+def test_reviewed_part_single_create_outputs_do_not_leak_paths_secrets_or_provider_messages(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": {
+            "part_type": "mounting_plate",
+            "unit": "mm",
+            "dimensions": {"length": 80, "width": 40, "thickness": 5},
+            "features": {"holes": {"count": 4, "diameter": 4.5, "positions": "corner_4"}},
+        },
+        "create_plan": {
+            "artifact_type": "plan",
+            "route": {},
+            "selected_parts": [],
+            "flow_gate_status": {},
+        },
+    }, provider_identity={"provider": "fake/json", "api_key": "secret"})
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "single_create_privacy"
+
+    run_reviewed_part_single_create_pipeline(_valid_reviewed_part_handoff(), adapter, output_dir=output_dir)
+
+    serialized_outputs = json.dumps({
+        "execution_request": json.loads((output_dir / "part_execution_request.json").read_text(encoding="utf-8")),
+        "lineage": json.loads((output_dir / "lineage.json").read_text(encoding="utf-8")),
+        "report": json.loads((output_dir / "report.json").read_text(encoding="utf-8")),
+        "trace": json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8")),
+    }, sort_keys=True)
+    assert str(tmp_path) not in serialized_outputs
+    assert "D:\\" not in serialized_outputs
+    assert "api_key" not in serialized_outputs
+    assert "secret" not in serialized_outputs
+    assert "messages" not in serialized_outputs
+    assert "raw_response" not in serialized_outputs
+
+
 def test_reviewed_part_handoff_exports_are_available():
     import ai_native_cad.pipeline as pipeline
 
     assert pipeline.create_reviewed_part_handoff is create_reviewed_part_handoff
     assert pipeline.run_reviewed_part_handoff_pipeline is run_reviewed_part_handoff_pipeline
+    assert pipeline.run_reviewed_part_single_create_pipeline is run_reviewed_part_single_create_pipeline
     assert "create_reviewed_part_handoff" in pipeline.__all__
     assert "run_reviewed_part_handoff_pipeline" in pipeline.__all__
+    assert "run_reviewed_part_single_create_pipeline" in pipeline.__all__
 
 
 @pytest.mark.parametrize(
