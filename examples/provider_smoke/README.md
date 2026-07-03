@@ -96,3 +96,8 @@ manual-only and is meant to inspect design-level artifacts, multi-part intent,
 assembly-like scope, unsupported requests, and safety-critical blocks. It does
 not add assembly CAD generation, gear templates, provider-generated CAD IR, or
 provider-generated code.
+
+For normalized design create runs, multi-part or assembly prompts may now write
+`assembly_plan.json`. That file is a sanitized planning artifact only; it
+records the assembly boundary and blocked reasons, then stops before CAD IR,
+multi-part CAD, constraints, or STEP assembly generation.

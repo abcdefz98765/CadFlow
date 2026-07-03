@@ -114,9 +114,9 @@ prompt
   -> local compiler creates design_brief.json
   -> local compiler creates candidate_plans.json
   -> deterministic candidate selection
-  -> local planning_artifact.json
-  -> deterministic CAD IR conversion
-  -> run_ir_pipeline(...)
+  -> local planning_artifact.json for supported single-part requests
+  -> deterministic CAD IR conversion for supported single-part requests
+  -> run_ir_pipeline(...) for supported single-part requests
 ```
 
 The provider may contribute design-level signals, but the official
@@ -124,6 +124,14 @@ The provider may contribute design-level signals, but the official
 `requirement.json`, `planning_artifact.json`, and `input_ir.json` artifacts are
 compiled and validated by CadFlow. Provider-generated CAD IR and
 CadQuery/Python code are not accepted.
+
+For `multi_part` or `assembly` scope, this MVP writes a local
+`assembly_plan.json` and blocks before part generation. `assembly_plan.json` is
+a planning artifact only: it preserves sanitized parts, interfaces, fasteners,
+clearance notes, risk notes, and blocked reasons. It does not mean CadFlow can
+generate multi-part CAD, solve assembly constraints, or export a STEP assembly.
+Those capabilities remain future work, and the workflow must not fabricate
+`input_ir.json` for an unsupported assembly request.
 
 ### Text Pipeline Fallback
 

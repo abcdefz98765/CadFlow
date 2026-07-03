@@ -326,6 +326,36 @@ def run_provider_normalized_design_create_pipeline(
     provider_traces.append(_provider_stage_trace(adapter, "parse_requirement", validation_status="passed"))
     requirement_decision = requirement.get("requirement_status", {}).get("flow_decision", {})
     if not is_proceed_action(requirement_decision.get("action")):
+        if _requirement_requires_assembly_planning(requirement):
+            intent = _compile_normalized_design_intent(prompt, requirement)
+            validate_adapter_result("interpret_user_intent", intent)
+            _write_json(output_path / "intent.json", intent)
+
+            design_brief = _compile_normalized_design_brief(intent, requirement)
+            validate_adapter_result("propose_design_brief", design_brief)
+            _write_json(output_path / "design_brief.json", design_brief)
+
+            candidate_plans = _compile_normalized_candidate_plans(design_brief, requirement)
+            if not candidate_plans:
+                raise ValueError("normalized design compiler must produce candidate plans")
+            _write_json(output_path / "candidate_plans.json", candidate_plans)
+
+            selected_plan = _select_candidate_plan(candidate_plans, selected_candidate)
+            _write_json(output_path / "selected_plan.json", selected_plan)
+
+            assembly_plan = _compile_assembly_plan(prompt, requirement, design_brief, selected_plan)
+            _write_json(output_path / "assembly_plan.json", assembly_plan)
+            return _write_blocked_normalized_design_assembly_result(
+                output_path=output_path,
+                adapter=adapter,
+                provider_traces=provider_traces,
+                requirement=requirement,
+                intent=intent,
+                design_brief=design_brief,
+                candidate_plans=candidate_plans,
+                selected_plan=selected_plan,
+                assembly_plan=assembly_plan,
+            )
         return _write_blocked_provider_create_result(
             output_path=output_path,
             status="blocked_provider_requirement",
@@ -862,7 +892,7 @@ def run_ir_pipeline(
     }
 
 
-def _collect_files(output_dir: Path) -> dict[str, str]:
+def _collect_files(output_dir: Path, *, repo_relative: bool = False) -> dict[str, str]:
     files = {}
     labels = {
         "prompt.txt": "prompt",
@@ -883,6 +913,7 @@ def _collect_files(output_dir: Path) -> dict[str, str]:
         "parent_agent_trace_snapshot.json": "parent_agent_trace_snapshot",
         "requirement.json": "requirement",
         "planning_artifact.json": "planning_artifact",
+        "assembly_plan.json": "assembly_plan",
         "input_ir.json": "input_ir",
         "model.py": "model_py",
         "model.step": "step",
@@ -895,7 +926,7 @@ def _collect_files(output_dir: Path) -> dict[str, str]:
     for name, label in labels.items():
         path = output_dir / name
         if path.exists():
-            files[label] = str(path)
+            files[label] = _repo_relative_string(path) if repo_relative else str(path)
     return files
 
 
@@ -1309,6 +1340,152 @@ def _normalized_design_risk_notes(requirement: dict[str, Any]) -> list[dict[str,
         if isinstance(item, str):
             notes.append({"kind": "assumption", "note": item})
     return notes
+
+
+def _requirement_requires_assembly_planning(requirement: dict[str, Any]) -> bool:
+    scope = requirement.get("intent", {}).get("scope")
+    codes = set(_requirement_diagnostic_codes(requirement))
+    return scope in {"multi_part", "assembly"} or bool(
+        codes
+        & {
+            "compiler.multi_part_requires_assembly_planning",
+            "compiler.assembly_requires_assembly_planning",
+        }
+    )
+
+
+def _compile_assembly_plan(
+    prompt: str,
+    requirement: dict[str, Any],
+    design_brief: dict[str, Any],
+    selected_plan: dict[str, Any],
+) -> dict[str, Any]:
+    scope = requirement.get("intent", {}).get("scope")
+    if scope not in {"multi_part", "assembly"}:
+        scope = "multi_part"
+    parts = _assembly_plan_parts(prompt, requirement)
+    interfaces = _assembly_plan_interfaces(prompt, scope)
+    fasteners = _assembly_plan_fasteners(prompt)
+    diagnostic_codes = _safe_diagnostic_codes(
+        _requirement_diagnostic_codes(requirement)
+        + [
+            "assembly.generation_not_supported_yet",
+            "scope.assembly_intent" if scope == "assembly" else "scope.multi_part_intent",
+        ]
+    )
+    return {
+        "artifact_type": "assembly_plan",
+        "schema_version": "0.1",
+        "scope": scope,
+        "status": "blocked_before_part_generation",
+        "parts": parts,
+        "interfaces": interfaces,
+        "fasteners": fasteners,
+        "clearance_notes": _assembly_plan_clearance_notes(prompt, interfaces),
+        "risk_notes": _assembly_plan_risk_notes(design_brief),
+        "blocked_reasons": [
+            {
+                "code": "assembly_generation_not_supported_yet",
+                "message": "CadFlow can plan this assembly but cannot generate multi-part CAD yet.",
+            }
+        ],
+        "diagnostic_codes": diagnostic_codes,
+        "source": {
+            "compiler": "cadflow_assembly_plan_v0.1",
+            "provider_role": "extraction_only",
+            "requirement_artifact": "requirement.json",
+            "design_brief_artifact": "design_brief.json",
+            "selected_plan_artifact": "selected_plan.json",
+            "selected_candidate": selected_plan.get("candidate_id") or selected_plan.get("label"),
+        },
+    }
+
+
+def _assembly_plan_parts(prompt: str, requirement: dict[str, Any]) -> list[dict[str, Any]]:
+    lowered = prompt.lower()
+    if "base and lid" in lowered or "two-part" in lowered or "two part" in lowered:
+        names = [("base", "main enclosure component"), ("lid", "cover component")]
+    elif "hinge" in lowered or "two leaves" in lowered:
+        names = [("leaf_a", "hinge leaf"), ("leaf_b", "hinge leaf"), ("pin", "hinge pin")]
+    elif "vertical support" in lowered and "clamp" in lowered:
+        names = [("base", "support base"), ("vertical_support", "upright support"), ("clamp", "phone clamp")]
+    else:
+        part_type = requirement.get("part_type") if isinstance(requirement.get("part_type"), str) else "component"
+        names = [(part_type, "assembly component")]
+    return [
+        {
+            "part_id": _safe_artifact_id(part_id),
+            "role": role,
+            "generation_strategy": "future_part_pipeline",
+        }
+        for part_id, role in names
+    ]
+
+
+def _assembly_plan_interfaces(prompt: str, scope: str) -> list[dict[str, Any]]:
+    lowered = prompt.lower()
+    if "base and lid" in lowered or "two-part" in lowered or "two part" in lowered:
+        return [{"from": "lid", "to": "base", "kind": "screw_fastened", "notes": "four corner screws"}]
+    if "hinge" in lowered or "two leaves" in lowered:
+        return [
+            {"from": "leaf_a", "to": "pin", "kind": "pin_joint", "notes": "rotating hinge interface"},
+            {"from": "leaf_b", "to": "pin", "kind": "pin_joint", "notes": "rotating hinge interface"},
+        ]
+    if "vertical support" in lowered and "clamp" in lowered:
+        return [
+            {"from": "vertical_support", "to": "base", "kind": "fixed_support", "notes": "upright attaches to base"},
+            {"from": "clamp", "to": "vertical_support", "kind": "adjustable_contact", "notes": "clamp position is not solved"},
+        ]
+    return [{"from": "component_a", "to": "component_b", "kind": scope, "notes": "relationship requires future assembly planning"}]
+
+
+def _assembly_plan_fasteners(prompt: str) -> list[dict[str, Any]]:
+    lowered = prompt.lower()
+    fasteners: list[dict[str, Any]] = []
+    if "screw" in lowered:
+        fasteners.append({"kind": "screw", "quantity": 4 if "four" in lowered or "4" in lowered else None})
+    if "pin" in lowered and "hinge" not in lowered:
+        fasteners.append({"kind": "pin", "quantity": 1})
+    return fasteners
+
+
+def _assembly_plan_clearance_notes(prompt: str, interfaces: list[dict[str, Any]]) -> list[str]:
+    lowered = prompt.lower()
+    notes: list[str] = []
+    if "clearance" in lowered or "fit" in lowered:
+        notes.append("Clearance or fit requirements must be resolved before assembly CAD generation.")
+    if any(interface.get("kind") == "pin_joint" for interface in interfaces):
+        notes.append("Pin joint clearance is recorded but not solved in this MVP.")
+    if any(interface.get("kind") == "adjustable_contact" for interface in interfaces):
+        notes.append("Adjustable clamp range is recorded but not solved in this MVP.")
+    return notes
+
+
+def _assembly_plan_risk_notes(design_brief: dict[str, Any]) -> list[dict[str, Any]]:
+    notes = [
+        {
+            "kind": "capability_boundary",
+            "note": "Assembly plan is advisory planning only; CAD assembly generation is not implemented.",
+        }
+    ]
+    for item in design_brief.get("risk_notes", []):
+        if isinstance(item, dict):
+            safe_item = {
+                key: value
+                for key, value in item.items()
+                if isinstance(key, str)
+                and key in {"kind", "field", "severity", "note"}
+                and isinstance(value, (str, int, float, bool))
+            }
+            if safe_item:
+                notes.append(safe_item)
+    return notes
+
+
+def _safe_artifact_id(value: Any) -> str:
+    text = str(value or "component").strip().lower()
+    safe = re.sub(r"[^a-z0-9_]+", "_", text).strip("_")
+    return safe or "component"
 
 
 def _agent_create_dir_name(prompt: str) -> str:
@@ -1748,7 +1925,7 @@ def _write_blocked_provider_create_result(
         "cad_ir_created": (output_path / "input_ir.json").exists(),
         "part_modeling_started": False,
         "provider_create": metadata,
-        "files": _collect_files(output_path),
+        "files": _collect_files(output_path, repo_relative=True),
     }
     if requirement is not None:
         report["requirement_status"] = requirement.get("requirement_status", {})
@@ -1758,7 +1935,7 @@ def _write_blocked_provider_create_result(
         report["planning_gate_status"] = planning_artifact.get("flow_gate_status")
     _write_json(output_path / "report.json", report)
     _write_blocked_provider_create_report_md(output_path, report)
-    files = _collect_files(output_path)
+    files = _collect_files(output_path, repo_relative=True)
     report["files"] = files
     _write_json(output_path / "report.json", report)
     _write_provider_create_runtime(output_path, metadata, status=status)
@@ -1819,8 +1996,43 @@ def _provider_normalized_design_create_metadata(
     status: str,
     selected_candidate: str | None,
     candidate_count: int,
+    assembly_plan_created: bool = False,
+    blocked_stage: str | None = None,
+    diagnostic_codes: list[str] | None = None,
 ) -> dict[str, Any]:
-    return {
+    local_authority = [
+        "intent.json",
+        "design_brief.json",
+        "candidate_plans.json",
+        "selected_plan.json",
+        "requirement.json",
+    ]
+    stages = [
+        "prompt",
+        "provider_extraction",
+        "compile_intent",
+        "compile_design_brief",
+        "compile_candidate_plans",
+        "select_candidate",
+    ]
+    artifacts = {
+        "prompt": "prompt.txt",
+        "intent": "intent.json",
+        "design_brief": "design_brief.json",
+        "candidate_plans": "candidate_plans.json",
+        "selected_plan": "selected_plan.json",
+        "requirement": "requirement.json",
+    }
+    if assembly_plan_created:
+        local_authority.append("assembly_plan.json")
+        stages.append("compile_assembly_plan")
+        artifacts["assembly_plan"] = "assembly_plan.json"
+    else:
+        local_authority.extend(["planning_artifact.json", "input_ir.json", "run_ir_pipeline"])
+        stages.extend(["local_requirement_planning", "planning_to_cad_ir", "run_ir_pipeline"])
+        artifacts["planning_artifact"] = "planning_artifact.json"
+        artifacts["input_ir"] = "input_ir.json"
+    metadata = {
         "workflow": "provider_normalized_design_create",
         "version": "provider-normalized-design-create-v0.1",
         "provider_contract_mode": "extract_then_compile",
@@ -1828,41 +2040,142 @@ def _provider_normalized_design_create_metadata(
         "status": status,
         "adapter": _safe_provider_identity(adapter),
         "provider_role": "extract_design_signals_only",
-        "local_authority": [
-            "intent.json",
-            "design_brief.json",
-            "candidate_plans.json",
-            "selected_plan.json",
-            "requirement.json",
-            "planning_artifact.json",
-            "input_ir.json",
-            "run_ir_pipeline",
-        ],
-        "stages": [
-            "prompt",
-            "provider_extraction",
-            "compile_intent",
-            "compile_design_brief",
-            "compile_candidate_plans",
-            "select_candidate",
-            "local_requirement_planning",
-            "planning_to_cad_ir",
-            "run_ir_pipeline",
-        ],
-        "artifacts": {
-            "prompt": "prompt.txt",
-            "intent": "intent.json",
-            "design_brief": "design_brief.json",
-            "candidate_plans": "candidate_plans.json",
-            "selected_plan": "selected_plan.json",
-            "requirement": "requirement.json",
-            "planning_artifact": "planning_artifact.json",
-            "input_ir": "input_ir.json",
-        },
+        "local_authority": local_authority,
+        "stages": stages,
+        "artifacts": artifacts,
         "selected_candidate": selected_candidate,
         "candidate_count": candidate_count,
+        "assembly_plan_created": assembly_plan_created,
         "provider_request_traces": provider_traces,
     }
+    if blocked_stage:
+        metadata["blocked_stage"] = blocked_stage
+    if diagnostic_codes:
+        metadata["diagnostic_codes"] = _safe_diagnostic_codes(diagnostic_codes)
+    return metadata
+
+
+def _write_blocked_normalized_design_assembly_result(
+    *,
+    output_path: Path,
+    adapter: AgentAdapter,
+    provider_traces: list[dict[str, Any]],
+    requirement: dict[str, Any],
+    intent: dict[str, Any],
+    design_brief: dict[str, Any],
+    candidate_plans: list[dict[str, Any]],
+    selected_plan: dict[str, Any],
+    assembly_plan: dict[str, Any],
+) -> dict[str, Any]:
+    scope = assembly_plan.get("scope") if assembly_plan.get("scope") in {"multi_part", "assembly"} else "multi_part"
+    status = (
+        "blocked_assembly_generation_not_supported"
+        if scope == "assembly"
+        else "blocked_multi_part_generation_not_supported"
+    )
+    diagnostic_codes = _safe_diagnostic_codes(
+        list(assembly_plan.get("diagnostic_codes", [])) + ["assembly.generation_not_supported_yet"]
+    )
+    metadata = _provider_normalized_design_create_metadata(
+        adapter=adapter,
+        provider_traces=provider_traces,
+        status=status,
+        selected_candidate=selected_plan.get("candidate_id") or selected_plan.get("label"),
+        candidate_count=len(candidate_plans),
+        assembly_plan_created=True,
+        blocked_stage="assembly_planning",
+        diagnostic_codes=diagnostic_codes,
+    )
+    trace = {
+        "total_attempts": 0,
+        "steps": [
+            {
+                "attempt": 0,
+                "status": "blocked",
+                "stage": "assembly_planning",
+                "error_category": "assembly_generation_not_supported_yet",
+            }
+        ],
+        "final_selected_candidate": None,
+        "provider_normalized_design_create": metadata,
+    }
+    _write_json(output_path / "agent_trace.json", trace)
+    report = {
+        "success": False,
+        "status": status,
+        "blocked_stage": "assembly_planning",
+        "error_category": "assembly_generation_not_supported_yet",
+        "diagnostic_codes": diagnostic_codes,
+        "part_type": requirement.get("part_type"),
+        "part_name": requirement.get("instance_name") or requirement.get("part_name") or requirement.get("part_type"),
+        "scope": scope,
+        "requirement_status": requirement.get("requirement_status", {}),
+        "assembly_plan_status": assembly_plan.get("status"),
+        "cad_ir_created": False,
+        "part_modeling_started": False,
+        "provider_normalized_design_create": metadata,
+        "files": _collect_files(output_path, repo_relative=True),
+    }
+    _write_json(output_path / "report.json", report)
+    _write_blocked_normalized_design_assembly_report_md(output_path, report, assembly_plan)
+    files = _collect_files(output_path, repo_relative=True)
+    report["files"] = files
+    _write_json(output_path / "report.json", report)
+    runtime_path = output_path / "logs" / "runtime.json"
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime = _read_json_if_present(runtime_path)
+    runtime["provider_normalized_design_create"] = metadata
+    _write_json(runtime_path, runtime)
+    return {
+        "status": status,
+        "success": False,
+        "blocked_stage": "assembly_planning",
+        "error_category": "assembly_generation_not_supported_yet",
+        "diagnostic_codes": diagnostic_codes,
+        "output_dir": str(output_path),
+        "intent": intent,
+        "design_brief": design_brief,
+        "candidate_plans": candidate_plans,
+        "selected_plan": selected_plan,
+        "requirement": requirement,
+        "assembly_plan": assembly_plan,
+        "provider_normalized_design_create": metadata,
+        "agent_trace": trace,
+        "files": files,
+        "report_json": str(output_path / "report.json"),
+        "report_md": str(output_path / "report.md"),
+    }
+
+
+def _write_blocked_normalized_design_assembly_report_md(
+    output_path: Path,
+    report: dict[str, Any],
+    assembly_plan: dict[str, Any],
+) -> None:
+    lines = [
+        "# Provider Normalized Design Create Report",
+        "",
+        f"**Status:** {report.get('status')}",
+        f"**Blocked stage:** {report.get('blocked_stage')}",
+        f"**Scope:** `{report.get('scope')}`",
+        f"**Error category:** `{report.get('error_category')}`",
+        "",
+        "`assembly_plan.json` is a planning artifact only. CadFlow did not generate CAD IR, "
+        "multi-part CAD, assembly constraints, or STEP assembly output.",
+        "",
+        "## Assembly Plan",
+        "",
+        f"- Parts: {len(assembly_plan.get('parts', []))}",
+        f"- Interfaces: {len(assembly_plan.get('interfaces', []))}",
+        f"- Fasteners: {len(assembly_plan.get('fasteners', []))}",
+        "",
+        "## Blocked Reasons",
+        "",
+    ]
+    for reason in assembly_plan.get("blocked_reasons", []):
+        if isinstance(reason, dict):
+            lines.append(f"- `{reason.get('code', 'blocked')}`: {reason.get('message', '')}")
+    (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _merge_provider_normalized_design_create_metadata(output_dir: Path, metadata: dict[str, Any]) -> None:
@@ -1878,7 +2191,7 @@ def _merge_provider_normalized_design_create_metadata(output_dir: Path, metadata
     if report_path.exists():
         report = json.loads(report_path.read_text(encoding="utf-8"))
         report["provider_normalized_design_create"] = metadata
-        report["files"] = _collect_files(output_dir)
+        report["files"] = _collect_files(output_dir, repo_relative=True)
         report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
     report_md_path = output_dir / "report.md"
@@ -1893,12 +2206,40 @@ def _merge_provider_normalized_design_create_metadata(output_dir: Path, metadata
             "- Provider role: extraction/advisory only; CadFlow compiles and validates official artifacts locally.\n"
         )
         report_md_path.write_text(report_md, encoding="utf-8")
+        _rewrite_report_md_files_section(output_dir)
 
     runtime_path = output_dir / "logs" / "runtime.json"
     runtime_path.parent.mkdir(parents=True, exist_ok=True)
     runtime = _read_json_if_present(runtime_path)
     runtime["provider_normalized_design_create"] = metadata
     _write_json(runtime_path, runtime)
+
+
+def _rewrite_report_md_files_section(output_dir: Path) -> None:
+    report_md_path = output_dir / "report.md"
+    if not report_md_path.exists():
+        return
+    lines = report_md_path.read_text(encoding="utf-8").splitlines()
+    files = _collect_files(output_dir, repo_relative=True)
+    rewritten: list[str] = []
+    index = 0
+    replaced = False
+    while index < len(lines):
+        line = lines[index]
+        rewritten.append(line)
+        if line == "## Files":
+            replaced = True
+            index += 1
+            while index < len(lines) and lines[index] == "":
+                index += 1
+            for label, path in files.items():
+                rewritten.append(f"- {label}: `{path}`")
+            while index < len(lines) and lines[index].startswith("- "):
+                index += 1
+            continue
+        index += 1
+    if replaced:
+        report_md_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
 
 
 def _merge_agent_create_metadata(output_dir: Path, planning_metadata: dict[str, Any]) -> None:

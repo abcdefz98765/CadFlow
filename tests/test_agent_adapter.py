@@ -1319,9 +1319,9 @@ def test_normalized_design_eval_aggregates_classifications(tmp_path):
             raise RuntimeError("raw provider response should not be recorded")
         if "hinge" in prompt:
             return {
-                "status": "blocked_provider_validation",
-                "blocked_stage": "planning",
-                "error_category": "planning_gate_blocked",
+                "status": "blocked_assembly_generation_not_supported",
+                "blocked_stage": "assembly_planning",
+                "error_category": "assembly_generation_not_supported_yet",
                 "design_brief": {"design_goal": {"scope": "assembly"}},
             }
         if "unsupported plate" in prompt:
@@ -1791,8 +1791,11 @@ def test_provider_normalized_design_create_pipeline_writes_local_design_artifact
     ):
         assert (output_dir / artifact).exists()
     report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    report_md = (output_dir / "report.md").read_text(encoding="utf-8")
     trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
     assert report["provider_normalized_design_create"]["selected_candidate"] == "A"
+    assert str(output_dir) not in json.dumps(report, sort_keys=True)
+    assert str(output_dir) not in report_md
     assert trace["provider_normalized_design_create"]["provider_role"] == "extract_design_signals_only"
 
 
@@ -1853,6 +1856,102 @@ def test_provider_normalized_design_create_ignores_provider_ir_code_and_arbitrar
 
 
 @pytest.mark.parametrize(
+    ("prompt", "provider_requirement", "expected_status", "expected_scope", "expected_code"),
+    [
+        (
+            "Design a two-part electronics enclosure with base and lid, four screws, and PCB standoffs.",
+            {
+                "part_type": "electronics_enclosure",
+                "scope": "single_part",
+                "dimensions": {"length": 100, "width": 60, "height": 30},
+                "features": {"standoffs": {"count": 4}, "screws": {"count": 4}},
+                "input_ir": {"part_type": "gear"},
+                "cadquery_code": "import cadquery as cq",
+                "unsafe_extra": {"secret": "provider value"},
+            },
+            "blocked_multi_part_generation_not_supported",
+            "multi_part",
+            "compiler.multi_part_requires_assembly_planning",
+        ),
+        (
+            "Design a simple hinge bracket assembly with two leaves and a pin.",
+            {
+                "part_type": "hinge_bracket",
+                "scope": "single_part",
+                "dimensions": {"length": 60, "width": 30, "height": 10},
+                "features": {"pin": {"diameter": 4}},
+                "python_code": "print('provider code must not run')",
+            },
+            "blocked_assembly_generation_not_supported",
+            "assembly",
+            "compiler.assembly_requires_assembly_planning",
+        ),
+    ],
+)
+def test_provider_normalized_design_create_writes_assembly_plan_without_cad_execution(
+    prompt,
+    provider_requirement,
+    expected_status,
+    expected_scope,
+    expected_code,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    called = {"run_ir_pipeline": False}
+
+    def fake_run_ir_pipeline(*args, **kwargs):
+        called["run_ir_pipeline"] = True
+        raise AssertionError("assembly planning MVP must not run CAD execution")
+
+    monkeypatch.setattr(pipeline_runner, "run_ir_pipeline", fake_run_ir_pipeline)
+    fake_client = OperationFakeJsonContractClient({
+        "parse_requirement": provider_requirement,
+        "create_plan": _valid_planning_json(),
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+    output_dir = tmp_path / "outputs" / "provider_normalized_design_assembly_plan"
+
+    result = run_provider_normalized_design_create_pipeline(prompt, adapter, output_dir=output_dir)
+
+    assert result["status"] == expected_status
+    assert result["blocked_stage"] == "assembly_planning"
+    assert result["assembly_plan"]["artifact_type"] == "assembly_plan"
+    assert result["assembly_plan"]["scope"] == expected_scope
+    assert result["assembly_plan"]["status"] == "blocked_before_part_generation"
+    assert expected_code in result["assembly_plan"]["diagnostic_codes"]
+    assert "assembly.generation_not_supported_yet" in result["diagnostic_codes"]
+    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement"]
+    assert called["run_ir_pipeline"] is False
+    assert (output_dir / "assembly_plan.json").exists()
+    assert (output_dir / "intent.json").exists()
+    assert (output_dir / "design_brief.json").exists()
+    assert (output_dir / "candidate_plans.json").exists()
+    assert (output_dir / "selected_plan.json").exists()
+    assert (output_dir / "requirement.json").exists()
+    assert (output_dir / "report.json").exists()
+    assert (output_dir / "report.md").exists()
+    assert (output_dir / "agent_trace.json").exists()
+    assert not (output_dir / "input_ir.json").exists()
+    assert not (output_dir / "planning_artifact.json").exists()
+
+    assembly_plan = json.loads((output_dir / "assembly_plan.json").read_text(encoding="utf-8"))
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    serialized = json.dumps({"assembly_plan": assembly_plan, "report": report, "trace": trace}, sort_keys=True)
+    assert assembly_plan["parts"]
+    assert assembly_plan["blocked_reasons"][0]["code"] == "assembly_generation_not_supported_yet"
+    assert report["cad_ir_created"] is False
+    assert report["part_modeling_started"] is False
+    assert trace["provider_normalized_design_create"]["assembly_plan_created"] is True
+    assert "input_ir" not in trace["provider_normalized_design_create"]["artifacts"]
+    assert "cadquery_code" not in serialized
+    assert "python_code" not in serialized
+    assert "unsafe_extra" not in serialized
+    assert "provider value" not in serialized
+
+
+@pytest.mark.parametrize(
     ("prompt", "provider_requirement", "expected_code"),
     [
         ("Make a 24 tooth gear.", {"part_type": "gear", "dimensions": {"teeth": 24}}, "unsupported_part_type.gear"),
@@ -1885,6 +1984,7 @@ def test_provider_normalized_design_create_keeps_expected_unsupported_or_unsafe_
     assert [request["operation"] for request in fake_client.requests] == ["parse_requirement"]
     assert (output_dir / "requirement.json").exists()
     assert not (output_dir / "intent.json").exists()
+    assert not (output_dir / "assembly_plan.json").exists()
     assert not (output_dir / "input_ir.json").exists()
     requirement = json.loads((output_dir / "requirement.json").read_text(encoding="utf-8"))
     report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))

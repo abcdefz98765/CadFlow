@@ -555,7 +555,7 @@ def _code_for_error_category(error_category: str, blocked_stage: str) -> str:
 
 def _blocked_stage(result: dict[str, Any]) -> str:
     stage = result.get("blocked_stage")
-    if stage in {"requirement", "planning", "cad_ir", "part_modeling"}:
+    if stage in {"requirement", "planning", "cad_ir", "part_modeling", "assembly_planning"}:
         return str(stage)
     if str(result.get("status", "")).startswith("blocked_provider_"):
         return "part_modeling"
@@ -565,7 +565,7 @@ def _blocked_stage(result: dict[str, Any]) -> str:
 def _eval_status(raw_status: str, blocked_stage: str) -> str:
     if raw_status == "success":
         return "success"
-    if raw_status.startswith("blocked_provider_") or blocked_stage != "none":
+    if raw_status.startswith("blocked_") or blocked_stage != "none":
         return "blocked"
     return "failed"
 
