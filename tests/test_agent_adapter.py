@@ -1148,6 +1148,7 @@ def test_reviewed_part_single_create_smoke_runs_one_sanitized_fake_flow(tmp_path
     assert status["bridge_status"] == "success"
     assert status["child_run_created"] is True
     assert status["child_run_name"] == "single_part_base"
+    assert status["child_diagnostic_codes"] == []
     assert status["step_created"] is True
     assert status["stl_created"] is True
     assert status["no_batch_generation"] is True
@@ -1160,6 +1161,107 @@ def test_reviewed_part_single_create_smoke_runs_one_sanitized_fake_flow(tmp_path
     assert "messages" not in output
     assert "raw_response" not in output
     assert "transcript" not in output
+
+
+def test_reviewed_part_single_create_smoke_surfaces_blocked_child_diagnostics(tmp_path, monkeypatch):
+    from examples.provider_smoke import reviewed_part_single_create_smoke as smoke
+
+    class FakeAdapter:
+        provider_identity = {"provider": "fake/json", "model": "fake-model", "api_key": "secret-value"}
+
+    def fake_design(prompt, adapter, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "assembly_plan.json").write_text(json.dumps({
+            "artifact_type": "assembly_plan",
+            "scope": "multi_part",
+            "parts": [
+                {
+                    "part_id": "base",
+                    "supported_candidate": True,
+                    "part_status": "candidate_for_single_part_generation",
+                    "generation_strategy": "single_part",
+                },
+                {"part_id": "screws", "part_status": "reference_only"},
+            ],
+            "interfaces": [],
+        }), encoding="utf-8")
+        return {"status": "blocked_multi_part_generation_not_supported", "diagnostic_codes": ["assembly.plan_created"]}
+
+    def fake_part_request(assembly_plan, output_dir=None, part_id=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "part_create_request.json").write_text(json.dumps({"part_id": part_id}), encoding="utf-8")
+        return {"status": "ready_for_review", "diagnostic_codes": ["part_request.created"]}
+
+    def fake_review(part_create_request, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "part_request_review.json").write_text(json.dumps({"status": "approved"}), encoding="utf-8")
+        return {"status": "approved", "diagnostic_codes": ["part_request.approved_for_single_part_planning"]}
+
+    def fake_handoff(part_create_request, part_request_review, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "reviewed_part_handoff.json").write_text(json.dumps({
+            "part_id": "base",
+            "status": "ready_for_single_part_planning",
+        }), encoding="utf-8")
+        return {"status": "ready_for_single_part_planning", "diagnostic_codes": ["part_handoff.ready_for_single_part_planning"]}
+
+    def fake_bridge(reviewed_part_handoff, adapter, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        child_dir = output_path / "single_part_base"
+        child_dir.mkdir(parents=True)
+        (child_dir / "report.json").write_text(json.dumps({
+            "status": "blocked_provider_requirement",
+            "diagnostic_codes": ["compiler.assembly_requires_assembly_planning"],
+            "provider_create": {
+                "diagnostic_codes": ["compiler.assembly_requires_assembly_planning"],
+                "requirement_status": {
+                    "diagnostic_codes": ["compiler.scope_blocked"],
+                    "raw_response": "do not print",
+                },
+            },
+        }), encoding="utf-8")
+        return {
+            "status": "blocked_provider_requirement",
+            "child_output_dir": str(child_dir),
+            "diagnostic_codes": ["reviewed_part_single_create.started"],
+            "child_result": {
+                "diagnostic_codes": ["compiler.assembly_requires_assembly_planning"],
+            },
+        }
+
+    monkeypatch.setattr(smoke, "run_provider_normalized_design_create_pipeline", fake_design)
+    monkeypatch.setattr(smoke, "run_assembly_part_request_pipeline", fake_part_request)
+    monkeypatch.setattr(smoke, "run_part_request_review_pipeline", fake_review)
+    monkeypatch.setattr(smoke, "run_reviewed_part_handoff_pipeline", fake_handoff)
+    monkeypatch.setattr(smoke, "run_reviewed_part_single_create_pipeline", fake_bridge)
+
+    summary = smoke.run_reviewed_part_single_create_smoke(
+        FakeAdapter(),
+        "fake",
+        tmp_path / "outputs" / "manual_smoke",
+    )
+
+    serialized = json.dumps(summary, sort_keys=True)
+    assert summary["selected_part_id"] == "base"
+    assert summary["child_run_created"] is True
+    assert summary["bridge_status"] == "blocked_provider_requirement"
+    assert summary["child_diagnostic_codes"] == [
+        "compiler.assembly_requires_assembly_planning",
+        "compiler.scope_blocked",
+    ]
+    assert "compiler.assembly_requires_assembly_planning" in summary["diagnostic_codes"]
+    assert summary["step_created"] is False
+    assert summary["stl_created"] is False
+    assert summary["no_batch_generation"] is True
+    assert summary["no_assembly_generation"] is True
+    assert "secret-value" not in serialized
+    assert str(tmp_path) not in serialized
+    assert "raw_response" not in serialized
+    assert "do not print" not in serialized
 
 
 def test_reviewed_part_single_create_smoke_selects_one_candidate_only():
@@ -2829,7 +2931,7 @@ def test_reviewed_part_handoff_pipeline_writes_ready_handoff_without_cad_generat
     assert {
         "kind": "screw_alignment",
         "related_part_id": "lid",
-        "notes": "Screw holes should align with lid.",
+        "notes": "fastener clearance/alignment features",
     } in handoff["interface_constraints"]
     assert handoff["preserved_assembly_context"]["assembly_scope"] == "multi_part"
     assert handoff["preserved_assembly_context"]["related_parts"] == ["lid", "screws", "gear"]
@@ -3048,10 +3150,14 @@ def test_reviewed_part_single_create_ready_handoff_invokes_normalized_single_par
     assert execution_request["execution_mode"] == "single_part_only"
     assert execution_request["child_run_id"] == "single_part_base"
     assert 'part_id "base"' in prompt
+    assert "Generate only this one part." in prompt
     assert "Base component with PCB standoffs and screw bosses." in prompt
-    assert "Screw holes should align with lid." in prompt
-    assert "Do not generate other parts or a combined model." in prompt
+    assert "fastener clearance/alignment features" in prompt
+    assert "Do not generate a lid, screws, other parts, batch output, or a combined model." in prompt
+    assert "lid component" not in prompt.lower()
+    assert "reference screw envelope" not in prompt.lower()
     assert "generate all parts" not in prompt.lower()
+    assert "batch generate" not in prompt.lower()
     assert "step assembly" not in prompt.lower()
     assert "assembly" not in prompt.lower()
     assert _request_user_message(fake_client.requests[0])["content"] == prompt

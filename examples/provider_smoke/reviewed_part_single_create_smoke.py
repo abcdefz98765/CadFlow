@@ -203,6 +203,7 @@ def _summary_from_results(
         "bridge_status": _safe_status((bridge_result or design_result or {}).get("status")),
         "child_run_created": bool(child_dir and child_dir.exists()),
         "child_run_name": child_run_name,
+        "child_diagnostic_codes": _collect_child_diagnostic_codes(bridge_result, child_dir),
         "step_created": bool(child_dir and (child_dir / "model.step").exists()),
         "stl_created": bool(child_dir and (child_dir / "model.stl").exists()),
         "no_batch_generation": _count_child_run_dirs(bridge_dir) <= 1,
@@ -214,6 +215,7 @@ def _summary_from_results(
             review_result,
             handoff_result,
             bridge_result,
+            {"diagnostic_codes": _collect_child_diagnostic_codes(bridge_result, child_dir)},
         ),
     })
     if isinstance(assembly_plan, dict) and selected_part_id is None:
@@ -239,6 +241,7 @@ def _base_summary(identity: dict[str, Any], *, error_category: str | None = None
         "bridge_status": "not_run",
         "child_run_created": False,
         "child_run_name": None,
+        "child_diagnostic_codes": [],
         "step_created": False,
         "stl_created": False,
         "no_batch_generation": True,
@@ -317,6 +320,30 @@ def _collect_diagnostic_codes(*results: dict[str, Any] | None) -> list[str]:
             safe = _safe_status(code)
             if safe:
                 codes.add(safe)
+    return sorted(codes)
+
+
+def _collect_child_diagnostic_codes(bridge_result: dict[str, Any] | None, child_dir: Path | None) -> list[str]:
+    codes: set[str] = set()
+
+    def add_from(value: Any) -> None:
+        if isinstance(value, dict):
+            for code in value.get("diagnostic_codes", []):
+                safe = _safe_status(code)
+                if safe:
+                    codes.add(safe)
+            for key in ("provider_create", "requirement_status", "child_result"):
+                add_from(value.get(key))
+
+    if isinstance(bridge_result, dict):
+        add_from(bridge_result.get("child_result"))
+    if child_dir is not None and child_dir.exists():
+        report_path = child_dir / "report.json"
+        if report_path.exists():
+            try:
+                add_from(json.loads(report_path.read_text(encoding="utf-8")))
+            except (OSError, json.JSONDecodeError):
+                pass
     return sorted(codes)
 
 

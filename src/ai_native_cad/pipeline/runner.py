@@ -2157,7 +2157,7 @@ def create_reviewed_part_handoff(
         "part_id": part_id,
         "status": status,
         "single_part_prompt": _single_part_handoff_prompt(part_create_request),
-        "part_brief": _safe_short_text(part_create_request.get("part_brief"), fallback="", max_length=180),
+        "part_brief": _single_part_focused_part_brief(part_create_request.get("part_brief")),
         "interface_constraints": _reviewed_part_handoff_interface_constraints(part_create_request),
         "preserved_assembly_context": _reviewed_part_handoff_assembly_context(part_create_request),
         "diagnostic_codes": _safe_diagnostic_codes(diagnostic_codes),
@@ -2551,12 +2551,46 @@ def _single_part_handoff_prompt(part_create_request: dict[str, Any]) -> str:
     part_id = _safe_artifact_id(part_create_request.get("part_id")) if part_create_request.get("part_id") else "component"
     constraints = _reviewed_part_handoff_interface_constraints(part_create_request)
     if constraints:
-        phrases = [
-            f"{constraint['kind'].replace('_', ' ')} with {constraint['related_part_id']}"
-            for constraint in constraints[:3]
-        ]
+        phrases = [_single_part_interface_note(constraint) for constraint in constraints[:3]]
         return f"Create the {part_id} component as a single CAD part. Preserve {' and '.join(phrases)}."
     return f"Create the {part_id} component as a single CAD part."
+
+
+def _single_part_focused_part_brief(value: Any) -> str:
+    text = _safe_short_text(value, fallback="", max_length=180)
+    if not text:
+        return ""
+    replacements = {
+        "assembly interfaces": "local interface features",
+        "assembly interface": "local interface feature",
+        "assembly": "single part",
+        "multi-part": "single-part",
+        "multipart": "single-part",
+    }
+    focused = text
+    for source, target in replacements.items():
+        focused = focused.replace(source, target)
+        focused = focused.replace(source.capitalize(), target.capitalize())
+    return focused
+
+
+def _single_part_interface_note(constraint: dict[str, Any]) -> str:
+    kind = _safe_artifact_id(constraint.get("kind"))
+    note = _safe_short_text(constraint.get("notes"), fallback="", max_length=120)
+    lowered = note.lower()
+    if "four corner" in lowered and ("screw" in lowered or "fastener" in lowered):
+        return "four corner fastener clearance/alignment features"
+    if "reference screw envelope" in lowered:
+        return "reference fastener clearance envelope"
+    if kind == "screw_alignment":
+        return "fastener clearance/alignment features"
+    if kind == "pin_alignment":
+        return "pin alignment features"
+    if kind in {"sliding_fit", "snap_fit", "contact_alignment"}:
+        return f"{kind.replace('_', ' ')} features"
+    if note:
+        return _single_part_focused_part_brief(note)
+    return "local interface features"
 
 
 def _reviewed_part_handoff_interface_constraints(part_create_request: dict[str, Any]) -> list[dict[str, str]]:
@@ -2584,7 +2618,10 @@ def _reviewed_part_handoff_interface_constraints(part_create_request: dict[str, 
         sanitized.append({
             "kind": kind,
             "related_part_id": related_part_id,
-            "notes": _safe_short_text(constraint.get("notes"), fallback="Assembly interface preserved for planning."),
+            "notes": _single_part_interface_note({
+                "kind": kind,
+                "notes": constraint.get("notes"),
+            }),
         })
     return sanitized
 
@@ -2688,28 +2725,29 @@ def _reviewed_part_single_create_prompt(handoff: dict[str, Any]) -> str:
     part_id = _safe_artifact_id(handoff.get("part_id"))
     lines = [
         f'Create a single CAD part for part_id "{part_id}".',
+        "Generate only this one part.",
         "",
         "Part brief:",
-        _safe_short_text(handoff.get("part_brief"), fallback="Single reviewed CAD part.", max_length=180),
+        _single_part_focused_part_brief(handoff.get("part_brief")) or "Single reviewed CAD part.",
         "",
-        "External interface constraints to preserve:",
+        "Local interface features to preserve:",
     ]
     constraints = handoff.get("interface_constraints") if isinstance(handoff.get("interface_constraints"), list) else []
     if constraints:
         for constraint in constraints:
             if isinstance(constraint, dict):
                 note = _safe_short_text(
-                    constraint.get("notes"),
-                    fallback=f"Preserve {constraint.get('kind', 'assembly interface')} with {constraint.get('related_part_id', 'related part')}.",
+                    _single_part_interface_note(constraint),
+                    fallback="Preserve local interface features.",
                     max_length=160,
                 )
                 lines.append(f"- {note}")
     else:
-        lines.append("- No assembly interfaces were supplied.")
+        lines.append("- No extra interface features were supplied.")
     lines.extend([
         "",
-        "This is a single-part generation request derived from reviewed planning context.",
-        "Do not generate other parts or a combined model.",
+        "This request is scoped to one standalone CAD part.",
+        "Do not generate a lid, screws, other parts, batch output, or a combined model.",
     ])
     return "\n".join(lines)
 
