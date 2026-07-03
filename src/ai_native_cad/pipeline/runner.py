@@ -1363,7 +1363,7 @@ def _compile_assembly_plan(
     scope = requirement.get("intent", {}).get("scope")
     if scope not in {"multi_part", "assembly"}:
         scope = "multi_part"
-    parts = _normalize_assembly_plan_parts(_assembly_plan_parts(prompt, requirement))
+    parts = _normalize_assembly_plan_parts(_assembly_plan_parts(prompt, requirement), prompt=prompt)
     interfaces = _normalize_assembly_plan_interfaces(_assembly_plan_interfaces(prompt, scope), parts)
     fasteners = _normalize_assembly_plan_fasteners(_assembly_plan_fasteners(prompt))
     blocked_reasons = [
@@ -1495,6 +1495,12 @@ def _assembly_plan_risk_notes(design_brief: dict[str, Any]) -> list[dict[str, An
 
 
 _ASSEMBLY_GENERATION_STRATEGIES = {"future_part_pipeline", "reference_only", "blocked"}
+_ASSEMBLY_PART_STATUSES = {
+    "planned_only",
+    "candidate_for_single_part_generation",
+    "reference_only",
+    "blocked",
+}
 _ASSEMBLY_INTERFACE_KINDS = {"screw_fastened", "pinned_joint", "sliding_fit", "snap_fit", "stacked", "unknown"}
 _ASSEMBLY_INTERFACE_KIND_ALIASES = {
     "pin_joint": "pinned_joint",
@@ -1505,24 +1511,120 @@ _ASSEMBLY_INTERFACE_KIND_ALIASES = {
 }
 
 
-def _normalize_assembly_plan_parts(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _normalize_assembly_plan_parts(parts: list[dict[str, Any]], *, prompt: str = "") -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     used_ids: set[str] = set()
     for index, part in enumerate(parts, start=1):
         if not isinstance(part, dict):
             continue
         part_id = _stable_unique_artifact_id(part.get("part_id") or part.get("name") or f"component_{index}", used_ids)
-        strategy = part.get("generation_strategy")
-        if strategy not in _ASSEMBLY_GENERATION_STRATEGIES:
-            strategy = "future_part_pipeline"
+        role = _safe_short_text(part.get("role") or "assembly component", fallback="assembly component")
+        classification = _classify_assembly_plan_part(part_id=part_id, role=role, prompt=prompt)
         normalized.append({
             "part_id": part_id,
-            "role": _safe_short_text(part.get("role") or "assembly component", fallback="assembly component"),
-            "generation_strategy": strategy,
+            "role": role,
+            "generation_strategy": classification["generation_strategy"],
+            "part_status": classification["part_status"],
+            "supported_candidate": classification["supported_candidate"],
+            "part_brief": classification["part_brief"],
+            "blocked_reasons": classification["blocked_reasons"],
         })
     if normalized:
         return normalized
-    return [{"part_id": "component", "role": "assembly component", "generation_strategy": "future_part_pipeline"}]
+    return [{
+        "part_id": "component",
+        "role": "assembly component",
+        "generation_strategy": "future_part_pipeline",
+        "part_status": "planned_only",
+        "supported_candidate": False,
+        "part_brief": "Assembly component recorded for future decomposition.",
+        "blocked_reasons": [],
+    }]
+
+
+def _classify_assembly_plan_part(*, part_id: str, role: str, prompt: str) -> dict[str, Any]:
+    text = f"{prompt} {part_id} {role}".lower()
+    prompt_text = prompt.lower()
+    part_text = f"{part_id} {role}".lower()
+    if any(token in prompt_text for token in ("medical", "implant", "aerospace", "load-bearing", "load bearing", "production")):
+        return _assembly_part_classification(
+            generation_strategy="blocked",
+            part_status="blocked",
+            supported_candidate=False,
+            part_brief=f"{role.capitalize()} is blocked for safety-critical or production-critical scope.",
+            blocked_reasons=["safety_or_production_critical_scope"],
+        )
+    if any(token in part_text for token in ("gear", "tooth", "teeth", "gearbox")):
+        return _assembly_part_classification(
+            generation_strategy="blocked",
+            part_status="blocked",
+            supported_candidate=False,
+            part_brief=f"{role.capitalize()} is unsupported by the current single-part pipeline.",
+            blocked_reasons=["unsupported_part_family"],
+        )
+    if part_id in {"pin", "screw", "bolt", "nut", "washer", "fastener"} or any(
+        token in text for token in ("hinge pin", "screw", "bolt", "fastener")
+    ):
+        return _assembly_part_classification(
+            generation_strategy="reference_only",
+            part_status="reference_only",
+            supported_candidate=False,
+            part_brief=f"{role.capitalize()} is recorded as reference hardware, not a primary generated CAD part.",
+            blocked_reasons=[],
+        )
+    if any(token in text for token in ("base", "lid", "leaf", "plate", "bracket", "support", "clamp", "housing", "enclosure")):
+        return _assembly_part_classification(
+            generation_strategy="future_part_pipeline",
+            part_status="candidate_for_single_part_generation",
+            supported_candidate=True,
+            part_brief=_assembly_part_brief(part_id, role),
+            blocked_reasons=[],
+        )
+    return _assembly_part_classification(
+        generation_strategy="future_part_pipeline",
+        part_status="planned_only",
+        supported_candidate=False,
+        part_brief=f"{role.capitalize()} recorded for future part decomposition.",
+        blocked_reasons=[],
+    )
+
+
+def _assembly_part_classification(
+    *,
+    generation_strategy: str,
+    part_status: str,
+    supported_candidate: bool,
+    part_brief: str,
+    blocked_reasons: list[str],
+) -> dict[str, Any]:
+    if generation_strategy not in _ASSEMBLY_GENERATION_STRATEGIES:
+        generation_strategy = "future_part_pipeline"
+    if part_status not in _ASSEMBLY_PART_STATUSES:
+        part_status = "planned_only"
+    return {
+        "generation_strategy": generation_strategy,
+        "part_status": part_status,
+        "supported_candidate": bool(supported_candidate),
+        "part_brief": _safe_short_text(part_brief, fallback="Assembly part recorded for future decomposition.", max_length=140),
+        "blocked_reasons": [
+            {"code": code}
+            for code in _safe_diagnostic_codes(blocked_reasons)
+        ],
+    }
+
+
+def _assembly_part_brief(part_id: str, role: str) -> str:
+    if part_id == "base":
+        return "Base component with assembly interfaces preserved for future single-part generation."
+    if part_id == "lid":
+        return "Lid or cover component with fastening interfaces preserved for future single-part generation."
+    if "leaf" in part_id:
+        return "Hinge leaf component with pin interface preserved for future single-part generation."
+    if "support" in part_id:
+        return "Support component with attachment interfaces preserved for future single-part generation."
+    if "clamp" in part_id:
+        return "Clamp component with sliding or contact interface preserved for future single-part generation."
+    return f"{role.capitalize()} with assembly interfaces preserved for future single-part generation."
 
 
 def _normalize_assembly_plan_interfaces(
@@ -1591,6 +1693,11 @@ def _assembly_plan_quality(
         "interface_count": len(interfaces),
         "fastener_count": len(fasteners),
         "risk_note_count": len(risk_notes),
+        "part_candidate_count": sum(1 for part in parts if part.get("supported_candidate") is True),
+        "part_reference_only_count": sum(1 for part in parts if part.get("part_status") == "reference_only"),
+        "part_blocked_count": sum(1 for part in parts if part.get("part_status") == "blocked"),
+        "part_generation_strategy_counts": _count_assembly_part_field(parts, "generation_strategy"),
+        "part_status_counts": _count_assembly_part_field(parts, "part_status"),
         "blocked_reason_codes": blocked_reason_codes,
         "risk_notes": risk_notes,
     }
@@ -1604,12 +1711,61 @@ def _assembly_plan_quality_metadata(assembly_plan: dict[str, Any]) -> dict[str, 
         "interface_count": _safe_nonnegative_int(quality.get("interface_count"), fallback=len(assembly_plan.get("interfaces", []))),
         "fastener_count": _safe_nonnegative_int(quality.get("fastener_count"), fallback=len(assembly_plan.get("fasteners", []))),
         "risk_note_count": _safe_nonnegative_int(quality.get("risk_note_count"), fallback=len(assembly_plan.get("risk_notes", []))),
+        "part_candidate_count": _safe_nonnegative_int(
+            quality.get("part_candidate_count"),
+            fallback=sum(1 for part in assembly_plan.get("parts", []) if isinstance(part, dict) and part.get("supported_candidate") is True),
+        ),
+        "part_reference_only_count": _safe_nonnegative_int(
+            quality.get("part_reference_only_count"),
+            fallback=sum(1 for part in assembly_plan.get("parts", []) if isinstance(part, dict) and part.get("part_status") == "reference_only"),
+        ),
+        "part_blocked_count": _safe_nonnegative_int(
+            quality.get("part_blocked_count"),
+            fallback=sum(1 for part in assembly_plan.get("parts", []) if isinstance(part, dict) and part.get("part_status") == "blocked"),
+        ),
+        "part_generation_strategy_counts": _safe_count_map(
+            quality.get("part_generation_strategy_counts"),
+            allowed=_ASSEMBLY_GENERATION_STRATEGIES,
+            fallback=_count_assembly_part_field(assembly_plan.get("parts", []), "generation_strategy"),
+        ),
+        "part_status_counts": _safe_count_map(
+            quality.get("part_status_counts"),
+            allowed=_ASSEMBLY_PART_STATUSES,
+            fallback=_count_assembly_part_field(assembly_plan.get("parts", []), "part_status"),
+        ),
         "blocked_reason_codes": _safe_diagnostic_codes(
             list(quality.get("blocked_reason_codes", []))
             if isinstance(quality.get("blocked_reason_codes"), list)
             else []
         ),
     }
+
+
+def _count_assembly_part_field(parts: Any, field: str) -> dict[str, int]:
+    if not isinstance(parts, list):
+        return {}
+    counts: dict[str, int] = {}
+    for part in parts:
+        if not isinstance(part, dict) or not isinstance(part.get(field), str):
+            continue
+        value = part[field]
+        if field == "generation_strategy" and value not in _ASSEMBLY_GENERATION_STRATEGIES:
+            continue
+        if field == "part_status" and value not in _ASSEMBLY_PART_STATUSES:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _safe_count_map(value: Any, *, allowed: set[str], fallback: dict[str, int]) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return fallback
+    counts: dict[str, int] = {}
+    for key, count in value.items():
+        if not isinstance(key, str) or key not in allowed:
+            continue
+        counts[key] = _safe_nonnegative_int(count, fallback=0)
+    return dict(sorted(counts.items()))
 
 
 def _safe_nonnegative_int(value: Any, *, fallback: int) -> int:
@@ -2279,6 +2435,11 @@ def _write_blocked_normalized_design_assembly_result(
         "interface_count": assembly_plan_quality["interface_count"],
         "fastener_count": assembly_plan_quality["fastener_count"],
         "risk_note_count": assembly_plan_quality["risk_note_count"],
+        "part_candidate_count": assembly_plan_quality["part_candidate_count"],
+        "part_reference_only_count": assembly_plan_quality["part_reference_only_count"],
+        "part_blocked_count": assembly_plan_quality["part_blocked_count"],
+        "part_generation_strategy_counts": assembly_plan_quality["part_generation_strategy_counts"],
+        "part_status_counts": assembly_plan_quality["part_status_counts"],
         "blocked_reason_codes": assembly_plan_quality["blocked_reason_codes"],
         "cad_ir_created": False,
         "part_modeling_started": False,
@@ -2338,6 +2499,9 @@ def _write_blocked_normalized_design_assembly_report_md(
         f"- Interfaces: {len(assembly_plan.get('interfaces', []))}",
         f"- Fasteners: {len(assembly_plan.get('fasteners', []))}",
         f"- Risk notes: {len(assembly_plan.get('risk_notes', []))}",
+        f"- Candidate parts: {report.get('part_candidate_count', 0)}",
+        f"- Reference-only parts: {report.get('part_reference_only_count', 0)}",
+        f"- Blocked parts: {report.get('part_blocked_count', 0)}",
         "",
         "## Blocked Reasons",
         "",
