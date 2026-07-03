@@ -498,7 +498,11 @@ def _blocked_provider_requirement(
     diagnostic_codes: list[str],
 ) -> dict[str, Any]:
     safe_part_type = _safe_diagnostic_code(part_type) or "blocked_request"
-    safe_scope = scope if scope in {"single_part", "multi_part", "assembly", "unsupported", "safety_critical"} else "unsupported"
+    safe_scope = (
+        scope
+        if scope in {"single_part", "single_part_with_features", "multi_part", "assembly", "unsupported", "safety_critical"}
+        else "unsupported"
+    )
     codes = [_safe_diagnostic_code(code) for code in diagnostic_codes if isinstance(code, str)]
     requirement = {
         "part_type": safe_part_type,
@@ -678,17 +682,79 @@ def _normalized_scope(provider_requirement: dict[str, Any], prompt: str) -> str:
         return "safety_critical"
     if "gearbox" in lowered or "exact tooth" in lowered or "exact teeth" in lowered:
         return "unsupported"
+    if _prompt_has_assembly_intent(lowered):
+        return "assembly"
+    if _prompt_has_multi_part_intent(lowered):
+        return "multi_part"
+    if _prompt_has_single_part_feature_intent(lowered):
+        return "single_part_with_features"
     if scope_text in {"assembly", "assembled", "assembly_like"}:
         return "assembly"
     if scope_text in {"multi_part", "multipart", "multiple_parts"}:
         return "multi_part"
-    if any(token in lowered for token in (" assembly", "hinge", "two leaves", " pin", "drone arm assembly")):
-        return "assembly"
-    if any(token in lowered for token in ("two-part", "two part", "base and lid", "made of a base", "vertical support", "clamp")):
-        return "multi_part"
-    if scope_text in {"unsupported", "safety_critical", "single_part"}:
+    if scope_text in {"unsupported", "safety_critical", "single_part", "single_part_with_features"}:
         return scope_text
     return "single_part"
+
+
+def _prompt_has_assembly_intent(lowered_prompt: str) -> bool:
+    return any(
+        token in lowered_prompt
+        for token in (
+            " assembly",
+            "hinge",
+            "two leaves",
+            " pin",
+            "gears and shafts",
+            "moving joint",
+            "mechanism",
+        )
+    )
+
+
+def _prompt_has_multi_part_intent(lowered_prompt: str) -> bool:
+    return any(
+        token in lowered_prompt
+        for token in (
+            "two-part",
+            "two part",
+            "base and lid",
+            "base, vertical support, and clamp",
+            "made of a base",
+            "separate parts",
+            "separable parts",
+        )
+    )
+
+
+def _prompt_has_single_part_feature_intent(lowered_prompt: str) -> bool:
+    if any(
+        token in lowered_prompt
+        for token in (
+            "mounting plate",
+            "camera mounting plate",
+            "enclosure base",
+            "phone stand",
+        )
+    ):
+        return True
+    return any(
+        token in lowered_prompt
+        for token in (
+            "hole",
+            "holes",
+            "boss",
+            "bosses",
+            "slot",
+            "standoff",
+            "standoffs",
+            "pocket",
+            "chamfer",
+            "chamfered",
+            "lip",
+            "tripod",
+        )
+    )
 
 
 def _safety_scope_codes(provider_requirement: dict[str, Any], prompt: str) -> list[str]:

@@ -1415,6 +1415,71 @@ def test_normalized_design_eval_records_assembly_metadata_from_compiled_artifact
     assert case["selected_candidate"] == "B"
 
 
+@pytest.mark.parametrize(
+    ("prompt", "expected_scope"),
+    [
+        (
+            "Make a phone stand with a back support, cable slot, and rounded front lip.",
+            "single_part_with_features",
+        ),
+        (
+            "Make a small electronics enclosure base with PCB standoffs, battery pocket, and lid screw bosses.",
+            "single_part_with_features",
+        ),
+        (
+            "Make a camera mounting plate with tripod hole, four corner holes, and chamfered edges.",
+            "single_part_with_features",
+        ),
+        (
+            "Design a two-part electronics enclosure with base and lid, four screws, and PCB standoffs.",
+            "multi_part",
+        ),
+        (
+            "Design a simple hinge bracket assembly with two leaves and a pin.",
+            "assembly",
+        ),
+        (
+            "Design a small adjustable phone holder made of a base, vertical support, and clamp.",
+            "multi_part",
+        ),
+        (
+            "Design a load-bearing drone arm assembly for production.",
+            "safety_critical",
+        ),
+        (
+            "Design a gearbox with two gears and exact tooth profiles.",
+            "unsupported",
+        ),
+    ],
+)
+def test_normalized_design_eval_scope_detection_refines_feature_rich_single_parts(prompt, expected_scope):
+    from examples.provider_smoke import normalized_design_eval
+
+    assert normalized_design_eval._detected_scope(prompt, {}) == expected_scope
+
+
+def test_normalized_design_eval_diagnostic_text_does_not_turn_feature_part_into_assembly():
+    from examples.provider_smoke import normalized_design_eval
+
+    artifacts = {
+        "requirement": {
+            "requirement_status": {
+                "diagnostic_codes": [
+                    "blocked_policy.requirement_gate_blocked",
+                    "compiler.multi_part_requires_assembly_planning",
+                ]
+            }
+        }
+    }
+
+    scope = normalized_design_eval._detected_scope(
+        "Make a camera mounting plate with tripod hole, four corner holes, and chamfered edges.",
+        artifacts,
+    )
+
+    assert scope == "single_part_with_features"
+
+
 def test_normalized_design_eval_classifies_expected_blocked_cases(tmp_path):
     from examples.provider_smoke import normalized_design_eval
 
@@ -1962,6 +2027,66 @@ def test_provider_requirement_compiler_maps_prompt_scoped_bracket_alias():
     assert requirement["features"]["base_holes"]["count"] == 2
 
 
+def test_provider_requirement_compiler_does_not_treat_single_part_features_as_assembly():
+    fake_client = FakeJsonContractClient({
+        "part_type": "camera_mounting_plate",
+        "scope": "assembly",
+        "dimensions": {"length": 90, "width": 55, "thickness": 5},
+        "features": {
+            "mounting_holes": {"count": 4, "diameter": 4, "offset_from_edge": 8},
+            "tripod_hole": {"diameter": 6.35},
+        },
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    requirement = adapter.parse_requirement(
+        "Make a camera mounting plate with tripod hole, four corner holes, and chamfered edges.",
+        context={"provider_contract_mode": "extract_then_compile"},
+    )
+
+    assert requirement["part_type"] == "mounting_plate"
+    assert requirement["requirement_status"]["complete_for_generation"] is True
+    assert "compiler.assembly_requires_assembly_planning" not in requirement["requirement_status"]["diagnostic_codes"]
+
+
+def test_provider_requirement_compiler_blocks_two_part_enclosure_as_multi_part():
+    fake_client = FakeJsonContractClient({
+        "part_type": "electronics_enclosure",
+        "scope": "single_part",
+        "dimensions": {"length": 100, "width": 60, "height": 30},
+        "features": {"standoffs": {"count": 4}, "screws": {"count": 4}},
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    requirement = adapter.parse_requirement(
+        "Design a two-part electronics enclosure with base and lid, four screws, and PCB standoffs.",
+        context={"provider_contract_mode": "extract_then_compile"},
+    )
+
+    assert requirement["intent"]["scope"] == "multi_part"
+    assert requirement["requirement_status"]["complete_for_generation"] is False
+    assert "compiler.multi_part_requires_assembly_planning" in requirement["requirement_status"]["diagnostic_codes"]
+
+
+def test_provider_requirement_compiler_blocks_hinge_as_assembly():
+    fake_client = FakeJsonContractClient({
+        "part_type": "hinge_bracket",
+        "scope": "single_part",
+        "dimensions": {"length": 60, "width": 30, "height": 10},
+        "features": {"pin": {"diameter": 4}},
+    })
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    requirement = adapter.parse_requirement(
+        "Design a simple hinge bracket assembly with two leaves and a pin.",
+        context={"provider_contract_mode": "extract_then_compile"},
+    )
+
+    assert requirement["intent"]["scope"] == "assembly"
+    assert requirement["requirement_status"]["complete_for_generation"] is False
+    assert "compiler.assembly_requires_assembly_planning" in requirement["requirement_status"]["diagnostic_codes"]
+
+
 def test_provider_requirement_compiler_does_not_map_unsafe_generic_bracket():
     fake_client = FakeJsonContractClient({
         "part_type": "bracket",
@@ -1996,9 +2121,9 @@ def test_provider_requirement_compiler_blocks_assembly_without_single_part_cad()
     )
 
     assert requirement["part_type"] == "phone_holder"
-    assert requirement["intent"]["scope"] == "assembly"
+    assert requirement["intent"]["scope"] == "multi_part"
     assert requirement["requirement_status"]["complete_for_generation"] is False
-    assert "compiler.assembly_requires_assembly_planning" in requirement["requirement_status"]["diagnostic_codes"]
+    assert "compiler.multi_part_requires_assembly_planning" in requirement["requirement_status"]["diagnostic_codes"]
     serialized = json.dumps(requirement, sort_keys=True)
     assert "input_ir" not in serialized
     assert "cadquery_code" not in serialized

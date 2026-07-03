@@ -360,19 +360,118 @@ def _requirement_blocked(requirement: Any) -> bool:
 
 
 def _detected_scope(prompt: str, artifacts: dict[str, Any]) -> str:
-    text = " ".join([prompt.lower(), _artifact_text(artifacts)])
-    if "medical implant" in text or ("implant" in text and "medical" in text):
+    lowered = prompt.lower()
+    codes = set(_artifact_diagnostic_codes(artifacts))
+    if (
+        "medical implant" in lowered
+        or ("implant" in lowered and "medical" in lowered)
+        or "load-bearing" in lowered
+        or "production" in lowered
+        or "aerospace" in lowered
+        or "drone arm" in lowered
+    ):
         return "safety_critical"
-    if "gearbox" in text or "gear tooth" in text or "exact tooth" in text:
+    if "gearbox" in lowered or "gear tooth" in lowered or "exact tooth" in lowered:
         return "unsupported"
-    if "assembly" in text or "hinge" in text or "pin" in text:
+    if _prompt_has_assembly_intent(lowered):
         return "assembly"
-    if "two-part" in text or "base and lid" in text or "made of a base" in text or "clamp" in text:
+    if _prompt_has_multi_part_intent(lowered):
+        return "multi_part"
+    if _prompt_has_single_part_feature_intent(lowered):
+        return "single_part_with_features"
+    if any(code in codes for code in {"blocked_policy.safety_scope_blocked", "scope.medical_implant"}):
+        return "safety_critical"
+    if any(code.startswith(("unsupported.", "unsupported_part_type.")) for code in codes):
+        return "unsupported"
+    if "compiler.assembly_requires_assembly_planning" in codes:
+        return "assembly"
+    if "compiler.multi_part_requires_assembly_planning" in codes:
         return "multi_part"
     scope = _nested_get(artifacts, ("intent", "scope")) or _nested_get(artifacts, ("design_brief", "design_goal", "scope"))
-    if isinstance(scope, str) and scope in {"single_part", "multi_part", "assembly", "unsupported", "safety_critical"}:
+    if isinstance(scope, str) and scope in {
+        "single_part",
+        "single_part_with_features",
+        "multi_part",
+        "assembly",
+        "unsupported",
+        "safety_critical",
+    }:
         return scope
     return "single_part"
+
+
+def _prompt_has_assembly_intent(lowered_prompt: str) -> bool:
+    return any(
+        token in lowered_prompt
+        for token in (
+            " assembly",
+            "hinge",
+            "two leaves",
+            " pin",
+            "gears and shafts",
+            "moving joint",
+            "mechanism",
+        )
+    )
+
+
+def _prompt_has_multi_part_intent(lowered_prompt: str) -> bool:
+    return any(
+        token in lowered_prompt
+        for token in (
+            "two-part",
+            "two part",
+            "base and lid",
+            "base, vertical support, and clamp",
+            "made of a base",
+            "separate parts",
+            "separable parts",
+        )
+    )
+
+
+def _prompt_has_single_part_feature_intent(lowered_prompt: str) -> bool:
+    if any(
+        token in lowered_prompt
+        for token in (
+            "mounting plate",
+            "camera mounting plate",
+            "enclosure base",
+            "phone stand",
+        )
+    ):
+        return True
+    return any(
+        token in lowered_prompt
+        for token in (
+            "hole",
+            "holes",
+            "boss",
+            "bosses",
+            "slot",
+            "standoff",
+            "standoffs",
+            "pocket",
+            "chamfer",
+            "chamfered",
+            "lip",
+            "tripod",
+        )
+    )
+
+
+def _artifact_diagnostic_codes(value: Any) -> list[str]:
+    codes: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if str(key) == "diagnostic_codes" and isinstance(item, list):
+                codes.extend(_safe_code_token(str(code)) for code in item if isinstance(code, str))
+            else:
+                codes.extend(_artifact_diagnostic_codes(item))
+    elif isinstance(value, list):
+        for item in value:
+            codes.extend(_artifact_diagnostic_codes(item))
+    return codes
 
 
 def _part_count_estimate(prompt: str, artifacts: dict[str, Any]) -> int:
@@ -429,6 +528,8 @@ def _diagnostic_codes(result: dict[str, Any], *, case_id: str, prompt: str, dete
         codes.add("scope.assembly_intent")
     elif detected_scope == "multi_part":
         codes.add("scope.multi_part_intent")
+    elif detected_scope == "single_part_with_features":
+        codes.add("scope.single_part_with_features")
     elif detected_scope == "unsupported":
         codes.add("scope.unsupported")
     elif detected_scope == "safety_critical":
