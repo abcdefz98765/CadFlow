@@ -123,3 +123,13 @@ from one ready `reviewed_part_handoff.json` to the existing normalized
 single-part create pipeline. It creates one child single-part run and records
 lineage back to the assembly planning artifacts. It does not generate all parts,
 create an assembly, add assembly constraints, or export a STEP assembly.
+
+Manual end-to-end reviewed part smoke:
+
+```bash
+python examples/provider_smoke/reviewed_part_single_create_smoke.py --provider deepseek --env-file .env
+```
+
+This fixed prompt smoke stages one multi-part design plan into one reviewed
+child single-part run. It prints a compact sanitized summary only and keeps
+generated artifacts under ignored `outputs/`.

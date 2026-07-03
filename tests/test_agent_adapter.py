@@ -1039,6 +1039,176 @@ def test_provider_create_smoke_script_handles_missing_credentials_without_leakin
     assert "messages" not in output
 
 
+def test_reviewed_part_single_create_smoke_runs_one_sanitized_fake_flow(tmp_path, monkeypatch, capsys):
+    from examples.provider_smoke import reviewed_part_single_create_smoke as smoke
+
+    secret = "env-file-secret-value-456"
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"DEEPSEEK_API_KEY={secret}\n", encoding="utf-8")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    class FakeAdapter:
+        provider_identity = {"provider": "deepseek", "model": "fake-model", "api_key": secret}
+
+    def fake_make_adapter(provider, model=None):
+        assert provider == "deepseek"
+        assert os.environ["DEEPSEEK_API_KEY"] == secret
+        return FakeAdapter()
+
+    def fake_design(prompt, adapter, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "assembly_plan.json").write_text(json.dumps({
+            "artifact_type": "assembly_plan",
+            "scope": "multi_part",
+            "parts": [
+                {
+                    "part_id": "base",
+                    "supported_candidate": True,
+                    "part_status": "candidate_for_single_part_generation",
+                    "generation_strategy": "single_part",
+                },
+                {
+                    "part_id": "lid",
+                    "supported_candidate": True,
+                    "part_status": "candidate_for_single_part_generation",
+                    "generation_strategy": "single_part",
+                },
+                {"part_id": "screws", "part_status": "reference_only"},
+            ],
+            "interfaces": [],
+        }), encoding="utf-8")
+        return {"status": "blocked_multi_part_generation_not_supported", "diagnostic_codes": ["assembly.plan_created"]}
+
+    def fake_part_request(assembly_plan, output_dir=None, part_id=None, **kwargs):
+        assert part_id == "base"
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "part_create_request.json").write_text(json.dumps({"part_id": part_id}), encoding="utf-8")
+        return {"status": "ready_for_review", "diagnostic_codes": ["part_request.created"]}
+
+    def fake_review(part_create_request, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "part_request_review.json").write_text(json.dumps({"status": "approved"}), encoding="utf-8")
+        return {"status": "approved", "diagnostic_codes": ["part_request.approved_for_single_part_planning"]}
+
+    def fake_handoff(part_create_request, part_request_review, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "reviewed_part_handoff.json").write_text(json.dumps({
+            "part_id": "base",
+            "status": "ready_for_single_part_planning",
+        }), encoding="utf-8")
+        return {"status": "ready_for_single_part_planning", "diagnostic_codes": ["part_handoff.ready_for_single_part_planning"]}
+
+    def fake_bridge(reviewed_part_handoff, adapter, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        child_dir = output_path / "single_part_base"
+        child_dir.mkdir(parents=True)
+        (child_dir / "model.step").write_text("STEP", encoding="utf-8")
+        (child_dir / "model.stl").write_text("STL", encoding="utf-8")
+        (output_path / "lineage.json").write_text(json.dumps({
+            "reviewed_part_handoff_artifact": "reviewed_part_handoff.json",
+            "child_run_id": "single_part_base",
+        }), encoding="utf-8")
+        return {
+            "status": "success",
+            "child_output_dir": str(child_dir),
+            "diagnostic_codes": ["reviewed_part_single_create.started"],
+        }
+
+    monkeypatch.setattr(smoke, "make_json_contract_adapter_from_env", fake_make_adapter)
+    monkeypatch.setattr(smoke, "run_provider_normalized_design_create_pipeline", fake_design)
+    monkeypatch.setattr(smoke, "run_assembly_part_request_pipeline", fake_part_request)
+    monkeypatch.setattr(smoke, "run_part_request_review_pipeline", fake_review)
+    monkeypatch.setattr(smoke, "run_reviewed_part_handoff_pipeline", fake_handoff)
+    monkeypatch.setattr(smoke, "run_reviewed_part_single_create_pipeline", fake_bridge)
+
+    exit_code = smoke.main([
+        "--provider",
+        "deepseek",
+        "--env-file",
+        str(env_file),
+        "--output-dir",
+        str(tmp_path / "outputs" / "manual_smoke"),
+    ])
+
+    output = capsys.readouterr().out
+    status = json.loads(output)
+    assert exit_code == 0
+    assert status["provider"] == "deepseek"
+    assert status["model"] == "fake-model"
+    assert status["source_prompt_case"] == "electronics_enclosure_base_lid"
+    assert status["assembly_plan_created"] is True
+    assert status["selected_part_id"] == "base"
+    assert status["part_request_status"] == "ready_for_review"
+    assert status["review_status"] == "approved"
+    assert status["handoff_status"] == "ready_for_single_part_planning"
+    assert status["bridge_status"] == "success"
+    assert status["child_run_created"] is True
+    assert status["child_run_name"] == "single_part_base"
+    assert status["step_created"] is True
+    assert status["stl_created"] is True
+    assert status["no_batch_generation"] is True
+    assert status["no_assembly_generation"] is True
+    assert status["no_assembly_constraints_solved"] is True
+    assert "reviewed_part_single_create.started" in status["diagnostic_codes"]
+    assert secret not in output
+    assert str(tmp_path) not in output
+    assert "DEEPSEEK_API_KEY" not in output
+    assert "messages" not in output
+    assert "raw_response" not in output
+    assert "transcript" not in output
+
+
+def test_reviewed_part_single_create_smoke_selects_one_candidate_only():
+    from examples.provider_smoke.reviewed_part_single_create_smoke import select_one_candidate_part_id
+
+    assembly_plan = {
+        "parts": [
+            {
+                "part_id": "base",
+                "supported_candidate": True,
+                "part_status": "candidate_for_single_part_generation",
+            },
+            {
+                "part_id": "lid",
+                "supported_candidate": True,
+                "part_status": "candidate_for_single_part_generation",
+            },
+            {"part_id": "screws", "part_status": "reference_only"},
+        ]
+    }
+
+    assert select_one_candidate_part_id(assembly_plan) == "base"
+
+
+def test_reviewed_part_single_create_smoke_missing_credentials_are_sanitized(monkeypatch, capsys):
+    from examples.provider_smoke import reviewed_part_single_create_smoke as smoke
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    def fake_make_adapter(provider, model=None):
+        raise JsonContractProviderError("parse_requirement", "auth_failed")
+
+    monkeypatch.setattr(smoke, "make_json_contract_adapter_from_env", fake_make_adapter)
+
+    exit_code = smoke.main(["--provider", "deepseek"])
+
+    output = capsys.readouterr().out
+    status = json.loads(output)
+    assert exit_code == 2
+    assert status["provider"] == "deepseek"
+    assert status["bridge_status"] == "provider_error"
+    assert status["error_category"] == "auth_failed"
+    assert status["message"] == "Provider credentials are missing or not accepted."
+    assert "DEEPSEEK_API_KEY" not in output
+    assert "Authorization" not in output
+    assert "messages" not in output
+    assert "raw_response" not in output
+
+
 def test_provider_create_eval_aggregates_successful_and_blocked_cases(tmp_path):
     from examples.provider_smoke import provider_create_eval
 
