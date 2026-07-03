@@ -152,6 +152,8 @@ assembly_plan.json
   -> ready_for_review or blocked_no_candidate_part
   -> part_request_review.json
   -> approved, needs_revision, or blocked
+  -> reviewed_part_handoff.json
+  -> ready_for_single_part_planning or blocked/needs_revision
 ```
 
 `part_create_request.json` is locally compiled and sanitized. It records one
@@ -175,6 +177,16 @@ interfaces are not needed. Incomplete assembly-derived requests return
 `needs_revision`; reference-only, unsupported, safety-critical, or
 provider-executable requests return `blocked`. This gate still does not call
 `run_ir_pipeline(...)`, write `input_ir.json`, or generate CAD artifacts.
+
+`run_reviewed_part_handoff_pipeline(...)` compiles an approved
+`part_create_request.json` plus `part_request_review.json` into
+`reviewed_part_handoff.json`. The handoff is locally compiled and sanitized; it
+preserves the selected part brief, interface constraints, and assembly context
+needed for future explicit single-part planning. Non-approved reviews,
+reference-only parts, unsupported/blocked parts, missing assembly interfaces, or
+provider-generated CAD IR/code remain blocked or `needs_revision`. This handoff
+is still planning-only and does not call `run_ir_pipeline(...)`, write
+`input_ir.json`, or generate STEP/STL artifacts.
 
 ### Text Pipeline Fallback
 

@@ -111,3 +111,9 @@ does not write per-part `input_ir.json`, STEP/STL, or provider-generated code.
 `run_part_request_review_pipeline(...)` can then write
 `part_request_review.json` with `approved`, `needs_revision`, or `blocked`
 status. This is also planning/review only and does not start CAD execution.
+
+Approved reviews can be compiled into `reviewed_part_handoff.json` with
+`run_reviewed_part_handoff_pipeline(...)`. That artifact preserves the reviewed
+part brief, interface constraints, and assembly context for a future explicit
+single-part planning step. It still does not write `input_ir.json`, STEP/STL, or
+provider-generated code.

@@ -20,9 +20,11 @@ from ai_native_cad.agents.provider_context import knowledge_summary_for, provide
 from ai_native_cad.agents.validation import validate_adapter_result, validate_requirement_draft
 import ai_native_cad.cadquery.executor as cadquery_executor
 from ai_native_cad.pipeline import (
+    create_reviewed_part_handoff,
     review_part_create_request,
     run_assembly_part_request_pipeline,
     run_part_request_review_pipeline,
+    run_reviewed_part_handoff_pipeline,
     run_provider_create_pipeline,
     run_provider_normalized_create_pipeline,
     run_provider_normalized_design_create_pipeline,
@@ -2502,6 +2504,228 @@ def test_part_request_review_exports_are_available():
     assert pipeline.run_part_request_review_pipeline is run_part_request_review_pipeline
     assert "review_part_create_request" in pipeline.__all__
     assert "run_part_request_review_pipeline" in pipeline.__all__
+
+
+def test_reviewed_part_handoff_pipeline_writes_ready_handoff_without_cad_generation(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    called = {"run_ir_pipeline": False}
+
+    def fake_run_ir_pipeline(*args, **kwargs):
+        called["run_ir_pipeline"] = True
+        raise AssertionError("reviewed part handoff MVP must not run CAD execution")
+
+    monkeypatch.setattr(pipeline_runner, "run_ir_pipeline", fake_run_ir_pipeline)
+    output_dir = tmp_path / "outputs" / "reviewed_part_handoff"
+    output_dir.mkdir(parents=True)
+    request = _valid_part_create_request()
+    review = review_part_create_request(request)
+    request_path = output_dir / "part_create_request.json"
+    review_path = output_dir / "part_request_review.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    review_path.write_text(json.dumps(review), encoding="utf-8")
+
+    result = run_reviewed_part_handoff_pipeline(request_path, review_path, output_dir=output_dir)
+
+    assert result["status"] == "ready_for_single_part_planning"
+    assert result["success"] is True
+    assert called["run_ir_pipeline"] is False
+    assert (output_dir / "reviewed_part_handoff.json").exists()
+    assert (output_dir / "report.json").exists()
+    assert (output_dir / "report.md").exists()
+    assert (output_dir / "agent_trace.json").exists()
+    assert not (output_dir / "input_ir.json").exists()
+    assert not (output_dir / "model.step").exists()
+    assert not (output_dir / "model.stl").exists()
+
+    handoff = json.loads((output_dir / "reviewed_part_handoff.json").read_text(encoding="utf-8"))
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    assert handoff == result["reviewed_part_handoff"]
+    assert handoff["artifact_type"] == "reviewed_part_handoff"
+    assert handoff["schema_version"] == "0.1"
+    assert handoff["source_part_request"] == "part_create_request.json"
+    assert handoff["source_review"] == "part_request_review.json"
+    assert handoff["part_id"] == "base"
+    assert handoff["status"] == "ready_for_single_part_planning"
+    assert "Create the base component as a single CAD part." in handoff["single_part_prompt"]
+    assert handoff["part_brief"] == "Base component with PCB standoffs and screw bosses."
+    assert {
+        "kind": "screw_alignment",
+        "related_part_id": "lid",
+        "notes": "Screw holes should align with lid.",
+    } in handoff["interface_constraints"]
+    assert handoff["preserved_assembly_context"]["assembly_scope"] == "multi_part"
+    assert handoff["preserved_assembly_context"]["related_parts"] == ["lid", "screws", "gear"]
+    assert "part_handoff.created" in handoff["diagnostic_codes"]
+    assert "part_handoff.ready_for_single_part_planning" in handoff["diagnostic_codes"]
+    assert handoff["blocked_reasons"] == []
+    assert report["cad_ir_created"] is False
+    assert report["part_modeling_started"] is False
+    assert trace["reviewed_part_handoff"]["cad_ir_created"] is False
+    assert "run_ir_pipeline" not in json.dumps(trace, sort_keys=True)
+
+
+@pytest.mark.parametrize(
+    ("review_status", "review_result", "expected_status", "expected_code"),
+    [
+        ("needs_revision", "needs_revision_missing_part_brief", "blocked_review_not_approved", "part_handoff.blocked_review_not_approved"),
+        (
+            "needs_revision",
+            "needs_revision_missing_interface_constraints",
+            "needs_revision_missing_interface_constraints",
+            "part_handoff.needs_revision_missing_interface_constraints",
+        ),
+        ("blocked", "blocked_unsupported_part", "blocked_review_not_approved", "part_handoff.blocked_review_not_approved"),
+    ],
+)
+def test_reviewed_part_handoff_non_approved_review_blocks_or_needs_revision(
+    tmp_path,
+    monkeypatch,
+    review_status,
+    review_result,
+    expected_status,
+    expected_code,
+):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    request = _valid_part_create_request()
+    review = {
+        **review_part_create_request(request),
+        "status": review_status,
+        "review_result": review_result,
+    }
+
+    result = run_reviewed_part_handoff_pipeline(
+        request,
+        review,
+        output_dir=tmp_path / "outputs" / f"handoff_{expected_status}",
+    )
+
+    handoff = result["reviewed_part_handoff"]
+    assert result["status"] == expected_status
+    assert result["success"] is False
+    assert expected_code in handoff["diagnostic_codes"]
+    assert {"code": expected_code} in handoff["blocked_reasons"]
+    assert not (Path(result["output_dir"]) / "input_ir.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("request_update", "expected_status", "expected_code"),
+    [
+        (
+            {
+                "part_id": "screws",
+                "status": "blocked_no_candidate_part",
+                "blocked_reasons": [{"code": "part_request.reference_only_not_selectable"}],
+                "diagnostic_codes": ["part_request.reference_only_not_selectable"],
+            },
+            "blocked_reference_only_part",
+            "part_handoff.blocked_reference_only_part",
+        ),
+        (
+            {
+                "part_id": "gear",
+                "status": "blocked_no_candidate_part",
+                "blocked_reasons": [{"code": "part_request.blocked_part_not_selectable"}],
+                "diagnostic_codes": ["part_request.blocked_part_not_selectable"],
+            },
+            "blocked_unsupported_part",
+            "part_handoff.blocked_unsupported_part",
+        ),
+    ],
+)
+def test_reviewed_part_handoff_rejects_reference_only_and_unsupported_parts(
+    tmp_path,
+    monkeypatch,
+    request_update,
+    expected_status,
+    expected_code,
+):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    request = {**_valid_part_create_request(), **request_update}
+    review = {
+        **review_part_create_request(_valid_part_create_request()),
+        "status": "approved",
+        "review_result": "approved_for_single_part_planning",
+    }
+
+    result = run_reviewed_part_handoff_pipeline(request, review, output_dir=tmp_path / "outputs" / expected_status)
+
+    handoff = result["reviewed_part_handoff"]
+    assert result["status"] == expected_status
+    assert handoff["part_id"] == request_update["part_id"]
+    assert expected_code in handoff["diagnostic_codes"]
+    assert {"code": expected_code} in handoff["blocked_reasons"]
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected_code"),
+    [
+        ({"python_code": "import cadquery as cq"}, "part_handoff.provider_code_rejected"),
+        ({"cad_ir": {"part_type": "spacer"}}, "part_handoff.provider_cad_ir_rejected"),
+        ({"provider_response": {"raw": "secret provider payload"}}, "part_handoff.provider_code_rejected"),
+    ],
+)
+def test_reviewed_part_handoff_rejects_provider_cad_code_ir_and_arbitrary_fields(
+    tmp_path,
+    monkeypatch,
+    extra,
+    expected_code,
+):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    request = {**_valid_part_create_request(), **extra}
+    review = {
+        **review_part_create_request(_valid_part_create_request()),
+        "status": "approved",
+        "review_result": "approved_for_single_part_planning",
+    }
+    output_dir = tmp_path / "outputs" / "handoff_provider_rejected"
+
+    result = run_reviewed_part_handoff_pipeline(request, review, output_dir=output_dir)
+
+    handoff = result["reviewed_part_handoff"]
+    serialized = json.dumps({
+        "result": result,
+        "handoff": json.loads((output_dir / "reviewed_part_handoff.json").read_text(encoding="utf-8")),
+        "report": json.loads((output_dir / "report.json").read_text(encoding="utf-8")),
+        "trace": json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8")),
+    }, sort_keys=True)
+    assert result["status"] == "blocked_unsupported_part"
+    assert expected_code in handoff["diagnostic_codes"]
+    assert "secret provider payload" not in serialized
+    assert "python_code" not in serialized
+    assert "\"cad_ir\": {" not in serialized
+    assert "import cadquery" not in serialized.lower()
+
+
+def test_reviewed_part_handoff_approved_review_with_missing_interfaces_needs_revision(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    request = _valid_part_create_request()
+    request["interface_constraints"] = []
+    review = {
+        **review_part_create_request(_valid_part_create_request()),
+        "status": "approved",
+        "review_result": "approved_for_single_part_planning",
+    }
+
+    result = run_reviewed_part_handoff_pipeline(
+        request,
+        review,
+        output_dir=tmp_path / "outputs" / "handoff_missing_interfaces",
+    )
+
+    handoff = result["reviewed_part_handoff"]
+    assert result["status"] == "needs_revision_missing_interface_constraints"
+    assert "part_handoff.needs_revision_missing_interface_constraints" in handoff["diagnostic_codes"]
+    assert not (Path(result["output_dir"]) / "input_ir.json").exists()
+
+
+def test_reviewed_part_handoff_exports_are_available():
+    import ai_native_cad.pipeline as pipeline
+
+    assert pipeline.create_reviewed_part_handoff is create_reviewed_part_handoff
+    assert pipeline.run_reviewed_part_handoff_pipeline is run_reviewed_part_handoff_pipeline
+    assert "create_reviewed_part_handoff" in pipeline.__all__
+    assert "run_reviewed_part_handoff_pipeline" in pipeline.__all__
 
 
 @pytest.mark.parametrize(

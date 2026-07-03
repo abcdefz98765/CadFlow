@@ -916,6 +916,7 @@ def _collect_files(output_dir: Path, *, repo_relative: bool = False) -> dict[str
         "assembly_plan.json": "assembly_plan",
         "part_create_request.json": "part_create_request",
         "part_request_review.json": "part_request_review",
+        "reviewed_part_handoff.json": "reviewed_part_handoff",
         "input_ir.json": "input_ir",
         "model.py": "model_py",
         "model.step": "step",
@@ -2059,6 +2060,203 @@ def run_part_request_review_pipeline(
     }
 
 
+def create_reviewed_part_handoff(
+    part_create_request: dict[str, Any],
+    part_request_review: dict[str, Any],
+    *,
+    source_part_request: str = "part_create_request.json",
+    source_review: str = "part_request_review.json",
+) -> dict[str, Any]:
+    """Compile a sanitized handoff for future explicit single-part planning."""
+
+    part_id = _safe_artifact_id(part_create_request.get("part_id")) if part_create_request.get("part_id") else None
+    checks = part_request_review.get("checks") if isinstance(part_request_review.get("checks"), dict) else {}
+    blocked_reason_codes = _part_request_blocked_reason_codes(part_create_request)
+    review_status = part_request_review.get("status")
+    status = "ready_for_single_part_planning"
+    diagnostic_codes = ["part_handoff.created"]
+    blocked_reasons: list[dict[str, str]] = []
+
+    is_reference_only = (
+        checks.get("is_reference_only") is True
+        or "part_request.reference_only_not_selectable" in blocked_reason_codes
+        or part_create_request.get("part_status") == "reference_only"
+        or part_create_request.get("generation_strategy") == "reference_only"
+    )
+    is_blocked = (
+        checks.get("is_blocked") is True
+        or bool(blocked_reason_codes)
+        or str(part_create_request.get("status", "")).startswith("blocked")
+        or part_create_request.get("part_status") == "blocked"
+        or part_create_request.get("generation_strategy") == "blocked"
+        or _has_unsupported_blocked_reason(blocked_reason_codes)
+    )
+    has_provider_code = checks.get("has_provider_generated_code") is True or _contains_provider_generated_code(part_create_request)
+    has_provider_cad_ir = checks.get("has_provider_generated_cad_ir") is True or _contains_provider_generated_cad_ir(part_create_request)
+    has_arbitrary_provider_fields = (
+        checks.get("has_arbitrary_provider_fields") is True or _contains_arbitrary_provider_fields(part_create_request)
+    )
+    missing_part_brief = not _has_reviewable_part_brief(part_create_request)
+    missing_interfaces = (
+        _is_assembly_derived_part_request(part_create_request)
+        and (
+            not _has_part_request_interface_constraints(part_create_request)
+            or not _has_clear_related_parts(part_create_request)
+        )
+    )
+
+    if review_status != "approved":
+        if (
+            review_status == "needs_revision"
+            and part_request_review.get("review_result") == "needs_revision_missing_interface_constraints"
+        ):
+            status = "needs_revision_missing_interface_constraints"
+            diagnostic_codes.append("part_handoff.needs_revision_missing_interface_constraints")
+            blocked_reasons.append({"code": "part_handoff.needs_revision_missing_interface_constraints"})
+        else:
+            status = "blocked_review_not_approved"
+            diagnostic_codes.append("part_handoff.blocked_review_not_approved")
+            blocked_reasons.append({"code": "part_handoff.blocked_review_not_approved"})
+    elif is_reference_only:
+        status = "blocked_reference_only_part"
+        diagnostic_codes.append("part_handoff.blocked_reference_only_part")
+        blocked_reasons.append({"code": "part_handoff.blocked_reference_only_part"})
+    elif is_blocked or missing_part_brief:
+        status = "blocked_unsupported_part"
+        diagnostic_codes.append("part_handoff.blocked_unsupported_part")
+        blocked_reasons.append({"code": "part_handoff.blocked_unsupported_part"})
+    elif missing_interfaces:
+        status = "needs_revision_missing_interface_constraints"
+        diagnostic_codes.append("part_handoff.needs_revision_missing_interface_constraints")
+        blocked_reasons.append({"code": "part_handoff.needs_revision_missing_interface_constraints"})
+
+    if has_provider_code or has_arbitrary_provider_fields:
+        if status == "ready_for_single_part_planning":
+            status = "blocked_unsupported_part"
+            diagnostic_codes.append("part_handoff.blocked_unsupported_part")
+            blocked_reasons.append({"code": "part_handoff.blocked_unsupported_part"})
+        diagnostic_codes.append("part_handoff.provider_code_rejected")
+        blocked_reasons.append({"code": "part_handoff.provider_code_rejected"})
+    if has_provider_cad_ir:
+        if status == "ready_for_single_part_planning":
+            status = "blocked_unsupported_part"
+            diagnostic_codes.append("part_handoff.blocked_unsupported_part")
+            blocked_reasons.append({"code": "part_handoff.blocked_unsupported_part"})
+        diagnostic_codes.append("part_handoff.provider_cad_ir_rejected")
+        blocked_reasons.append({"code": "part_handoff.provider_cad_ir_rejected"})
+
+    if status == "ready_for_single_part_planning":
+        diagnostic_codes.append("part_handoff.ready_for_single_part_planning")
+
+    return {
+        "artifact_type": "reviewed_part_handoff",
+        "schema_version": "0.1",
+        "source_part_request": _safe_part_request_source_artifact_name(source_part_request),
+        "source_review": _safe_part_request_review_source_artifact_name(source_review),
+        "part_id": part_id,
+        "status": status,
+        "single_part_prompt": _single_part_handoff_prompt(part_create_request),
+        "part_brief": _safe_short_text(part_create_request.get("part_brief"), fallback="", max_length=180),
+        "interface_constraints": _reviewed_part_handoff_interface_constraints(part_create_request),
+        "preserved_assembly_context": _reviewed_part_handoff_assembly_context(part_create_request),
+        "diagnostic_codes": _safe_diagnostic_codes(diagnostic_codes),
+        "blocked_reasons": _dedupe_reason_codes(blocked_reasons),
+    }
+
+
+def run_reviewed_part_handoff_pipeline(
+    part_create_request: dict[str, Any] | str | Path,
+    part_request_review: dict[str, Any] | str | Path,
+    *,
+    output_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Write a planning-only handoff after part request review approval."""
+
+    loaded_request, source_part_request, request_default_output = _load_part_create_request_input(part_create_request)
+    loaded_review, source_review, review_default_output = _load_part_request_review_input(part_request_review)
+    output_path = _resolve_output_dir(
+        "reviewed_part_handoff",
+        output_root,
+        output_dir or review_default_output or request_default_output,
+    )
+    output_path.mkdir(parents=True, exist_ok=True)
+    handoff = create_reviewed_part_handoff(
+        loaded_request,
+        loaded_review,
+        source_part_request=source_part_request,
+        source_review=source_review,
+    )
+    _write_json(output_path / "reviewed_part_handoff.json", handoff)
+    status = handoff["status"]
+    success = status == "ready_for_single_part_planning"
+    trace = {
+        "total_attempts": 0,
+        "steps": [
+            {
+                "attempt": 0,
+                "status": status,
+                "stage": "reviewed_part_handoff",
+                "diagnostic_codes": handoff.get("diagnostic_codes", []),
+            }
+        ],
+        "final_selected_candidate": handoff.get("part_id") if success else None,
+        "reviewed_part_handoff": {
+            "workflow": "reviewed_part_handoff",
+            "version": "reviewed-part-handoff-v0.1",
+            "status": status,
+            "local_authority": [
+                "part_create_request.json",
+                "part_request_review.json",
+                "reviewed_part_handoff.json",
+            ],
+            "stages": [
+                "load_part_create_request",
+                "load_part_request_review",
+                "compile_reviewed_part_handoff",
+            ],
+            "artifacts": {
+                "source_part_request": source_part_request,
+                "source_review": source_review,
+                "reviewed_part_handoff": "reviewed_part_handoff.json",
+            },
+            "cad_ir_created": False,
+            "part_modeling_started": False,
+            "diagnostic_codes": handoff.get("diagnostic_codes", []),
+        },
+    }
+    _write_json(output_path / "agent_trace.json", trace)
+    report = {
+        "success": success,
+        "status": status,
+        "blocked_stage": None if success else "reviewed_part_handoff",
+        "diagnostic_codes": handoff.get("diagnostic_codes", []),
+        "source_part_request": handoff.get("source_part_request"),
+        "source_review": handoff.get("source_review"),
+        "part_id": handoff.get("part_id"),
+        "interface_constraint_count": len(handoff.get("interface_constraints", [])),
+        "cad_ir_created": False,
+        "part_modeling_started": False,
+        "reviewed_part_handoff": handoff,
+        "files": _collect_files(output_path, repo_relative=True),
+    }
+    _write_json(output_path / "report.json", report)
+    _write_reviewed_part_handoff_report_md(output_path, report, handoff)
+    files = _collect_files(output_path, repo_relative=True)
+    report["files"] = files
+    _write_json(output_path / "report.json", report)
+    return {
+        "status": status,
+        "success": success,
+        "output_dir": str(output_path),
+        "reviewed_part_handoff": handoff,
+        "agent_trace": trace,
+        "files": files,
+        "report_json": str(output_path / "report.json"),
+        "report_md": str(output_path / "report.md"),
+    }
+
+
 def _is_selectable_assembly_part(part: dict[str, Any]) -> bool:
     part_id = _safe_artifact_id(part.get("part_id"))
     if part_id in {"pin", "screw", "bolt", "nut", "washer", "fastener"}:
@@ -2182,11 +2380,87 @@ def _load_part_create_request_input(part_create_request: dict[str, Any] | str | 
     return loaded, path.name, path.parent
 
 
+def _load_part_request_review_input(part_request_review: dict[str, Any] | str | Path) -> tuple[dict[str, Any], str, Path | None]:
+    if isinstance(part_request_review, dict):
+        return part_request_review, "part_request_review.json", None
+    path = Path(part_request_review)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path = _require_repo_path(path.resolve())
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError("part_request_review must be a JSON object")
+    return loaded, path.name, path.parent
+
+
 def _safe_part_request_source_artifact_name(value: Any) -> str:
     name = Path(str(value or "part_create_request.json")).name
     if name != "part_create_request.json":
         return "part_create_request.json"
     return name
+
+
+def _safe_part_request_review_source_artifact_name(value: Any) -> str:
+    name = Path(str(value or "part_request_review.json")).name
+    if name != "part_request_review.json":
+        return "part_request_review.json"
+    return name
+
+
+def _single_part_handoff_prompt(part_create_request: dict[str, Any]) -> str:
+    part_id = _safe_artifact_id(part_create_request.get("part_id")) if part_create_request.get("part_id") else "component"
+    constraints = _reviewed_part_handoff_interface_constraints(part_create_request)
+    if constraints:
+        phrases = [
+            f"{constraint['kind'].replace('_', ' ')} with {constraint['related_part_id']}"
+            for constraint in constraints[:3]
+        ]
+        return f"Create the {part_id} component as a single CAD part. Preserve {' and '.join(phrases)}."
+    return f"Create the {part_id} component as a single CAD part."
+
+
+def _reviewed_part_handoff_interface_constraints(part_create_request: dict[str, Any]) -> list[dict[str, str]]:
+    constraints = part_create_request.get("interface_constraints")
+    if not isinstance(constraints, list):
+        return []
+    allowed_kinds = {
+        "assembly_interface",
+        "contact_alignment",
+        "pin_alignment",
+        "screw_alignment",
+        "sliding_fit",
+        "snap_fit",
+    }
+    sanitized: list[dict[str, str]] = []
+    for constraint in constraints:
+        if not isinstance(constraint, dict):
+            continue
+        related_part_id = _safe_artifact_id(constraint.get("related_part_id"))
+        kind = _safe_artifact_id(constraint.get("kind"))
+        if not kind or not related_part_id:
+            continue
+        if kind not in allowed_kinds:
+            kind = _part_request_constraint_kind(kind)
+        sanitized.append({
+            "kind": kind,
+            "related_part_id": related_part_id,
+            "notes": _safe_short_text(constraint.get("notes"), fallback="Assembly interface preserved for planning."),
+        })
+    return sanitized
+
+
+def _reviewed_part_handoff_assembly_context(part_create_request: dict[str, Any]) -> dict[str, Any]:
+    context = part_create_request.get("preserved_assembly_context")
+    if not isinstance(context, dict):
+        return {"assembly_scope": "multi_part", "related_parts": []}
+    scope = context.get("assembly_scope") if context.get("assembly_scope") in {"multi_part", "assembly"} else "multi_part"
+    related_parts: list[str] = []
+    source_related_parts = context.get("related_parts") if isinstance(context.get("related_parts"), list) else []
+    for related_part in source_related_parts:
+        safe_part = _safe_artifact_id(related_part)
+        if safe_part and safe_part not in related_parts:
+            related_parts.append(safe_part)
+    return {"assembly_scope": scope, "related_parts": related_parts}
 
 
 def _part_request_blocked_reason_codes(part_create_request: dict[str, Any]) -> list[str]:
@@ -2323,6 +2597,28 @@ def _write_part_request_review_report_md(
         "",
     ]
     for code in review.get("diagnostic_codes", []):
+        lines.append(f"- `{code}`")
+    (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_reviewed_part_handoff_report_md(
+    output_path: Path,
+    report: dict[str, Any],
+    handoff: dict[str, Any],
+) -> None:
+    lines = [
+        "# Reviewed Part Handoff Report",
+        "",
+        f"**Status:** {report.get('status')}",
+        f"**Part ID:** `{handoff.get('part_id')}`",
+        "",
+        "`reviewed_part_handoff.json` is a planning handoff artifact only. CadFlow did not generate CAD IR, "
+        "`input_ir.json`, STEP, STL, or CadQuery/Python code.",
+        "",
+        "## Diagnostics",
+        "",
+    ]
+    for code in handoff.get("diagnostic_codes", []):
         lines.append(f"- `{code}`")
     (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
