@@ -918,6 +918,7 @@ def _collect_files(output_dir: Path, *, repo_relative: bool = False) -> dict[str
         "part_request_review.json": "part_request_review",
         "reviewed_part_handoff.json": "reviewed_part_handoff",
         "part_execution_request.json": "part_execution_request",
+        "part_result_review.json": "part_result_review",
         "input_ir.json": "input_ir",
         "model.py": "model_py",
         "model.step": "step",
@@ -2377,6 +2378,181 @@ def run_reviewed_part_single_create_pipeline(
     }
 
 
+def review_part_result(
+    reviewed_part_handoff: dict[str, Any],
+    child_run: str | Path,
+    *,
+    expected_stl: bool = True,
+) -> dict[str, Any]:
+    """Deterministically review one generated child part run without CAD execution."""
+
+    handoff = _sanitize_reviewed_part_handoff(reviewed_part_handoff, source_handoff="reviewed_part_handoff.json")
+    child_path = Path(child_run)
+    part_id = handoff.get("part_id")
+    bridge_dir = child_path.parent
+    checks = {
+        "child_run_created": child_path.exists() and child_path.is_dir(),
+        "step_created": (child_path / "model.step").exists(),
+        "stl_created": (child_path / "model.stl").exists(),
+        "input_ir_created": (child_path / "input_ir.json").exists(),
+        "report_created": (child_path / "report.json").exists(),
+        "single_part_only": _part_result_child_run_is_single_part(child_path, part_id),
+        "no_batch_generation": _part_result_no_batch_generation(bridge_dir),
+        "no_assembly_generation": _part_result_no_assembly_generation(bridge_dir),
+        "lineage_preserved": _part_result_lineage_preserved(bridge_dir, child_path, handoff),
+        "interface_constraints_preserved_in_metadata": _part_result_interfaces_preserved(bridge_dir, child_path, handoff),
+    }
+    diagnostic_codes = ["part_result.review_created"]
+    revision_notes: list[dict[str, str]] = []
+    status = "accepted_for_preview"
+
+    def block(next_status: str, code: str, note: str) -> None:
+        nonlocal status
+        if status == "accepted_for_preview" or status == "needs_revision":
+            status = next_status
+        diagnostic_codes.append(code)
+        revision_notes.append({"code": code, "message": note})
+
+    def revise(code: str, note: str) -> None:
+        nonlocal status
+        if status == "accepted_for_preview":
+            status = "needs_revision"
+        diagnostic_codes.append(code)
+        revision_notes.append({"code": code, "message": note})
+
+    if not checks["child_run_created"]:
+        block("blocked_missing_child_run", "part_result.blocked_missing_child_run", "Child single-part run directory is missing.")
+    if checks["child_run_created"] and not checks["step_created"]:
+        block("blocked_missing_step", "part_result.blocked_missing_step", "Child run did not create model.step.")
+    if expected_stl and checks["child_run_created"] and not checks["stl_created"]:
+        revise("part_result.needs_revision_missing_stl", "Child run did not create model.stl.")
+    if checks["step_created"]:
+        diagnostic_codes.append("part_result.step_created")
+    if checks["stl_created"]:
+        diagnostic_codes.append("part_result.stl_created")
+    if not checks["input_ir_created"]:
+        revise("part_result.needs_revision_missing_input_ir", "Child run did not preserve input_ir.json.")
+    if not checks["report_created"]:
+        revise("part_result.needs_revision_missing_report", "Child run did not preserve report.json.")
+    if not checks["single_part_only"] or not checks["no_batch_generation"] or not checks["no_assembly_generation"]:
+        block("blocked_scope_violation", "part_result.blocked_scope_violation", "Child output violated single-part scope.")
+    if checks["single_part_only"] and checks["no_batch_generation"] and checks["no_assembly_generation"]:
+        diagnostic_codes.append("part_result.single_part_scope_preserved")
+    if not checks["lineage_preserved"]:
+        block("blocked_lineage_missing", "part_result.blocked_lineage_missing", "Lineage does not point back to reviewed handoff context.")
+    else:
+        diagnostic_codes.append("part_result.lineage_preserved")
+    if not checks["interface_constraints_preserved_in_metadata"]:
+        revise(
+            "part_result.needs_revision_interface_constraints_not_preserved",
+            "Reviewed interface constraints were not found in child metadata or prompt artifacts.",
+        )
+    else:
+        diagnostic_codes.append("part_result.interface_constraints_preserved_in_metadata")
+
+    if status == "accepted_for_preview":
+        revision_notes = []
+
+    return {
+        "artifact_type": "part_result_review",
+        "schema_version": "0.1",
+        "source_handoff": "reviewed_part_handoff.json",
+        "child_run": child_path.name,
+        "part_id": part_id,
+        "status": status,
+        "checks": checks,
+        "diagnostic_codes": _safe_diagnostic_codes(diagnostic_codes),
+        "revision_notes": _dedupe_revision_notes(revision_notes),
+    }
+
+
+def run_part_result_review_pipeline(
+    reviewed_part_handoff: dict[str, Any] | str | Path,
+    child_run: str | Path,
+    *,
+    output_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+    expected_stl: bool = True,
+) -> dict[str, Any]:
+    """Write a local deterministic review of one reviewed single-part child run."""
+
+    handoff, source_handoff, default_output = _load_reviewed_part_handoff_input(reviewed_part_handoff)
+    child_path = Path(child_run)
+    if not child_path.is_absolute():
+        child_path = PROJECT_ROOT / child_path
+    child_path = _require_repo_path(child_path.resolve())
+    output_path = _resolve_output_dir("part_result_review", output_root, output_dir or default_output or child_path.parent)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    sanitized_handoff = _sanitize_reviewed_part_handoff(handoff, source_handoff=source_handoff)
+    review = review_part_result(sanitized_handoff, child_path, expected_stl=expected_stl)
+    _write_json(output_path / "part_result_review.json", review)
+
+    trace = {
+        "total_attempts": 0,
+        "steps": [
+            {
+                "attempt": 0,
+                "status": review["status"],
+                "stage": "part_result_review",
+                "diagnostic_codes": review["diagnostic_codes"],
+            }
+        ],
+        "final_selected_candidate": review.get("part_id") if review["status"] == "accepted_for_preview" else None,
+        "part_result_review": {
+            "workflow": "part_result_review",
+            "version": "part-result-review-v0.1",
+            "status": review["status"],
+            "part_id": review.get("part_id"),
+            "local_authority": [
+                "reviewed_part_handoff.json",
+                "part_execution_request.json",
+                "lineage.json",
+                "child_run_artifacts",
+            ],
+            "stages": ["load_reviewed_part_handoff", "inspect_child_run_artifacts", "write_part_result_review"],
+            "artifacts": {
+                "source_handoff": _safe_reviewed_part_handoff_source_artifact_name(source_handoff),
+                "child_run": child_path.name,
+                "part_result_review": "part_result_review.json",
+            },
+            "cad_ir_created": False,
+            "part_modeling_started": False,
+            "diagnostic_codes": review["diagnostic_codes"],
+        },
+    }
+    _write_json(output_path / "agent_trace.json", trace)
+    report = {
+        "success": review["status"] == "accepted_for_preview",
+        "status": review["status"],
+        "blocked_stage": None if review["status"] == "accepted_for_preview" else "part_result_review",
+        "diagnostic_codes": review["diagnostic_codes"],
+        "part_id": review.get("part_id"),
+        "source_handoff": "reviewed_part_handoff.json",
+        "child_run": child_path.name,
+        "checks": review["checks"],
+        "cad_ir_created": False,
+        "part_modeling_started": False,
+        "part_result_review": review,
+        "files": _collect_files(output_path, repo_relative=True),
+    }
+    _write_json(output_path / "report.json", report)
+    _write_part_result_review_report_md(output_path, report, review)
+    files = _collect_files(output_path, repo_relative=True)
+    report["files"] = files
+    _write_json(output_path / "report.json", report)
+    return {
+        "status": review["status"],
+        "success": review["status"] == "accepted_for_preview",
+        "output_dir": str(output_path),
+        "part_result_review": review,
+        "agent_trace": trace,
+        "files": files,
+        "report_json": str(output_path / "report.json"),
+        "report_md": str(output_path / "report.md"),
+    }
+
+
 def _is_selectable_assembly_part(part: dict[str, Any]) -> bool:
     part_id = _safe_artifact_id(part.get("part_id"))
     if part_id in {"pin", "screw", "bolt", "nut", "washer", "fastener"}:
@@ -2776,6 +2952,110 @@ def _reviewed_part_single_create_lineage(
     }
 
 
+def _part_result_child_run_is_single_part(child_path: Path, part_id: Any) -> bool:
+    safe_part_id = _safe_artifact_id(part_id)
+    if not child_path.exists() or not child_path.is_dir():
+        return False
+    if child_path.name != f"single_part_{safe_part_id}":
+        return False
+    parent = child_path.parent
+    child_runs = [path for path in parent.iterdir() if path.is_dir() and path.name.startswith("single_part_")]
+    return len(child_runs) == 1
+
+
+def _part_result_no_batch_generation(bridge_dir: Path) -> bool:
+    if not bridge_dir.exists():
+        return True
+    child_runs = [path for path in bridge_dir.iterdir() if path.is_dir() and path.name.startswith("single_part_")]
+    blocked_names = {"batch_generation.json", "batch_results.json", "all_parts.json"}
+    return len(child_runs) <= 1 and not any(path.name.lower() in blocked_names for path in bridge_dir.rglob("*"))
+
+
+def _part_result_no_assembly_generation(bridge_dir: Path) -> bool:
+    if not bridge_dir.exists():
+        return True
+    blocked_names = {"assembly.step", "assembly.stl", "assembly_constraints.json", "constraints.json", "joints.json"}
+    if (bridge_dir / "model.step").exists() or (bridge_dir / "model.stl").exists():
+        return False
+    return not any(path.name.lower() in blocked_names for path in bridge_dir.rglob("*"))
+
+
+def _part_result_lineage_preserved(bridge_dir: Path, child_path: Path, handoff: dict[str, Any]) -> bool:
+    lineage_path = bridge_dir / "lineage.json"
+    if not lineage_path.exists():
+        return False
+    lineage = _read_json_object(lineage_path)
+    if not lineage:
+        return False
+    if lineage.get("reviewed_part_handoff_artifact") != "reviewed_part_handoff.json":
+        return False
+    if lineage.get("child_run_id") != child_path.name:
+        return False
+    if lineage.get("part_id") != handoff.get("part_id"):
+        return False
+    return bool(lineage.get("part_create_request_artifact") and lineage.get("assembly_plan_artifact"))
+
+
+def _part_result_interfaces_preserved(bridge_dir: Path, child_path: Path, handoff: dict[str, Any]) -> bool:
+    constraints = handoff.get("interface_constraints") if isinstance(handoff.get("interface_constraints"), list) else []
+    if not constraints:
+        return True
+    metadata = _safe_artifact_text([
+        child_path / "prompt.txt",
+        child_path / "report.md",
+        bridge_dir / "part_execution_request.json",
+    ])
+    if not metadata:
+        return False
+    lowered = metadata.lower()
+    for constraint in constraints:
+        if not isinstance(constraint, dict):
+            continue
+        note = _single_part_interface_note(constraint).lower()
+        kind = _safe_artifact_id(constraint.get("kind")).replace("_", " ")
+        if note and note in lowered:
+            continue
+        if kind and kind in lowered:
+            continue
+        return False
+    return True
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _safe_artifact_text(paths: list[Path]) -> str:
+    chunks: list[str] = []
+    for path in paths:
+        if not path.exists() or path.is_dir():
+            continue
+        try:
+            chunks.append(path.read_text(encoding="utf-8")[:4000])
+        except OSError:
+            continue
+    return "\n".join(chunks)
+
+
+def _dedupe_revision_notes(notes: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[str] = set()
+    sanitized: list[dict[str, str]] = []
+    for note in notes:
+        code = _safe_diagnostic_codes([note.get("code", "")])
+        if not code or code[0] in seen:
+            continue
+        seen.add(code[0])
+        sanitized.append({
+            "code": code[0],
+            "message": _safe_short_text(note.get("message"), fallback="Review found a deterministic issue.", max_length=160),
+        })
+    return sanitized
+
+
 def _handoff_requests_multi_part_or_assembly_generation(handoff: dict[str, Any]) -> bool:
     text = " ".join([
         str(handoff.get("single_part_prompt") or ""),
@@ -3045,6 +3325,33 @@ def _write_reviewed_part_single_create_report_md(output_path: Path, report: dict
         "",
     ]
     for code in report.get("diagnostic_codes", []):
+        lines.append(f"- `{code}`")
+    (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_part_result_review_report_md(
+    output_path: Path,
+    report: dict[str, Any],
+    review: dict[str, Any],
+) -> None:
+    lines = [
+        "# Part Result Review Report",
+        "",
+        f"**Status:** {report.get('status')}",
+        f"**Part ID:** `{review.get('part_id')}`",
+        f"**Child run:** `{review.get('child_run')}`",
+        "",
+        "This local review inspects an existing reviewed single-part child run. It does not generate CAD, "
+        "generate batches, export an assembly, or solve assembly constraints.",
+        "",
+        "## Checks",
+        "",
+    ]
+    checks = review.get("checks") if isinstance(review.get("checks"), dict) else {}
+    for key in sorted(checks):
+        lines.append(f"- `{key}`: `{checks[key]}`")
+    lines.extend(["", "## Diagnostics", ""])
+    for code in review.get("diagnostic_codes", []):
         lines.append(f"- `{code}`")
     (output_path / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

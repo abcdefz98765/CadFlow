@@ -21,9 +21,11 @@ from ai_native_cad.agents.validation import validate_adapter_result, validate_re
 import ai_native_cad.cadquery.executor as cadquery_executor
 from ai_native_cad.pipeline import (
     create_reviewed_part_handoff,
+    review_part_result,
     review_part_create_request,
     run_assembly_part_request_pipeline,
     run_part_request_review_pipeline,
+    run_part_result_review_pipeline,
     run_reviewed_part_handoff_pipeline,
     run_reviewed_part_single_create_pipeline,
     run_provider_create_pipeline,
@@ -3344,15 +3346,219 @@ def test_reviewed_part_single_create_outputs_do_not_leak_paths_secrets_or_provid
     assert "raw_response" not in serialized_outputs
 
 
+def _write_part_result_child_run(tmp_path, *, include_step=True, include_stl=True, include_lineage=True, prompt_text=None):
+    bridge_dir = tmp_path / "outputs" / "reviewed_part_single_create"
+    child_dir = bridge_dir / "single_part_base"
+    child_dir.mkdir(parents=True)
+    (child_dir / "input_ir.json").write_text(json.dumps({"part_type": "mounting_plate"}), encoding="utf-8")
+    (child_dir / "report.json").write_text(json.dumps({
+        "status": "success",
+        "provider_response": {"raw_response": "secret provider payload"},
+        "messages": ["do not leak"],
+    }), encoding="utf-8")
+    (child_dir / "prompt.txt").write_text(
+        prompt_text or "Create base. Preserve fastener clearance/alignment features and reference fastener clearance envelope.",
+        encoding="utf-8",
+    )
+    if include_step:
+        (child_dir / "model.step").write_text("STEP", encoding="utf-8")
+    if include_stl:
+        (child_dir / "model.stl").write_text("STL", encoding="utf-8")
+    (bridge_dir / "part_execution_request.json").write_text(json.dumps({
+        "child_run_id": "single_part_base",
+        "execution_mode": "single_part_only",
+        "prompt": prompt_text or "Preserve fastener clearance/alignment features and reference fastener clearance envelope.",
+        "api_key": "secret",
+    }), encoding="utf-8")
+    (bridge_dir / "reviewed_part_handoff.json").write_text(json.dumps(_valid_reviewed_part_handoff()), encoding="utf-8")
+    if include_lineage:
+        (bridge_dir / "lineage.json").write_text(json.dumps({
+            "relationship": "reviewed_part_single_create_child",
+            "part_id": "base",
+            "assembly_plan_artifact": "assembly_plan.json",
+            "part_create_request_artifact": "part_create_request.json",
+            "part_request_review_artifact": "part_request_review.json",
+            "reviewed_part_handoff_artifact": "reviewed_part_handoff.json",
+            "child_run_id": "single_part_base",
+        }), encoding="utf-8")
+    return bridge_dir, child_dir
+
+
+def test_part_result_review_accepts_successful_single_part_child_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    called = {"run_ir_pipeline": False}
+
+    def fake_run_ir_pipeline(*args, **kwargs):
+        called["run_ir_pipeline"] = True
+        raise AssertionError("part result review must not run CAD execution")
+
+    monkeypatch.setattr(pipeline_runner, "run_ir_pipeline", fake_run_ir_pipeline)
+    bridge_dir, child_dir = _write_part_result_child_run(tmp_path)
+    output_dir = tmp_path / "outputs" / "part_result_review"
+
+    result = run_part_result_review_pipeline(
+        _valid_reviewed_part_handoff(),
+        child_dir,
+        output_dir=output_dir,
+    )
+
+    review = json.loads((output_dir / "part_result_review.json").read_text(encoding="utf-8"))
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    assert result["status"] == "accepted_for_preview"
+    assert result["success"] is True
+    assert called["run_ir_pipeline"] is False
+    assert review["artifact_type"] == "part_result_review"
+    assert review["source_handoff"] == "reviewed_part_handoff.json"
+    assert review["child_run"] == "single_part_base"
+    assert review["part_id"] == "base"
+    assert review["checks"] == {
+        "child_run_created": True,
+        "step_created": True,
+        "stl_created": True,
+        "input_ir_created": True,
+        "report_created": True,
+        "single_part_only": True,
+        "no_batch_generation": True,
+        "no_assembly_generation": True,
+        "lineage_preserved": True,
+        "interface_constraints_preserved_in_metadata": True,
+    }
+    assert "part_result.review_created" in review["diagnostic_codes"]
+    assert "part_result.step_created" in review["diagnostic_codes"]
+    assert "part_result.single_part_scope_preserved" in review["diagnostic_codes"]
+    assert "part_result.lineage_preserved" in review["diagnostic_codes"]
+    assert "part_result.interface_constraints_preserved_in_metadata" in review["diagnostic_codes"]
+    assert review["revision_notes"] == []
+    assert report["cad_ir_created"] is False
+    assert report["part_modeling_started"] is False
+    assert trace["part_result_review"]["cad_ir_created"] is False
+    assert (bridge_dir / "assembly.step").exists() is False
+
+
+def test_part_result_review_missing_child_run_blocks(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    child_dir = tmp_path / "outputs" / "reviewed_part_single_create" / "single_part_base"
+
+    result = run_part_result_review_pipeline(
+        _valid_reviewed_part_handoff(),
+        child_dir,
+        output_dir=tmp_path / "outputs" / "part_result_missing_child",
+    )
+
+    review = result["part_result_review"]
+    assert result["status"] == "blocked_missing_child_run"
+    assert review["checks"]["child_run_created"] is False
+    assert "part_result.blocked_missing_child_run" in review["diagnostic_codes"]
+
+
+def test_part_result_review_missing_step_blocks(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    _, child_dir = _write_part_result_child_run(tmp_path, include_step=False)
+
+    result = run_part_result_review_pipeline(
+        _valid_reviewed_part_handoff(),
+        child_dir,
+        output_dir=tmp_path / "outputs" / "part_result_missing_step",
+    )
+
+    review = result["part_result_review"]
+    assert result["status"] == "blocked_missing_step"
+    assert review["checks"]["step_created"] is False
+    assert "part_result.blocked_missing_step" in review["diagnostic_codes"]
+
+
+def test_part_result_review_scope_violation_blocks(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    bridge_dir, child_dir = _write_part_result_child_run(tmp_path)
+    (bridge_dir / "single_part_lid").mkdir()
+    (bridge_dir / "assembly.step").write_text("ASSEMBLY", encoding="utf-8")
+
+    result = run_part_result_review_pipeline(
+        _valid_reviewed_part_handoff(),
+        child_dir,
+        output_dir=tmp_path / "outputs" / "part_result_scope_violation",
+    )
+
+    review = result["part_result_review"]
+    assert result["status"] == "blocked_scope_violation"
+    assert review["checks"]["single_part_only"] is False
+    assert review["checks"]["no_batch_generation"] is False
+    assert review["checks"]["no_assembly_generation"] is False
+    assert "part_result.blocked_scope_violation" in review["diagnostic_codes"]
+
+
+def test_part_result_review_missing_lineage_blocks_with_diagnostic(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    _, child_dir = _write_part_result_child_run(tmp_path, include_lineage=False)
+
+    result = run_part_result_review_pipeline(
+        _valid_reviewed_part_handoff(),
+        child_dir,
+        output_dir=tmp_path / "outputs" / "part_result_missing_lineage",
+    )
+
+    review = result["part_result_review"]
+    assert result["status"] == "blocked_lineage_missing"
+    assert review["checks"]["lineage_preserved"] is False
+    assert "part_result.blocked_lineage_missing" in review["diagnostic_codes"]
+
+
+def test_part_result_review_interface_metadata_missing_needs_revision(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    _, child_dir = _write_part_result_child_run(tmp_path, prompt_text="Create base only.")
+
+    result = run_part_result_review_pipeline(
+        _valid_reviewed_part_handoff(),
+        child_dir,
+        output_dir=tmp_path / "outputs" / "part_result_missing_interface_metadata",
+    )
+
+    review = result["part_result_review"]
+    assert result["status"] == "needs_revision"
+    assert review["checks"]["interface_constraints_preserved_in_metadata"] is False
+    assert "part_result.needs_revision_interface_constraints_not_preserved" in review["diagnostic_codes"]
+
+
+def test_part_result_review_outputs_do_not_leak_paths_secrets_or_provider_messages(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    _, child_dir = _write_part_result_child_run(tmp_path)
+    output_dir = tmp_path / "outputs" / "part_result_privacy"
+
+    result = run_part_result_review_pipeline(
+        _valid_reviewed_part_handoff(),
+        child_dir,
+        output_dir=output_dir,
+    )
+
+    serialized_outputs = json.dumps({
+        "result": result,
+        "review": json.loads((output_dir / "part_result_review.json").read_text(encoding="utf-8")),
+        "report": json.loads((output_dir / "report.json").read_text(encoding="utf-8")),
+        "trace": json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8")),
+    }, sort_keys=True)
+    assert str(tmp_path) not in serialized_outputs
+    assert "D:\\" not in serialized_outputs
+    assert "api_key" not in serialized_outputs
+    assert "secret" not in serialized_outputs
+    assert "messages" not in serialized_outputs
+    assert "raw_response" not in serialized_outputs
+    assert "provider payload" not in serialized_outputs
+
+
 def test_reviewed_part_handoff_exports_are_available():
     import ai_native_cad.pipeline as pipeline
 
     assert pipeline.create_reviewed_part_handoff is create_reviewed_part_handoff
+    assert pipeline.review_part_result is review_part_result
     assert pipeline.run_reviewed_part_handoff_pipeline is run_reviewed_part_handoff_pipeline
     assert pipeline.run_reviewed_part_single_create_pipeline is run_reviewed_part_single_create_pipeline
+    assert pipeline.run_part_result_review_pipeline is run_part_result_review_pipeline
     assert "create_reviewed_part_handoff" in pipeline.__all__
+    assert "review_part_result" in pipeline.__all__
     assert "run_reviewed_part_handoff_pipeline" in pipeline.__all__
     assert "run_reviewed_part_single_create_pipeline" in pipeline.__all__
+    assert "run_part_result_review_pipeline" in pipeline.__all__
 
 
 @pytest.mark.parametrize(
