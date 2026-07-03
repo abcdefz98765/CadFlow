@@ -1389,6 +1389,29 @@ def test_normalized_design_eval_records_assembly_metadata_from_compiled_artifact
                 "selected_parts": [{"name": "leaf_a"}, {"name": "leaf_b"}, {"name": "pin"}],
                 "fit_interfaces": [{"kind": "pin_joint"}],
             },
+            "assembly_plan": {
+                "artifact_type": "assembly_plan",
+                "parts": [
+                    {"part_id": "leaf_a", "role": "hinge leaf", "generation_strategy": "future_part_pipeline"},
+                    {"part_id": "leaf_b", "role": "hinge leaf", "generation_strategy": "future_part_pipeline"},
+                    {"part_id": "pin", "role": "hinge pin", "generation_strategy": "future_part_pipeline"},
+                ],
+                "interfaces": [
+                    {"from": "leaf_a", "to": "pin", "kind": "pinned_joint", "notes": "rotating hinge interface"},
+                    {"from": "leaf_b", "to": "pin", "kind": "pinned_joint", "notes": "rotating hinge interface"},
+                ],
+                "fasteners": [],
+                "risk_notes": [{"kind": "capability_boundary"}],
+                "blocked_reasons": [{"code": "assembly_generation_not_supported_yet"}],
+                "quality": {
+                    "assembly_plan_count": 1,
+                    "part_count": 3,
+                    "interface_count": 2,
+                    "fastener_count": 0,
+                    "risk_note_count": 1,
+                    "blocked_reason_codes": ["assembly_generation_not_supported_yet"],
+                },
+            },
         }
 
     result = normalized_design_eval.run_normalized_design_eval(
@@ -1413,6 +1436,16 @@ def test_normalized_design_eval_records_assembly_metadata_from_compiled_artifact
     assert case["risk_notes_present"] is True
     assert case["candidate_plan_count"] == 2
     assert case["selected_candidate"] == "B"
+    assert case["assembly_plan_count"] == 1
+    assert case["part_count"] == 3
+    assert case["interface_count"] == 2
+    assert case["fastener_count"] == 0
+    assert case["risk_note_count"] == 1
+    assert case["blocked_reason_codes"] == ["assembly_generation_not_supported_yet"]
+    assert result["summary"]["assembly_plan_count"] == 1
+    assert result["summary"]["part_count"] == 3
+    assert result["summary"]["interface_count"] == 2
+    assert result["summary"]["risk_note_count"] == 1
 
 
 @pytest.mark.parametrize(
@@ -1920,6 +1953,9 @@ def test_provider_normalized_design_create_writes_assembly_plan_without_cad_exec
     assert result["assembly_plan"]["scope"] == expected_scope
     assert result["assembly_plan"]["status"] == "blocked_before_part_generation"
     assert expected_code in result["assembly_plan"]["diagnostic_codes"]
+    assert "assembly.plan_created" in result["assembly_plan"]["diagnostic_codes"]
+    assert "assembly.parts_detected" in result["assembly_plan"]["diagnostic_codes"]
+    assert "assembly.interfaces_detected" in result["assembly_plan"]["diagnostic_codes"]
     assert "assembly.generation_not_supported_yet" in result["diagnostic_codes"]
     assert [request["operation"] for request in fake_client.requests] == ["parse_requirement"]
     assert called["run_ir_pipeline"] is False
@@ -1940,15 +1976,64 @@ def test_provider_normalized_design_create_writes_assembly_plan_without_cad_exec
     trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
     serialized = json.dumps({"assembly_plan": assembly_plan, "report": report, "trace": trace}, sort_keys=True)
     assert assembly_plan["parts"]
+    assert all(set(part) == {"part_id", "role", "generation_strategy"} for part in assembly_plan["parts"])
+    assert all(part["generation_strategy"] in {"future_part_pipeline", "reference_only", "blocked"} for part in assembly_plan["parts"])
+    assert all(part["part_id"] == pipeline_runner._safe_artifact_id(part["part_id"]) for part in assembly_plan["parts"])
+    assert all(set(interface) == {"from", "to", "kind", "notes"} for interface in assembly_plan["interfaces"])
+    assert all(
+        interface["kind"] in {"screw_fastened", "pinned_joint", "sliding_fit", "snap_fit", "stacked", "unknown"}
+        for interface in assembly_plan["interfaces"]
+    )
+    assert assembly_plan["quality"]["assembly_plan_count"] == 1
+    assert assembly_plan["quality"]["part_count"] == len(assembly_plan["parts"])
+    assert assembly_plan["quality"]["interface_count"] == len(assembly_plan["interfaces"])
+    assert assembly_plan["quality"]["fastener_count"] == len(assembly_plan["fasteners"])
+    assert assembly_plan["quality"]["risk_note_count"] == len(assembly_plan["risk_notes"])
     assert assembly_plan["blocked_reasons"][0]["code"] == "assembly_generation_not_supported_yet"
     assert report["cad_ir_created"] is False
     assert report["part_modeling_started"] is False
+    assert report["assembly_plan_count"] == 1
+    assert report["part_count"] == len(assembly_plan["parts"])
+    assert report["interface_count"] == len(assembly_plan["interfaces"])
+    assert report["fastener_count"] == len(assembly_plan["fasteners"])
+    assert report["risk_note_count"] == len(assembly_plan["risk_notes"])
+    assert report["blocked_reason_codes"] == ["assembly_generation_not_supported_yet"]
     assert trace["provider_normalized_design_create"]["assembly_plan_created"] is True
+    assert trace["provider_normalized_design_create"]["assembly_plan_quality"]["part_count"] == len(assembly_plan["parts"])
     assert "input_ir" not in trace["provider_normalized_design_create"]["artifacts"]
+    assert "run_ir_pipeline" not in trace["provider_normalized_design_create"]["stages"]
+    assert "input_ir" not in serialized
     assert "cadquery_code" not in serialized
     assert "python_code" not in serialized
     assert "unsafe_extra" not in serialized
     assert "provider value" not in serialized
+
+
+def test_assembly_plan_normalization_is_stable_sanitized_and_non_executable():
+    raw_parts = [
+        {"part_id": "Base Plate!", "role": "main base\nwith extra detail", "generation_strategy": "provider_code"},
+        {"part_id": "Base Plate!", "role": "duplicate base"},
+        {"part_id": "Pin #1", "role": "hinge pin"},
+    ]
+    raw_interfaces = [
+        {"from": "Base Plate!", "to": "Pin #1", "kind": "pin_joint", "notes": "rotates\nwithout solving motion"},
+        {"from": "external part", "to": "Base Plate!", "kind": "provider_custom_kind", "notes": "unsafe <script> note"},
+    ]
+
+    first_parts = pipeline_runner._normalize_assembly_plan_parts(raw_parts)
+    second_parts = pipeline_runner._normalize_assembly_plan_parts(raw_parts)
+    interfaces = pipeline_runner._normalize_assembly_plan_interfaces(raw_interfaces, first_parts)
+
+    assert first_parts == second_parts
+    assert [part["part_id"] for part in first_parts] == ["base_plate", "base_plate_2", "pin_1"]
+    assert all(part["generation_strategy"] == "future_part_pipeline" for part in first_parts)
+    assert interfaces[0]["kind"] == "pinned_joint"
+    assert interfaces[1]["kind"] == "unknown"
+    assert all("\n" not in interface["notes"] for interface in interfaces)
+    serialized = json.dumps({"parts": first_parts, "interfaces": interfaces}, sort_keys=True)
+    assert "provider_code" not in serialized
+    assert "provider_custom_kind" not in serialized
+    assert "<script>" not in serialized
 
 
 @pytest.mark.parametrize(

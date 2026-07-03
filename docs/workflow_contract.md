@@ -133,6 +133,13 @@ generate multi-part CAD, solve assembly constraints, or export a STEP assembly.
 Those capabilities remain future work, and the workflow must not fabricate
 `input_ir.json` for an unsupported assembly request.
 
+Assembly plans use a deliberately small, non-executable surface. Parts expose
+only `part_id`, `role`, and `generation_strategy`. Interfaces expose only
+`from`, `to`, `kind`, and `notes`, with `kind` constrained to known advisory
+labels such as `screw_fastened`, `pinned_joint`, `sliding_fit`, `snap_fit`,
+`stacked`, or `unknown`. Reports include sanitized quality counts for assembly
+plans, parts, interfaces, fasteners, risk notes, and blocked reason codes.
+
 ### Text Pipeline Fallback
 
 `examples/prompt_pipeline/` is a debug and exploration path from natural

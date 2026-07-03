@@ -155,6 +155,17 @@ def summarize_eval_cases(cases: list[dict[str, Any]], *, provider: str, model: s
         "model": model or None,
         "workflow": "provider_normalized_design_create",
         "case_count": len(cases),
+        "assembly_plan_count": sum(int(case.get("assembly_plan_count") or 0) for case in cases),
+        "part_count": sum(int(case.get("part_count") or 0) for case in cases),
+        "interface_count": sum(int(case.get("interface_count") or 0) for case in cases),
+        "fastener_count": sum(int(case.get("fastener_count") or 0) for case in cases),
+        "risk_note_count": sum(int(case.get("risk_note_count") or 0) for case in cases),
+        "blocked_reason_codes": sorted({
+            str(code)
+            for case in cases
+            for code in case.get("blocked_reason_codes", [])
+            if isinstance(code, str)
+        }),
         "requirement_valid_count": sum(1 for case in cases if case.get("requirement_valid") is True),
         "requirement_blocked_count": sum(1 for case in cases if case.get("requirement_blocked") is True),
         "pipeline_success_count": sum(1 for case in cases if case.get("pipeline_success") is True),
@@ -209,6 +220,12 @@ def print_compact_summary(summary: dict[str, Any]) -> None:
         "unexpected_blocked_count": summary.get("unexpected_blocked_count"),
         "failed_count": summary.get("failed_count"),
         "blocked_count": summary.get("blocked_count"),
+        "assembly_plan_count": summary.get("assembly_plan_count"),
+        "part_count": summary.get("part_count"),
+        "interface_count": summary.get("interface_count"),
+        "fastener_count": summary.get("fastener_count"),
+        "risk_note_count": summary.get("risk_note_count"),
+        "blocked_reason_codes": summary.get("blocked_reason_codes"),
         "scope_counts": summary.get("scope_counts"),
         "top_diagnostic_codes": summary.get("top_diagnostic_codes"),
     }
@@ -264,6 +281,7 @@ def _case_record_from_pipeline_result(
     if not isinstance(candidates, list):
         candidates = []
     selected_plan = artifacts.get("selected_plan") if isinstance(artifacts.get("selected_plan"), dict) else {}
+    assembly_quality = _assembly_quality_counts(artifacts.get("assembly_plan"))
     return {
         "case_id": case_id,
         "category": category,
@@ -274,7 +292,13 @@ def _case_record_from_pipeline_result(
         "detected_scope": detected_scope,
         "requirement_valid": isinstance(artifacts.get("requirement"), dict),
         "requirement_blocked": _requirement_blocked(artifacts.get("requirement")),
-        "part_count_estimate": _part_count_estimate(prompt, artifacts),
+        "assembly_plan_count": assembly_quality["assembly_plan_count"],
+        "part_count": assembly_quality["part_count"],
+        "interface_count": assembly_quality["interface_count"],
+        "fastener_count": assembly_quality["fastener_count"],
+        "risk_note_count": assembly_quality["risk_note_count"],
+        "blocked_reason_codes": assembly_quality["blocked_reason_codes"],
+        "part_count_estimate": assembly_quality["part_count"] or _part_count_estimate(prompt, artifacts),
         "part_list_present": _artifact_key_present(artifacts, {"parts", "part_list", "components", "selected_parts"}),
         "interfaces_present": _artifact_key_present(artifacts, {"interfaces", "connections", "joints", "mates", "fit_interfaces"}),
         "fasteners_present": _contains_terms(artifacts, {"fastener", "fasteners", "screw", "screws", "bolt", "bolts"}),
@@ -298,6 +322,12 @@ def _failed_case_record(*, case_id: str, category: str, prompt: str) -> dict[str
         "detected_scope": _detected_scope(prompt, {}),
         "requirement_valid": False,
         "requirement_blocked": False,
+        "assembly_plan_count": 0,
+        "part_count": 0,
+        "interface_count": 0,
+        "fastener_count": 0,
+        "risk_note_count": 0,
+        "blocked_reason_codes": [],
         "part_count_estimate": _part_count_estimate(prompt, {}),
         "part_list_present": False,
         "interfaces_present": False,
@@ -321,6 +351,7 @@ def _official_artifacts(result: dict[str, Any]) -> dict[str, Any]:
         "requirement",
         "planning_artifact",
         "input_ir",
+        "assembly_plan",
         "report",
     ):
         value = result.get(key)
@@ -475,7 +506,7 @@ def _artifact_diagnostic_codes(value: Any) -> list[str]:
 
 
 def _part_count_estimate(prompt: str, artifacts: dict[str, Any]) -> int:
-    for key in ("planning_artifact", "design_brief", "selected_plan", "requirement"):
+    for key in ("assembly_plan", "planning_artifact", "design_brief", "selected_plan", "requirement"):
         count = _count_parts_in_artifact(artifacts.get(key))
         if count:
             return count
@@ -506,6 +537,46 @@ def _count_parts_in_artifact(value: Any) -> int:
             count = _count_parts_in_artifact(item)
             if count:
                 return count
+    return 0
+
+
+def _assembly_quality_counts(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {
+            "assembly_plan_count": 0,
+            "part_count": 0,
+            "interface_count": 0,
+            "fastener_count": 0,
+            "risk_note_count": 0,
+            "blocked_reason_codes": [],
+        }
+    quality = value.get("quality") if isinstance(value.get("quality"), dict) else {}
+    blocked_reason_codes = quality.get("blocked_reason_codes")
+    if not isinstance(blocked_reason_codes, list):
+        blocked_reason_codes = [
+            reason.get("code")
+            for reason in value.get("blocked_reasons", [])
+            if isinstance(reason, dict) and isinstance(reason.get("code"), str)
+        ]
+    return {
+        "assembly_plan_count": 1,
+        "part_count": _safe_count(quality.get("part_count"), value.get("parts")),
+        "interface_count": _safe_count(quality.get("interface_count"), value.get("interfaces")),
+        "fastener_count": _safe_count(quality.get("fastener_count"), value.get("fasteners")),
+        "risk_note_count": _safe_count(quality.get("risk_note_count"), value.get("risk_notes")),
+        "blocked_reason_codes": sorted({
+            _safe_code_token(str(code))
+            for code in blocked_reason_codes
+            if isinstance(code, str) and not _looks_sensitive(code)
+        }),
+    }
+
+
+def _safe_count(value: Any, fallback_collection: Any) -> int:
+    if isinstance(value, int) and value >= 0:
+        return value
+    if isinstance(fallback_collection, list):
+        return len(fallback_collection)
     return 0
 
 
@@ -651,6 +722,11 @@ def _render_eval_report(summary: dict[str, Any], cases: list[dict[str, Any]]) ->
         f"- Requirement valid: {summary.get('requirement_valid_count')}",
         f"- Requirement blocked: {summary.get('requirement_blocked_count')}",
         f"- Pipeline success: {summary.get('pipeline_success_count')}",
+        f"- Assembly plans: {summary.get('assembly_plan_count')}",
+        f"- Assembly parts: {summary.get('part_count')}",
+        f"- Assembly interfaces: {summary.get('interface_count')}",
+        f"- Assembly fasteners: {summary.get('fastener_count')}",
+        f"- Assembly risk notes: {summary.get('risk_note_count')}",
         f"- Success: {summary.get('success_count')}",
         f"- Expected blocked: {summary.get('expected_blocked_count')}",
         f"- Unexpected blocked: {summary.get('unexpected_blocked_count')}",
@@ -661,12 +737,12 @@ def _render_eval_report(summary: dict[str, Any], cases: list[dict[str, Any]]) ->
         "",
         "## Cases",
         "",
-        "| Case | Category | Classification | Status | Blocked stage | Scope | Requirement | Req blocked | Parts | Part list | Interfaces | Fasteners | Fit notes | Risks | Candidates | Selected | Pipeline | Diagnostic codes |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- | --- | --- | --- | ---: | --- | --- | --- |",
+        "| Case | Category | Classification | Status | Blocked stage | Scope | Requirement | Req blocked | Assembly plans | Parts | Interfaces | Fasteners | Risk notes | Part list | Fit notes | Candidates | Selected | Pipeline | Diagnostic codes |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | --- | --- | --- |",
     ]
     for case in cases:
         lines.append(
-            "| {case_id} | {category} | {classification} | {status} | {blocked_stage} | {scope} | {requirement} | {requirement_blocked} | {parts} | {part_list} | {interfaces} | {fasteners} | {fit} | {risks} | {candidates} | {selected} | {pipeline} | {codes} |".format(
+            "| {case_id} | {category} | {classification} | {status} | {blocked_stage} | {scope} | {requirement} | {requirement_blocked} | {assembly_plans} | {parts} | {interfaces} | {fasteners} | {risks} | {part_list} | {fit} | {candidates} | {selected} | {pipeline} | {codes} |".format(
                 case_id=case.get("case_id"),
                 category=case.get("category"),
                 classification=case.get("classification"),
@@ -675,12 +751,13 @@ def _render_eval_report(summary: dict[str, Any], cases: list[dict[str, Any]]) ->
                 scope=case.get("detected_scope"),
                 requirement=_yes_no(case.get("requirement_valid")),
                 requirement_blocked=_yes_no(case.get("requirement_blocked")),
-                parts=case.get("part_count_estimate"),
+                assembly_plans=case.get("assembly_plan_count"),
+                parts=case.get("part_count") or case.get("part_count_estimate"),
                 part_list=_yes_no(case.get("part_list_present")),
-                interfaces=_yes_no(case.get("interfaces_present")),
-                fasteners=_yes_no(case.get("fasteners_present")),
+                interfaces=case.get("interface_count") or 0,
+                fasteners=case.get("fastener_count") or 0,
                 fit=_yes_no(case.get("clearance_or_fit_notes_present")),
-                risks=_yes_no(case.get("risk_notes_present")),
+                risks=case.get("risk_note_count") or 0,
                 candidates=case.get("candidate_plan_count"),
                 selected=case.get("selected_candidate"),
                 pipeline=_yes_no(case.get("pipeline_success")),

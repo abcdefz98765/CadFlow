@@ -99,5 +99,5 @@ provider-generated code.
 
 For normalized design create runs, multi-part or assembly prompts may now write
 `assembly_plan.json`. That file is a sanitized planning artifact only; it
-records the assembly boundary and blocked reasons, then stops before CAD IR,
-multi-part CAD, constraints, or STEP assembly generation.
+records normalized parts, interfaces, quality counts, and blocked reasons, then
+stops before CAD IR, multi-part CAD, constraints, or STEP assembly generation.

@@ -1363,15 +1363,31 @@ def _compile_assembly_plan(
     scope = requirement.get("intent", {}).get("scope")
     if scope not in {"multi_part", "assembly"}:
         scope = "multi_part"
-    parts = _assembly_plan_parts(prompt, requirement)
-    interfaces = _assembly_plan_interfaces(prompt, scope)
-    fasteners = _assembly_plan_fasteners(prompt)
+    parts = _normalize_assembly_plan_parts(_assembly_plan_parts(prompt, requirement))
+    interfaces = _normalize_assembly_plan_interfaces(_assembly_plan_interfaces(prompt, scope), parts)
+    fasteners = _normalize_assembly_plan_fasteners(_assembly_plan_fasteners(prompt))
+    blocked_reasons = [
+        {
+            "code": "assembly_generation_not_supported_yet",
+            "message": "CadFlow can plan this assembly but cannot generate multi-part CAD yet.",
+        }
+    ]
     diagnostic_codes = _safe_diagnostic_codes(
         _requirement_diagnostic_codes(requirement)
         + [
+            "assembly.plan_created",
             "assembly.generation_not_supported_yet",
             "scope.assembly_intent" if scope == "assembly" else "scope.multi_part_intent",
         ]
+        + (["assembly.parts_detected"] if parts else [])
+        + (["assembly.interfaces_detected"] if interfaces else [])
+    )
+    quality = _assembly_plan_quality(
+        parts=parts,
+        interfaces=interfaces,
+        fasteners=fasteners,
+        risk_notes=_assembly_plan_risk_notes(design_brief),
+        blocked_reasons=blocked_reasons,
     )
     return {
         "artifact_type": "assembly_plan",
@@ -1382,14 +1398,10 @@ def _compile_assembly_plan(
         "interfaces": interfaces,
         "fasteners": fasteners,
         "clearance_notes": _assembly_plan_clearance_notes(prompt, interfaces),
-        "risk_notes": _assembly_plan_risk_notes(design_brief),
-        "blocked_reasons": [
-            {
-                "code": "assembly_generation_not_supported_yet",
-                "message": "CadFlow can plan this assembly but cannot generate multi-part CAD yet.",
-            }
-        ],
+        "risk_notes": quality["risk_notes"],
+        "blocked_reasons": blocked_reasons,
         "diagnostic_codes": diagnostic_codes,
+        "quality": {key: value for key, value in quality.items() if key != "risk_notes"},
         "source": {
             "compiler": "cadflow_assembly_plan_v0.1",
             "provider_role": "extraction_only",
@@ -1414,7 +1426,7 @@ def _assembly_plan_parts(prompt: str, requirement: dict[str, Any]) -> list[dict[
         names = [(part_type, "assembly component")]
     return [
         {
-            "part_id": _safe_artifact_id(part_id),
+            "part_id": part_id,
             "role": role,
             "generation_strategy": "future_part_pipeline",
         }
@@ -1428,15 +1440,15 @@ def _assembly_plan_interfaces(prompt: str, scope: str) -> list[dict[str, Any]]:
         return [{"from": "lid", "to": "base", "kind": "screw_fastened", "notes": "four corner screws"}]
     if "hinge" in lowered or "two leaves" in lowered:
         return [
-            {"from": "leaf_a", "to": "pin", "kind": "pin_joint", "notes": "rotating hinge interface"},
-            {"from": "leaf_b", "to": "pin", "kind": "pin_joint", "notes": "rotating hinge interface"},
+            {"from": "leaf_a", "to": "pin", "kind": "pinned_joint", "notes": "rotating hinge interface"},
+            {"from": "leaf_b", "to": "pin", "kind": "pinned_joint", "notes": "rotating hinge interface"},
         ]
     if "vertical support" in lowered and "clamp" in lowered:
         return [
-            {"from": "vertical_support", "to": "base", "kind": "fixed_support", "notes": "upright attaches to base"},
-            {"from": "clamp", "to": "vertical_support", "kind": "adjustable_contact", "notes": "clamp position is not solved"},
+            {"from": "vertical_support", "to": "base", "kind": "stacked", "notes": "upright attaches to base"},
+            {"from": "clamp", "to": "vertical_support", "kind": "sliding_fit", "notes": "clamp position is not solved"},
         ]
-    return [{"from": "component_a", "to": "component_b", "kind": scope, "notes": "relationship requires future assembly planning"}]
+    return [{"from": "component_a", "to": "component_b", "kind": "unknown", "notes": "relationship requires future assembly planning"}]
 
 
 def _assembly_plan_fasteners(prompt: str) -> list[dict[str, Any]]:
@@ -1454,9 +1466,9 @@ def _assembly_plan_clearance_notes(prompt: str, interfaces: list[dict[str, Any]]
     notes: list[str] = []
     if "clearance" in lowered or "fit" in lowered:
         notes.append("Clearance or fit requirements must be resolved before assembly CAD generation.")
-    if any(interface.get("kind") == "pin_joint" for interface in interfaces):
+    if any(interface.get("kind") == "pinned_joint" for interface in interfaces):
         notes.append("Pin joint clearance is recorded but not solved in this MVP.")
-    if any(interface.get("kind") == "adjustable_contact" for interface in interfaces):
+    if any(interface.get("kind") == "sliding_fit" for interface in interfaces):
         notes.append("Adjustable clamp range is recorded but not solved in this MVP.")
     return notes
 
@@ -1480,6 +1492,151 @@ def _assembly_plan_risk_notes(design_brief: dict[str, Any]) -> list[dict[str, An
             if safe_item:
                 notes.append(safe_item)
     return notes
+
+
+_ASSEMBLY_GENERATION_STRATEGIES = {"future_part_pipeline", "reference_only", "blocked"}
+_ASSEMBLY_INTERFACE_KINDS = {"screw_fastened", "pinned_joint", "sliding_fit", "snap_fit", "stacked", "unknown"}
+_ASSEMBLY_INTERFACE_KIND_ALIASES = {
+    "pin_joint": "pinned_joint",
+    "fixed_support": "stacked",
+    "adjustable_contact": "sliding_fit",
+    "assembly": "unknown",
+    "multi_part": "unknown",
+}
+
+
+def _normalize_assembly_plan_parts(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    used_ids: set[str] = set()
+    for index, part in enumerate(parts, start=1):
+        if not isinstance(part, dict):
+            continue
+        part_id = _stable_unique_artifact_id(part.get("part_id") or part.get("name") or f"component_{index}", used_ids)
+        strategy = part.get("generation_strategy")
+        if strategy not in _ASSEMBLY_GENERATION_STRATEGIES:
+            strategy = "future_part_pipeline"
+        normalized.append({
+            "part_id": part_id,
+            "role": _safe_short_text(part.get("role") or "assembly component", fallback="assembly component"),
+            "generation_strategy": strategy,
+        })
+    if normalized:
+        return normalized
+    return [{"part_id": "component", "role": "assembly component", "generation_strategy": "future_part_pipeline"}]
+
+
+def _normalize_assembly_plan_interfaces(
+    interfaces: list[dict[str, Any]],
+    parts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    part_ids = {part["part_id"] for part in parts if isinstance(part, dict) and isinstance(part.get("part_id"), str)}
+    normalized: list[dict[str, Any]] = []
+    for interface in interfaces:
+        if not isinstance(interface, dict):
+            continue
+        from_id = _safe_artifact_id(interface.get("from"))
+        to_id = _safe_artifact_id(interface.get("to"))
+        if from_id not in part_ids and part_ids:
+            from_id = sorted(part_ids)[0]
+        if to_id not in part_ids and part_ids:
+            candidates = [part_id for part_id in sorted(part_ids) if part_id != from_id]
+            to_id = candidates[0] if candidates else from_id
+        kind = _normalized_assembly_interface_kind(interface.get("kind"))
+        normalized.append({
+            "from": from_id,
+            "to": to_id,
+            "kind": kind,
+            "notes": _safe_short_text(interface.get("notes"), fallback="interface requires future assembly planning"),
+        })
+    return normalized
+
+
+def _normalize_assembly_plan_fasteners(fasteners: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for fastener in fasteners:
+        if not isinstance(fastener, dict):
+            continue
+        quantity = fastener.get("quantity")
+        if not isinstance(quantity, int) or quantity < 1:
+            quantity = None
+        normalized.append({
+            "kind": _safe_artifact_id(fastener.get("kind") or "fastener"),
+            "quantity": quantity,
+        })
+    return normalized
+
+
+def _normalized_assembly_interface_kind(value: Any) -> str:
+    kind = _safe_artifact_id(value or "unknown")
+    kind = _ASSEMBLY_INTERFACE_KIND_ALIASES.get(kind, kind)
+    return kind if kind in _ASSEMBLY_INTERFACE_KINDS else "unknown"
+
+
+def _assembly_plan_quality(
+    *,
+    parts: list[dict[str, Any]],
+    interfaces: list[dict[str, Any]],
+    fasteners: list[dict[str, Any]],
+    risk_notes: list[dict[str, Any]],
+    blocked_reasons: list[dict[str, Any]],
+) -> dict[str, Any]:
+    blocked_reason_codes = _safe_diagnostic_codes([
+        str(reason.get("code"))
+        for reason in blocked_reasons
+        if isinstance(reason, dict) and isinstance(reason.get("code"), str)
+    ])
+    return {
+        "assembly_plan_count": 1,
+        "part_count": len(parts),
+        "interface_count": len(interfaces),
+        "fastener_count": len(fasteners),
+        "risk_note_count": len(risk_notes),
+        "blocked_reason_codes": blocked_reason_codes,
+        "risk_notes": risk_notes,
+    }
+
+
+def _assembly_plan_quality_metadata(assembly_plan: dict[str, Any]) -> dict[str, Any]:
+    quality = assembly_plan.get("quality") if isinstance(assembly_plan.get("quality"), dict) else {}
+    return {
+        "assembly_plan_count": _safe_nonnegative_int(quality.get("assembly_plan_count"), fallback=1),
+        "part_count": _safe_nonnegative_int(quality.get("part_count"), fallback=len(assembly_plan.get("parts", []))),
+        "interface_count": _safe_nonnegative_int(quality.get("interface_count"), fallback=len(assembly_plan.get("interfaces", []))),
+        "fastener_count": _safe_nonnegative_int(quality.get("fastener_count"), fallback=len(assembly_plan.get("fasteners", []))),
+        "risk_note_count": _safe_nonnegative_int(quality.get("risk_note_count"), fallback=len(assembly_plan.get("risk_notes", []))),
+        "blocked_reason_codes": _safe_diagnostic_codes(
+            list(quality.get("blocked_reason_codes", []))
+            if isinstance(quality.get("blocked_reason_codes"), list)
+            else []
+        ),
+    }
+
+
+def _safe_nonnegative_int(value: Any, *, fallback: int) -> int:
+    if isinstance(value, int) and value >= 0:
+        return value
+    return fallback if fallback >= 0 else 0
+
+
+def _stable_unique_artifact_id(value: Any, used_ids: set[str]) -> str:
+    base = _safe_artifact_id(value)
+    candidate = base
+    suffix = 2
+    while candidate in used_ids:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    used_ids.add(candidate)
+    return candidate
+
+
+def _safe_short_text(value: Any, *, fallback: str, max_length: int = 96) -> str:
+    text = str(value or fallback).strip()
+    text = re.sub(r"[\r\n\t]+", " ", text)
+    text = re.sub(r"[^a-zA-Z0-9 .,;:_/()#-]+", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        text = fallback
+    return text[:max_length].rstrip()
 
 
 def _safe_artifact_id(value: Any) -> str:
@@ -1997,6 +2154,7 @@ def _provider_normalized_design_create_metadata(
     selected_candidate: str | None,
     candidate_count: int,
     assembly_plan_created: bool = False,
+    assembly_plan_quality: dict[str, Any] | None = None,
     blocked_stage: str | None = None,
     diagnostic_codes: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -2048,6 +2206,8 @@ def _provider_normalized_design_create_metadata(
         "assembly_plan_created": assembly_plan_created,
         "provider_request_traces": provider_traces,
     }
+    if assembly_plan_quality:
+        metadata["assembly_plan_quality"] = assembly_plan_quality
     if blocked_stage:
         metadata["blocked_stage"] = blocked_stage
     if diagnostic_codes:
@@ -2076,6 +2236,7 @@ def _write_blocked_normalized_design_assembly_result(
     diagnostic_codes = _safe_diagnostic_codes(
         list(assembly_plan.get("diagnostic_codes", [])) + ["assembly.generation_not_supported_yet"]
     )
+    assembly_plan_quality = _assembly_plan_quality_metadata(assembly_plan)
     metadata = _provider_normalized_design_create_metadata(
         adapter=adapter,
         provider_traces=provider_traces,
@@ -2083,6 +2244,7 @@ def _write_blocked_normalized_design_assembly_result(
         selected_candidate=selected_plan.get("candidate_id") or selected_plan.get("label"),
         candidate_count=len(candidate_plans),
         assembly_plan_created=True,
+        assembly_plan_quality=assembly_plan_quality,
         blocked_stage="assembly_planning",
         diagnostic_codes=diagnostic_codes,
     )
@@ -2111,6 +2273,13 @@ def _write_blocked_normalized_design_assembly_result(
         "scope": scope,
         "requirement_status": requirement.get("requirement_status", {}),
         "assembly_plan_status": assembly_plan.get("status"),
+        "assembly_plan_quality": assembly_plan_quality,
+        "assembly_plan_count": assembly_plan_quality["assembly_plan_count"],
+        "part_count": assembly_plan_quality["part_count"],
+        "interface_count": assembly_plan_quality["interface_count"],
+        "fastener_count": assembly_plan_quality["fastener_count"],
+        "risk_note_count": assembly_plan_quality["risk_note_count"],
+        "blocked_reason_codes": assembly_plan_quality["blocked_reason_codes"],
         "cad_ir_created": False,
         "part_modeling_started": False,
         "provider_normalized_design_create": metadata,
@@ -2168,6 +2337,7 @@ def _write_blocked_normalized_design_assembly_report_md(
         f"- Parts: {len(assembly_plan.get('parts', []))}",
         f"- Interfaces: {len(assembly_plan.get('interfaces', []))}",
         f"- Fasteners: {len(assembly_plan.get('fasteners', []))}",
+        f"- Risk notes: {len(assembly_plan.get('risk_notes', []))}",
         "",
         "## Blocked Reasons",
         "",
