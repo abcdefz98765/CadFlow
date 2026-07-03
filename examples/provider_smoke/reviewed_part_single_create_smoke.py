@@ -22,6 +22,7 @@ from ai_native_cad.agents import JsonContractProviderError, make_json_contract_a
 from ai_native_cad.pipeline import (
     run_assembly_part_request_pipeline,
     run_part_request_review_pipeline,
+    run_part_result_review_pipeline,
     run_provider_normalized_design_create_pipeline,
     run_reviewed_part_handoff_pipeline,
     run_reviewed_part_single_create_pipeline,
@@ -74,6 +75,7 @@ def run_reviewed_part_single_create_smoke(adapter: Any, provider: str, output_ro
     review_dir = output_root / "03_review"
     handoff_dir = output_root / "04_handoff"
     bridge_dir = output_root / "05_single_create"
+    part_result_review_dir = output_root / "06_part_result_review"
 
     design_result = run_provider_normalized_design_create_pipeline(SMOKE_PROMPT, adapter, output_dir=design_dir)
     assembly_plan_path = design_dir / "assembly_plan.json"
@@ -104,6 +106,15 @@ def run_reviewed_part_single_create_smoke(adapter: Any, provider: str, output_ro
         adapter,
         output_dir=bridge_dir,
     )
+    part_result_review_result = None
+    child_run_name = _safe_child_run_name(bridge_result)
+    child_dir = bridge_dir / child_run_name if child_run_name else None
+    if child_dir is not None and child_dir.exists():
+        part_result_review_result = run_part_result_review_pipeline(
+            handoff_dir / "reviewed_part_handoff.json",
+            child_dir,
+            output_dir=part_result_review_dir,
+        )
     return _summary_from_results(
         identity,
         design_result=design_result,
@@ -114,6 +125,7 @@ def run_reviewed_part_single_create_smoke(adapter: Any, provider: str, output_ro
         handoff_result=handoff_result,
         bridge_result=bridge_result,
         bridge_dir=bridge_dir,
+        part_result_review_result=part_result_review_result,
     )
 
 
@@ -189,6 +201,7 @@ def _summary_from_results(
     handoff_result: dict[str, Any] | None = None,
     bridge_result: dict[str, Any] | None = None,
     bridge_dir: Path | None = None,
+    part_result_review_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     summary = _base_summary(identity)
     assembly_plan_created = isinstance(assembly_plan, dict)
@@ -204,6 +217,17 @@ def _summary_from_results(
         "child_run_created": bool(child_dir and child_dir.exists()),
         "child_run_name": child_run_name,
         "child_diagnostic_codes": _collect_child_diagnostic_codes(bridge_result, child_dir),
+        "part_result_review_created": isinstance((part_result_review_result or {}).get("part_result_review"), dict),
+        "part_result_review_status": _safe_status((part_result_review_result or {}).get("status")),
+        "part_result_diagnostic_codes": _safe_part_result_diagnostic_codes(part_result_review_result),
+        "part_result_step_check": _safe_part_result_check(part_result_review_result, "step_created"),
+        "part_result_stl_check": _safe_part_result_check(part_result_review_result, "stl_created"),
+        "part_result_single_part_scope_check": _safe_part_result_scope_check(part_result_review_result),
+        "part_result_lineage_check": _safe_part_result_check(part_result_review_result, "lineage_preserved"),
+        "part_result_interface_metadata_check": _safe_part_result_check(
+            part_result_review_result,
+            "interface_constraints_preserved_in_metadata",
+        ),
         "step_created": bool(child_dir and (child_dir / "model.step").exists()),
         "stl_created": bool(child_dir and (child_dir / "model.stl").exists()),
         "no_batch_generation": _count_child_run_dirs(bridge_dir) <= 1,
@@ -216,6 +240,7 @@ def _summary_from_results(
             handoff_result,
             bridge_result,
             {"diagnostic_codes": _collect_child_diagnostic_codes(bridge_result, child_dir)},
+            {"diagnostic_codes": _safe_part_result_diagnostic_codes(part_result_review_result)},
         ),
     })
     if isinstance(assembly_plan, dict) and selected_part_id is None:
@@ -242,6 +267,14 @@ def _base_summary(identity: dict[str, Any], *, error_category: str | None = None
         "child_run_created": False,
         "child_run_name": None,
         "child_diagnostic_codes": [],
+        "part_result_review_created": False,
+        "part_result_review_status": None,
+        "part_result_diagnostic_codes": [],
+        "part_result_step_check": None,
+        "part_result_stl_check": None,
+        "part_result_single_part_scope_check": None,
+        "part_result_lineage_check": None,
+        "part_result_interface_metadata_check": None,
         "step_created": False,
         "stl_created": False,
         "no_batch_generation": True,
@@ -321,6 +354,36 @@ def _collect_diagnostic_codes(*results: dict[str, Any] | None) -> list[str]:
             if safe:
                 codes.add(safe)
     return sorted(codes)
+
+
+def _safe_part_result_review(result: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    review = result.get("part_result_review")
+    return review if isinstance(review, dict) else {}
+
+
+def _safe_part_result_diagnostic_codes(result: dict[str, Any] | None) -> list[str]:
+    review = _safe_part_result_review(result)
+    return _collect_diagnostic_codes(review)
+
+
+def _safe_part_result_check(result: dict[str, Any] | None, key: str) -> bool | None:
+    review = _safe_part_result_review(result)
+    checks = review.get("checks") if isinstance(review.get("checks"), dict) else {}
+    value = checks.get(key)
+    return value if isinstance(value, bool) else None
+
+
+def _safe_part_result_scope_check(result: dict[str, Any] | None) -> bool | None:
+    values = [
+        _safe_part_result_check(result, "single_part_only"),
+        _safe_part_result_check(result, "no_batch_generation"),
+        _safe_part_result_check(result, "no_assembly_generation"),
+    ]
+    if any(value is None for value in values):
+        return None
+    return all(values)
 
 
 def _collect_child_diagnostic_codes(bridge_result: dict[str, Any] | None, child_dir: Path | None) -> list[str]:

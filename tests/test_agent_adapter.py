@@ -1120,12 +1120,43 @@ def test_reviewed_part_single_create_smoke_runs_one_sanitized_fake_flow(tmp_path
             "diagnostic_codes": ["reviewed_part_single_create.started"],
         }
 
+    def fake_part_result_review(reviewed_part_handoff, child_run, output_dir=None, **kwargs):
+        assert Path(child_run).name == "single_part_base"
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        review = {
+            "artifact_type": "part_result_review",
+            "schema_version": "0.1",
+            "source_handoff": "reviewed_part_handoff.json",
+            "child_run": "single_part_base",
+            "part_id": "base",
+            "status": "accepted_for_preview",
+            "checks": {
+                "step_created": True,
+                "stl_created": True,
+                "single_part_only": True,
+                "no_batch_generation": True,
+                "no_assembly_generation": True,
+                "lineage_preserved": True,
+                "interface_constraints_preserved_in_metadata": True,
+            },
+            "diagnostic_codes": [
+                "part_result.review_created",
+                "part_result.step_created",
+                "part_result.single_part_scope_preserved",
+            ],
+            "revision_notes": [],
+        }
+        (output_path / "part_result_review.json").write_text(json.dumps(review), encoding="utf-8")
+        return {"status": "accepted_for_preview", "part_result_review": review}
+
     monkeypatch.setattr(smoke, "make_json_contract_adapter_from_env", fake_make_adapter)
     monkeypatch.setattr(smoke, "run_provider_normalized_design_create_pipeline", fake_design)
     monkeypatch.setattr(smoke, "run_assembly_part_request_pipeline", fake_part_request)
     monkeypatch.setattr(smoke, "run_part_request_review_pipeline", fake_review)
     monkeypatch.setattr(smoke, "run_reviewed_part_handoff_pipeline", fake_handoff)
     monkeypatch.setattr(smoke, "run_reviewed_part_single_create_pipeline", fake_bridge)
+    monkeypatch.setattr(smoke, "run_part_result_review_pipeline", fake_part_result_review)
 
     exit_code = smoke.main([
         "--provider",
@@ -1151,6 +1182,18 @@ def test_reviewed_part_single_create_smoke_runs_one_sanitized_fake_flow(tmp_path
     assert status["child_run_created"] is True
     assert status["child_run_name"] == "single_part_base"
     assert status["child_diagnostic_codes"] == []
+    assert status["part_result_review_created"] is True
+    assert status["part_result_review_status"] == "accepted_for_preview"
+    assert status["part_result_diagnostic_codes"] == [
+        "part_result.review_created",
+        "part_result.single_part_scope_preserved",
+        "part_result.step_created",
+    ]
+    assert status["part_result_step_check"] is True
+    assert status["part_result_stl_check"] is True
+    assert status["part_result_single_part_scope_check"] is True
+    assert status["part_result_lineage_check"] is True
+    assert status["part_result_interface_metadata_check"] is True
     assert status["step_created"] is True
     assert status["stl_created"] is True
     assert status["no_batch_generation"] is True
@@ -1163,6 +1206,7 @@ def test_reviewed_part_single_create_smoke_runs_one_sanitized_fake_flow(tmp_path
     assert "messages" not in output
     assert "raw_response" not in output
     assert "transcript" not in output
+    assert "part_result_review.json" not in output
 
 
 def test_reviewed_part_single_create_smoke_surfaces_blocked_child_diagnostics(tmp_path, monkeypatch):
@@ -1235,11 +1279,40 @@ def test_reviewed_part_single_create_smoke_surfaces_blocked_child_diagnostics(tm
             },
         }
 
+    def fake_part_result_review(reviewed_part_handoff, child_run, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        review = {
+            "artifact_type": "part_result_review",
+            "schema_version": "0.1",
+            "source_handoff": "reviewed_part_handoff.json",
+            "child_run": "single_part_base",
+            "part_id": "base",
+            "status": "blocked_missing_step",
+            "checks": {
+                "step_created": False,
+                "stl_created": False,
+                "single_part_only": True,
+                "no_batch_generation": True,
+                "no_assembly_generation": True,
+                "lineage_preserved": False,
+                "interface_constraints_preserved_in_metadata": False,
+            },
+            "diagnostic_codes": [
+                "part_result.review_created",
+                "part_result.blocked_missing_step",
+            ],
+            "revision_notes": [{"code": "part_result.blocked_missing_step", "message": "sanitized"}],
+            "raw_response": "do not print",
+        }
+        return {"status": "blocked_missing_step", "part_result_review": review}
+
     monkeypatch.setattr(smoke, "run_provider_normalized_design_create_pipeline", fake_design)
     monkeypatch.setattr(smoke, "run_assembly_part_request_pipeline", fake_part_request)
     monkeypatch.setattr(smoke, "run_part_request_review_pipeline", fake_review)
     monkeypatch.setattr(smoke, "run_reviewed_part_handoff_pipeline", fake_handoff)
     monkeypatch.setattr(smoke, "run_reviewed_part_single_create_pipeline", fake_bridge)
+    monkeypatch.setattr(smoke, "run_part_result_review_pipeline", fake_part_result_review)
 
     summary = smoke.run_reviewed_part_single_create_smoke(
         FakeAdapter(),
@@ -1255,6 +1328,18 @@ def test_reviewed_part_single_create_smoke_surfaces_blocked_child_diagnostics(tm
         "compiler.assembly_requires_assembly_planning",
         "compiler.scope_blocked",
     ]
+    assert summary["part_result_review_created"] is True
+    assert summary["part_result_review_status"] == "blocked_missing_step"
+    assert summary["part_result_diagnostic_codes"] == [
+        "part_result.blocked_missing_step",
+        "part_result.review_created",
+    ]
+    assert summary["part_result_step_check"] is False
+    assert summary["part_result_stl_check"] is False
+    assert summary["part_result_single_part_scope_check"] is True
+    assert summary["part_result_lineage_check"] is False
+    assert summary["part_result_interface_metadata_check"] is False
+    assert summary["part_result_review_status"] != "accepted_for_preview"
     assert "compiler.assembly_requires_assembly_planning" in summary["diagnostic_codes"]
     assert summary["step_created"] is False
     assert summary["stl_created"] is False
@@ -1264,6 +1349,7 @@ def test_reviewed_part_single_create_smoke_surfaces_blocked_child_diagnostics(tm
     assert str(tmp_path) not in serialized
     assert "raw_response" not in serialized
     assert "do not print" not in serialized
+    assert str(tmp_path) not in serialized
 
 
 def test_reviewed_part_single_create_smoke_selects_one_candidate_only():
@@ -1350,6 +1436,7 @@ def test_reviewed_part_single_create_smoke_no_candidate_summary_includes_sanitiz
     monkeypatch.setattr(smoke, "run_part_request_review_pipeline", fail_if_called)
     monkeypatch.setattr(smoke, "run_reviewed_part_handoff_pipeline", fail_if_called)
     monkeypatch.setattr(smoke, "run_reviewed_part_single_create_pipeline", fail_if_called)
+    monkeypatch.setattr(smoke, "run_part_result_review_pipeline", fail_if_called)
 
     summary = smoke.run_reviewed_part_single_create_smoke(
         FakeAdapter(),
