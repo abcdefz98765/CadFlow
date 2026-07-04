@@ -31,6 +31,23 @@ from ai_native_cad.workflow_control import (
 
 DOWNLOADABLE_FILES = ("model.step", "model.stl", "preview.png", "model.py")
 EDITABLE_ARTIFACTS = {"requirement.json", "planning_artifact.json", "input_ir.json"}
+STAGED_READABLE_ARTIFACTS = {
+    "assembly_plan.json": ("01_design/assembly_plan.json",),
+    "part_create_request.json": ("02_part_request/part_create_request.json",),
+    "part_request_review.json": ("03_review/part_request_review.json",),
+    "reviewed_part_handoff.json": ("04_handoff/reviewed_part_handoff.json",),
+    "part_execution_request.json": ("05_single_create/part_execution_request.json",),
+    "lineage.json": ("05_single_create/lineage.json",),
+    "part_result_review.json": ("06_part_result_review/part_result_review.json",),
+}
+STAGED_ARTIFACT_DIRS = {
+    "01_design",
+    "02_part_request",
+    "03_review",
+    "04_handoff",
+    "05_single_create",
+    "06_part_result_review",
+}
 GATE_DECISION_ACTIONS = {
     "approve",
     "reject",
@@ -145,6 +162,8 @@ class WorkflowConsoleBackend:
                 continue
             candidates = [root, *sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: str(path))]
             for child in candidates:
+                if child.name in STAGED_ARTIFACT_DIRS:
+                    continue
                 resolved = child.resolve()
                 if resolved in seen:
                     continue
@@ -488,7 +507,7 @@ class WorkflowConsoleBackend:
         path = self._require_project_path(Path(run_dir))
         artifacts = []
         for name in sorted(READABLE_ARTIFACTS):
-            artifact_path = path / name
+            artifact_path = _first_existing_artifact_path(path, name)
             if artifact_path.exists():
                 artifacts.append(_file_metadata(name, artifact_path))
         return artifacts
@@ -535,7 +554,7 @@ class WorkflowConsoleBackend:
         if artifact not in READABLE_ARTIFACTS:
             raise ValueError(f"artifact is not readable by the workflow console: {artifact}")
         run_path = self._require_project_path(Path(run_dir))
-        artifact_path = self._require_child_path(run_path, artifact)
+        artifact_path = _first_existing_artifact_path(run_path, artifact)
         if not artifact_path.exists():
             raise FileNotFoundError(str(artifact_path))
         text = artifact_path.read_text(encoding="utf-8")
@@ -671,6 +690,17 @@ def _has_workflow_artifact(path: Path) -> bool:
             "06_part_result_review/part_result_review.json",
         )
     )
+
+
+def _first_existing_artifact_path(root: Path, artifact: str) -> Path:
+    direct = root / artifact
+    if direct.exists():
+        return direct
+    for relative in STAGED_READABLE_ARTIFACTS.get(artifact, ()):
+        candidate = root / relative
+        if candidate.exists():
+            return candidate
+    return direct
 
 
 def _read_json_if_present(path: Path) -> dict[str, Any] | None:

@@ -446,12 +446,12 @@ CLI/manual smoke tests.
 Architecture decision for this slice:
 
 ```text
-FastAPI/action backend first.
-NiceGUI optional later.
+Safe action backend remains authoritative.
+NiceGUI is an optional local UI shell.
 ```
 
-The current server remains the stdlib local bridge, but it exposes a
-FastAPI-style read/action shape over the existing safe route contract:
+The stdlib HTML console remains available as the fallback/debug view. It exposes
+a FastAPI-style read/action shape over the existing safe route contract:
 
 ```text
 GET  /api/runs
@@ -464,8 +464,12 @@ POST /api/actions/reviewed-part-create
 POST /api/actions/part-result-review
 ```
 
-NiceGUI is not introduced yet. It may be evaluated later as an internal-tool UI
-shell after the backend APIs and action boundaries are stable.
+An experimental-but-supported NiceGUI console is also available for local use.
+It is paged into Runs, Requirement Review, Assembly Plan, Part Workflow, and
+Artifacts so reviewed-part work is less dense than the single-page HTML console.
+NiceGUI does not bypass `WorkflowConsoleActions`, does not add CAD capability,
+and does not provide batch generation, assembly generation, provider-generated
+CAD/code, or free-form chat.
 
 Run the local console with the stdlib-only bridge:
 
@@ -491,10 +495,29 @@ Then open:
 http://127.0.0.1:8765/workflow-console.html
 ```
 
-The bridge exposes only the existing route contract, the explicit staged action
-API aliases, and whitelisted downloadable files. It does not add FastAPI,
-NiceGUI, a database, login, cloud deployment, LLM API dependencies, API keys, or
-arbitrary shell command endpoints.
+Run the NiceGUI console after installing the optional web extra:
+
+```bash
+pip install -e ".[web]"
+PYTHONPATH=src python -m ai_native_cad.workflow_console.nicegui_app
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\start_nicegui_console.ps1
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8780/
+```
+
+Both local consoles expose only the existing route/action contract and
+whitelisted downloadable files. They do not add FastAPI, a database, login,
+cloud deployment, API keys, arbitrary filesystem browsing, provider raw payloads,
+or arbitrary shell command endpoints.
 
 It is not a browser CAD editor, not a new CAD backend, and not a direct arbitrary code execution surface. Artifacts remain file-based and traceable so CLI, Python API, tests, and the future Web Console all inspect the same run contract.
 

@@ -141,8 +141,8 @@ The current scaffold lives under `src/ai_native_cad/workflow_console/`:
 Current architecture decision:
 
 ```text
-FastAPI/action backend first.
-NiceGUI optional later.
+Safe action backend remains authoritative.
+NiceGUI is an optional local UI shell.
 ```
 
 The backend surface is now FastAPI-shaped, but the server remains the existing
@@ -151,8 +151,8 @@ bound to `127.0.0.1` by default, and routed through safe run ids instead of
 filesystem paths, so a framework migration is deferred until the action
 boundaries are stable. A future FastAPI adapter should wrap the same backend
 methods and action service rather than introduce new CAD behavior. NiceGUI is
-not introduced in this pass; it may be evaluated later as an internal-tool UI
-shell after the backend APIs and staged actions are stable.
+now introduced only as a local UI shell over the same backend facade and
+`WorkflowConsoleActions`; it is not a replacement backend.
 
 `StageRunner` records local stage history in the existing `logs/runtime.json` artifact under `workflow_console.stages`. This keeps stage status file-based without introducing a database or separate state store. `WorkflowConsoleBackend.read_run_metadata(...)` exposes path-free `stage_history`, `gate_history`, and `report_summary` summaries for UI timelines and review panels, while the raw runtime/report/trace artifacts remain readable for audit. Stage history may include sanitized adapter activity such as operation and local/mock provider identity, but not prompts, transcripts, tokens, or provider secrets. The summary also includes compact, path-free requirement and planning metadata from `requirement.json` and `planning_artifact.json`, including assumptions, missing fields, follow-up fields, `requirement_status.flow_decision`, and planning `flow_gate_status`. When revision artifacts are present, the same summary exposes compact revision metadata such as parent/child run ids, lineage relationship, revision index, plan/status, blocked reason, and requested/actual/validation/repair change counts.
 
@@ -205,7 +205,7 @@ keys, no environment values, no provider raw payloads, and no transcripts.
 
 Readable artifacts remain limited to workflow source, handoff, reviewed-part,
 report, trace, and revision records: `prompt.txt`, `revision_prompt.txt`,
-`requirement.json`, `planning_artifact.json`, `input_ir.json`,
+`requirement.json`, `design_brief.json`, `planning_artifact.json`, `input_ir.json`,
 `parent_input_ir.json`, parent snapshots, `assembly_plan.json`,
 `assembly_plan.md`, `part_create_request.json`, `part_request_review.json`,
 `reviewed_part_handoff.json`, `part_execution_request.json`,
@@ -236,11 +236,15 @@ The local backend should expose only workflow operations:
 
 The backend should not change benchmark contracts, add new CAD generator behavior, or make browser state authoritative.
 
-The scaffold now includes a stdlib-only local HTTP bridge and a static frontend. It still does not provide authentication, a database, cloud deployment, NiceGUI, or a framework-backed web app. A FastAPI app can be layered over the Python facade later only if the dependency is intentionally added.
+The scaffold now includes a stdlib-only local HTTP bridge, a static frontend,
+and an optional NiceGUI frontend. It still does not provide authentication, a
+database, cloud deployment, or a framework-backed public web app. A FastAPI app
+can be layered over the Python facade later only if the dependency is
+intentionally added.
 
 ## v0.4a UI Surface
 
-The first frontend now lives in `web-viewer/workflow-console.html` and stays workflow-oriented:
+The first frontend lives in `web-viewer/workflow-console.html` and stays workflow-oriented:
 
 - Stage timeline: Requirement -> Planning -> Part Modeling -> Review -> Outputs.
 - Prompt entry and run controls.
@@ -265,6 +269,35 @@ server entrypoint. It selects `.venv-cadflow` when present, sets
 `PYTHONPATH=src`, prints the local URL, and then runs
 `ai_native_cad.workflow_console.server`. It is a convenience launcher only; it
 does not add provider execution, CAD generation, or new Web actions.
+
+The NiceGUI frontend lives in
+`ai_native_cad.workflow_console.nicegui_app` and is launched separately:
+
+```powershell
+.\scripts\start_nicegui_console.ps1
+```
+
+It binds to `127.0.0.1:8780` by default and uses the optional `web` dependency
+group:
+
+```bash
+pip install -e ".[web]"
+```
+
+The NiceGUI UI is intentionally paged:
+
+- Runs: compact run selection, status, child runs, reviewed-part status, and
+  STEP/STL availability.
+- Requirement Review: read-only original prompt and available negotiation fields
+  such as assumptions, missing information, clarification questions, blocked
+  reason, and diagnostics, plus a local notes textarea that is not wired into the
+  pipeline.
+- Assembly Plan: compact assembly status and a parts table, not full JSON by
+  default.
+- Part Workflow: one-stage reviewed-part action cards gated by upstream
+  artifacts.
+- Artifacts: collapsed/on-demand allowlisted artifacts and model-file
+  availability.
 
 The browser never becomes the source of truth. Create, stage execution, artifact edits, gate decisions, artifact reads, and downloadable discovery all round-trip through the Python backend and existing run artifacts. Editable artifacts remain limited to `requirement.json`, `planning_artifact.json`, and `input_ir.json`; the UI only enables save controls for those files and the backend remains authoritative for validation.
 
@@ -292,10 +325,11 @@ add batch generation, assembly CAD generation, assembly constraint solving, STEP
 assembly export, geometric fit validation, new CAD templates, or automatic
 all-part generation.
 
-The UI now shows a minimal reviewed-part action strip in the existing summary
-panel. Buttons are enabled only when their upstream artifact is present, and
-each button calls exactly one backend action. There is still no frontend
-framework, no NiceGUI shell, no chat UI, and no editable clarification form.
+Both UIs expose reviewed-part actions only when their upstream artifact is
+present, and each button calls exactly one backend action. There is still no
+chat UI, no editable clarification pipeline, no provider calls for free-form
+chat, no automatic all-part generation, no batch generation, and no assembly
+generation.
 
 ## Security Notes
 

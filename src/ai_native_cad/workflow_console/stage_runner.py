@@ -22,6 +22,7 @@ READABLE_ARTIFACTS = {
     "prompt.txt",
     "revision_prompt.txt",
     "requirement.json",
+    "design_brief.json",
     "planning_artifact.json",
     "input_ir.json",
     "parent_input_ir.json",
