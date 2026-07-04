@@ -124,7 +124,9 @@ This checkpoint supports planning a multi-part prompt, selecting one reviewed
 candidate part, generating only that child single-part STEP/STL through the
 existing single-part path, and reviewing the child result locally. It does not
 generate a full assembly, generate all parts, solve assembly constraints, export
-a STEP assembly, or geometrically validate fit between parts yet.
+a STEP assembly, or geometrically validate fit between parts yet. The current
+checkpoint is validated through CLI/manual smoke runs; the Web Workflow Console
+is the intended future review surface for this staged artifact workflow.
 
 ## 当前定位
 
@@ -395,7 +397,13 @@ normalization, CAD execution, and artifact contracts.
 
 ## Web Workflow Console
 
-The Web UI is a local workflow cockpit for running and visualizing CadFlow. The backend and first static console now exist under `ai_native_cad.workflow_console` and `web-viewer/`:
+CadFlow includes a lightweight Web Workflow Console for staged workflow
+artifact inspection, operation, and review. It is meant to help users inspect
+file-backed workflow runs, review reports and traces, and operate approval
+points around structured artifacts. It is not a full browser CAD editor.
+
+The backend and first static console now exist under
+`ai_native_cad.workflow_console` and `web-viewer/`:
 
 - run the existing workflow from natural-language prompts
 - list artifact-backed runs under `outputs/` and `runs/`
@@ -404,6 +412,7 @@ The Web UI is a local workflow cockpit for running and visualizing CadFlow. The 
 - read requirement, planning, IR, report, and trace artifacts
 - identify STEP-first outputs and derived preview/download files
 - run local Review and Outputs check stages from existing artifacts
+- support provider-backed workflow modes where implemented
 - show path-free stage history in the workflow timeline
 - show path-free gate decision history in the workflow timeline
 - edit only `requirement.json`, `planning_artifact.json`, and `input_ir.json`
@@ -413,7 +422,13 @@ Future Web Console stages should add iterative workflow support: show
 assumptions and risky missing fields, ask focused clarification questions,
 select a previous run, submit a revision prompt, display the revision plan and
 patch diff, compare old/new outputs, show lineage, and download parent/child
-artifacts.
+artifacts. It is also the intended future review surface for reviewed-part and
+staged approval workflows such as the Reviewed Part Single-Part E2E MVP.
+
+Boundaries are explicit: the Web Workflow Console does not add full assembly
+generation, automatic all-part generation, assembly constraint solving, STEP
+assembly export, a new CAD backend, or browser-native CAD editing. The current
+reviewed-part E2E milestone remains validated by CLI/manual smoke tests.
 
 Run the local console with the stdlib-only bridge:
 

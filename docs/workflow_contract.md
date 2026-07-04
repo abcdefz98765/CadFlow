@@ -233,6 +233,10 @@ multi-part prompt
 The boundary remains explicit: this MVP does not generate a full assembly, does
 not generate all parts, does not solve assembly constraints, does not export a
 STEP assembly, and does not geometrically validate fit between parts yet.
+The current checkpoint is validated by CLI/manual smoke runs. The Web Workflow
+Console is the intended future review and approval surface for these staged
+artifacts, but it must not imply full assembly CAD support or replace the
+artifact contracts above.
 
 ### Text Pipeline Fallback
 

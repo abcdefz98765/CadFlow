@@ -37,6 +37,14 @@ The user may start from a blank prompt, a previous CadFlow run, CadFlow IR plus
 `model.py`, a STEP reference, or a mesh reference. The UI should route those
 inputs through Model Intake before choosing a create or revise workflow.
 
+The lightweight Web Workflow Console belongs in this layer as an artifact
+inspection and review surface. Its current and near-term role is to inspect
+workflow runs, view reports and traces, review staged outputs, operate
+implemented provider-backed modes, and eventually support reviewed-part and
+staged approval workflows. It is not a full browser CAD editor and must not be
+treated as full assembly generation, assembly constraint solving, STEP assembly
+export, or automatic all-part generation.
+
 ### Agent Layer
 
 - `AgentAdapter`
@@ -124,6 +132,10 @@ not be overwritten.
 - CadQuery/STEP: CAD generation backend and primary artifact output.
 
 These responsibilities should not collapse into each other. The Web Console should run and inspect the workflow, not become a CAD kernel. The agent should produce validated contracts, not arbitrary runtime code.
+
+The current Reviewed Part Single-Part E2E milestone is still CLI/manual-smoke
+validated. The Web Console is the intended future review surface for that
+artifact workflow, not evidence of full assembly CAD support.
 
 ## Related Architecture Docs
 
