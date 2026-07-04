@@ -413,6 +413,9 @@ The backend and first static console now exist under
 - read requirement, planning, IR, reviewed-part, report, and trace artifacts
 - summarize reviewed-part assembly plans, candidate part statuses, lineage, child
   runs, and `part_result_review.json` checks
+- run explicit one-stage reviewed-part actions when upstream artifacts are present:
+  part request, part review, reviewed handoff, reviewed single-part create, and
+  part result review
 - identify STEP-first outputs and derived preview/download files
 - run local Review and Outputs check stages from existing artifacts
 - support provider-backed workflow modes where implemented
@@ -428,17 +431,41 @@ patch diff, compare old/new outputs, show lineage, and download parent/child
 artifacts. It is also the intended future review surface for reviewed-part and
 staged approval workflows such as the Reviewed Part Single-Part E2E MVP.
 
-For the Reviewed Part Single-Part E2E MVP, the console can inspect the existing
-artifact chain from `assembly_plan.json` through `part_result_review.json`,
-including candidate parts, reference-only parts, child run summaries, and
-STEP/STL download links when present. It does not replace the manual smoke
-validation path yet.
+For the Reviewed Part Single-Part E2E MVP, the console can inspect and operate
+the existing artifact chain from `assembly_plan.json` through
+`part_result_review.json`, including candidate parts, reference-only parts, child
+run summaries, and STEP/STL download links when present. Each backend action is
+one stage only; there is no single "run everything" reviewed-part action.
 
 Boundaries are explicit: the Web Workflow Console does not add full assembly
 generation, automatic all-part generation, assembly constraint solving, STEP
 assembly export, geometric fit validation, a new CAD backend, or browser-native
 CAD editing. The current reviewed-part E2E milestone remains validated by
 CLI/manual smoke tests.
+
+Architecture decision for this slice:
+
+```text
+FastAPI/action backend first.
+NiceGUI optional later.
+```
+
+The current server remains the stdlib local bridge, but it exposes a
+FastAPI-style read/action shape over the existing safe route contract:
+
+```text
+GET  /api/runs
+GET  /api/runs/{run_id}/summary
+GET  /api/runs/{run_id}/artifacts/{artifact_name}
+POST /api/actions/part-request
+POST /api/actions/part-review
+POST /api/actions/reviewed-handoff
+POST /api/actions/reviewed-part-create
+POST /api/actions/part-result-review
+```
+
+NiceGUI is not introduced yet. It may be evaluated later as an internal-tool UI
+shell after the backend APIs and action boundaries are stable.
 
 Run the local console with the stdlib-only bridge:
 
@@ -464,7 +491,10 @@ Then open:
 http://127.0.0.1:8765/workflow-console.html
 ```
 
-The bridge exposes only the existing route contract and whitelisted downloadable files. It does not add FastAPI, a database, login, cloud deployment, LLM API dependencies, API keys, or arbitrary shell command endpoints.
+The bridge exposes only the existing route contract, the explicit staged action
+API aliases, and whitelisted downloadable files. It does not add FastAPI,
+NiceGUI, a database, login, cloud deployment, LLM API dependencies, API keys, or
+arbitrary shell command endpoints.
 
 It is not a browser CAD editor, not a new CAD backend, and not a direct arbitrary code execution surface. Artifacts remain file-based and traceable so CLI, Python API, tests, and the future Web Console all inspect the same run contract.
 

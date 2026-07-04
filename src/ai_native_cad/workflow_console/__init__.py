@@ -6,6 +6,11 @@ from ai_native_cad.workflow_console.backend import (
     GATE_DECISION_STAGES,
     WorkflowConsoleBackend,
 )
+from ai_native_cad.workflow_console.actions import (
+    ACTION_NAMES,
+    ACTION_STAGE_FOLDERS,
+    WorkflowConsoleActions,
+)
 from ai_native_cad.workflow_console.routes import (
     ROUTE_SPECS,
     ROUTE_SPECS_BY_NAME,
@@ -44,6 +49,9 @@ __all__ = [
     "StageRunner",
     "RouteSpec",
     "WorkflowConsoleBackend",
+    "WorkflowConsoleActions",
+    "ACTION_NAMES",
+    "ACTION_STAGE_FOLDERS",
     "dispatch_route",
     "error_response",
     "status_code_for_exception",

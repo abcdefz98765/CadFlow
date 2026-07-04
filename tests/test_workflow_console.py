@@ -7,6 +7,7 @@ import pytest
 from ai_native_cad.agents import DeterministicAgentAdapter, JsonContractAgentAdapter, JsonContractProviderError
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
 from ai_native_cad.workflow_console import (
+    ACTION_NAMES,
     EDITABLE_ARTIFACTS,
     GATE_DECISION_ACTIONS,
     ROUTE_SPECS,
@@ -14,6 +15,7 @@ from ai_native_cad.workflow_console import (
     STATUS_CREATED,
     WORKFLOW_STATUS_VALUES,
     StageRunner,
+    WorkflowConsoleActions,
     WorkflowConsoleBackend,
     dispatch_route,
     error_response,
@@ -38,6 +40,17 @@ def _does_not_contain_absolute_paths(value):
         return all(_does_not_contain_absolute_paths(item) for item in value)
     if isinstance(value, str):
         return not Path(value).is_absolute() and str(Path.cwd().resolve()) not in value
+    return True
+
+
+def _does_not_contain_text(value, blocked):
+    if isinstance(value, dict):
+        return all(_does_not_contain_text(key, blocked) and _does_not_contain_text(item, blocked) for key, item in value.items())
+    if isinstance(value, list):
+        return all(_does_not_contain_text(item, blocked) for item in value)
+    if isinstance(value, str):
+        lowered = value.lower()
+        return all(item.lower() not in lowered for item in blocked)
     return True
 
 
@@ -99,6 +112,11 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         "write_artifact_by_id",
         "list_downloadables_by_id",
         "record_gate_decision_by_id",
+        "WorkflowConsoleActions.create_part_request",
+        "WorkflowConsoleActions.review_part_request",
+        "WorkflowConsoleActions.create_reviewed_handoff",
+        "WorkflowConsoleActions.create_reviewed_part",
+        "WorkflowConsoleActions.review_part_result",
     }
 
     assert {spec.backend_operation for spec in ROUTE_SPECS} == expected_operations
@@ -109,6 +127,11 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
             "read_provider_config",
             "configure_provider",
             "test_provider_connection",
+            "WorkflowConsoleActions.create_part_request",
+            "WorkflowConsoleActions.review_part_request",
+            "WorkflowConsoleActions.create_reviewed_handoff",
+            "WorkflowConsoleActions.create_reviewed_part",
+            "WorkflowConsoleActions.review_part_result",
         }
         for spec in ROUTE_SPECS
     )
@@ -164,6 +187,8 @@ def test_workflow_console_route_contract_includes_edit_and_gate_routes():
     assert ROUTE_SPECS_BY_NAME["configure_provider"].backend_operation == "configure_provider"
     assert ROUTE_SPECS_BY_NAME["test_provider_connection"].method == "POST"
     assert ROUTE_SPECS_BY_NAME["test_provider_connection"].backend_operation == "test_provider_connection"
+    assert ROUTE_SPECS_BY_NAME["action_part_request"].path == "/api/actions/part-request"
+    assert ROUTE_SPECS_BY_NAME["action_part_result_review"].path == "/api/actions/part-result-review"
 
 
 def test_workflow_console_internal_error_shape_does_not_leak_local_paths():
@@ -174,6 +199,188 @@ def test_workflow_console_internal_error_shape_does_not_leak_local_paths():
     assert response["error"]["message"] == "internal workflow console error"
     assert "D:\\MyCode" not in response["error"]["message"]
     assert "secret_run" not in response["error"]["message"]
+
+
+def test_workflow_console_action_service_rejects_paths_outside_output_root(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    actions = WorkflowConsoleActions(backend)
+
+    with pytest.raises(ValueError, match="run id"):
+        actions.create_part_request("../outside")
+
+    with pytest.raises(ValueError, match="run root is not configured"):
+        actions.create_part_request("console_run", root=tmp_path / "elsewhere")
+
+
+def test_workflow_console_action_service_accepts_artifact_relative_run_under_output_root(tmp_path, monkeypatch):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    run_dir = tmp_path / "outputs" / "assembly_review"
+    run_dir.mkdir(parents=True)
+    (run_dir / "assembly_plan.json").write_text(
+        json.dumps({"artifact_type": "assembly_plan", "parts": [{"part_id": "base"}]}),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_part_request(assembly_plan, *, output_dir=None, part_id=None, output_root=None):
+        calls.append({"assembly_plan": Path(assembly_plan), "output_dir": Path(output_dir), "part_id": part_id})
+        Path(output_dir).mkdir(parents=True)
+        (Path(output_dir) / "part_create_request.json").write_text(
+            json.dumps({"artifact_type": "part_create_request", "part_id": "base", "status": "ready_for_review"}),
+            encoding="utf-8",
+        )
+        return {
+            "status": "ready_for_review",
+            "success": True,
+            "output_dir": str(output_dir),
+            "part_create_request": {
+                "artifact_type": "part_create_request",
+                "part_id": "base",
+                "diagnostic_codes": ["part_request.created"],
+            },
+            "files": {"request": str(Path(output_dir) / "part_create_request.json")},
+            "raw_provider_payload": {"api_key": "secret"},
+        }
+
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_assembly_part_request_pipeline", fake_part_request)
+
+    result = WorkflowConsoleActions(backend).create_part_request("assembly_review", part_id="base")
+
+    assert result["stage_count"] == 1
+    assert result["summary"]["status"] == "ready_for_review"
+    assert result["summary"]["artifacts"] == ["part_create_request.json"]
+    assert calls == [{"assembly_plan": run_dir / "assembly_plan.json", "output_dir": run_dir / "02_part_request", "part_id": "base"}]
+    assert _does_not_contain_absolute_paths(result)
+    assert _does_not_contain_keys(result, {"raw_provider_payload", "api_key", "secret", "token"})
+
+
+def test_workflow_console_action_routes_are_one_stage_and_sanitized(tmp_path, monkeypatch):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    run_dir = tmp_path / "outputs" / "route_action"
+    run_dir.mkdir(parents=True)
+    (run_dir / "assembly_plan.json").write_text(json.dumps({"parts": [{"part_id": "base"}]}), encoding="utf-8")
+
+    def fake_part_request(assembly_plan, *, output_dir=None, part_id=None, output_root=None):
+        Path(output_dir).mkdir(parents=True)
+        return {
+            "status": "ready_for_review",
+            "success": True,
+            "output_dir": str(output_dir),
+            "part_create_request": {
+                "artifact_type": "part_create_request",
+                "part_id": "base",
+                "diagnostic_codes": ["part_request.created"],
+            },
+            "agent_trace": {"provider_response": {"token": "secret"}},
+            "files": {"request": str(Path(output_dir) / "part_create_request.json")},
+        }
+
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_assembly_part_request_pipeline", fake_part_request)
+
+    response = dispatch_route(backend, "action_part_request", body={"run_id": "route_action"})
+
+    assert response["ok"] is True
+    assert response["status_code"] == 201
+    assert response["data"]["stage_count"] == 1
+    assert response["data"]["summary"]["stage_count"] == 1
+    assert _does_not_contain_absolute_paths(response["data"])
+    assert _does_not_contain_keys(
+        response["data"],
+        {"raw_provider_payload", "provider_response", "api_key", "token", "secret", "payload"},
+    )
+    assert _does_not_contain_text(response["data"], ["secret", "api_key", "token", "provider_response"])
+
+
+def test_workflow_console_action_missing_upstream_artifact_blocks_gracefully(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "missing_upstream"}, body={"prompt": "Make a part."})
+
+    response = dispatch_route(backend, "action_part_review", body={"run_id": "missing_upstream"})
+
+    assert response["ok"] is False
+    assert response["status_code"] == 404
+    assert response["error"]["type"] == "not_found"
+    assert "part_create_request.json" in response["error"]["message"]
+    assert _does_not_contain_absolute_paths(response)
+
+
+def test_workflow_console_reviewed_part_create_action_uses_one_handoff_and_sanitizes_nested_payloads(tmp_path, monkeypatch):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    run_dir = tmp_path / "outputs" / "single_handoff"
+    run_dir.mkdir(parents=True)
+    (run_dir / "reviewed_part_handoff.json").write_text(
+        json.dumps({
+            "artifact_type": "reviewed_part_handoff",
+            "part_id": "base",
+            "status": "ready_for_single_part_planning",
+        }),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_single_create(reviewed_part_handoff, adapter, *, output_dir=None, output_root=None):
+        calls.append({"handoff": Path(reviewed_part_handoff), "output_dir": Path(output_dir)})
+        return {
+            "status": "success",
+            "success": True,
+            "output_dir": str(output_dir),
+            "child_output_dir": str(Path(output_dir) / "single_part_base"),
+            "reviewed_part_handoff": {
+                "artifact_type": "reviewed_part_handoff",
+                "part_id": "base",
+                "diagnostic_codes": ["reviewed_part_single_create.ready"],
+            },
+            "child_result": {
+                "status": "success",
+                "provider_messages": [{"role": "assistant", "content": "secret token"}],
+                "raw_response": {"env": "OPENAI_API_KEY=secret"},
+            },
+            "files": {"step": str(Path(output_dir) / "single_part_base" / "model.step")},
+        }
+
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_reviewed_part_single_create_pipeline", fake_single_create)
+
+    response = dispatch_route(backend, "action_reviewed_part_create", body={"run_id": "single_handoff"})
+
+    assert response["ok"] is True
+    assert response["data"]["stage_count"] == 1
+    assert response["data"]["summary"]["action"] == "reviewed_part_create"
+    assert calls == [{"handoff": run_dir / "reviewed_part_handoff.json", "output_dir": run_dir / "05_single_create"}]
+    assert _does_not_contain_absolute_paths(response["data"])
+    assert _does_not_contain_keys(response["data"], {"provider_messages", "raw_response", "env", "token", "secret"})
+    assert _does_not_contain_text(response["data"], ["OPENAI_API_KEY", "secret token", "provider_messages"])
+
+
+def test_workflow_console_staged_action_routes_do_not_include_batch_or_assembly_generation():
+    action_specs = [spec for spec in ROUTE_SPECS if spec.name.startswith("action_")]
+
+    assert {spec.name for spec in action_specs} == {
+        "action_part_request",
+        "action_part_review",
+        "action_reviewed_handoff",
+        "action_reviewed_part_create",
+        "action_part_result_review",
+    }
+    assert all("batch" not in spec.path for spec in action_specs)
+    assert all("assembly-generation" not in spec.path for spec in action_specs)
+    assert "batch_generation" not in ACTION_NAMES
+    assert "assembly_generation" not in ACTION_NAMES
+
+
+def test_workflow_console_run_summary_includes_negotiation_placeholders(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "negotiation_placeholders"}, body={"prompt": "Make a bracket."})
+
+    response = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "negotiation_placeholders"})
+    negotiation = response["data"]["report_summary"]["negotiation"]
+
+    assert negotiation == {
+        "assumptions": [],
+        "missing_information": [],
+        "clarification_questions": [],
+        "blocked_reason": None,
+        "user_review_status": None,
+    }
 
 
 def test_workflow_console_dispatch_creates_and_reads_run_by_id(tmp_path):
@@ -657,6 +864,13 @@ def test_workflow_console_metadata_includes_compact_report_trace_summary(tmp_pat
             "actual_ir_change_count": 0,
             "validation_change_count": 0,
             "system_repair_change_count": 0,
+        },
+        "negotiation": {
+            "assumptions": [],
+            "missing_information": [],
+            "clarification_questions": [],
+            "blocked_reason": None,
+            "user_review_status": None,
         },
     }
     assert _does_not_contain_keys(metadata["report_summary"], {"path", "run_dir", "root", "output_dir", "file"})

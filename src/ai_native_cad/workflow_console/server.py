@@ -45,10 +45,16 @@ def make_handler(
             if parsed.path.startswith("/api/downloads/"):
                 self._handle_download(parsed.path, parsed.query)
                 return
+            if parsed.path.startswith("/api/"):
+                self._handle_api_get(parsed.path, parsed.query)
+                return
             super().do_GET()
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             parsed = urlparse(self.path)
+            if parsed.path.startswith("/api/actions/"):
+                self._handle_api_action(parsed.path, parsed.query)
+                return
             if parsed.path != "/api/route":
                 self._send_json(error_response(FileNotFoundError("workflow console API route not found")))
                 return
@@ -60,6 +66,54 @@ def make_handler(
                     path_params=_optional_dict(request, "path_params"),
                     body=_optional_dict(request, "body"),
                     query=_optional_dict(request, "query"),
+                )
+            except Exception as exc:
+                response = error_response(exc)
+            self._send_json(response)
+
+        def _handle_api_get(self, path: str, query_string: str) -> None:
+            parts = [unquote(part) for part in path.split("/") if part]
+            query = _single_value_query(query_string)
+            try:
+                if parts == ["api", "runs"]:
+                    response = dispatch_route(console_backend, "list_runs", query=query)
+                elif len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "summary":
+                    response = dispatch_route(
+                        console_backend,
+                        "read_run_metadata",
+                        path_params={"run_id": parts[2]},
+                        query=query,
+                    )
+                elif len(parts) >= 5 and parts[:2] == ["api", "runs"] and parts[3] == "artifacts":
+                    response = dispatch_route(
+                        console_backend,
+                        "read_artifact",
+                        path_params={"run_id": parts[2], "artifact": "/".join(parts[4:])},
+                        query=query,
+                    )
+                else:
+                    response = error_response(FileNotFoundError("workflow console API route not found"))
+            except Exception as exc:
+                response = error_response(exc)
+            self._send_json(response)
+
+        def _handle_api_action(self, path: str, query_string: str) -> None:
+            route_name = {
+                "/api/actions/part-request": "action_part_request",
+                "/api/actions/part-review": "action_part_review",
+                "/api/actions/reviewed-handoff": "action_reviewed_handoff",
+                "/api/actions/reviewed-part-create": "action_reviewed_part_create",
+                "/api/actions/part-result-review": "action_part_result_review",
+            }.get(path)
+            if route_name is None:
+                self._send_json(error_response(FileNotFoundError("workflow console API action not found")))
+                return
+            try:
+                response = dispatch_route(
+                    console_backend,
+                    route_name,
+                    body=self._read_json_body(),
+                    query=_single_value_query(query_string),
                 )
             except Exception as exc:
                 response = error_response(exc)
@@ -154,6 +208,11 @@ def _optional_dict(values: dict[str, Any], key: str) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         raise ValueError(f"workflow console API request {key} must be a JSON object")
     return value
+
+
+def _single_value_query(query_string: str) -> dict[str, str]:
+    query = parse_qs(query_string)
+    return {key: values[0] for key, values in query.items() if values}
 
 
 if __name__ == "__main__":

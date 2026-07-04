@@ -456,6 +456,7 @@ class WorkflowConsoleBackend:
             "requirement_flow_decision": requirement_summary["flow_decision"],
             "planning_flow_gate": planning_summary["flow_gate"],
             "revision_summary": _compact_revision_summary(comparison, lineage, revision_plan),
+            "negotiation": _compact_negotiation_summary(requirement, planning, report, trace),
         }
 
     def read_gate_history(self, run_dir: str | Path) -> list[dict[str, Any]]:
@@ -799,6 +800,92 @@ def _compact_revision_summary(
         "validation_change_count": summary.get("validation_change_count", 0),
         "system_repair_change_count": summary.get("system_repair_change_count", 0),
     }
+
+
+def _compact_negotiation_summary(
+    requirement: dict[str, Any] | None,
+    planning: dict[str, Any] | None,
+    report: dict[str, Any] | None,
+    trace: dict[str, Any] | None,
+) -> dict[str, Any]:
+    requirement = requirement or {}
+    planning = planning or {}
+    report = report or {}
+    trace = trace or {}
+    gate = planning.get("flow_gate_status") if isinstance(planning.get("flow_gate_status"), dict) else {}
+    requirement_status = (
+        requirement.get("requirement_status") if isinstance(requirement.get("requirement_status"), dict) else {}
+    )
+    flow_decision = (
+        report.get("flow_decision")
+        or trace.get("final_flow_decision")
+        or requirement_status.get("flow_decision")
+        or gate.get("rework_decision")
+        or {}
+    )
+    missing = _first_list(
+        requirement.get("missing_information"),
+        requirement.get("missing_fields"),
+        requirement_status.get("missing_information"),
+        gate.get("missing_information"),
+        report.get("missing_information"),
+    )
+    clarification = _first_list(
+        requirement.get("clarification_questions"),
+        requirement.get("follow_up_questions"),
+        requirement_status.get("clarification_questions"),
+        report.get("clarification_questions"),
+    )
+    assumptions = _first_list(
+        requirement.get("assumptions"),
+        requirement_status.get("assumptions"),
+        planning.get("assumptions"),
+        gate.get("assumptions"),
+        flow_decision.get("assumptions") if isinstance(flow_decision, dict) else None,
+        report.get("assumptions"),
+    )
+    return {
+        "assumptions": _compact_text_items(assumptions),
+        "missing_information": _compact_text_items(missing),
+        "clarification_questions": _compact_text_items(clarification),
+        "blocked_reason": _safe_summary_text(
+            report.get("blocked_reason")
+            or requirement_status.get("blocked_reason")
+            or gate.get("blocked_reason")
+            or trace.get("blocked_reason")
+        ),
+        "user_review_status": _safe_summary_text(
+            report.get("user_review_status")
+            or requirement_status.get("user_review_status")
+            or gate.get("user_review_status")
+        ),
+    }
+
+
+def _first_list(*values: Any) -> list[Any]:
+    for value in values:
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _compact_text_items(items: list[Any]) -> list[Any]:
+    compact = []
+    for item in items[:20]:
+        if isinstance(item, dict):
+            compact_item = {
+                key: safe
+                for key, value in item.items()
+                for safe in [_safe_summary_text(value)]
+                if key in {"code", "field", "question", "message", "text", "assumption"} and safe is not None
+            }
+            if compact_item:
+                compact.append(compact_item)
+            continue
+        safe = _safe_summary_text(item)
+        if safe is not None:
+            compact.append(safe)
+    return compact
 
 
 def _compact_assembly_plan_summary(assembly_plan: dict[str, Any] | None) -> dict[str, Any]:

@@ -135,7 +135,24 @@ The current scaffold lives under `src/ai_native_cad/workflow_console/`:
 
 - `StageRunner`: deterministic local stage execution and artifact persistence.
 - `WorkflowConsoleBackend`: local run listing, path-safe run-id resolution, artifact metadata/content reads, status derivation, and downloadable-file discovery.
+- `WorkflowConsoleActions`: safe one-stage reviewed-part workflow actions over existing pipeline functions.
 - `routes.py`: dependency-free future route contract specs, in-process route dispatch, response envelopes, and backend exception to HTTP-like status mapping.
+
+Current architecture decision:
+
+```text
+FastAPI/action backend first.
+NiceGUI optional later.
+```
+
+The backend surface is now FastAPI-shaped, but the server remains the existing
+stdlib local bridge for this pass. The current bridge was already dependency-free,
+bound to `127.0.0.1` by default, and routed through safe run ids instead of
+filesystem paths, so a framework migration is deferred until the action
+boundaries are stable. A future FastAPI adapter should wrap the same backend
+methods and action service rather than introduce new CAD behavior. NiceGUI is
+not introduced in this pass; it may be evaluated later as an internal-tool UI
+shell after the backend APIs and staged actions are stable.
 
 `StageRunner` records local stage history in the existing `logs/runtime.json` artifact under `workflow_console.stages`. This keeps stage status file-based without introducing a database or separate state store. `WorkflowConsoleBackend.read_run_metadata(...)` exposes path-free `stage_history`, `gate_history`, and `report_summary` summaries for UI timelines and review panels, while the raw runtime/report/trace artifacts remain readable for audit. Stage history may include sanitized adapter activity such as operation and local/mock provider identity, but not prompts, transcripts, tokens, or provider secrets. The summary also includes compact, path-free requirement and planning metadata from `requirement.json` and `planning_artifact.json`, including assumptions, missing fields, follow-up fields, `requirement_status.flow_decision`, and planning `flow_gate_status`. When revision artifacts are present, the same summary exposes compact revision metadata such as parent/child run ids, lineage relationship, revision index, plan/status, blocked reason, and requested/actual/validation/repair change counts.
 
@@ -146,6 +163,45 @@ It can also create a run without executing stages, writing only `prompt.txt` and
 For future HTTP routes, `WorkflowConsoleBackend` also exposes run-id based operations that create or resolve runs only under configured local run roots, currently `outputs/` and `runs/`. These methods reject absolute paths, traversal segments, path separators, duplicate create targets, and unconfigured run roots so routes do not need to accept arbitrary filesystem paths.
 
 The route contract scaffold defines future method/path semantics without importing a web framework or starting an HTTP server. It also provides a small in-process dispatcher that accepts a route name plus path/body/query dictionaries and calls an explicit allowlist of by-id backend methods. The dispatcher removes local path fields such as `run_dir`, `root`, `path`, and `output_dir` from public route response data while preserving artifact content. Generated file references in route result metadata are reduced to filenames; downloadable lookup still goes through the whitelisted download route. Gate-decision payloads remain in `logs/runtime.json` for audit, but public metadata and route responses expose only compact payload summaries. The `run_revision` route can execute a structured CadFlow-native revision from a valid parent run into an explicit safe child run id, returning path-free metadata while the child run stores `model.step`, `model.stl`, comparison, lineage, revision report, and trace artifacts. Future FastAPI or other HTTP adapters must wrap the by-id backend methods only, such as `create_run_by_id`, `run_stage_by_id`, `run_revision_by_id`, `read_artifact_by_id`, `write_artifact_by_id`, and `record_gate_decision_by_id`; direct local `run_dir` operations remain internal Python APIs.
+
+The explicit read/action API shape is:
+
+```text
+GET  /api/runs
+GET  /api/runs/{run_id}/summary
+GET  /api/runs/{run_id}/artifacts/{artifact_name}
+POST /api/actions/part-request
+POST /api/actions/part-review
+POST /api/actions/reviewed-handoff
+POST /api/actions/reviewed-part-create
+POST /api/actions/part-result-review
+```
+
+The existing `POST /api/route` bridge remains for the static frontend, and the
+stdlib server also exposes the API-shaped aliases above. Each action accepts a
+safe run id and optional action-specific fields; none accept arbitrary local
+filesystem paths.
+
+`WorkflowConsoleActions` maps the reviewed-part workflow to explicit one-stage
+operations:
+
+- `part-request`: reads `assembly_plan.json` or `01_design/assembly_plan.json`
+  and writes `02_part_request/part_create_request.json`.
+- `part-review`: reads `part_create_request.json` from the staged folder or run
+  root and writes `03_review/part_request_review.json`.
+- `reviewed-handoff`: reads the part request and review artifacts and writes
+  `04_handoff/reviewed_part_handoff.json`.
+- `reviewed-part-create`: reads one reviewed handoff and calls the existing
+  reviewed single-part create bridge once, writing under `05_single_create/`.
+- `part-result-review`: reads one reviewed handoff plus one child run identified
+  by `05_single_create/lineage.json` or an explicit safe child run id, then
+  writes `06_part_result_review/part_result_review.json`.
+
+These actions wrap existing pipeline functions only. They do not add assembly
+generation, automatic all-part generation, batch generation, new CAD templates,
+assembly constraint solving, provider-generated CAD IR/code, or free-form Web
+chat. Public action results are sanitized summaries: no absolute paths, no API
+keys, no environment values, no provider raw payloads, and no transcripts.
 
 Readable artifacts remain limited to workflow source, handoff, reviewed-part,
 report, trace, and revision records: `prompt.txt`, `revision_prompt.txt`,
@@ -180,7 +236,7 @@ The local backend should expose only workflow operations:
 
 The backend should not change benchmark contracts, add new CAD generator behavior, or make browser state authoritative.
 
-The scaffold now includes a stdlib-only local HTTP bridge and a static frontend. It still does not provide authentication, a database, cloud deployment, or a framework-backed web app. A FastAPI app can be layered over the Python facade later only if the dependency is intentionally added.
+The scaffold now includes a stdlib-only local HTTP bridge and a static frontend. It still does not provide authentication, a database, cloud deployment, NiceGUI, or a framework-backed web app. A FastAPI app can be layered over the Python facade later only if the dependency is intentionally added.
 
 ## v0.4a UI Surface
 
@@ -235,6 +291,11 @@ manual-smoke artifacts and discover generated STEP/STL files, but it does not
 add batch generation, assembly CAD generation, assembly constraint solving, STEP
 assembly export, geometric fit validation, new CAD templates, or automatic
 all-part generation.
+
+The UI now shows a minimal reviewed-part action strip in the existing summary
+panel. Buttons are enabled only when their upstream artifact is present, and
+each button calls exactly one backend action. There is still no frontend
+framework, no NiceGUI shell, no chat UI, and no editable clarification form.
 
 ## Security Notes
 

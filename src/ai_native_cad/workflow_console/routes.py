@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
+from ai_native_cad.workflow_console.actions import WorkflowConsoleActions
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,7 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
     RouteSpec(
         name="list_runs",
         method="GET",
-        path="/workflow/runs",
+        path="/api/runs",
         backend_operation="list_runs",
         description="List workflow runs under configured run roots.",
     ),
@@ -59,7 +60,7 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
     RouteSpec(
         name="read_run_metadata",
         method="GET",
-        path="/workflow/runs/{run_id}",
+        path="/api/runs/{run_id}/summary",
         backend_operation="read_run_metadata_by_id",
         description="Read metadata and derived status for a safe run id.",
     ),
@@ -87,9 +88,44 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
     RouteSpec(
         name="read_artifact",
         method="GET",
-        path="/workflow/runs/{run_id}/artifacts/{artifact}",
+        path="/api/runs/{run_id}/artifacts/{artifact}",
         backend_operation="read_artifact_by_id",
         description="Read one whitelisted workflow artifact for a safe run id.",
+    ),
+    RouteSpec(
+        name="action_part_request",
+        method="POST",
+        path="/api/actions/part-request",
+        backend_operation="WorkflowConsoleActions.create_part_request",
+        description="Create one part request from one assembly plan artifact.",
+    ),
+    RouteSpec(
+        name="action_part_review",
+        method="POST",
+        path="/api/actions/part-review",
+        backend_operation="WorkflowConsoleActions.review_part_request",
+        description="Review one part request artifact.",
+    ),
+    RouteSpec(
+        name="action_reviewed_handoff",
+        method="POST",
+        path="/api/actions/reviewed-handoff",
+        backend_operation="WorkflowConsoleActions.create_reviewed_handoff",
+        description="Create one reviewed part handoff from reviewed request artifacts.",
+    ),
+    RouteSpec(
+        name="action_reviewed_part_create",
+        method="POST",
+        path="/api/actions/reviewed-part-create",
+        backend_operation="WorkflowConsoleActions.create_reviewed_part",
+        description="Run one reviewed single-part create bridge.",
+    ),
+    RouteSpec(
+        name="action_part_result_review",
+        method="POST",
+        path="/api/actions/part-result-review",
+        backend_operation="WorkflowConsoleActions.review_part_result",
+        description="Review one child result from a reviewed single-part create bridge.",
     ),
     RouteSpec(
         name="write_artifact",
@@ -346,6 +382,63 @@ def _record_gate_decision(
     )
 
 
+def _action_part_request(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return WorkflowConsoleActions(backend).create_part_request(
+        _require_value(body, "run_id"),
+        part_id=body.get("part_id"),
+        root=query.get("root"),
+    )
+
+
+def _action_part_review(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return WorkflowConsoleActions(backend).review_part_request(_require_value(body, "run_id"), root=query.get("root"))
+
+
+def _action_reviewed_handoff(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return WorkflowConsoleActions(backend).create_reviewed_handoff(_require_value(body, "run_id"), root=query.get("root"))
+
+
+def _action_reviewed_part_create(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return WorkflowConsoleActions(backend).create_reviewed_part(_require_value(body, "run_id"), root=query.get("root"))
+
+
+def _action_part_result_review(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    expected_stl = body.get("expected_stl", True)
+    if not isinstance(expected_stl, bool):
+        raise ValueError("workflow console action expected_stl must be a boolean")
+    return WorkflowConsoleActions(backend).review_part_result(
+        _require_value(body, "run_id"),
+        child_run_id=body.get("child_run_id"),
+        root=query.get("root"),
+        expected_stl=expected_stl,
+    )
+
+
 RouteHandler = Callable[
     [WorkflowConsoleBackend, dict[str, Any], dict[str, Any], dict[str, Any]],
     Any,
@@ -365,11 +458,25 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "write_artifact": _write_artifact,
     "list_downloadables": _list_downloadables,
     "record_gate_decision": _record_gate_decision,
+    "action_part_request": _action_part_request,
+    "action_part_review": _action_part_review,
+    "action_reviewed_handoff": _action_reviewed_handoff,
+    "action_reviewed_part_create": _action_reviewed_part_create,
+    "action_part_result_review": _action_part_result_review,
 }
 
 
 def _success_status_code(route_name: str) -> int:
-    if route_name in {"create_run", "run_revision", "record_gate_decision"}:
+    if route_name in {
+        "create_run",
+        "run_revision",
+        "record_gate_decision",
+        "action_part_request",
+        "action_part_review",
+        "action_reviewed_handoff",
+        "action_reviewed_part_create",
+        "action_part_result_review",
+    }:
         return 201
     return 200
 
