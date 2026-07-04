@@ -480,6 +480,24 @@ requested changes. This is save-only in the current pass: it records intent for
 review and future rework, but it does not rerun stages, call providers, enqueue
 overnight jobs, start an autonomous loop, or generate batches/assemblies.
 
+NiceGUI also includes a Human-readable Workflow Review / Agent Report MVP. The
+explicit Create / Refresh Workflow Review action writes deterministic local
+`workflow_review.json` and `workflow_review.md` artifacts from existing
+allowlisted run summaries. The report shows overall status, readiness score,
+confidence bands, risk level, summary bullets, risks, and recommended next
+actions. These readiness/confidence/risk values are local heuristics, not LLM
+self-certification, and the action does not call a provider, rerun CAD, or add
+new CAD capability.
+
+Artifact display is intentionally tiered. Human-facing artifacts such as
+`workflow_review.md`, `workflow_review.json`, `stage_review.json`, `report.md`,
+assembly-plan summaries, part-result summaries, and STEP/STL availability are
+shown by default. Review/debug artifacts such as `requirement.json`,
+`design_brief.json`, handoff JSON, lineage, and sanitized trace summaries are
+collapsed behind "Show debug artifacts". Internal/schema-heavy artifacts such as
+`input_ir.json`, planning internals, revision internals, and runtime logs remain
+hidden unless "Show internal artifacts" is explicitly enabled.
+
 Run the local console with the stdlib-only bridge:
 
 ```bash

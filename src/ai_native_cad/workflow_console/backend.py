@@ -21,6 +21,7 @@ from ai_native_cad.workflow_console.stage_runner import (
     StageRunner,
     _safe_run_name,
 )
+from ai_native_cad.workflow_console.workflow_review import compact_workflow_review_summary
 from ai_native_cad.workflow_control import (
     ASK_USER,
     PROCEED_WITH_ASSUMPTIONS,
@@ -373,6 +374,7 @@ class WorkflowConsoleBackend:
             "report_summary": self.read_report_summary(path),
             "reviewed_part_summary": self.read_reviewed_part_summary(path),
             "stage_review_summary": self.read_stage_review_summary(path),
+            "workflow_review_summary": self.read_workflow_review_summary(path),
             "child_runs": self.list_child_runs(path),
             "artifacts": self.list_artifacts(path),
             "downloadables": self.list_downloadables(path),
@@ -383,6 +385,17 @@ class WorkflowConsoleBackend:
         path = self._require_project_path(Path(run_dir))
         review = _read_json_if_present(path / "stage_review.json")
         return _compact_stage_review_summary(review)
+
+    def read_workflow_review_summary(self, run_dir: str | Path) -> dict[str, Any]:
+        """Return a compact sanitized summary of the deterministic workflow review."""
+        path = self._require_project_path(Path(run_dir))
+        review = _read_json_if_present(path / "workflow_review.json")
+        summary = compact_workflow_review_summary(review)
+        summary["artifact_availability"] = {
+            "workflow_review_json": (path / "workflow_review.json").exists(),
+            "workflow_review_md": (path / "workflow_review.md").exists(),
+        }
+        return summary
 
     def read_reviewed_part_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return compact reviewed-part workflow summaries for console inspection."""

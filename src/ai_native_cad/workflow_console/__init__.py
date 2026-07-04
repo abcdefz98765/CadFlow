@@ -14,6 +14,12 @@ from ai_native_cad.workflow_console.actions import (
     STAGE_REWORK_TARGETS,
     WorkflowConsoleActions,
 )
+from ai_native_cad.workflow_console.artifact_display import (
+    ARTIFACT_DISPLAY_CATEGORIES,
+    artifact_display_category,
+    artifact_visible_by_default,
+    filter_artifacts_for_display,
+)
 from ai_native_cad.workflow_console.routes import (
     ROUTE_SPECS,
     ROUTE_SPECS_BY_NAME,
@@ -58,6 +64,10 @@ __all__ = [
     "STAGE_REVIEW_STATUSES",
     "STAGE_REVIEW_STAGES",
     "STAGE_REWORK_TARGETS",
+    "ARTIFACT_DISPLAY_CATEGORIES",
+    "artifact_display_category",
+    "artifact_visible_by_default",
+    "filter_artifacts_for_display",
     "dispatch_route",
     "error_response",
     "status_code_for_exception",

@@ -45,6 +45,8 @@ READABLE_ARTIFACTS = {
     "lineage.json",
     "report.json",
     "report.md",
+    "workflow_review.json",
+    "workflow_review.md",
     "agent_trace.json",
     "logs/runtime.json",
 }

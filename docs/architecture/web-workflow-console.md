@@ -176,6 +176,7 @@ POST /api/actions/reviewed-handoff
 POST /api/actions/reviewed-part-create
 POST /api/actions/part-result-review
 POST /api/actions/stage-review
+POST /api/actions/workflow-review
 ```
 
 The existing `POST /api/route` bridge remains for the static frontend, and the
@@ -199,6 +200,8 @@ operations:
   writes `06_part_result_review/part_result_review.json`.
 - `stage-review`: writes one local `stage_review.json` artifact that records
   user review/rework intent for an explicit stage.
+- `workflow-review`: writes deterministic local `workflow_review.json` and
+  `workflow_review.md` artifacts from existing run summaries and diagnostics.
 
 These actions wrap existing pipeline functions only. They do not add assembly
 generation, automatic all-part generation, batch generation, new CAD templates,
@@ -217,6 +220,18 @@ not call a provider, rerun a pipeline stage, modify CAD artifacts, create a loop
 queue, or trigger batch/all-part/assembly generation. Rework execution and
 overnight one-part-at-a-time queues remain future work.
 
+`workflow_review.json` and `workflow_review.md` are the Human-readable Workflow
+Review / Agent Report MVP. The report is deterministic and local; it reads
+existing allowlisted run summaries, reviewed-part summaries, stage review
+summary, artifact availability, and diagnostics. It reports `overall_status`,
+`readiness_score`, confidence bands, `risk_level`, summary bullets, key
+diagnostics, risks, recommended next actions, and a short scoring explanation.
+Readiness, confidence, and risk are explainable heuristics, not provider advice
+or LLM self-evaluation. Creating the report does not call providers, call CAD
+pipeline functions, modify CAD outputs, create loop queues, or add CAD
+capability. A provider advisory report can be layered in later only as a
+separate explicit feature.
+
 Readable artifacts remain limited to workflow source, handoff, reviewed-part,
 report, trace, and revision records: `prompt.txt`, `revision_prompt.txt`,
 `requirement.json`, `design_brief.json`, `planning_artifact.json`, `input_ir.json`,
@@ -225,9 +240,22 @@ report, trace, and revision records: `prompt.txt`, `revision_prompt.txt`,
 `reviewed_part_handoff.json`, `part_execution_request.json`,
 `part_result_review.json`, `stage_review.json`, `revision_request.json`, `change_intent.json`,
 `revision_plan.json`, `patch.json`, `comparison.json`, `revision_report.md`,
-`lineage.json`, `report.json`, `report.md`, `agent_trace.json`, and
+`lineage.json`, `report.json`, `report.md`, `workflow_review.json`,
+`workflow_review.md`, `agent_trace.json`, and
 `logs/runtime.json`. Downloadable discovery remains limited to `model.step`,
 `model.stl`, `preview.png`, and `model.py`.
+
+The UI display policy is stricter than the readable-artifact allowlist. It
+classifies artifacts as `human_facing`, `review_debug`, or `internal_debug`.
+Human-facing artifacts are visible by default: Markdown reports, workflow
+review artifacts, stage review summaries, assembly-plan/part-result summaries,
+and model availability. Review-debug artifacts such as requirement/design brief,
+handoff, lineage, and sanitized trace summaries are collapsed behind an explicit
+debug toggle. Internal/schema-heavy artifacts such as CAD IR, planning internals,
+revision internals, validation/runtime logs, and raw-ish trace internals are
+hidden unless internal artifacts are explicitly enabled. This classification is
+a presentation policy only; artifact reads still go through the existing
+allowlist and sanitization path.
 
 Editable artifacts are narrower than readable artifacts. The backend can write only `requirement.json`, `planning_artifact.json`, and `input_ir.json`; writes must be JSON objects, pass artifact-specific validation, and are recorded in `logs/runtime.json` under `workflow_console.artifact_edits`.
 
@@ -302,6 +330,9 @@ The NiceGUI UI is intentionally paged:
 
 - Runs: compact run selection, status, child runs, reviewed-part status, and
   STEP/STL availability.
+- Review Report: deterministic workflow-review status, readiness, risk,
+  confidence, summaries, and recommended next actions, plus an explicit
+  Create / Refresh action.
 - Requirement Review: read-only original prompt and available negotiation fields
   such as assumptions, missing information, clarification questions, blocked
   reason, and diagnostics, plus save-only Stage Review controls.
@@ -310,7 +341,8 @@ The NiceGUI UI is intentionally paged:
 - Part Workflow: one-stage reviewed-part action cards gated by upstream
   artifacts.
 - Artifacts: collapsed/on-demand allowlisted artifacts and model-file
-  availability.
+  availability. Human-facing artifacts are visible by default; review/debug and
+  internal artifacts require explicit toggles.
 
 The browser never becomes the source of truth. Create, stage execution, artifact edits, gate decisions, artifact reads, and downloadable discovery all round-trip through the Python backend and existing run artifacts. Editable artifacts remain limited to `requirement.json`, `planning_artifact.json`, and `input_ir.json`; the UI only enables save controls for those files and the backend remains authoritative for validation.
 
@@ -321,6 +353,7 @@ The current UI supports the first usable local workflow loop:
 - select a run and inspect status/current stage plus stage/gate history;
 - run Requirement, Planning, Part Modeling, Review, Outputs, or the full text pipeline by safe run id;
 - inspect readable artifacts;
+- inspect a human-readable workflow review report;
 - inspect a compact report/trace summary without opening raw JSON;
 - inspect existing reviewed-part E2E artifacts, including assembly-plan parts,
   candidate status, part result review status, STEP/STL checks, single-part
@@ -328,6 +361,8 @@ The current UI supports the first usable local workflow loop:
 - edit only the allowed JSON handoff artifacts;
 - record approve/reject/return/override gate decisions;
 - save a structured `stage_review.json` rework intent without rerunning stages;
+- create or refresh deterministic `workflow_review.json` and
+  `workflow_review.md` report artifacts without provider or CAD execution;
 - list STEP-first downloadables and open the secondary STL preview when `model.stl` exists;
 - use an explicit Interact/Release control before the embedded STL viewer captures pointer wheel/drag input.
 

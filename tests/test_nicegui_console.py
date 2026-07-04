@@ -15,6 +15,8 @@ from ai_native_cad.workflow_console.nicegui_app import (
     build_part_workflow_data,
     build_requirement_review_data,
     build_stage_review_data,
+    build_workflow_review_data,
+    build_artifacts_page_data,
     read_artifact_page_content,
 )
 from ai_native_cad.workflow_console.routes import dispatch_route
@@ -104,6 +106,25 @@ def _sample_run(tmp_path):
     return run_dir
 
 
+def _add_workflow_review(run_dir: Path):
+    _write_json(
+        run_dir / "workflow_review.json",
+        {
+            "schema_version": 1,
+            "overall_status": "accepted_for_preview",
+            "readiness_score": 88,
+            "confidence": {"cad_result": "high"},
+            "risk_level": "medium",
+            "summary": ["Base was selected and generated as a single part."],
+            "key_diagnostics": ["part_result.step_created"],
+            "risks": ["No geometric fit validation with lid."],
+            "recommended_next_actions": ["Review the generated STEP/STL."],
+            "scoring_explanation": ["STEP availability adds readiness."],
+        },
+    )
+    (run_dir / "workflow_review.md").write_text("# Workflow Review\n", encoding="utf-8")
+
+
 def test_nicegui_console_builds_page_data_from_fake_run_summaries(tmp_path):
     _sample_run(tmp_path)
     backend = WorkflowConsoleBackend(project_root=tmp_path)
@@ -175,6 +196,25 @@ def test_nicegui_stage_review_view_model_handles_empty_and_saved_states(tmp_path
     assert build_stage_review_data(data["selected_run"])["saved"]["user_notes_preview"] == "Treat lid as flat cover."
 
 
+def test_nicegui_workflow_review_view_model_handles_empty_and_saved_states(tmp_path):
+    run_dir = _sample_run(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    empty = build_console_page_data(backend, "nicegui_run")
+
+    assert empty["workflow_review"]["present"] is False
+    assert empty["workflow_review"]["summary_preview"] == []
+
+    _add_workflow_review(run_dir)
+    data = build_console_page_data(backend, "nicegui_run")
+    review = build_workflow_review_data(data["selected_run"])
+
+    assert review["present"] is True
+    assert review["overall_status"] == "accepted_for_preview"
+    assert review["readiness_score"] == 88
+    assert review["risk_level"] == "medium"
+    assert review["summary_preview"] == ["Base was selected and generated as a single part."]
+
+
 def test_nicegui_assembly_plan_table_data_is_sanitized(tmp_path):
     _sample_run(tmp_path)
     backend = WorkflowConsoleBackend(project_root=tmp_path)
@@ -238,14 +278,36 @@ def test_nicegui_artifact_page_uses_existing_allowlist_and_sanitization(tmp_path
     data = build_console_page_data(backend, "nicegui_run")
 
     artifact_names = {item["name"] for item in data["artifacts_page"]["artifacts"]}
+    debug_names = {item["name"] for item in build_artifacts_page_data(data["selected_run"], show_debug=True)["artifacts"]}
     content = read_artifact_page_content(backend, "nicegui_run", "agent_trace.json")
 
     assert artifact_names <= set(ARTIFACT_PAGE_ARTIFACTS) | {"planning_artifact.json", "input_ir.json"}
-    assert "agent_trace.json" in artifact_names
+    assert "agent_trace.json" not in artifact_names
+    assert "agent_trace.json" in debug_names
     assert content["content"] == {"safe": "ok"}
     assert _does_not_contain_text(content, ["SECRET_TOKEN", "raw_provider_response", str(tmp_path)])
     with pytest.raises(ValueError, match="not readable"):
         read_artifact_page_content(backend, "nicegui_run", "not_allowed.json")
+
+
+def test_nicegui_artifact_page_defaults_to_human_facing_and_filters_debug(tmp_path):
+    run_dir = _sample_run(tmp_path)
+    _add_workflow_review(run_dir)
+    _write_json(run_dir / "input_ir.json", {"kind": "internal"})
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    run = build_console_page_data(backend, "nicegui_run")["selected_run"]
+
+    default = build_artifacts_page_data(run)
+    debug = build_artifacts_page_data(run, show_debug=True)
+    internal = build_artifacts_page_data(run, show_internal=True)
+
+    assert "workflow_review.md" in {item["name"] for item in default["artifacts"]}
+    assert "workflow_review.json" in {item["name"] for item in default["artifacts"]}
+    assert "requirement.json" not in {item["name"] for item in default["artifacts"]}
+    assert "input_ir.json" not in {item["name"] for item in default["artifacts"]}
+    assert "requirement.json" in {item["name"] for item in debug["artifacts"]}
+    assert "input_ir.json" not in {item["name"] for item in debug["artifacts"]}
+    assert "input_ir.json" in {item["name"] for item in internal["artifacts"]}
 
 
 def test_nicegui_artifact_page_includes_stage_review_debug_access(tmp_path):

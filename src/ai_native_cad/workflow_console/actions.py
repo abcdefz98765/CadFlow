@@ -15,6 +15,11 @@ from ai_native_cad.pipeline.runner import (
     run_reviewed_part_single_create_pipeline,
 )
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
+from ai_native_cad.workflow_console.workflow_review import (
+    build_workflow_review,
+    compact_workflow_review_summary,
+    write_workflow_review_files,
+)
 
 ACTION_STAGE_FOLDERS = {
     "part_request": "02_part_request",
@@ -39,6 +44,7 @@ ACTION_NAMES = {
     "reviewed_part_create",
     "part_result_review",
     "save_stage_review",
+    "create_workflow_review",
 }
 
 STAGE_REVIEW_STAGES = {
@@ -200,11 +206,32 @@ class WorkflowConsoleActions:
         artifact_path = self.backend._require_child_path(run_path, "stage_review.json")
         artifact_path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         summary = _compact_stage_review_summary(artifact)
-        self._record_action(run_path, {"action": "save_stage_review", "status": review_status, "success": True})
+        self._record_action(run_path, {"action": "save_stage_review", "status": review_status, "success": True, "stage_count": 0})
         return {
             "action": "save_stage_review",
             "stage_count": 0,
             "summary": summary,
+            "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
+        }
+
+    def create_workflow_review(
+        self,
+        run_id: str,
+        *,
+        root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Create deterministic human-readable workflow review artifacts."""
+        run_path = self.backend.resolve_run(run_id, root=root)
+        metadata = self.backend.read_run_metadata(run_path)
+        review = build_workflow_review(metadata)
+        files = write_workflow_review_files(run_path, review)
+        summary = compact_workflow_review_summary(review)
+        self._record_action(run_path, {"action": "create_workflow_review", "status": summary.get("overall_status"), "success": True, "stage_count": 0})
+        return {
+            "action": "create_workflow_review",
+            "stage_count": 0,
+            "summary": summary,
+            "files": files,
             "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
         }
 
@@ -223,7 +250,7 @@ class WorkflowConsoleActions:
         self._record_action(run_path, summary)
         return {
             "action": action,
-            "stage_count": 1,
+            "stage_count": summary.get("stage_count", 1),
             "summary": summary,
             "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
         }
@@ -303,6 +330,7 @@ def _public_run_summary(metadata: dict[str, Any]) -> dict[str, Any]:
         "report_summary": _sanitize_public_value(metadata.get("report_summary")),
         "reviewed_part_summary": _sanitize_public_value(metadata.get("reviewed_part_summary")),
         "stage_review_summary": _sanitize_public_value(metadata.get("stage_review_summary")),
+        "workflow_review_summary": _sanitize_public_value(metadata.get("workflow_review_summary")),
         "artifacts": [
             {"name": item["name"]}
             for item in metadata.get("artifacts", [])

@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from ai_native_cad.workflow_console.actions import WorkflowConsoleActions
 from ai_native_cad.workflow_console.actions import STAGE_REVIEW_STATUSES, STAGE_REVIEW_STAGES, STAGE_REWORK_TARGETS
+from ai_native_cad.workflow_console.artifact_display import filter_artifacts_for_display
 from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, WorkflowConsoleBackend
 from ai_native_cad.workflow_console.routes import dispatch_route
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
@@ -23,6 +24,8 @@ DEFAULT_PORT = 8780
 ARTIFACT_PAGE_ARTIFACTS = (
     "report.md",
     "report.json",
+    "workflow_review.md",
+    "workflow_review.json",
     "requirement.json",
     "design_brief.json",
     "assembly_plan.json",
@@ -118,6 +121,7 @@ def build_selected_run_data(
         "selected_run": run,
         "requirement_review": build_requirement_review_data(backend, run_id, run, root=root),
         "assembly_plan": build_assembly_plan_data(run),
+        "workflow_review": build_workflow_review_data(run),
         "stage_review": build_stage_review_data(run),
         "part_workflow": build_part_workflow_data(run),
         "artifacts_page": build_artifacts_page_data(run),
@@ -155,6 +159,7 @@ def empty_selected_run_data() -> dict[str, Any]:
             "parts": [],
         },
         "part_workflow": {"actions": []},
+        "workflow_review": build_workflow_review_data({}),
         "stage_review": build_stage_review_data({}),
         "artifacts_page": {"artifacts": [], "downloadables": [], "model_files": []},
         "artifact_names": [],
@@ -235,6 +240,21 @@ def build_stage_review_data(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_workflow_review_data(run: dict[str, Any]) -> dict[str, Any]:
+    """Return workflow review summary for the top-level review page."""
+    summary = run.get("workflow_review_summary") if isinstance(run.get("workflow_review_summary"), dict) else {}
+    return {
+        "present": bool(summary.get("present")),
+        "overall_status": summary.get("overall_status"),
+        "readiness_score": summary.get("readiness_score"),
+        "risk_level": summary.get("risk_level"),
+        "recommended_next_action_count": summary.get("recommended_next_action_count", 0),
+        "risk_count": summary.get("risk_count", 0),
+        "summary_preview": _as_list(summary.get("summary_preview")),
+        "artifact_availability": summary.get("artifact_availability") if isinstance(summary.get("artifact_availability"), dict) else {},
+    }
+
+
 def build_part_workflow_data(run: dict[str, Any]) -> dict[str, Any]:
     """Return one-stage action cards gated by upstream artifacts."""
     artifacts = _artifact_names(run)
@@ -265,9 +285,14 @@ def build_part_workflow_data(run: dict[str, Any]) -> dict[str, Any]:
     return {"actions": cards}
 
 
-def build_artifacts_page_data(run: dict[str, Any]) -> dict[str, Any]:
+def build_artifacts_page_data(
+    run: dict[str, Any],
+    *,
+    show_debug: bool = False,
+    show_internal: bool = False,
+) -> dict[str, Any]:
     """Return allowlisted artifact and model availability data."""
-    artifacts = [
+    artifact_candidates = [
         {
             "name": item["name"],
             "size_bytes": item.get("size_bytes"),
@@ -280,6 +305,7 @@ def build_artifacts_page_data(run: dict[str, Any]) -> dict[str, Any]:
         and item.get("name") in READABLE_ARTIFACTS
         and (item.get("name") in ARTIFACT_PAGE_ARTIFACTS or item.get("name") in {"planning_artifact.json", "input_ir.json"})
     ]
+    artifacts = filter_artifacts_for_display(artifact_candidates, show_debug=show_debug, show_internal=show_internal)
     downloadables = [
         {"name": item["name"], "available": True}
         for item in _as_list(run.get("downloadables"))
@@ -290,7 +316,13 @@ def build_artifacts_page_data(run: dict[str, Any]) -> dict[str, Any]:
         {"name": name, "available": name in present_downloadables}
         for name in ("model.step", "model.stl")
     ]
-    return {"artifacts": artifacts, "downloadables": downloadables, "model_files": model_files}
+    return {
+        "artifacts": artifacts,
+        "downloadables": downloadables,
+        "model_files": model_files,
+        "show_debug": show_debug,
+        "show_internal": show_internal,
+    }
 
 
 def read_artifact_page_content(
@@ -338,6 +370,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
             tabs = ui.tabs().classes("w-full")
             with tabs:
                 ui.tab("Runs")
+                ui.tab("Review Report")
                 ui.tab("Requirement Review")
                 ui.tab("Assembly Plan")
                 ui.tab("Part Workflow")
@@ -351,6 +384,8 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
                 with panels:
                     with ui.tab_panel("Runs"):
                         _render_runs(ui, data, lambda run_id: select_run(run_id))
+                    with ui.tab_panel("Review Report"):
+                        _render_workflow_review(ui, data, actions, state, refresh)
                     with ui.tab_panel("Requirement Review"):
                         _render_requirement_review(ui, data, actions, state, refresh)
                     with ui.tab_panel("Assembly Plan"):
@@ -413,6 +448,36 @@ def _render_runs(ui: Any, data: dict[str, Any], on_select: Callable[[str], None]
         ui.badge(f"Children: {len(selected_run.get('child_runs') or [])}")
         ui.badge(f"Bridge: {_bridge_status(selected_run)}")
         ui.badge(f"Result review: {_part_result_review_status(selected_run)}")
+
+
+def _render_workflow_review(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    run_id = data.get("selected_run_id")
+    review = data.get("workflow_review") or {}
+    last = state.get("workflow_review_result")
+    with ui.card().classes("w-full"):
+        ui.label("Workflow Review").classes("text-xl font-semibold")
+        if review.get("present"):
+            _key_values(ui, {
+                "Overall status": review.get("overall_status") or "Empty",
+                "Readiness score": review.get("readiness_score"),
+                "Risk level": review.get("risk_level") or "Empty",
+                "Risks": review.get("risk_count", 0),
+                "Recommended actions": review.get("recommended_next_action_count", 0),
+            })
+            _list_block(ui, "Summary", review.get("summary_preview"))
+        else:
+            ui.label("No workflow review has been generated for this run.").classes("text-sm text-gray-500")
+        if last is not None:
+            ui.markdown(f"```json\n{json.dumps(last, indent=2, sort_keys=True)}\n```").classes("w-full")
+        button = ui.button("Create / Refresh Workflow Review", icon="summarize", on_click=lambda: _create_workflow_review_ui(actions, run_id, state, refresh))
+        if not run_id:
+            button.disable()
 
 
 def _render_requirement_review(
@@ -568,10 +633,36 @@ def _render_artifacts(ui: Any, data: dict[str, Any], backend: WorkflowConsoleBac
     if not run_id:
         ui.label("Select a run first.").classes("text-gray-600")
         return
-    for model in (data.get("artifacts_page") or {}).get("model_files", []):
+    artifact_options = {"show_debug": False, "show_internal": False}
+    with ui.row().classes("gap-4"):
+        debug_toggle = ui.checkbox("Show debug artifacts", value=False)
+        internal_toggle = ui.checkbox("Show internal artifacts", value=False)
+    current_page = build_artifacts_page_data(data.get("selected_run") or {}, **artifact_options)
+
+    def refresh_artifacts() -> None:
+        nonlocal current_page
+        current_page = build_artifacts_page_data(
+            data.get("selected_run") or {},
+            show_debug=bool(debug_toggle.value),
+            show_internal=bool(internal_toggle.value),
+        )
+        artifact_container.clear()
+        with artifact_container:
+            _render_artifact_list(ui, current_page, backend, run_id)
+
+    debug_toggle.on_value_change(lambda _: refresh_artifacts())
+    internal_toggle.on_value_change(lambda _: refresh_artifacts())
+    artifact_container = ui.column().classes("w-full")
+    with artifact_container:
+        _render_artifact_list(ui, current_page, backend, run_id)
+
+
+def _render_artifact_list(ui: Any, artifacts_page: dict[str, Any], backend: WorkflowConsoleBackend, run_id: str) -> None:
+    for model in artifacts_page.get("model_files", []):
         ui.badge(f"{model['name']}: {'available' if model['available'] else 'missing'}")
-    for artifact in (data.get("artifacts_page") or {}).get("artifacts", []):
+    for artifact in artifacts_page.get("artifacts", []):
         with ui.expansion(artifact["name"]).classes("w-full"):
+            ui.badge(artifact.get("display_category", "unknown"))
             try:
                 content = read_artifact_page_content(backend, run_id, artifact["name"])
                 ui.markdown(f"```json\n{json.dumps(content.get('content'), indent=2, sort_keys=True)}\n```").classes("w-full mono")
@@ -621,6 +712,23 @@ def _save_stage_review_ui(
         )
     except Exception as exc:
         state[result_key] = {"ok": False, "error": str(exc)}
+    refresh()
+
+
+def _create_workflow_review_ui(
+    actions: WorkflowConsoleActions,
+    run_id: str | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    if run_id is None:
+        state["workflow_review_result"] = {"ok": False, "error": "Select a run first."}
+        refresh()
+        return
+    try:
+        state["workflow_review_result"] = actions.create_workflow_review(run_id)
+    except Exception as exc:
+        state["workflow_review_result"] = {"ok": False, "error": str(exc)}
     refresh()
 
 

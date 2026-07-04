@@ -250,6 +250,17 @@ parts, generate batches, or generate assemblies. Rework execution and
 one-part-at-a-time loop queues are future workflow capabilities, not part of
 this artifact MVP.
 
+`workflow_review.json` and `workflow_review.md` are deterministic local review
+reports for fast human assessment. They summarize existing workflow artifacts
+and diagnostics into an overall status, readiness score, confidence bands, risk
+level, summary bullets, key diagnostics, risks, recommended next actions, and a
+scoring explanation. The score and confidence values are local heuristics over
+artifact availability and review diagnostics; they are not LLM self-evaluation
+and not a provider certification. Creating a workflow review reads only known
+run summaries and allowlisted artifacts, writes only the two workflow review
+artifacts under the selected run, and does not call providers, run CAD, modify
+CAD outputs, queue loops, generate batches, or generate assemblies.
+
 ### Text Pipeline Fallback
 
 `examples/prompt_pipeline/` is a debug and exploration path from natural

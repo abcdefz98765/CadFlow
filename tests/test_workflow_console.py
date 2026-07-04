@@ -23,6 +23,11 @@ from ai_native_cad.workflow_console import (
     success_response,
 )
 from ai_native_cad.workflow_console.server import resolve_downloadable
+from ai_native_cad.workflow_console.artifact_display import (
+    artifact_display_category,
+    artifact_visible_by_default,
+    filter_artifacts_for_display,
+)
 
 
 def _does_not_contain_keys(value, keys):
@@ -118,6 +123,7 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         "WorkflowConsoleActions.create_reviewed_part",
         "WorkflowConsoleActions.review_part_result",
         "WorkflowConsoleActions.save_stage_review",
+        "WorkflowConsoleActions.create_workflow_review",
     }
 
     assert {spec.backend_operation for spec in ROUTE_SPECS} == expected_operations
@@ -134,6 +140,7 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
             "WorkflowConsoleActions.create_reviewed_part",
             "WorkflowConsoleActions.review_part_result",
             "WorkflowConsoleActions.save_stage_review",
+            "WorkflowConsoleActions.create_workflow_review",
         }
         for spec in ROUTE_SPECS
     )
@@ -192,6 +199,7 @@ def test_workflow_console_route_contract_includes_edit_and_gate_routes():
     assert ROUTE_SPECS_BY_NAME["action_part_request"].path == "/api/actions/part-request"
     assert ROUTE_SPECS_BY_NAME["action_part_result_review"].path == "/api/actions/part-result-review"
     assert ROUTE_SPECS_BY_NAME["action_save_stage_review"].path == "/api/actions/stage-review"
+    assert ROUTE_SPECS_BY_NAME["action_create_workflow_review"].path == "/api/actions/workflow-review"
 
 
 def test_workflow_console_internal_error_shape_does_not_leak_local_paths():
@@ -364,11 +372,40 @@ def test_workflow_console_staged_action_routes_do_not_include_batch_or_assembly_
         "action_reviewed_part_create",
         "action_part_result_review",
         "action_save_stage_review",
+        "action_create_workflow_review",
     }
     assert all("batch" not in spec.path for spec in action_specs)
     assert all("assembly-generation" not in spec.path for spec in action_specs)
     assert "batch_generation" not in ACTION_NAMES
     assert "assembly_generation" not in ACTION_NAMES
+
+
+def test_workflow_console_artifact_display_policy_classifies_known_artifacts():
+    assert artifact_display_category("workflow_review.md") == "human_facing"
+    assert artifact_display_category("workflow_review.json") == "human_facing"
+    assert artifact_display_category("stage_review.json") == "human_facing"
+    assert artifact_display_category("requirement.json") == "review_debug"
+    assert artifact_display_category("agent_trace.json") == "review_debug"
+    assert artifact_display_category("input_ir.json") == "internal_debug"
+    assert artifact_visible_by_default("workflow_review.md") is True
+    assert artifact_visible_by_default("requirement.json") is False
+
+
+def test_workflow_console_artifact_display_policy_filters_by_explicit_mode():
+    artifacts = [
+        {"name": "workflow_review.md"},
+        {"name": "requirement.json"},
+        {"name": "input_ir.json"},
+    ]
+
+    default = filter_artifacts_for_display(artifacts)
+    debug = filter_artifacts_for_display(artifacts, show_debug=True)
+    internal = filter_artifacts_for_display(artifacts, show_internal=True)
+
+    assert [item["name"] for item in default] == ["workflow_review.md"]
+    assert [item["name"] for item in debug] == ["workflow_review.md", "requirement.json"]
+    assert [item["name"] for item in internal] == ["workflow_review.md", "requirement.json", "input_ir.json"]
+    assert all(".." not in item["name"] for item in internal)
 
 
 def test_workflow_console_stage_review_can_be_saved_under_selected_run(tmp_path):
@@ -522,6 +559,159 @@ def test_workflow_console_stage_review_makes_no_provider_or_cad_pipeline_call(tm
 
     assert response["ok"] is True
     assert response["data"]["summary"]["stage"] == "requirement"
+
+
+def _write_reviewed_part_run(run_dir: Path, *, accepted: bool = True) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "model.step").write_text("STEP\n", encoding="utf-8")
+    if accepted:
+        (run_dir / "model.stl").write_text("STL\n", encoding="utf-8")
+    (run_dir / "assembly_plan.json").write_text(
+        json.dumps({
+            "artifact_type": "assembly_plan",
+            "scope": "multi_part",
+            "status": "blocked_before_part_generation" if accepted else "blocked_before_part_generation",
+            "parts": [
+                {
+                    "part_id": "base",
+                    "role": "base",
+                    "generation_strategy": "future_part_pipeline",
+                    "part_status": "candidate_for_single_part_generation",
+                    "supported_candidate": True,
+                },
+                {
+                    "part_id": "lid",
+                    "role": "cover",
+                    "generation_strategy": "future_part_pipeline",
+                    "part_status": "blocked" if not accepted else "candidate_for_single_part_generation",
+                    "supported_candidate": accepted,
+                    "blocked_reasons": [{"code": "unsupported_lid_cover"}] if not accepted else [],
+                },
+                {
+                    "part_id": "screws",
+                    "role": "fasteners",
+                    "generation_strategy": "reference_only",
+                    "part_status": "reference_only",
+                    "supported_candidate": False,
+                },
+            ],
+            "interfaces": [{"from": "base", "to": "lid", "kind": "screw_fastened"}],
+            "diagnostic_codes": ["assembly.plan_created"],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "part_result_review.json").write_text(
+        json.dumps({
+            "artifact_type": "part_result_review",
+            "status": "accepted_for_preview" if accepted else "blocked_missing_step",
+            "part_id": "base" if accepted else "lid",
+            "checks": {
+                "step_created": accepted,
+                "stl_created": accepted,
+                "single_part_only": True,
+                "lineage_preserved": True,
+                "interface_constraints_preserved_in_metadata": True,
+            },
+            "diagnostic_codes": (
+                ["part_result.step_created", "part_result.single_part_scope_preserved"]
+                if accepted
+                else ["part_result.blocked_missing_step", "part_request.unsupported_part_family"]
+            ),
+        }) + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_workflow_console_workflow_review_generation_is_deterministic_from_fake_artifacts(tmp_path):
+    run_dir = tmp_path / "outputs" / "accepted_review"
+    _write_reviewed_part_run(run_dir, accepted=True)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    first = dispatch_route(backend, "action_create_workflow_review", body={"run_id": "accepted_review"})
+    first_json = json.loads((run_dir / "workflow_review.json").read_text(encoding="utf-8"))
+    second = dispatch_route(backend, "action_create_workflow_review", body={"run_id": "accepted_review"})
+    second_json = json.loads((run_dir / "workflow_review.json").read_text(encoding="utf-8"))
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert first_json == second_json
+    assert (run_dir / "workflow_review.md").exists()
+    assert first_json["overall_status"] == "accepted_for_preview"
+    assert first_json["readiness_score"] >= 80
+    assert "No geometric fit validation with related assembly parts." in first_json["risks"]
+    assert _does_not_contain_absolute_paths(first)
+
+
+def test_workflow_console_workflow_review_blocked_run_is_low_readiness(tmp_path):
+    run_dir = tmp_path / "outputs" / "blocked_lid"
+    _write_reviewed_part_run(run_dir, accepted=False)
+    (run_dir / "model.step").unlink()
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    response = dispatch_route(backend, "action_create_workflow_review", body={"run_id": "blocked_lid"})
+    review = json.loads((run_dir / "workflow_review.json").read_text(encoding="utf-8"))
+
+    assert response["ok"] is True
+    assert review["overall_status"] == "blocked"
+    assert review["readiness_score"] < 40
+    assert review["risk_level"] == "high"
+    assert "part_request.unsupported_part_family" in review["key_diagnostics"]
+    assert any("Primary STEP output is missing" in risk for risk in review["risks"])
+
+
+def test_workflow_console_workflow_review_rejects_invalid_run_ids_and_traversal(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "safe_workflow_review"}, body={"prompt": "Make a bracket."})
+
+    missing = dispatch_route(backend, "action_create_workflow_review", body={"run_id": "missing_review"})
+    traversal = dispatch_route(backend, "action_create_workflow_review", body={"run_id": "../safe_workflow_review"})
+
+    assert missing["ok"] is False
+    assert missing["status_code"] == 404
+    assert traversal["ok"] is False
+    assert traversal["status_code"] == 400
+
+
+def test_workflow_console_workflow_review_makes_no_provider_or_cad_pipeline_call(tmp_path, monkeypatch):
+    run_dir = tmp_path / "outputs" / "local_report"
+    _write_reviewed_part_run(run_dir, accepted=True)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("workflow review must not call provider or CAD pipeline")
+
+    backend.stage_runner.agent_adapter.parse_requirement = fail_if_called
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_assembly_part_request_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_part_request_review_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_part_result_review_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_reviewed_part_handoff_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_reviewed_part_single_create_pipeline", fail_if_called)
+
+    response = dispatch_route(backend, "action_create_workflow_review", body={"run_id": "local_report"})
+
+    assert response["ok"] is True
+    assert response["data"]["summary"]["overall_status"] == "accepted_for_preview"
+
+
+def test_workflow_console_workflow_review_summary_is_sanitized(tmp_path):
+    run_dir = tmp_path / "outputs" / "review_privacy"
+    _write_reviewed_part_run(run_dir, accepted=True)
+    (run_dir / "stage_review.json").write_text(
+        json.dumps({"schema_version": 1, "stage": "requirement", "review_status": "approved", "user_notes": "api_key=SECRET"}) + "\n",
+        encoding="utf-8",
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    dispatch_route(backend, "action_create_workflow_review", body={"run_id": "review_privacy"})
+    metadata = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "review_privacy"})["data"]
+    serialized = json.dumps(metadata, sort_keys=True)
+
+    assert metadata["workflow_review_summary"]["present"] is True
+    assert metadata["workflow_review_summary"]["overall_status"] == "accepted_for_preview"
+    assert metadata["workflow_review_summary"]["recommended_next_action_count"] >= 1
+    assert "workflow_review.json" in {item["name"] for item in metadata["artifacts"]}
+    assert "SECRET" not in serialized
+    assert str(tmp_path) not in serialized
 
 
 def test_workflow_console_run_summary_includes_negotiation_placeholders(tmp_path):
