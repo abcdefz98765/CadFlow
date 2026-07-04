@@ -238,6 +238,18 @@ Console is the intended future review and approval surface for these staged
 artifacts, but it must not imply full assembly CAD support or replace the
 artifact contracts above.
 
+`stage_review.json` records save-only user review and rework intent for the
+current Workflow Console. It is local, deterministic, and written under the
+selected run directory only. The artifact uses explicit vocabularies for
+`stage`, `review_status`, and `target_rework_stage`; captures sanitized
+`user_notes` and a bounded list of `requested_changes`; and includes diagnostic
+codes such as `stage_review.user_approved`,
+`stage_review.user_requested_rework`, or `stage_review.user_blocked`. Saving a
+stage review does not call providers, rerun stages, write CAD artifacts, enqueue
+parts, generate batches, or generate assemblies. Rework execution and
+one-part-at-a-time loop queues are future workflow capabilities, not part of
+this artifact MVP.
+
 ### Text Pipeline Fallback
 
 `examples/prompt_pipeline/` is a debug and exploration path from natural

@@ -12,6 +12,7 @@ import json
 from typing import Any, Callable
 
 from ai_native_cad.workflow_console.actions import WorkflowConsoleActions
+from ai_native_cad.workflow_console.actions import STAGE_REVIEW_STATUSES, STAGE_REVIEW_STAGES, STAGE_REWORK_TARGETS
 from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, WorkflowConsoleBackend
 from ai_native_cad.workflow_console.routes import dispatch_route
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
@@ -30,6 +31,7 @@ ARTIFACT_PAGE_ARTIFACTS = (
     "reviewed_part_handoff.json",
     "part_execution_request.json",
     "part_result_review.json",
+    "stage_review.json",
     "lineage.json",
     "agent_trace.json",
 )
@@ -116,6 +118,7 @@ def build_selected_run_data(
         "selected_run": run,
         "requirement_review": build_requirement_review_data(backend, run_id, run, root=root),
         "assembly_plan": build_assembly_plan_data(run),
+        "stage_review": build_stage_review_data(run),
         "part_workflow": build_part_workflow_data(run),
         "artifacts_page": build_artifacts_page_data(run),
         "artifact_names": sorted(artifacts),
@@ -152,6 +155,7 @@ def empty_selected_run_data() -> dict[str, Any]:
             "parts": [],
         },
         "part_workflow": {"actions": []},
+        "stage_review": build_stage_review_data({}),
         "artifacts_page": {"artifacts": [], "downloadables": [], "model_files": []},
         "artifact_names": [],
         "error": None,
@@ -217,6 +221,17 @@ def build_assembly_plan_data(run: dict[str, Any]) -> dict[str, Any]:
         "interface_count": assembly.get("interface_count") if isinstance(assembly.get("interface_count"), int) else 0,
         "blocked_reasons": _as_list(assembly.get("blocked_reason_codes")),
         "parts": parts,
+    }
+
+
+def build_stage_review_data(run: dict[str, Any]) -> dict[str, Any]:
+    """Return saved stage-review state plus explicit selector options."""
+    summary = run.get("stage_review_summary") if isinstance(run.get("stage_review_summary"), dict) else {}
+    return {
+        "saved": summary if summary.get("present") else None,
+        "stage_options": sorted(STAGE_REVIEW_STAGES),
+        "review_status_options": sorted(STAGE_REVIEW_STATUSES),
+        "target_rework_stage_options": sorted(STAGE_REWORK_TARGETS),
     }
 
 
@@ -337,9 +352,9 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
                     with ui.tab_panel("Runs"):
                         _render_runs(ui, data, lambda run_id: select_run(run_id))
                     with ui.tab_panel("Requirement Review"):
-                        _render_requirement_review(ui, data["requirement_review"])
+                        _render_requirement_review(ui, data, actions, state, refresh)
                     with ui.tab_panel("Assembly Plan"):
-                        _render_assembly_plan(ui, data["assembly_plan"])
+                        _render_assembly_plan(ui, data, actions, state, refresh)
                     with ui.tab_panel("Part Workflow"):
                         _render_part_workflow(ui, data, actions, state, refresh)
                     with ui.tab_panel("Artifacts"):
@@ -400,34 +415,49 @@ def _render_runs(ui: Any, data: dict[str, Any], on_select: Callable[[str], None]
         ui.badge(f"Result review: {_part_result_review_status(selected_run)}")
 
 
-def _render_requirement_review(ui: Any, data: dict[str, Any]) -> None:
+def _render_requirement_review(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    review_data = data["requirement_review"]
     _key_values(ui, {
-        "Original prompt": data.get("original_prompt") or "Empty",
-        "Detected scope": data.get("detected_scope") or "Empty",
-        "Product family": data.get("product_family") or "Empty",
-        "Part family": data.get("part_family") or "Empty",
-        "Blocked reason": data.get("blocked_reason") or "Empty",
+        "Original prompt": review_data.get("original_prompt") or "Empty",
+        "Detected scope": review_data.get("detected_scope") or "Empty",
+        "Product family": review_data.get("product_family") or "Empty",
+        "Part family": review_data.get("part_family") or "Empty",
+        "Blocked reason": review_data.get("blocked_reason") or "Empty",
     })
-    _list_block(ui, "Assumptions", data.get("assumptions"))
-    _list_block(ui, "Missing information", data.get("missing_information"))
-    _list_block(ui, "Clarification questions", data.get("clarification_questions"))
-    _list_block(ui, "Diagnostics", data.get("diagnostics"))
-    ui.textarea("User notes / future clarification draft").props("outlined autogrow").classes("w-full")
+    _list_block(ui, "Assumptions", review_data.get("assumptions"))
+    _list_block(ui, "Missing information", review_data.get("missing_information"))
+    _list_block(ui, "Clarification questions", review_data.get("clarification_questions"))
+    _list_block(ui, "Diagnostics", review_data.get("diagnostics"))
+    _render_stage_review_form(ui, data, actions, state, refresh, stage="requirement")
 
 
-def _render_assembly_plan(ui: Any, data: dict[str, Any]) -> None:
-    if not data.get("present"):
+def _render_assembly_plan(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    assembly = data["assembly_plan"]
+    if not assembly.get("present"):
         ui.label("No assembly_plan.json found for this run.").classes("text-gray-600")
+        _render_stage_review_form(ui, data, actions, state, refresh, stage="assembly_plan")
         return
     _key_values(ui, {
-        "Scope": data.get("scope") or "Empty",
-        "Status": data.get("status") or "Empty",
-        "Part count": data.get("part_count"),
-        "Candidate parts": ", ".join(data.get("candidate_part_ids") or []) or "Empty",
-        "Reference-only parts": ", ".join(data.get("reference_only_part_ids") or []) or "Empty",
-        "Blocked parts": ", ".join(data.get("blocked_part_ids") or []) or "Empty",
-        "Interfaces": data.get("interface_count"),
-        "Blocked reasons": ", ".join(data.get("blocked_reasons") or []) or "Empty",
+        "Scope": assembly.get("scope") or "Empty",
+        "Status": assembly.get("status") or "Empty",
+        "Part count": assembly.get("part_count"),
+        "Candidate parts": ", ".join(assembly.get("candidate_part_ids") or []) or "Empty",
+        "Reference-only parts": ", ".join(assembly.get("reference_only_part_ids") or []) or "Empty",
+        "Blocked parts": ", ".join(assembly.get("blocked_part_ids") or []) or "Empty",
+        "Interfaces": assembly.get("interface_count"),
+        "Blocked reasons": ", ".join(assembly.get("blocked_reasons") or []) or "Empty",
     })
     columns = [
         {"name": key, "label": label, "field": key, "align": "left"}
@@ -440,7 +470,68 @@ def _render_assembly_plan(ui: Any, data: dict[str, Any]) -> None:
             ("reason", "reason"),
         )
     ]
-    ui.table(columns=columns, rows=data.get("parts") or [], row_key="part_id").classes("w-full")
+    ui.table(columns=columns, rows=assembly.get("parts") or [], row_key="part_id").classes("w-full")
+    _render_stage_review_form(ui, data, actions, state, refresh, stage="assembly_plan")
+
+
+def _render_stage_review_form(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    *,
+    stage: str,
+) -> None:
+    run_id = data.get("selected_run_id")
+    review_data = data.get("stage_review") or {}
+    saved = review_data.get("saved") if isinstance(review_data.get("saved"), dict) else None
+    with ui.card().classes("w-full"):
+        ui.label("Stage Review").classes("text-lg font-medium")
+        if saved is not None:
+            _key_values(ui, {
+                "Saved stage": saved.get("stage") or "Empty",
+                "Saved status": saved.get("review_status") or "Empty",
+                "Target rework stage": saved.get("target_rework_stage") or "Empty",
+                "Requested changes": saved.get("requested_changes_count", 0),
+                "Notes": saved.get("user_notes_preview") or "Empty",
+            })
+        else:
+            ui.label("No stage review saved for this run.").classes("text-sm text-gray-500")
+
+        status = ui.select(
+            options=review_data.get("review_status_options") or ["approved", "needs_revision", "blocked"],
+            value="approved",
+            label="Review status",
+        ).classes("w-full")
+        target = ui.select(
+            options=review_data.get("target_rework_stage_options") or ["requirement", "assembly_plan"],
+            value="assembly_plan" if stage == "requirement" else "requirement",
+            label="Target rework stage",
+        ).classes("w-full")
+        notes = ui.textarea("User notes").props("outlined autogrow").classes("w-full")
+        changes = ui.textarea("Requested changes").props("outlined autogrow").classes("w-full")
+        result_key = f"stage_review_result_{stage}"
+        if state.get(result_key) is not None:
+            ui.markdown(f"```json\n{json.dumps(state[result_key], indent=2, sort_keys=True)}\n```").classes("w-full")
+        button = ui.button(
+            "Save review",
+            icon="save",
+            on_click=lambda: _save_stage_review_ui(
+                actions,
+                run_id,
+                stage,
+                status.value,
+                target.value,
+                notes.value,
+                changes.value,
+                state,
+                result_key,
+                refresh,
+            ),
+        )
+        if not run_id:
+            button.disable()
 
 
 def _render_part_workflow(
@@ -500,6 +591,36 @@ def _run_ui_action(
         state["last_action_result"] = method(run_id)
     except Exception as exc:
         state["last_action_result"] = {"ok": False, "error": str(exc)}
+    refresh()
+
+
+def _save_stage_review_ui(
+    actions: WorkflowConsoleActions,
+    run_id: str | None,
+    stage: str,
+    review_status: str,
+    target_rework_stage: str | None,
+    user_notes: str | None,
+    requested_changes: str | None,
+    state: dict[str, Any],
+    result_key: str,
+    refresh: Callable[[], None],
+) -> None:
+    if run_id is None:
+        state[result_key] = {"ok": False, "error": "Select a run first."}
+        refresh()
+        return
+    try:
+        state[result_key] = actions.save_stage_review(
+            run_id,
+            stage=stage,
+            review_status=review_status,
+            target_rework_stage=target_rework_stage if review_status == "needs_revision" else None,
+            user_notes=user_notes,
+            requested_changes=requested_changes,
+        )
+    except Exception as exc:
+        state[result_key] = {"ok": False, "error": str(exc)}
     refresh()
 
 

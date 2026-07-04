@@ -14,8 +14,10 @@ from ai_native_cad.workflow_console.nicegui_app import (
     build_console_page_data,
     build_part_workflow_data,
     build_requirement_review_data,
+    build_stage_review_data,
     read_artifact_page_content,
 )
+from ai_native_cad.workflow_console.routes import dispatch_route
 
 
 def _write_json(path: Path, value):
@@ -141,6 +143,38 @@ def test_nicegui_requirement_review_handles_missing_fields_gracefully(tmp_path):
     assert review["blocked_reason"] is None
 
 
+def test_nicegui_stage_review_view_model_handles_empty_and_saved_states(tmp_path):
+    _sample_run(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    empty = build_console_page_data(backend, "nicegui_run")
+
+    assert empty["stage_review"]["saved"] is None
+    assert "requirement" in empty["stage_review"]["stage_options"]
+    assert "needs_revision" in empty["stage_review"]["review_status_options"]
+    assert "assembly_plan" in empty["stage_review"]["target_rework_stage_options"]
+
+    saved = dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={
+            "run_id": "nicegui_run",
+            "stage": "assembly_plan",
+            "review_status": "needs_revision",
+            "target_rework_stage": "requirement",
+            "user_notes": "Treat lid as flat cover.",
+            "requested_changes": ["Keep screws reference_only"],
+        },
+    )
+    data = build_console_page_data(backend, "nicegui_run")
+
+    assert saved["ok"] is True
+    assert data["stage_review"]["saved"]["stage"] == "assembly_plan"
+    assert data["stage_review"]["saved"]["review_status"] == "needs_revision"
+    assert data["stage_review"]["saved"]["target_rework_stage"] == "requirement"
+    assert data["stage_review"]["saved"]["requested_changes_count"] == 1
+    assert build_stage_review_data(data["selected_run"])["saved"]["user_notes_preview"] == "Treat lid as flat cover."
+
+
 def test_nicegui_assembly_plan_table_data_is_sanitized(tmp_path):
     _sample_run(tmp_path)
     backend = WorkflowConsoleBackend(project_root=tmp_path)
@@ -212,6 +246,24 @@ def test_nicegui_artifact_page_uses_existing_allowlist_and_sanitization(tmp_path
     assert _does_not_contain_text(content, ["SECRET_TOKEN", "raw_provider_response", str(tmp_path)])
     with pytest.raises(ValueError, match="not readable"):
         read_artifact_page_content(backend, "nicegui_run", "not_allowed.json")
+
+
+def test_nicegui_artifact_page_includes_stage_review_debug_access(tmp_path):
+    _sample_run(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={"run_id": "nicegui_run", "stage": "requirement", "review_status": "approved"},
+    )
+
+    data = build_console_page_data(backend, "nicegui_run")
+    artifact_names = {item["name"] for item in data["artifacts_page"]["artifacts"]}
+    content = read_artifact_page_content(backend, "nicegui_run", "stage_review.json")
+
+    assert "stage_review.json" in artifact_names
+    assert content["content"]["stage"] == "requirement"
+    assert content["content"]["review_status"] == "approved"
 
 
 def test_nicegui_defaults_are_local_and_optional_import_can_be_skipped():

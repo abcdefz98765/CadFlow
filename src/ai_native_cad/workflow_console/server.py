@@ -104,6 +104,7 @@ def make_handler(
                 "/api/actions/reviewed-handoff": "action_reviewed_handoff",
                 "/api/actions/reviewed-part-create": "action_reviewed_part_create",
                 "/api/actions/part-result-review": "action_part_result_review",
+                "/api/actions/stage-review": "action_save_stage_review",
             }.get(path)
             if route_name is None:
                 self._send_json(error_response(FileNotFoundError("workflow console API action not found")))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -37,7 +38,33 @@ ACTION_NAMES = {
     "reviewed_handoff",
     "reviewed_part_create",
     "part_result_review",
+    "save_stage_review",
 }
+
+STAGE_REVIEW_STAGES = {
+    "requirement",
+    "design_brief",
+    "assembly_plan",
+    "candidate_parts",
+    "part_request",
+    "part_review",
+    "handoff",
+    "single_part_result",
+}
+STAGE_REVIEW_STATUSES = {"approved", "needs_revision", "blocked"}
+STAGE_REWORK_TARGETS = {
+    "requirement",
+    "design_brief",
+    "assembly_plan",
+    "candidate_parts",
+    "part_request",
+    "part_review",
+    "handoff",
+    "single_part_result",
+}
+STAGE_REVIEW_NOTE_LIMIT = 1200
+STAGE_REVIEW_CHANGE_LIMIT = 12
+STAGE_REVIEW_CHANGE_TEXT_LIMIT = 240
 
 BLOCKED_PUBLIC_KEYS = {
     "path",
@@ -150,6 +177,37 @@ class WorkflowConsoleActions:
             expected_stl=expected_stl,
         )
 
+    def save_stage_review(
+        self,
+        run_id: str,
+        *,
+        stage: str,
+        review_status: str,
+        user_notes: str | None = None,
+        target_rework_stage: str | None = None,
+        requested_changes: list[str] | str | None = None,
+        root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Save one deterministic local stage review without rerunning workflow stages."""
+        run_path = self.backend.resolve_run(run_id, root=root)
+        artifact = _build_stage_review_artifact(
+            stage=stage,
+            review_status=review_status,
+            user_notes=user_notes,
+            target_rework_stage=target_rework_stage,
+            requested_changes=requested_changes,
+        )
+        artifact_path = self.backend._require_child_path(run_path, "stage_review.json")
+        artifact_path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        summary = _compact_stage_review_summary(artifact)
+        self._record_action(run_path, {"action": "save_stage_review", "status": review_status, "success": True})
+        return {
+            "action": "save_stage_review",
+            "stage_count": 0,
+            "summary": summary,
+            "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
+        }
+
     def _run_action(
         self,
         run_path: Path,
@@ -244,6 +302,7 @@ def _public_run_summary(metadata: dict[str, Any]) -> dict[str, Any]:
         "status": _sanitize_public_value(metadata.get("status")),
         "report_summary": _sanitize_public_value(metadata.get("report_summary")),
         "reviewed_part_summary": _sanitize_public_value(metadata.get("reviewed_part_summary")),
+        "stage_review_summary": _sanitize_public_value(metadata.get("stage_review_summary")),
         "artifacts": [
             {"name": item["name"]}
             for item in metadata.get("artifacts", [])
@@ -255,6 +314,104 @@ def _public_run_summary(metadata: dict[str, Any]) -> dict[str, Any]:
             if isinstance(item, dict) and isinstance(item.get("name"), str)
         ],
     }
+
+
+def _build_stage_review_artifact(
+    *,
+    stage: str,
+    review_status: str,
+    user_notes: str | None,
+    target_rework_stage: str | None,
+    requested_changes: list[str] | str | None,
+) -> dict[str, Any]:
+    if stage not in STAGE_REVIEW_STAGES:
+        raise ValueError(f"unsupported workflow console stage review stage: {stage}")
+    if review_status not in STAGE_REVIEW_STATUSES:
+        raise ValueError(f"unsupported workflow console stage review status: {review_status}")
+    if target_rework_stage is not None and target_rework_stage not in STAGE_REWORK_TARGETS:
+        raise ValueError(f"unsupported workflow console rework target stage: {target_rework_stage}")
+    if review_status == "needs_revision" and target_rework_stage is None:
+        raise ValueError("workflow console stage review target_rework_stage is required for needs_revision")
+    if review_status != "needs_revision":
+        target_rework_stage = None
+
+    changes = _sanitize_requested_changes(requested_changes)
+    artifact = {
+        "schema_version": 1,
+        "stage": stage,
+        "review_status": review_status,
+        "user_notes": _sanitize_note(user_notes),
+        "target_rework_stage": target_rework_stage,
+        "requested_changes": changes,
+        "created_by": "user",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "diagnostic_codes": [_stage_review_diagnostic_code(review_status)],
+    }
+    return {key: value for key, value in artifact.items() if value not in (None, [], "")}
+
+
+def _compact_stage_review_summary(artifact: dict[str, Any] | None) -> dict[str, Any]:
+    artifact = artifact or {}
+    changes = artifact.get("requested_changes") if isinstance(artifact.get("requested_changes"), list) else []
+    return {
+        "present": bool(artifact),
+        "schema_version": artifact.get("schema_version") if isinstance(artifact.get("schema_version"), int) else None,
+        "stage": _safe_text(artifact.get("stage")),
+        "review_status": _safe_text(artifact.get("review_status")),
+        "target_rework_stage": _safe_text(artifact.get("target_rework_stage")),
+        "requested_changes_count": len(changes),
+        "user_notes_preview": _safe_text(artifact.get("user_notes")),
+        "diagnostic_codes": [
+            code
+            for code in (_safe_text(item) for item in artifact.get("diagnostic_codes", []))
+            if code is not None
+        ][:20],
+    }
+
+
+def _sanitize_note(value: str | None) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError("workflow console stage review notes must be text")
+    return _safe_review_text(value.replace("\r\n", "\n").replace("\r", "\n"), STAGE_REVIEW_NOTE_LIMIT)
+
+
+def _sanitize_requested_changes(value: list[str] | str | None) -> list[str]:
+    if value is None:
+        return []
+    raw_items = value.splitlines() if isinstance(value, str) else value
+    if not isinstance(raw_items, list):
+        raise ValueError("workflow console stage review requested_changes must be a list or newline text")
+    changes = []
+    for item in raw_items:
+        if not isinstance(item, str):
+            raise ValueError("workflow console stage review requested_changes entries must be text")
+        safe = _safe_review_text(item.strip(), STAGE_REVIEW_CHANGE_TEXT_LIMIT)
+        if safe:
+            changes.append(safe)
+        if len(changes) == STAGE_REVIEW_CHANGE_LIMIT:
+            break
+    return changes
+
+
+def _safe_review_text(value: str, limit: int) -> str:
+    if _contains_secret_marker(value.lower()):
+        return ""
+    lines = []
+    for line in value.splitlines():
+        if ":\\" in line or "\\\\" in line:
+            continue
+        lines.append(line.strip())
+    return "\n".join(line for line in lines if line)[:limit]
+
+
+def _stage_review_diagnostic_code(review_status: str) -> str:
+    if review_status == "approved":
+        return "stage_review.user_approved"
+    if review_status == "blocked":
+        return "stage_review.user_blocked"
+    return "stage_review.user_requested_rework"
 
 
 def _collect_diagnostic_codes(result: dict[str, Any]) -> list[str]:

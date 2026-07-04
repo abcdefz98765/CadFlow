@@ -117,6 +117,7 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         "WorkflowConsoleActions.create_reviewed_handoff",
         "WorkflowConsoleActions.create_reviewed_part",
         "WorkflowConsoleActions.review_part_result",
+        "WorkflowConsoleActions.save_stage_review",
     }
 
     assert {spec.backend_operation for spec in ROUTE_SPECS} == expected_operations
@@ -132,6 +133,7 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
             "WorkflowConsoleActions.create_reviewed_handoff",
             "WorkflowConsoleActions.create_reviewed_part",
             "WorkflowConsoleActions.review_part_result",
+            "WorkflowConsoleActions.save_stage_review",
         }
         for spec in ROUTE_SPECS
     )
@@ -189,6 +191,7 @@ def test_workflow_console_route_contract_includes_edit_and_gate_routes():
     assert ROUTE_SPECS_BY_NAME["test_provider_connection"].backend_operation == "test_provider_connection"
     assert ROUTE_SPECS_BY_NAME["action_part_request"].path == "/api/actions/part-request"
     assert ROUTE_SPECS_BY_NAME["action_part_result_review"].path == "/api/actions/part-result-review"
+    assert ROUTE_SPECS_BY_NAME["action_save_stage_review"].path == "/api/actions/stage-review"
 
 
 def test_workflow_console_internal_error_shape_does_not_leak_local_paths():
@@ -360,11 +363,165 @@ def test_workflow_console_staged_action_routes_do_not_include_batch_or_assembly_
         "action_reviewed_handoff",
         "action_reviewed_part_create",
         "action_part_result_review",
+        "action_save_stage_review",
     }
     assert all("batch" not in spec.path for spec in action_specs)
     assert all("assembly-generation" not in spec.path for spec in action_specs)
     assert "batch_generation" not in ACTION_NAMES
     assert "assembly_generation" not in ACTION_NAMES
+
+
+def test_workflow_console_stage_review_can_be_saved_under_selected_run(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "review_target"}, body={"prompt": "Make a bracket."})
+
+    response = dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={
+            "run_id": "review_target",
+            "stage": "assembly_plan",
+            "review_status": "needs_revision",
+            "target_rework_stage": "requirement",
+            "user_notes": "The lid should be treated as a flat cover.",
+            "requested_changes": ["Keep screws reference_only", "Do not generate full assembly"],
+        },
+    )
+    artifact = json.loads((tmp_path / "outputs" / "review_target" / "stage_review.json").read_text(encoding="utf-8"))
+
+    assert response["ok"] is True
+    assert response["status_code"] == 201
+    assert response["data"]["summary"]["stage"] == "assembly_plan"
+    assert response["data"]["summary"]["review_status"] == "needs_revision"
+    assert response["data"]["summary"]["requested_changes_count"] == 2
+    assert artifact["created_by"] == "user"
+    assert artifact["diagnostic_codes"] == ["stage_review.user_requested_rework"]
+    assert not (tmp_path / "outputs" / "review_target" / "model.step").exists()
+    assert _does_not_contain_absolute_paths(response["data"])
+
+
+def test_workflow_console_stage_review_rejects_invalid_run_ids_and_traversal(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "safe_review"}, body={"prompt": "Make a bracket."})
+
+    missing = dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={"run_id": "missing_review", "stage": "requirement", "review_status": "approved"},
+    )
+    traversal = dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={"run_id": "../safe_review", "stage": "requirement", "review_status": "approved"},
+    )
+
+    assert missing["ok"] is False
+    assert missing["status_code"] == 404
+    assert traversal["ok"] is False
+    assert traversal["status_code"] == 400
+    assert _does_not_contain_absolute_paths(traversal)
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ({"run_id": "enum_review", "stage": "unknown", "review_status": "approved"}, "stage review stage"),
+        ({"run_id": "enum_review", "stage": "requirement", "review_status": "maybe"}, "stage review status"),
+        (
+            {
+                "run_id": "enum_review",
+                "stage": "assembly_plan",
+                "review_status": "needs_revision",
+                "target_rework_stage": "unknown",
+            },
+            "rework target stage",
+        ),
+    ],
+)
+def test_workflow_console_stage_review_rejects_unknown_enum_values(tmp_path, body, message):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "enum_review"}, body={"prompt": "Make a bracket."})
+
+    response = dispatch_route(backend, "action_save_stage_review", body=body)
+
+    assert response["ok"] is False
+    assert response["status_code"] == 400
+    assert message in response["error"]["message"]
+
+
+def test_workflow_console_stage_review_long_notes_are_truncated_and_sanitized(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "long_review"}, body={"prompt": "Make a bracket."})
+
+    response = dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={
+            "run_id": "long_review",
+            "stage": "requirement",
+            "review_status": "blocked",
+            "user_notes": "A" * 2000,
+            "requested_changes": "\n".join([f"change {index}" for index in range(20)]),
+        },
+    )
+    artifact = json.loads((tmp_path / "outputs" / "long_review" / "stage_review.json").read_text(encoding="utf-8"))
+
+    assert response["ok"] is True
+    assert len(artifact["user_notes"]) == 1200
+    assert len(artifact["requested_changes"]) == 12
+    assert response["data"]["summary"]["user_notes_preview"] == "A" * 160
+
+
+def test_workflow_console_stage_review_summary_is_sanitized_and_in_run_summary(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "summary_review"}, body={"prompt": "Make a bracket."})
+
+    dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={
+            "run_id": "summary_review",
+            "stage": "requirement",
+            "review_status": "approved",
+            "user_notes": "api_key=SECRET_SHOULD_NOT_APPEAR",
+            "requested_changes": [str(tmp_path / "secret.txt"), "safe change"],
+        },
+    )
+    response = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "summary_review"})
+    summary = response["data"]["stage_review_summary"]
+    serialized = json.dumps(response["data"], sort_keys=True)
+
+    assert summary["present"] is True
+    assert summary["stage"] == "requirement"
+    assert summary["review_status"] == "approved"
+    assert summary["requested_changes_count"] == 1
+    assert "stage_review.json" in {item["name"] for item in response["data"]["artifacts"]}
+    assert "SECRET_SHOULD_NOT_APPEAR" not in serialized
+    assert str(tmp_path) not in serialized
+
+
+def test_workflow_console_stage_review_makes_no_provider_or_cad_pipeline_call(tmp_path, monkeypatch):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "local_only_review"}, body={"prompt": "Make a bracket."})
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("stage review must not call provider or CAD pipeline")
+
+    backend.stage_runner.agent_adapter.parse_requirement = fail_if_called
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_assembly_part_request_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_part_request_review_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_part_result_review_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_reviewed_part_handoff_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_reviewed_part_single_create_pipeline", fail_if_called)
+
+    response = dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={"run_id": "local_only_review", "stage": "requirement", "review_status": "approved"},
+    )
+
+    assert response["ok"] is True
+    assert response["data"]["summary"]["stage"] == "requirement"
 
 
 def test_workflow_console_run_summary_includes_negotiation_placeholders(tmp_path):

@@ -175,6 +175,7 @@ POST /api/actions/part-review
 POST /api/actions/reviewed-handoff
 POST /api/actions/reviewed-part-create
 POST /api/actions/part-result-review
+POST /api/actions/stage-review
 ```
 
 The existing `POST /api/route` bridge remains for the static frontend, and the
@@ -196,6 +197,8 @@ operations:
 - `part-result-review`: reads one reviewed handoff plus one child run identified
   by `05_single_create/lineage.json` or an explicit safe child run id, then
   writes `06_part_result_review/part_result_review.json`.
+- `stage-review`: writes one local `stage_review.json` artifact that records
+  user review/rework intent for an explicit stage.
 
 These actions wrap existing pipeline functions only. They do not add assembly
 generation, automatic all-part generation, batch generation, new CAD templates,
@@ -203,13 +206,24 @@ assembly constraint solving, provider-generated CAD IR/code, or free-form Web
 chat. Public action results are sanitized summaries: no absolute paths, no API
 keys, no environment values, no provider raw payloads, and no transcripts.
 
+`stage_review.json` is the Stage Review / Rework Artifact MVP and the first
+save-only user-agent negotiation surface. It allows `review_status` values
+`approved`, `needs_revision`, and `blocked`; explicit `stage` values such as
+`requirement`, `design_brief`, `assembly_plan`, `candidate_parts`,
+`part_request`, `part_review`, `handoff`, and `single_part_result`; and explicit
+`target_rework_stage` values from the same controlled vocabulary. Notes and
+requested changes are sanitized and length-limited. Saving this artifact does
+not call a provider, rerun a pipeline stage, modify CAD artifacts, create a loop
+queue, or trigger batch/all-part/assembly generation. Rework execution and
+overnight one-part-at-a-time queues remain future work.
+
 Readable artifacts remain limited to workflow source, handoff, reviewed-part,
 report, trace, and revision records: `prompt.txt`, `revision_prompt.txt`,
 `requirement.json`, `design_brief.json`, `planning_artifact.json`, `input_ir.json`,
 `parent_input_ir.json`, parent snapshots, `assembly_plan.json`,
 `assembly_plan.md`, `part_create_request.json`, `part_request_review.json`,
 `reviewed_part_handoff.json`, `part_execution_request.json`,
-`part_result_review.json`, `revision_request.json`, `change_intent.json`,
+`part_result_review.json`, `stage_review.json`, `revision_request.json`, `change_intent.json`,
 `revision_plan.json`, `patch.json`, `comparison.json`, `revision_report.md`,
 `lineage.json`, `report.json`, `report.md`, `agent_trace.json`, and
 `logs/runtime.json`. Downloadable discovery remains limited to `model.step`,
@@ -290,10 +304,9 @@ The NiceGUI UI is intentionally paged:
   STEP/STL availability.
 - Requirement Review: read-only original prompt and available negotiation fields
   such as assumptions, missing information, clarification questions, blocked
-  reason, and diagnostics, plus a local notes textarea that is not wired into the
-  pipeline.
+  reason, and diagnostics, plus save-only Stage Review controls.
 - Assembly Plan: compact assembly status and a parts table, not full JSON by
-  default.
+  default, plus save-only Stage Review controls.
 - Part Workflow: one-stage reviewed-part action cards gated by upstream
   artifacts.
 - Artifacts: collapsed/on-demand allowlisted artifacts and model-file
@@ -314,6 +327,7 @@ The current UI supports the first usable local workflow loop:
   scope checks, lineage checks, and interface metadata checks;
 - edit only the allowed JSON handoff artifacts;
 - record approve/reject/return/override gate decisions;
+- save a structured `stage_review.json` rework intent without rerunning stages;
 - list STEP-first downloadables and open the secondary STL preview when `model.stl` exists;
 - use an explicit Interact/Release control before the embedded STL viewer captures pointer wheel/drag input.
 
@@ -328,8 +342,8 @@ all-part generation.
 Both UIs expose reviewed-part actions only when their upstream artifact is
 present, and each button calls exactly one backend action. There is still no
 chat UI, no editable clarification pipeline, no provider calls for free-form
-chat, no automatic all-part generation, no batch generation, and no assembly
-generation.
+chat, no automatic rework execution, no loop queue, no automatic all-part
+generation, no batch generation, and no assembly generation.
 
 ## Security Notes
 

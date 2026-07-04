@@ -128,6 +128,13 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="Review one child result from a reviewed single-part create bridge.",
     ),
     RouteSpec(
+        name="action_save_stage_review",
+        method="POST",
+        path="/api/actions/stage-review",
+        backend_operation="WorkflowConsoleActions.save_stage_review",
+        description="Save one local stage review/rework intent artifact without rerunning workflow stages.",
+    ),
+    RouteSpec(
         name="write_artifact",
         method="PUT",
         path="/workflow/runs/{run_id}/artifacts/{artifact}",
@@ -439,6 +446,23 @@ def _action_part_result_review(
     )
 
 
+def _action_save_stage_review(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return WorkflowConsoleActions(backend).save_stage_review(
+        _require_value(body, "run_id"),
+        stage=_require_value(body, "stage"),
+        review_status=_require_value(body, "review_status"),
+        user_notes=body.get("user_notes"),
+        target_rework_stage=body.get("target_rework_stage"),
+        requested_changes=body.get("requested_changes"),
+        root=query.get("root"),
+    )
+
+
 RouteHandler = Callable[
     [WorkflowConsoleBackend, dict[str, Any], dict[str, Any], dict[str, Any]],
     Any,
@@ -463,6 +487,7 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "action_reviewed_handoff": _action_reviewed_handoff,
     "action_reviewed_part_create": _action_reviewed_part_create,
     "action_part_result_review": _action_part_result_review,
+    "action_save_stage_review": _action_save_stage_review,
 }
 
 
@@ -476,6 +501,7 @@ def _success_status_code(route_name: str) -> int:
         "action_reviewed_handoff",
         "action_reviewed_part_create",
         "action_part_result_review",
+        "action_save_stage_review",
     }:
         return 201
     return 200

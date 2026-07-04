@@ -462,6 +462,7 @@ POST /api/actions/part-review
 POST /api/actions/reviewed-handoff
 POST /api/actions/reviewed-part-create
 POST /api/actions/part-result-review
+POST /api/actions/stage-review
 ```
 
 An experimental-but-supported NiceGUI console is also available for local use.
@@ -470,6 +471,14 @@ Artifacts so reviewed-part work is less dense than the single-page HTML console.
 NiceGUI does not bypass `WorkflowConsoleActions`, does not add CAD capability,
 and does not provide batch generation, assembly generation, provider-generated
 CAD/code, or free-form chat.
+
+The first user-agent negotiation surface is the Stage Review / Rework Artifact
+MVP. From the NiceGUI Requirement Review and Assembly Plan pages, a user can save
+a structured `stage_review.json` with an explicit stage, review status
+(`approved`, `needs_revision`, or `blocked`), optional rework target, notes, and
+requested changes. This is save-only in the current pass: it records intent for
+review and future rework, but it does not rerun stages, call providers, enqueue
+overnight jobs, start an autonomous loop, or generate batches/assemblies.
 
 Run the local console with the stdlib-only bridge:
 

@@ -372,10 +372,17 @@ class WorkflowConsoleBackend:
             "gate_history": self.read_gate_history(path),
             "report_summary": self.read_report_summary(path),
             "reviewed_part_summary": self.read_reviewed_part_summary(path),
+            "stage_review_summary": self.read_stage_review_summary(path),
             "child_runs": self.list_child_runs(path),
             "artifacts": self.list_artifacts(path),
             "downloadables": self.list_downloadables(path),
         }
+
+    def read_stage_review_summary(self, run_dir: str | Path) -> dict[str, Any]:
+        """Return a compact sanitized summary of the latest local stage review."""
+        path = self._require_project_path(Path(run_dir))
+        review = _read_json_if_present(path / "stage_review.json")
+        return _compact_stage_review_summary(review)
 
     def read_reviewed_part_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return compact reviewed-part workflow summaries for console inspection."""
@@ -1069,6 +1076,21 @@ def _compact_reviewed_part_lineage_summary(lineage: dict[str, Any] | None) -> di
         "part_create_request_artifact": _safe_summary_text(lineage.get("part_create_request_artifact")),
         "part_request_review_artifact": _safe_summary_text(lineage.get("part_request_review_artifact")),
         "reviewed_part_handoff_artifact": _safe_summary_text(lineage.get("reviewed_part_handoff_artifact")),
+    }
+
+
+def _compact_stage_review_summary(review: dict[str, Any] | None) -> dict[str, Any]:
+    review = review or {}
+    changes = review.get("requested_changes") if isinstance(review.get("requested_changes"), list) else []
+    return {
+        "present": bool(review),
+        "schema_version": review.get("schema_version") if isinstance(review.get("schema_version"), int) else None,
+        "stage": _safe_summary_text(review.get("stage")),
+        "review_status": _safe_summary_text(review.get("review_status")),
+        "target_rework_stage": _safe_summary_text(review.get("target_rework_stage")),
+        "requested_changes_count": len(changes),
+        "user_notes_preview": _safe_summary_text(review.get("user_notes")),
+        "diagnostic_codes": _compact_code_list(review.get("diagnostic_codes")),
     }
 
 
