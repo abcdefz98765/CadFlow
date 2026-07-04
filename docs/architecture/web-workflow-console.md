@@ -204,6 +204,12 @@ The UI is served by `ai_native_cad.workflow_console.server`, a stdlib-only local
 - `GET /api/downloads/{run_id}/{filename}`: whitelisted local file serving for `model.step`, `model.stl`, `preview.png`, and `model.py` only.
 - Static files from `web-viewer/`, including the existing STL viewer.
 
+For local Windows use, `scripts/start_workflow_console.ps1` wraps the same
+server entrypoint. It selects `.venv-cadflow` when present, sets
+`PYTHONPATH=src`, prints the local URL, and then runs
+`ai_native_cad.workflow_console.server`. It is a convenience launcher only; it
+does not add provider execution, CAD generation, or new Web actions.
+
 The browser never becomes the source of truth. Create, stage execution, artifact edits, gate decisions, artifact reads, and downloadable discovery all round-trip through the Python backend and existing run artifacts. Editable artifacts remain limited to `requirement.json`, `planning_artifact.json`, and `input_ir.json`; the UI only enables save controls for those files and the backend remains authoritative for validation.
 
 The current UI supports the first usable local workflow loop:

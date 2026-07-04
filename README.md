@@ -449,7 +449,13 @@ PYTHONPATH=src python -m ai_native_cad.workflow_console.server
 Windows PowerShell:
 
 ```powershell
-$env:PYTHONPATH='src'; python -m ai_native_cad.workflow_console.server
+.\scripts\start_workflow_console.ps1
+```
+
+Optional host/port and browser launch:
+
+```powershell
+.\scripts\start_workflow_console.ps1 -Port 8770 -Open
 ```
 
 Then open:
