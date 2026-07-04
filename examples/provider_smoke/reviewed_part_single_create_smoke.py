@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--provider", default="deepseek", choices=("deepseek", "openai"))
     parser.add_argument("--model", default=None)
     parser.add_argument("--env-file", default=None, help="Optional manual KEY=VALUE env file. Process env wins.")
+    parser.add_argument("--part-id", default=None, help="Optional explicit candidate part_id to review and generate.")
     parser.add_argument(
         "--output-dir",
         default=None,
@@ -51,10 +52,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     output_root = Path(args.output_dir) if args.output_dir else REPO_ROOT / "outputs" / "provider_smoke" / "reviewed_part_single_create"
+    requested_part_id = _safe_artifact_id(args.part_id) if args.part_id else None
+    if args.output_dir is None and requested_part_id:
+        output_root = output_root / requested_part_id
     try:
         load_env_file(args.env_file)
         adapter = make_json_contract_adapter_from_env(args.provider, model=args.model)
-        summary = run_reviewed_part_single_create_smoke(adapter, args.provider, output_root)
+        summary = run_reviewed_part_single_create_smoke(
+            adapter,
+            args.provider,
+            output_root,
+            requested_part_id=requested_part_id,
+        )
     except JsonContractProviderError as exc:
         summary = _base_summary({"provider": args.provider}, error_category=exc.category)
     except Exception:
@@ -68,7 +77,13 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-def run_reviewed_part_single_create_smoke(adapter: Any, provider: str, output_root: Path) -> dict[str, Any]:
+def run_reviewed_part_single_create_smoke(
+    adapter: Any,
+    provider: str,
+    output_root: Path,
+    *,
+    requested_part_id: str | None = None,
+) -> dict[str, Any]:
     identity = _safe_identity(getattr(adapter, "provider_identity", {"provider": provider}))
     design_dir = output_root / "01_design"
     part_request_dir = output_root / "02_part_request"
@@ -83,9 +98,16 @@ def run_reviewed_part_single_create_smoke(adapter: Any, provider: str, output_ro
         return _summary_from_results(identity, design_result=design_result)
 
     assembly_plan = json.loads(assembly_plan_path.read_text(encoding="utf-8"))
-    selected_part_id = select_one_candidate_part_id(assembly_plan)
+    part_selection = select_candidate_part(assembly_plan, requested_part_id=requested_part_id)
+    selected_part_id = part_selection["selected_part_id"]
     if selected_part_id is None:
-        return _summary_from_results(identity, design_result=design_result, assembly_plan=assembly_plan)
+        return _summary_from_results(
+            identity,
+            design_result=design_result,
+            assembly_plan=assembly_plan,
+            requested_part_id=requested_part_id,
+            part_selection=part_selection,
+        )
 
     part_request_result = run_assembly_part_request_pipeline(
         assembly_plan_path,
@@ -119,6 +141,8 @@ def run_reviewed_part_single_create_smoke(adapter: Any, provider: str, output_ro
         identity,
         design_result=design_result,
         assembly_plan=assembly_plan,
+        requested_part_id=requested_part_id,
+        part_selection=part_selection,
         selected_part_id=selected_part_id,
         part_request_result=part_request_result,
         review_result=review_result,
@@ -130,17 +154,89 @@ def run_reviewed_part_single_create_smoke(adapter: Any, provider: str, output_ro
 
 
 def select_one_candidate_part_id(assembly_plan: dict[str, Any]) -> str | None:
+    return select_candidate_part(assembly_plan)["selected_part_id"]
+
+
+def select_candidate_part(assembly_plan: dict[str, Any], *, requested_part_id: str | None = None) -> dict[str, Any]:
     parts = assembly_plan.get("parts") if isinstance(assembly_plan.get("parts"), list) else []
-    selected: list[str] = []
+    candidate_part_ids: list[str] = []
+    reference_only_part_ids: list[str] = []
+    blocked_part_ids: list[str] = []
+    matches: list[dict[str, Any]] = []
     for part in parts:
         if not isinstance(part, dict):
             continue
         part_id = _safe_artifact_id(part.get("part_id"))
-        if part_id in {"screw", "screws", "bolt", "bolts", "nut", "nuts", "washer", "washers", "fastener", "fasteners"}:
+        if not part_id:
             continue
-        if part.get("supported_candidate") is True and part.get("part_status") == "candidate_for_single_part_generation":
-            selected.append(part_id)
-    return selected[0] if selected else None
+        if _is_reference_hardware_part_id(part_id) or part.get("part_status") == "reference_only":
+            reference_only_part_ids.append(part_id)
+        if part.get("part_status") == "blocked" or part.get("generation_strategy") == "blocked":
+            blocked_part_ids.append(part_id)
+        if _is_candidate_part(part):
+            candidate_part_ids.append(part_id)
+        if requested_part_id and part_id == requested_part_id:
+            matches.append(part)
+
+    status = "selected"
+    selected_part_id: str | None = None
+    diagnostic_codes: list[str] = []
+
+    if requested_part_id:
+        if not matches:
+            status = "blocked_requested_part_not_found"
+            diagnostic_codes.append("part_selection.requested_part_not_found")
+        elif len(matches) > 1:
+            status = "blocked_ambiguous_part_id"
+            diagnostic_codes.append("part_selection.ambiguous_part_id")
+        else:
+            selected_part = matches[0]
+            selected_part_id = _safe_artifact_id(selected_part.get("part_id"))
+            if _is_reference_hardware_part_id(selected_part_id) or selected_part.get("part_status") == "reference_only":
+                status = "blocked_reference_only_part"
+                selected_part_id = None
+                diagnostic_codes.append("part_selection.reference_only_not_selectable")
+            elif selected_part.get("part_status") == "blocked" or selected_part.get("generation_strategy") == "blocked":
+                status = "blocked_part_not_selectable"
+                selected_part_id = None
+                diagnostic_codes.append("part_selection.blocked_part_not_selectable")
+            elif not _is_candidate_part(selected_part):
+                status = "blocked_requested_part_not_candidate"
+                selected_part_id = None
+                diagnostic_codes.append("part_selection.requested_part_not_candidate")
+            else:
+                diagnostic_codes.append("part_selection.requested_part_selected")
+    elif candidate_part_ids:
+        selected_part_id = candidate_part_ids[0]
+        diagnostic_codes.append("part_selection.default_candidate_selected")
+    else:
+        status = "blocked_no_candidate_part"
+        diagnostic_codes.append("part_selection.no_candidate_part")
+
+    return {
+        "requested_part_id": requested_part_id,
+        "selected_part_id": selected_part_id,
+        "status": status,
+        "diagnostic_codes": _collect_diagnostic_codes({"diagnostic_codes": diagnostic_codes}),
+        "candidate_part_ids": sorted(set(candidate_part_ids)),
+        "reference_only_part_ids": sorted(set(reference_only_part_ids)),
+        "blocked_part_ids": sorted(set(blocked_part_ids)),
+    }
+
+
+def _is_candidate_part(part: dict[str, Any]) -> bool:
+    part_id = _safe_artifact_id(part.get("part_id"))
+    return (
+        bool(part_id)
+        and not _is_reference_hardware_part_id(part_id)
+        and part.get("supported_candidate") is True
+        and part.get("part_status") == "candidate_for_single_part_generation"
+        and part.get("generation_strategy") != "blocked"
+    )
+
+
+def _is_reference_hardware_part_id(part_id: str) -> bool:
+    return part_id in {"pin", "pins", "screw", "screws", "bolt", "bolts", "nut", "nuts", "washer", "washers", "fastener", "fasteners"}
 
 
 def selection_diagnostics(assembly_plan: dict[str, Any]) -> dict[str, Any]:
@@ -195,6 +291,8 @@ def _summary_from_results(
     *,
     design_result: dict[str, Any] | None = None,
     assembly_plan: dict[str, Any] | None = None,
+    requested_part_id: str | None = None,
+    part_selection: dict[str, Any] | None = None,
     selected_part_id: str | None = None,
     part_request_result: dict[str, Any] | None = None,
     review_result: dict[str, Any] | None = None,
@@ -209,7 +307,13 @@ def _summary_from_results(
     child_dir = bridge_dir / child_run_name if bridge_dir is not None and child_run_name else None
     summary.update({
         "assembly_plan_created": assembly_plan_created,
+        "requested_part_id": _safe_artifact_id(requested_part_id) if requested_part_id else None,
         "selected_part_id": selected_part_id,
+        "part_selection_status": _safe_status((part_selection or {}).get("status")),
+        "part_selection_diagnostic_codes": _collect_diagnostic_codes(part_selection),
+        "candidate_part_ids": _safe_part_id_list((part_selection or {}).get("candidate_part_ids")),
+        "reference_only_part_ids": _safe_part_id_list((part_selection or {}).get("reference_only_part_ids")),
+        "blocked_part_ids": _safe_part_id_list((part_selection or {}).get("blocked_part_ids")),
         "part_request_status": _safe_status((part_request_result or {}).get("status")),
         "review_status": _safe_status((review_result or {}).get("status")),
         "handoff_status": _safe_status((handoff_result or {}).get("status")),
@@ -235,6 +339,7 @@ def _summary_from_results(
         "no_assembly_constraints_solved": _no_assembly_constraints_solved(bridge_dir),
         "diagnostic_codes": _collect_diagnostic_codes(
             design_result,
+            part_selection,
             part_request_result,
             review_result,
             handoff_result,
@@ -259,7 +364,13 @@ def _base_summary(identity: dict[str, Any], *, error_category: str | None = None
         "model": identity.get("model"),
         "source_prompt_case": SOURCE_PROMPT_CASE,
         "assembly_plan_created": False,
+        "requested_part_id": None,
         "selected_part_id": None,
+        "part_selection_status": None,
+        "part_selection_diagnostic_codes": [],
+        "candidate_part_ids": [],
+        "reference_only_part_ids": [],
+        "blocked_part_ids": [],
         "part_request_status": None,
         "review_status": None,
         "handoff_status": None,
@@ -311,6 +422,12 @@ def _safe_status(value: Any) -> str | None:
         return None
     safe = "".join(char if char.isalnum() or char in "_.-" else "_" for char in value.strip()).strip("_")
     return safe or None
+
+
+def _safe_part_id_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return sorted({_safe_artifact_id(item) for item in value if _safe_artifact_id(item)})
 
 
 def _safe_child_run_name(bridge_result: dict[str, Any] | None) -> str | None:

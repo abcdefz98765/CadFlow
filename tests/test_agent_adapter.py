@@ -1174,7 +1174,13 @@ def test_reviewed_part_single_create_smoke_runs_one_sanitized_fake_flow(tmp_path
     assert status["model"] == "fake-model"
     assert status["source_prompt_case"] == "electronics_enclosure_base_lid"
     assert status["assembly_plan_created"] is True
+    assert status["requested_part_id"] is None
     assert status["selected_part_id"] == "base"
+    assert status["part_selection_status"] == "selected"
+    assert status["part_selection_diagnostic_codes"] == ["part_selection.default_candidate_selected"]
+    assert status["candidate_part_ids"] == ["base", "lid"]
+    assert status["reference_only_part_ids"] == ["screws"]
+    assert status["blocked_part_ids"] == []
     assert status["part_request_status"] == "ready_for_review"
     assert status["review_status"] == "approved"
     assert status["handoff_status"] == "ready_for_single_part_planning"
@@ -1353,7 +1359,11 @@ def test_reviewed_part_single_create_smoke_surfaces_blocked_child_diagnostics(tm
 
 
 def test_reviewed_part_single_create_smoke_selects_one_candidate_only():
-    from examples.provider_smoke.reviewed_part_single_create_smoke import select_one_candidate_part_id, selection_diagnostics
+    from examples.provider_smoke.reviewed_part_single_create_smoke import (
+        select_candidate_part,
+        select_one_candidate_part_id,
+        selection_diagnostics,
+    )
 
     assembly_plan = {
         "parts": [
@@ -1372,6 +1382,16 @@ def test_reviewed_part_single_create_smoke_selects_one_candidate_only():
     }
 
     assert select_one_candidate_part_id(assembly_plan) == "base"
+    explicit = select_candidate_part(assembly_plan, requested_part_id="lid")
+    assert explicit["selected_part_id"] == "lid"
+    assert explicit["status"] == "selected"
+    assert explicit["diagnostic_codes"] == ["part_selection.requested_part_selected"]
+    reference_only = select_candidate_part(assembly_plan, requested_part_id="screws")
+    assert reference_only["selected_part_id"] is None
+    assert reference_only["status"] == "blocked_reference_only_part"
+    assert reference_only["diagnostic_codes"] == ["part_selection.reference_only_not_selectable"]
+    missing = select_candidate_part(assembly_plan, requested_part_id="missing")
+    assert missing["status"] == "blocked_requested_part_not_found"
     diagnostics = selection_diagnostics(assembly_plan)
     assert diagnostics["part_count"] == 3
     assert diagnostics["candidate_part_count"] == 2
@@ -1382,6 +1402,181 @@ def test_reviewed_part_single_create_smoke_selects_one_candidate_only():
         "candidate_for_single_part_generation": 2,
         "reference_only": 1,
     }
+
+
+def test_reviewed_part_single_create_smoke_explicit_part_id_selects_requested_candidate(tmp_path, monkeypatch):
+    from examples.provider_smoke import reviewed_part_single_create_smoke as smoke
+
+    class FakeAdapter:
+        provider_identity = {"provider": "fake/json", "model": "fake-model", "api_key": "secret-value"}
+
+    def fake_design(prompt, adapter, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "assembly_plan.json").write_text(json.dumps({
+            "parts": [
+                {
+                    "part_id": "base",
+                    "supported_candidate": True,
+                    "part_status": "candidate_for_single_part_generation",
+                    "generation_strategy": "single_part",
+                },
+                {
+                    "part_id": "lid",
+                    "supported_candidate": True,
+                    "part_status": "candidate_for_single_part_generation",
+                    "generation_strategy": "single_part",
+                },
+                {"part_id": "screws", "part_status": "reference_only"},
+            ],
+            "interfaces": [],
+        }), encoding="utf-8")
+        return {"status": "blocked_multi_part_generation_not_supported", "diagnostic_codes": ["assembly.plan_created"]}
+
+    def fake_part_request(assembly_plan, output_dir=None, part_id=None, **kwargs):
+        assert part_id == "lid"
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "part_create_request.json").write_text(json.dumps({"part_id": part_id}), encoding="utf-8")
+        return {"status": "ready_for_review", "diagnostic_codes": ["part_request.created"]}
+
+    def fake_review(part_create_request, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "part_request_review.json").write_text(json.dumps({"status": "approved"}), encoding="utf-8")
+        return {"status": "approved", "diagnostic_codes": ["part_request.approved_for_single_part_planning"]}
+
+    def fake_handoff(part_create_request, part_request_review, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "reviewed_part_handoff.json").write_text(json.dumps({
+            "part_id": "lid",
+            "status": "ready_for_single_part_planning",
+        }), encoding="utf-8")
+        return {"status": "ready_for_single_part_planning", "diagnostic_codes": ["part_handoff.ready_for_single_part_planning"]}
+
+    def fake_bridge(reviewed_part_handoff, adapter, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        child_dir = output_path / "single_part_lid"
+        child_dir.mkdir(parents=True)
+        (child_dir / "model.step").write_text("STEP", encoding="utf-8")
+        (child_dir / "model.stl").write_text("STL", encoding="utf-8")
+        return {
+            "status": "success",
+            "child_output_dir": str(child_dir),
+            "diagnostic_codes": ["reviewed_part_single_create.started"],
+        }
+
+    def fake_part_result_review(reviewed_part_handoff, child_run, output_dir=None, **kwargs):
+        review = {
+            "status": "accepted_for_preview",
+            "checks": {
+                "step_created": True,
+                "stl_created": True,
+                "single_part_only": True,
+                "no_batch_generation": True,
+                "no_assembly_generation": True,
+                "lineage_preserved": True,
+                "interface_constraints_preserved_in_metadata": True,
+            },
+            "diagnostic_codes": ["part_result.review_created"],
+        }
+        return {"status": "accepted_for_preview", "part_result_review": review}
+
+    monkeypatch.setattr(smoke, "run_provider_normalized_design_create_pipeline", fake_design)
+    monkeypatch.setattr(smoke, "run_assembly_part_request_pipeline", fake_part_request)
+    monkeypatch.setattr(smoke, "run_part_request_review_pipeline", fake_review)
+    monkeypatch.setattr(smoke, "run_reviewed_part_handoff_pipeline", fake_handoff)
+    monkeypatch.setattr(smoke, "run_reviewed_part_single_create_pipeline", fake_bridge)
+    monkeypatch.setattr(smoke, "run_part_result_review_pipeline", fake_part_result_review)
+
+    summary = smoke.run_reviewed_part_single_create_smoke(
+        FakeAdapter(),
+        "fake",
+        tmp_path / "outputs" / "manual_smoke",
+        requested_part_id="lid",
+    )
+
+    serialized = json.dumps(summary, sort_keys=True)
+    assert summary["requested_part_id"] == "lid"
+    assert summary["selected_part_id"] == "lid"
+    assert summary["part_selection_status"] == "selected"
+    assert summary["part_selection_diagnostic_codes"] == ["part_selection.requested_part_selected"]
+    assert summary["child_run_name"] == "single_part_lid"
+    assert summary["child_run_created"] is True
+    assert summary["no_batch_generation"] is True
+    assert summary["no_assembly_generation"] is True
+    assert "secret-value" not in serialized
+    assert str(tmp_path) not in serialized
+
+
+@pytest.mark.parametrize(
+    ("requested_part_id", "expected_status", "expected_code"),
+    [
+        ("screws", "blocked_reference_only_part", "part_selection.reference_only_not_selectable"),
+        ("gear", "blocked_part_not_selectable", "part_selection.blocked_part_not_selectable"),
+        ("missing", "blocked_requested_part_not_found", "part_selection.requested_part_not_found"),
+    ],
+)
+def test_reviewed_part_single_create_smoke_blocks_unsafe_requested_parts(
+    tmp_path,
+    monkeypatch,
+    requested_part_id,
+    expected_status,
+    expected_code,
+):
+    from examples.provider_smoke import reviewed_part_single_create_smoke as smoke
+
+    class FakeAdapter:
+        provider_identity = {"provider": "fake/json", "model": "fake-model", "api_key": "secret-value"}
+
+    def fake_design(prompt, adapter, output_dir=None, **kwargs):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True)
+        (output_path / "assembly_plan.json").write_text(json.dumps({
+            "parts": [
+                {
+                    "part_id": "base",
+                    "supported_candidate": True,
+                    "part_status": "candidate_for_single_part_generation",
+                    "generation_strategy": "single_part",
+                },
+                {"part_id": "screws", "part_status": "reference_only", "generation_strategy": "reference_only"},
+                {"part_id": "gear", "part_status": "blocked", "generation_strategy": "blocked"},
+            ],
+        }), encoding="utf-8")
+        return {"status": "blocked_multi_part_generation_not_supported", "diagnostic_codes": ["assembly.plan_created"]}
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("blocked requested part must stop before downstream stages")
+
+    monkeypatch.setattr(smoke, "run_provider_normalized_design_create_pipeline", fake_design)
+    monkeypatch.setattr(smoke, "run_assembly_part_request_pipeline", fail_if_called)
+    monkeypatch.setattr(smoke, "run_part_request_review_pipeline", fail_if_called)
+    monkeypatch.setattr(smoke, "run_reviewed_part_handoff_pipeline", fail_if_called)
+    monkeypatch.setattr(smoke, "run_reviewed_part_single_create_pipeline", fail_if_called)
+    monkeypatch.setattr(smoke, "run_part_result_review_pipeline", fail_if_called)
+
+    summary = smoke.run_reviewed_part_single_create_smoke(
+        FakeAdapter(),
+        "fake",
+        tmp_path / "outputs" / "manual_smoke",
+        requested_part_id=requested_part_id,
+    )
+
+    serialized = json.dumps(summary, sort_keys=True)
+    assert summary["requested_part_id"] == requested_part_id
+    assert summary["selected_part_id"] is None
+    assert summary["part_selection_status"] == expected_status
+    assert summary["part_selection_diagnostic_codes"] == [expected_code]
+    assert summary["candidate_part_ids"] == ["base"]
+    assert summary["reference_only_part_ids"] == ["screws"]
+    assert summary["blocked_part_ids"] == ["gear"]
+    assert summary["child_run_created"] is False
+    assert summary["no_batch_generation"] is True
+    assert summary["no_assembly_generation"] is True
+    assert "secret-value" not in serialized
+    assert str(tmp_path) not in serialized
 
 
 def test_reviewed_part_single_create_smoke_no_candidate_summary_includes_sanitized_selection_diagnostics(tmp_path, monkeypatch):
