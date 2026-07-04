@@ -545,7 +545,9 @@ def test_workflow_console_dispatch_sanitizes_gate_payload_but_preserves_runtime_
     ]
     assert "secret-token" not in json.dumps(recorded["data"])
     assert "D:\\MyCode" not in json.dumps(recorded["data"])
-    assert runtime["data"]["content"]["workflow_console"]["latest_gate_decision"]["payload"]["api_key"] == "secret-token"
+    assert "secret-token" not in json.dumps(runtime["data"])
+    private_runtime = backend.read_artifact_by_id("gate_payload", "logs/runtime.json")
+    assert private_runtime["content"]["workflow_console"]["latest_gate_decision"]["payload"]["api_key"] == "secret-token"
 
 
 def test_workflow_console_metadata_includes_compact_report_trace_summary(tmp_path):
@@ -869,6 +871,38 @@ def test_workflow_console_dispatch_preserves_artifact_content_path_keys(tmp_path
 
     assert "path" not in response["data"]
     assert response["data"]["content"]["features"]["path"] == "not a filesystem path"
+
+
+def test_workflow_console_read_artifact_route_redacts_raw_provider_payloads_and_secrets(tmp_path):
+    run_dir = tmp_path / "outputs" / "redacted_artifact"
+    run_dir.mkdir(parents=True)
+    (run_dir / "part_request_review.json").write_text(
+        json.dumps({
+            "status": "approved",
+            "checks": {"has_interface_constraints": True},
+            "raw_provider_response": {"message": "SECRET_SHOULD_NOT_APPEAR"},
+            "provider_messages": ["SECRET_SHOULD_NOT_APPEAR"],
+            "diagnostic_codes": ["part_review.approved"],
+            "local_path": str(tmp_path / "outputs" / "redacted_artifact"),
+        }) + "\n",
+        encoding="utf-8",
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    response = dispatch_route(
+        backend,
+        "read_artifact",
+        path_params={"run_id": "redacted_artifact", "artifact": "part_request_review.json"},
+    )
+    serialized = json.dumps(response, sort_keys=True)
+
+    assert response["ok"] is True
+    assert response["data"]["content"]["status"] == "approved"
+    assert response["data"]["content"]["diagnostic_codes"] == ["part_review.approved"]
+    assert "raw_provider_response" not in serialized
+    assert "provider_messages" not in serialized
+    assert "SECRET_SHOULD_NOT_APPEAR" not in serialized
+    assert str(tmp_path) not in serialized
 
 
 def test_backend_reads_stage_status_from_runtime_without_report(tmp_path):
@@ -1420,6 +1454,228 @@ def test_backend_downloadables_by_id_remain_whitelisted(tmp_path):
         "preview.png",
         "model.py",
     ]
+
+
+def test_workflow_console_routes_list_nested_reviewed_part_runs_without_paths(tmp_path):
+    run_dir = tmp_path / "outputs" / "provider_smoke" / "reviewed_part_single_create" / "base"
+    run_dir.mkdir(parents=True)
+    (run_dir / "assembly_plan.json").write_text(
+        json.dumps({"artifact_type": "assembly_plan", "scope": "multi_part", "parts": []}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "model.step").write_text("STEP\n", encoding="utf-8")
+
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    response = dispatch_route(backend, "list_runs")
+    serialized = json.dumps(response, sort_keys=True)
+
+    assert response["ok"] is True
+    assert [item["run_id"] for item in response["data"]] == ["base"]
+    assert str(tmp_path) not in serialized
+    assert "provider_smoke" not in serialized
+    assert "model.step" in serialized
+
+
+def test_workflow_console_reviewed_part_summary_extracts_assembly_plan_and_part_result(tmp_path):
+    run_dir = tmp_path / "outputs" / "provider_smoke" / "reviewed_part_single_create" / "base"
+    child_dir = run_dir / "single_part_base"
+    child_dir.mkdir(parents=True)
+    (child_dir / "model.step").write_text("STEP\n", encoding="utf-8")
+    (child_dir / "model.stl").write_text("STL\n", encoding="utf-8")
+    (child_dir / "report.json").write_text(json.dumps({"status": "success"}) + "\n", encoding="utf-8")
+    (run_dir / "assembly_plan.json").write_text(
+        json.dumps({
+            "artifact_type": "assembly_plan",
+            "scope": "multi_part",
+            "status": "blocked_before_part_generation",
+            "parts": [
+                {
+                    "part_id": "base",
+                    "role": "main enclosure component",
+                    "generation_strategy": "future_part_pipeline",
+                    "part_status": "candidate_for_single_part_generation",
+                    "supported_candidate": True,
+                    "blocked_reasons": [],
+                },
+                {
+                    "part_id": "lid",
+                    "role": "cover component",
+                    "generation_strategy": "future_part_pipeline",
+                    "part_status": "candidate_for_single_part_generation",
+                    "supported_candidate": True,
+                    "blocked_reasons": [],
+                },
+                {
+                    "part_id": "screws",
+                    "role": "fasteners",
+                    "generation_strategy": "reference_only",
+                    "part_status": "reference_only",
+                    "supported_candidate": False,
+                    "blocked_reasons": [],
+                },
+            ],
+            "interfaces": [{"from": "lid", "to": "base", "kind": "screw_fastened"}],
+            "fasteners": [{"kind": "screw", "quantity": 4}],
+            "diagnostic_codes": ["assembly.plan_created"],
+            "quality": {
+                "part_status_counts": {
+                    "candidate_for_single_part_generation": 2,
+                    "reference_only": 1,
+                },
+                "part_generation_strategy_counts": {
+                    "future_part_pipeline": 2,
+                    "reference_only": 1,
+                },
+            },
+        }) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "part_create_request.json").write_text(
+        json.dumps({
+            "part_id": "base",
+            "status": "ready_for_review",
+            "generation_strategy": "future_part_pipeline",
+            "interface_constraints": [{"kind": "screw_fastened"}],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "part_request_review.json").write_text(
+        json.dumps({
+            "status": "approved",
+            "checks": {
+                "has_interface_constraints": True,
+                "has_provider_generated_code": False,
+            },
+            "raw_response": "SECRET_SHOULD_NOT_APPEAR",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "reviewed_part_handoff.json").write_text(
+        json.dumps({
+            "part_id": "base",
+            "status": "ready_for_single_part_planning",
+            "source_part_request": "part_create_request.json",
+            "source_review": "part_request_review.json",
+            "interface_constraints": [{"kind": "screw_fastened"}],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "lineage.json").write_text(
+        json.dumps({
+            "relationship": "reviewed_part_single_create_child",
+            "part_id": "base",
+            "child_run_id": "single_part_base",
+            "assembly_plan_artifact": "assembly_plan.json",
+            "part_create_request_artifact": "part_create_request.json",
+            "part_request_review_artifact": "part_request_review.json",
+            "reviewed_part_handoff_artifact": "reviewed_part_handoff.json",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "part_result_review.json").write_text(
+        json.dumps({
+            "artifact_type": "part_result_review",
+            "child_run": "single_part_base",
+            "part_id": "base",
+            "status": "accepted_for_preview",
+            "checks": {
+                "child_run_created": True,
+                "step_created": True,
+                "stl_created": True,
+                "input_ir_created": True,
+                "report_created": True,
+                "child_scope": "single_part",
+                "single_part_only": True,
+                "no_batch_generation": True,
+                "no_assembly_generation": True,
+                "lineage_preserved": True,
+                "interface_constraints_preserved_in_metadata": True,
+            },
+            "diagnostic_codes": ["part_result.review_created", "part_result.step_created"],
+            "raw_provider_response": "SECRET_SHOULD_NOT_APPEAR",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    metadata = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "base"})["data"]
+    reviewed = metadata["reviewed_part_summary"]
+
+    assert reviewed["assembly_plan"]["scope"] == "multi_part"
+    assert reviewed["assembly_plan"]["candidate_part_count"] == 2
+    assert reviewed["assembly_plan"]["reference_only_count"] == 1
+    assert reviewed["assembly_plan"]["parts"][0]["part_id"] == "base"
+    assert reviewed["assembly_plan"]["parts"][0]["interfaces_count"] == 1
+    assert reviewed["part_request"]["interface_constraint_count"] == 1
+    assert reviewed["part_request_review"]["checks"]["has_interface_constraints"] is True
+    assert reviewed["reviewed_part_handoff"]["status"] == "ready_for_single_part_planning"
+    assert reviewed["lineage"]["child_run_id"] == "single_part_base"
+    assert reviewed["part_result_review"]["status"] == "accepted_for_preview"
+    assert reviewed["part_result_review"]["checks"]["step_created"] is True
+    assert reviewed["part_result_review"]["checks"]["stl_created"] is True
+    assert reviewed["part_result_review"]["checks"]["single_part_only"] is True
+    assert reviewed["part_result_review"]["checks"]["lineage_preserved"] is True
+    assert reviewed["part_result_review"]["checks"]["interface_constraints_preserved_in_metadata"] is True
+    assert metadata["child_runs"] == [{
+        "run_id": "single_part_base",
+        "status": "success",
+        "stage": None,
+        "artifacts": ["report.json"],
+        "downloadables": ["model.step", "model.stl"],
+    }]
+    serialized = json.dumps(metadata, sort_keys=True)
+    assert str(tmp_path) not in serialized
+    assert "SECRET_SHOULD_NOT_APPEAR" not in serialized
+
+
+def test_workflow_console_reviewed_part_missing_artifacts_are_graceful(tmp_path):
+    run_dir = tmp_path / "outputs" / "partial_reviewed_part"
+    run_dir.mkdir(parents=True)
+    (run_dir / "assembly_plan.json").write_text(
+        json.dumps({
+            "artifact_type": "assembly_plan",
+            "scope": "multi_part",
+            "status": "blocked_before_part_generation",
+            "parts": [{"part_id": "base", "supported_candidate": True}],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    metadata = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "partial_reviewed_part"})["data"]
+
+    assert metadata["reviewed_part_summary"]["assembly_plan"]["present"] is True
+    assert metadata["reviewed_part_summary"]["part_result_review"]["present"] is False
+    assert metadata["child_runs"] == []
+
+
+def test_workflow_console_report_summary_sanitizes_raw_messages_secrets_and_paths(tmp_path):
+    run_dir = tmp_path / "outputs" / "privacy_summary"
+    run_dir.mkdir(parents=True)
+    (run_dir / "report.json").write_text(
+        json.dumps({
+            "status": "failed",
+            "success": False,
+            "warnings": [
+                {"code": "safe.warning", "message": "api_key=SECRET_SHOULD_NOT_APPEAR"},
+                {"code": "path.warning", "message": str(tmp_path / "secret.txt")},
+            ],
+            "errors": [{"code": "safe.error", "message": "ordinary sanitized message"}],
+            "raw_provider_messages": ["SECRET_SHOULD_NOT_APPEAR"],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    metadata = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "privacy_summary"})["data"]
+    serialized = json.dumps(metadata["report_summary"], sort_keys=True)
+
+    assert "safe.warning" in serialized
+    assert "safe.error" in serialized
+    assert "ordinary sanitized message" in serialized
+    assert "SECRET_SHOULD_NOT_APPEAR" not in serialized
+    assert str(tmp_path) not in serialized
 
 
 def test_workflow_console_server_resolves_only_whitelisted_downloadables(tmp_path):

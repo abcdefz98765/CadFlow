@@ -416,9 +416,10 @@ def _public_route_data(value: Any) -> Any:
         if key == "files" and isinstance(item, dict):
             public[key] = _public_file_refs(item)
             continue
+        if key == "content":
+            public[key] = _public_artifact_content(item)
+            continue
         public[key] = _public_route_data(item)
-    if "content" in value:
-        public["content"] = value["content"]
     return public
 
 
@@ -439,3 +440,48 @@ def _public_string(value: str) -> str:
     except (OSError, ValueError):
         pass
     return value
+
+
+def _public_artifact_content(value: Any) -> Any:
+    if isinstance(value, list):
+        public_items = [_public_artifact_content(item) for item in value]
+        return [item for item in public_items if item is not None]
+    if isinstance(value, str):
+        if _unsafe_public_content_string(value):
+            return None
+        return _public_string(value)
+    if not isinstance(value, dict):
+        return value
+    public = {}
+    for key, item in value.items():
+        if _unsafe_public_content_key(key):
+            continue
+        public_item = _public_artifact_content(item)
+        if public_item is not None:
+            public[key] = public_item
+    return public
+
+
+def _unsafe_public_content_key(key: Any) -> bool:
+    lowered = str(key).lower()
+    blocked = (
+        "api_key",
+        "apikey",
+        "password",
+        "secret",
+        "token",
+        "bearer",
+        "raw_response",
+        "raw_provider",
+        "provider_messages",
+        "provider_response",
+        "transcript",
+        "request_payload",
+        "response_payload",
+    )
+    return any(marker in lowered for marker in blocked)
+
+
+def _unsafe_public_content_string(value: str) -> bool:
+    lowered = value.lower()
+    return any(marker in lowered for marker in ("api_key", "apikey", "password", "secret", "token", "bearer "))

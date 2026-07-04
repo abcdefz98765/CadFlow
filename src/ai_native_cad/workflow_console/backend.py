@@ -139,11 +139,17 @@ class WorkflowConsoleBackend:
     def list_runs(self) -> list[dict[str, Any]]:
         """List existing run directories under outputs/ and runs/."""
         runs: list[dict[str, Any]] = []
+        seen: set[Path] = set()
         for root in self._resolved_run_roots():
             if not root.exists():
                 continue
-            for child in sorted(root.iterdir(), key=lambda path: path.name):
+            candidates = [root, *sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: str(path))]
+            for child in candidates:
+                resolved = child.resolve()
+                if resolved in seen:
+                    continue
                 if child.is_dir() and _has_workflow_artifact(child):
+                    seen.add(resolved)
                     runs.append(self.read_run_metadata(child))
         return sorted(runs, key=lambda item: (item.get("updated_at") or "", item["run_id"]), reverse=True)
 
@@ -323,6 +329,9 @@ class WorkflowConsoleBackend:
             candidate = self._require_child_path(run_root, run_id)
             if candidate.is_dir() and _has_workflow_artifact(candidate):
                 return candidate
+            for nested in sorted(run_root.rglob(run_id), key=lambda path: str(path)):
+                if nested.name == run_id and nested.is_dir() and _has_workflow_artifact(nested):
+                    return self._require_project_path(nested)
         root_labels = ", ".join(str(path) for path in search_roots)
         raise FileNotFoundError(f"workflow console run not found: {run_id} under {root_labels}")
 
@@ -343,9 +352,48 @@ class WorkflowConsoleBackend:
             "stage_history": self.read_stage_history(path),
             "gate_history": self.read_gate_history(path),
             "report_summary": self.read_report_summary(path),
+            "reviewed_part_summary": self.read_reviewed_part_summary(path),
+            "child_runs": self.list_child_runs(path),
             "artifacts": self.list_artifacts(path),
             "downloadables": self.list_downloadables(path),
         }
+
+    def read_reviewed_part_summary(self, run_dir: str | Path) -> dict[str, Any]:
+        """Return compact reviewed-part workflow summaries for console inspection."""
+        path = self._require_project_path(Path(run_dir))
+        assembly_plan = _read_json_if_present(path / "assembly_plan.json")
+        part_result_review = _read_json_if_present(path / "part_result_review.json")
+        part_request = _read_json_if_present(path / "part_create_request.json")
+        part_review = _read_json_if_present(path / "part_request_review.json")
+        handoff = _read_json_if_present(path / "reviewed_part_handoff.json")
+        lineage = _read_json_if_present(path / "lineage.json")
+        return {
+            "assembly_plan": _compact_assembly_plan_summary(assembly_plan),
+            "part_request": _compact_part_request_summary(part_request),
+            "part_request_review": _compact_part_request_review_summary(part_review),
+            "reviewed_part_handoff": _compact_reviewed_part_handoff_summary(handoff),
+            "part_result_review": _compact_part_result_review_summary(part_result_review),
+            "lineage": _compact_reviewed_part_lineage_summary(lineage),
+        }
+
+    def list_child_runs(self, run_dir: str | Path) -> list[dict[str, Any]]:
+        """List immediate child run directories with artifact-backed output."""
+        path = self._require_project_path(Path(run_dir))
+        children: list[dict[str, Any]] = []
+        if not path.exists():
+            return children
+        for child in sorted(path.iterdir(), key=lambda item: item.name):
+            if not child.is_dir() or not _has_workflow_artifact(child):
+                continue
+            status = self.read_run_status(child)
+            children.append({
+                "run_id": child.name,
+                "status": status.get("status"),
+                "stage": status.get("stage"),
+                "artifacts": [item["name"] for item in self.list_artifacts(child)],
+                "downloadables": [item["name"] for item in self.list_downloadables(child)],
+            })
+        return children
 
     def read_stage_history(self, run_dir: str | Path) -> list[dict[str, Any]]:
         """Return path-free workflow console stage history for a run."""
@@ -651,12 +699,16 @@ def _require_keys(content: dict[str, Any], artifact: str, keys: tuple[str, ...])
 
 def _compact_issue(item: Any) -> dict[str, Any]:
     if isinstance(item, dict):
-        return {
-            key: value
-            for key, value in item.items()
-            if key in {"code", "message", "dimension", "feature", "check"}
-        }
-    return {"message": str(item)}
+        compact = {}
+        for key, value in item.items():
+            if key not in {"code", "message", "dimension", "feature", "check"}:
+                continue
+            safe_value = _safe_summary_text(value)
+            if safe_value is not None:
+                compact[key] = safe_value
+        return compact
+    safe_message = _safe_summary_text(item)
+    return {"message": safe_message} if safe_message is not None else {}
 
 
 def _compact_requirement_summary(requirement: dict[str, Any] | None) -> dict[str, Any]:
@@ -721,6 +773,193 @@ def _compact_revision_summary(
         "validation_change_count": summary.get("validation_change_count", 0),
         "system_repair_change_count": summary.get("system_repair_change_count", 0),
     }
+
+
+def _compact_assembly_plan_summary(assembly_plan: dict[str, Any] | None) -> dict[str, Any]:
+    assembly_plan = assembly_plan or {}
+    parts = [part for part in assembly_plan.get("parts", []) if isinstance(part, dict)]
+    interfaces = [item for item in assembly_plan.get("interfaces", []) if isinstance(item, dict)]
+    blocked = [item for item in assembly_plan.get("blocked_reasons", []) if isinstance(item, dict)]
+    quality = assembly_plan.get("quality") if isinstance(assembly_plan.get("quality"), dict) else {}
+    part_status_counts = _safe_count_dict(quality.get("part_status_counts")) or _count_field(parts, "part_status")
+    generation_strategy_counts = (
+        _safe_count_dict(quality.get("part_generation_strategy_counts"))
+        or _count_field(parts, "generation_strategy")
+    )
+    return {
+        "present": bool(assembly_plan),
+        "scope": _safe_summary_text(assembly_plan.get("scope")),
+        "status": _safe_summary_text(assembly_plan.get("status")),
+        "part_count": len(parts),
+        "interface_count": len(interfaces),
+        "fastener_count": len(assembly_plan.get("fasteners", [])) if isinstance(assembly_plan.get("fasteners"), list) else 0,
+        "candidate_part_count": sum(1 for part in parts if part.get("supported_candidate") is True),
+        "reference_only_count": sum(1 for part in parts if part.get("part_status") == "reference_only"),
+        "blocked_part_count": sum(1 for part in parts if part.get("part_status") == "blocked"),
+        "part_status_counts": part_status_counts,
+        "generation_strategy_counts": generation_strategy_counts,
+        "diagnostic_codes": _compact_code_list(assembly_plan.get("diagnostic_codes")),
+        "blocked_reason_codes": _compact_code_list([item.get("code") for item in blocked]),
+        "parts": [_compact_assembly_part(part, interfaces) for part in parts[:20]],
+    }
+
+
+def _compact_assembly_part(part: dict[str, Any], interfaces: list[dict[str, Any]]) -> dict[str, Any]:
+    part_id = _safe_summary_text(part.get("part_id"))
+    blocked = [item for item in part.get("blocked_reasons", []) if isinstance(item, dict)]
+    return {
+        "part_id": part_id,
+        "role": _safe_summary_text(part.get("role")),
+        "generation_strategy": _safe_summary_text(part.get("generation_strategy")),
+        "part_status": _safe_summary_text(part.get("part_status")),
+        "supported_candidate": part.get("supported_candidate") is True,
+        "reference_only": part.get("part_status") == "reference_only",
+        "blocked_reason_codes": _compact_code_list([item.get("code") for item in blocked]),
+        "interfaces_count": sum(
+            1
+            for interface in interfaces
+            if part_id is not None and (interface.get("from") == part_id or interface.get("to") == part_id)
+        ),
+    }
+
+
+def _compact_part_request_summary(part_request: dict[str, Any] | None) -> dict[str, Any]:
+    part_request = part_request or {}
+    return {
+        "present": bool(part_request),
+        "part_id": _safe_summary_text(part_request.get("part_id")),
+        "status": _safe_summary_text(part_request.get("status")),
+        "generation_strategy": _safe_summary_text(part_request.get("generation_strategy")),
+        "interface_constraint_count": (
+            len(part_request.get("interface_constraints", []))
+            if isinstance(part_request.get("interface_constraints"), list)
+            else 0
+        ),
+        "diagnostic_codes": _compact_code_list(part_request.get("diagnostic_codes")),
+    }
+
+
+def _compact_part_request_review_summary(part_review: dict[str, Any] | None) -> dict[str, Any]:
+    part_review = part_review or {}
+    checks = part_review.get("checks") if isinstance(part_review.get("checks"), dict) else {}
+    return {
+        "present": bool(part_review),
+        "status": _safe_summary_text(part_review.get("status")),
+        "diagnostic_codes": _compact_code_list(part_review.get("diagnostic_codes")),
+        "checks": {
+            key: checks.get(key)
+            for key in (
+                "is_reference_only",
+                "is_blocked",
+                "has_interface_constraints",
+                "has_provider_generated_code",
+                "has_provider_generated_cad_ir",
+                "has_arbitrary_provider_fields",
+            )
+            if isinstance(checks.get(key), bool)
+        },
+    }
+
+
+def _compact_reviewed_part_handoff_summary(handoff: dict[str, Any] | None) -> dict[str, Any]:
+    handoff = handoff or {}
+    return {
+        "present": bool(handoff),
+        "part_id": _safe_summary_text(handoff.get("part_id")),
+        "status": _safe_summary_text(handoff.get("status")),
+        "source_part_request": _safe_summary_text(handoff.get("source_part_request")),
+        "source_review": _safe_summary_text(handoff.get("source_review")),
+        "interface_constraint_count": (
+            len(handoff.get("interface_constraints", []))
+            if isinstance(handoff.get("interface_constraints"), list)
+            else 0
+        ),
+        "diagnostic_codes": _compact_code_list(handoff.get("diagnostic_codes")),
+    }
+
+
+def _compact_part_result_review_summary(review: dict[str, Any] | None) -> dict[str, Any]:
+    review = review or {}
+    checks = review.get("checks") if isinstance(review.get("checks"), dict) else {}
+    return {
+        "present": bool(review),
+        "status": _safe_summary_text(review.get("status")),
+        "part_id": _safe_summary_text(review.get("part_id")),
+        "child_run": _safe_summary_text(review.get("child_run")),
+        "diagnostic_codes": _compact_code_list(review.get("diagnostic_codes")),
+        "checks": {
+            key: checks.get(key)
+            for key in (
+                "child_run_created",
+                "step_created",
+                "stl_created",
+                "input_ir_created",
+                "report_created",
+                "single_part_only",
+                "no_batch_generation",
+                "no_assembly_generation",
+                "selected_part_id_preserved",
+                "lineage_preserved",
+                "interface_constraints_preserved_in_metadata",
+            )
+            if isinstance(checks.get(key), bool)
+        },
+        "child_scope": _safe_summary_text(checks.get("child_scope")),
+        "revision_note_codes": _compact_code_list(
+            [
+                item.get("code")
+                for item in review.get("revision_notes", [])
+                if isinstance(item, dict)
+            ]
+        ),
+    }
+
+
+def _compact_reviewed_part_lineage_summary(lineage: dict[str, Any] | None) -> dict[str, Any]:
+    lineage = lineage or {}
+    return {
+        "present": bool(lineage),
+        "relationship": _safe_summary_text(lineage.get("relationship")),
+        "part_id": _safe_summary_text(lineage.get("part_id")),
+        "child_run_id": _safe_summary_text(lineage.get("child_run_id")),
+        "assembly_plan_artifact": _safe_summary_text(lineage.get("assembly_plan_artifact")),
+        "part_create_request_artifact": _safe_summary_text(lineage.get("part_create_request_artifact")),
+        "part_request_review_artifact": _safe_summary_text(lineage.get("part_request_review_artifact")),
+        "reviewed_part_handoff_artifact": _safe_summary_text(lineage.get("reviewed_part_handoff_artifact")),
+    }
+
+
+def _compact_code_list(items: Any) -> list[str]:
+    values = items if isinstance(items, list) else []
+    codes = []
+    for item in values:
+        text = _safe_summary_text(item)
+        if text is not None and text not in codes:
+            codes.append(text)
+        if len(codes) == 20:
+            break
+    return codes
+
+
+def _safe_count_dict(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    counts: dict[str, int] = {}
+    for key, item in value.items():
+        safe_key = _safe_summary_text(key)
+        if safe_key is not None and isinstance(item, int) and item >= 0:
+            counts[safe_key] = item
+    return counts
+
+
+def _count_field(items: list[dict[str, Any]], field: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        value = _safe_summary_text(item.get(field))
+        if value is None:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+    return counts
 
 
 def _compact_flow_decision(decision: dict[str, Any] | None) -> dict[str, Any]:

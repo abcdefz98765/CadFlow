@@ -147,15 +147,17 @@ For future HTTP routes, `WorkflowConsoleBackend` also exposes run-id based opera
 
 The route contract scaffold defines future method/path semantics without importing a web framework or starting an HTTP server. It also provides a small in-process dispatcher that accepts a route name plus path/body/query dictionaries and calls an explicit allowlist of by-id backend methods. The dispatcher removes local path fields such as `run_dir`, `root`, `path`, and `output_dir` from public route response data while preserving artifact content. Generated file references in route result metadata are reduced to filenames; downloadable lookup still goes through the whitelisted download route. Gate-decision payloads remain in `logs/runtime.json` for audit, but public metadata and route responses expose only compact payload summaries. The `run_revision` route can execute a structured CadFlow-native revision from a valid parent run into an explicit safe child run id, returning path-free metadata while the child run stores `model.step`, `model.stl`, comparison, lineage, revision report, and trace artifacts. Future FastAPI or other HTTP adapters must wrap the by-id backend methods only, such as `create_run_by_id`, `run_stage_by_id`, `run_revision_by_id`, `read_artifact_by_id`, `write_artifact_by_id`, and `record_gate_decision_by_id`; direct local `run_dir` operations remain internal Python APIs.
 
-Readable artifacts remain limited to workflow source, handoff, report, trace,
-and revision records: `prompt.txt`, `revision_prompt.txt`,
+Readable artifacts remain limited to workflow source, handoff, reviewed-part,
+report, trace, and revision records: `prompt.txt`, `revision_prompt.txt`,
 `requirement.json`, `planning_artifact.json`, `input_ir.json`,
-`parent_input_ir.json`, parent snapshots, `revision_request.json`,
-`change_intent.json`, `revision_plan.json`, `patch.json`,
-`comparison.json`, `revision_report.md`, `lineage.json`, `report.json`,
-`report.md`, `agent_trace.json`, and `logs/runtime.json`. Downloadable
-discovery remains limited to `model.step`, `model.stl`, `preview.png`, and
-`model.py`.
+`parent_input_ir.json`, parent snapshots, `assembly_plan.json`,
+`assembly_plan.md`, `part_create_request.json`, `part_request_review.json`,
+`reviewed_part_handoff.json`, `part_execution_request.json`,
+`part_result_review.json`, `revision_request.json`, `change_intent.json`,
+`revision_plan.json`, `patch.json`, `comparison.json`, `revision_report.md`,
+`lineage.json`, `report.json`, `report.md`, `agent_trace.json`, and
+`logs/runtime.json`. Downloadable discovery remains limited to `model.step`,
+`model.stl`, `preview.png`, and `model.py`.
 
 Editable artifacts are narrower than readable artifacts. The backend can write only `requirement.json`, `planning_artifact.json`, and `input_ir.json`; writes must be JSON objects, pass artifact-specific validation, and are recorded in `logs/runtime.json` under `workflow_console.artifact_edits`.
 
@@ -188,6 +190,9 @@ The first frontend now lives in `web-viewer/workflow-console.html` and stays wor
 - Prompt entry and run controls.
 - Artifact inspector for `requirement.json`, `planning_artifact.json`, `input_ir.json`, reports, and traces.
 - Report/trace viewer that highlights verified, unverified, warning, error, and rework states.
+- Reviewed-part summaries for `assembly_plan.json` candidates, reference-only
+  parts, `reviewed_part_handoff.json`, child run discovery, lineage, and
+  `part_result_review.json` checks.
 - Right-side Inspector tabs for report/trace summary, gate decisions, downloadables, and activity.
 - Scroll-safe preview surface using current-run STL or later GLB assets.
 
@@ -209,12 +214,21 @@ The current UI supports the first usable local workflow loop:
 - run Requirement, Planning, Part Modeling, Review, Outputs, or the full text pipeline by safe run id;
 - inspect readable artifacts;
 - inspect a compact report/trace summary without opening raw JSON;
+- inspect existing reviewed-part E2E artifacts, including assembly-plan parts,
+  candidate status, part result review status, STEP/STL checks, single-part
+  scope checks, lineage checks, and interface metadata checks;
 - edit only the allowed JSON handoff artifacts;
 - record approve/reject/return/override gate decisions;
 - list STEP-first downloadables and open the secondary STL preview when `model.stl` exists;
 - use an explicit Interact/Release control before the embedded STL viewer captures pointer wheel/drag input.
 
 Review and Outputs are executable local check stages. Review reads the existing `report.json` flow decision and records the review gate status. Outputs checks publishable artifacts, including primary `model.step`, without regenerating CAD. STEP remains the primary CAD artifact; the embedded viewer loads `model.stl` only as a secondary inspection aid.
+
+Reviewed-part awareness is read-only in this slice. The console can inspect
+manual-smoke artifacts and discover generated STEP/STL files, but it does not
+add batch generation, assembly CAD generation, assembly constraint solving, STEP
+assembly export, geometric fit validation, new CAD templates, or automatic
+all-part generation.
 
 ## Security Notes
 

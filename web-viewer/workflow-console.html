@@ -1179,7 +1179,9 @@ function renderDownloads() {
 function renderReportSummary() {
   const target = el("report-summary");
   const summary = state.metadata.report_summary || {};
-  if (!summary.report_present && !summary.trace_present) {
+  const reviewedPart = state.metadata.reviewed_part_summary || {};
+  const hasReviewedPart = reviewedPartHasContent(reviewedPart);
+  if (!summary.report_present && !summary.trace_present && !hasReviewedPart) {
     target.innerHTML = '<div class="empty" style="grid-column: 1 / -1;">No report or trace yet.</div>';
     return;
   }
@@ -1212,7 +1214,87 @@ function renderReportSummary() {
     ${summaryFields("Planning Risks", planning.risk_notes, "warn")}
     ${summaryIssues("Warnings", summary.warning_count || 0, summary.warnings || [], "warn")}
     ${summaryIssues("Errors", summary.error_count || 0, summary.errors || [], "danger")}
+    ${reviewedPartSummary(reviewedPart, state.metadata.child_runs || [])}
   `;
+}
+
+function reviewedPartHasContent(summary) {
+  return Boolean(
+    summary.assembly_plan?.present ||
+    summary.part_request?.present ||
+    summary.part_request_review?.present ||
+    summary.reviewed_part_handoff?.present ||
+    summary.part_result_review?.present ||
+    summary.lineage?.present
+  );
+}
+
+function reviewedPartSummary(summary, childRuns) {
+  if (!reviewedPartHasContent(summary) && !childRuns.length) return "";
+  const assembly = summary.assembly_plan || {};
+  const partResult = summary.part_result_review || {};
+  const request = summary.part_request || {};
+  const requestReview = summary.part_request_review || {};
+  const handoff = summary.reviewed_part_handoff || {};
+  const lineage = summary.lineage || {};
+  return `
+    <div class="summary-list">
+      <div class="label">Reviewed Part Workflow</div>
+      ${assembly.present ? `
+        <div class="summary-line">
+          Assembly plan: ${escapeHtml(assembly.scope || "-")} · ${escapeHtml(assembly.status || "-")} · ${assembly.part_count || 0} parts · ${assembly.interface_count || 0} interfaces
+        </div>
+        ${assemblyPartsSummary(assembly.parts || [])}
+      ` : '<div class="summary-line">No assembly_plan.json summary.</div>'}
+      ${request.present ? `<div class="summary-line">Part request: ${escapeHtml(request.part_id || "-")} · ${escapeHtml(request.status || "-")} · interfaces ${request.interface_constraint_count || 0}</div>` : ""}
+      ${requestReview.present ? `<div class="summary-line">Request review: ${escapeHtml(requestReview.status || "-")}</div>` : ""}
+      ${handoff.present ? `<div class="summary-line">Handoff: ${escapeHtml(handoff.part_id || "-")} · ${escapeHtml(handoff.status || "-")} · interfaces ${handoff.interface_constraint_count || 0}</div>` : ""}
+      ${lineage.present ? `<div class="summary-line">Lineage: ${escapeHtml(lineage.relationship || "-")} · child ${escapeHtml(lineage.child_run_id || "-")}</div>` : ""}
+      ${partResult.present ? partResultSummary(partResult) : ""}
+      ${childRunsSummary(childRuns)}
+    </div>
+  `;
+}
+
+function assemblyPartsSummary(parts) {
+  if (!parts.length) return '<div class="summary-line">No parts recorded.</div>';
+  return parts.map((part) => {
+    const flags = [
+      part.supported_candidate ? "candidate" : null,
+      part.reference_only ? "reference_only" : null,
+      (part.blocked_reason_codes || []).join(", "),
+    ].filter(Boolean).join(" · ");
+    return `<div class="summary-line">${escapeHtml(part.part_id || "-")} · ${escapeHtml(part.role || "-")} · ${escapeHtml(part.generation_strategy || "-")} · ${escapeHtml(part.part_status || "-")} · interfaces ${part.interfaces_count || 0}${flags ? ` · ${escapeHtml(flags)}` : ""}</div>`;
+  }).join("");
+}
+
+function partResultSummary(result) {
+  const checks = result.checks || {};
+  const checkLine = [
+    `STEP ${checkMark(checks.step_created)}`,
+    `STL ${checkMark(checks.stl_created)}`,
+    `single part ${checkMark(checks.single_part_only)}`,
+    `lineage ${checkMark(checks.lineage_preserved)}`,
+    `interfaces ${checkMark(checks.interface_constraints_preserved_in_metadata)}`,
+  ].join(" · ");
+  const diagnostics = result.diagnostic_codes && result.diagnostic_codes.length
+    ? ` · ${escapeHtml(result.diagnostic_codes.slice(0, 5).join(", "))}`
+    : "";
+  return `<div class="summary-line">Part result: ${escapeHtml(result.status || "-")} · ${checkLine}${diagnostics}</div>`;
+}
+
+function childRunsSummary(childRuns) {
+  if (!childRuns.length) return "";
+  return childRuns.map((child) => {
+    const downloads = child.downloadables && child.downloadables.length ? child.downloadables.join(", ") : "no downloads";
+    return `<div class="summary-line">Child run: ${escapeHtml(child.run_id || "-")} · ${escapeHtml(child.status || "-")} · ${escapeHtml(downloads)}</div>`;
+  }).join("");
+}
+
+function checkMark(value) {
+  if (value === true) return "yes";
+  if (value === false) return "no";
+  return "-";
 }
 
 function summaryItem(label, value, pillClass) {

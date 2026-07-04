@@ -406,10 +406,13 @@ The backend and first static console now exist under
 `ai_native_cad.workflow_console` and `web-viewer/`:
 
 - run the existing workflow from natural-language prompts
-- list artifact-backed runs under `outputs/` and `runs/`
+- list artifact-backed runs under `outputs/` and `runs/`, including nested
+  manual smoke output runs
 - derive run status from `report.json` and `agent_trace.json`
 - show compact report/trace summaries for review decisions and attempt status
-- read requirement, planning, IR, report, and trace artifacts
+- read requirement, planning, IR, reviewed-part, report, and trace artifacts
+- summarize reviewed-part assembly plans, candidate part statuses, lineage, child
+  runs, and `part_result_review.json` checks
 - identify STEP-first outputs and derived preview/download files
 - run local Review and Outputs check stages from existing artifacts
 - support provider-backed workflow modes where implemented
@@ -425,10 +428,17 @@ patch diff, compare old/new outputs, show lineage, and download parent/child
 artifacts. It is also the intended future review surface for reviewed-part and
 staged approval workflows such as the Reviewed Part Single-Part E2E MVP.
 
+For the Reviewed Part Single-Part E2E MVP, the console can inspect the existing
+artifact chain from `assembly_plan.json` through `part_result_review.json`,
+including candidate parts, reference-only parts, child run summaries, and
+STEP/STL download links when present. It does not replace the manual smoke
+validation path yet.
+
 Boundaries are explicit: the Web Workflow Console does not add full assembly
 generation, automatic all-part generation, assembly constraint solving, STEP
-assembly export, a new CAD backend, or browser-native CAD editing. The current
-reviewed-part E2E milestone remains validated by CLI/manual smoke tests.
+assembly export, geometric fit validation, a new CAD backend, or browser-native
+CAD editing. The current reviewed-part E2E milestone remains validated by
+CLI/manual smoke tests.
 
 Run the local console with the stdlib-only bridge:
 
