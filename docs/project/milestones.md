@@ -179,7 +179,37 @@ Manual smoke:
 
 ```bash
 python examples/provider_smoke/reviewed_part_single_create_smoke.py --provider deepseek --env-file .env
+python examples/provider_smoke/reviewed_part_single_create_smoke.py --provider deepseek --env-file .env --part-id base
+python examples/provider_smoke/reviewed_part_single_create_smoke.py --provider deepseek --env-file .env --part-id lid
 ```
+
+Current candidate outcome boundary for the two-part electronics enclosure
+smoke:
+
+- `--part-id base` succeeds and generates one child single-part STEP/STL.
+- `--part-id lid` is selected and reviewed, then safely blocks at
+  `unsupported_part_type.lid`.
+- Screws and fasteners remain `reference_only` and are not selected for CAD
+  generation.
+- No batch generation occurs.
+- No full assembly generation occurs.
+- No assembly constraints are solved.
+
+Product meaning: CadFlow can attempt different candidate parts from the same
+assembly plan one at a time. The current supported boundary is visible through
+sanitized diagnostics rather than hidden fallback behavior.
+
+Non-goals: this does not mean all parts in an assembly can be generated
+automatically, does not mean lid/cover geometry is supported yet, and does not
+mean full assembly export or fit validation exists.
+
+What this tells us: the next capability gap is not assembly routing; it is
+single-part support and mapping for additional candidate families such as
+lid/cover.
+
+Potential next step: evaluate whether `lid` should map to an existing simple
+plate/cover family or become a new supported single-part family. This should be
+done as a separate capability decision, not as a smoke-test workaround.
 
 Sanitized example summary:
 
