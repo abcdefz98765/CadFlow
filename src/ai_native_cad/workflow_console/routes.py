@@ -259,8 +259,15 @@ def _list_runs(
     path_params: dict[str, Any],
     body: dict[str, Any],
     query: dict[str, Any],
-) -> list[dict[str, Any]]:
-    return backend.list_runs()
+) -> dict[str, Any]:
+    filters = {}
+    if query.get("search") is not None:
+        filters["search"] = _require_string(query, "search")
+    return backend.list_runs_page(
+        limit=_optional_int(query, "limit", 50),
+        offset=_optional_int(query, "offset", 0),
+        filters=filters,
+    )
 
 
 def _read_run_metadata(
@@ -541,6 +548,22 @@ def _require_value(values: dict[str, Any], key: str) -> Any:
     if value is None:
         raise ValueError(f"workflow console route is missing required value: {key}")
     return value
+
+
+def _require_string(values: dict[str, Any], key: str) -> str:
+    value = _require_value(values, key)
+    if not isinstance(value, str):
+        raise ValueError(f"workflow console route value must be a string: {key}")
+    return value
+
+
+def _optional_int(values: dict[str, Any], key: str, default: int) -> int:
+    value = values.get(key, default)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    raise ValueError(f"workflow console route value must be an integer: {key}")
 
 
 def _reject_secret_fields(value: Any) -> None:

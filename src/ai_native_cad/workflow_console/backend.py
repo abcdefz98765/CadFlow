@@ -31,6 +31,8 @@ from ai_native_cad.workflow_control import (
 )
 
 DOWNLOADABLE_FILES = ("model.step", "model.stl", "preview.png", "model.py")
+DEFAULT_RUN_LIST_LIMIT = 50
+MAX_RUN_LIST_LIMIT = 200
 EDITABLE_ARTIFACTS = {"requirement.json", "planning_artifact.json", "input_ir.json"}
 STAGED_READABLE_ARTIFACTS = {
     "assembly_plan.json": ("01_design/assembly_plan.json",),
@@ -154,15 +156,32 @@ class WorkflowConsoleBackend:
             },
         }
 
-    def list_runs(self) -> list[dict[str, Any]]:
-        """List existing run directories under outputs/ and runs/."""
-        runs: list[dict[str, Any]] = []
+    def list_runs(
+        self,
+        limit: int = DEFAULT_RUN_LIST_LIMIT,
+        offset: int = 0,
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """List a bounded page of workflow runs without loading full run details."""
+        return self.list_runs_page(limit=limit, offset=offset, filters=filters)["runs"]
+
+    def list_runs_page(
+        self,
+        limit: int = DEFAULT_RUN_LIST_LIMIT,
+        offset: int = 0,
+        filters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return paginated, cheap run summaries for configured run roots."""
+        limit = _normalize_limit(limit)
+        offset = _normalize_offset(offset)
+        filters = filters or {}
+        matched: list[dict[str, Any]] = []
         seen: set[Path] = set()
         for root in self._resolved_run_roots():
             if not root.exists():
                 continue
-            candidates = [root, *sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: str(path))]
-            for child in candidates:
+            directories = [root, *sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: str(path))]
+            for child in directories:
                 if child.name in STAGED_ARTIFACT_DIRS:
                     continue
                 resolved = child.resolve()
@@ -170,8 +189,24 @@ class WorkflowConsoleBackend:
                     continue
                 if child.is_dir() and _has_workflow_artifact(child):
                     seen.add(resolved)
-                    runs.append(self.read_run_metadata(child))
-        return sorted(runs, key=lambda item: (item.get("updated_at") or "", item["run_id"]), reverse=True)
+                    item = self._run_listing_candidate(child)
+                    if _matches_run_filters(item, filters):
+                        matched.append(item)
+        sorted_candidates = sorted(matched, key=lambda item: (item.get("updated_at") or "", item["run_id"]), reverse=True)
+        page_candidates = sorted_candidates[offset : offset + limit]
+        runs = [self.read_run_summary(item["path"]) for item in page_candidates]
+        return {
+            "runs": runs,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "returned": len(runs),
+                "total": len(sorted_candidates),
+                "has_previous": offset > 0,
+                "has_next": offset + len(runs) < len(sorted_candidates),
+            },
+            "filters": _public_run_filters(filters),
+        }
 
     def create_workflow_from_prompt(
         self,
@@ -359,6 +394,33 @@ class WorkflowConsoleBackend:
         """Return run metadata for a path-safe run id."""
         return self.read_run_metadata(self.resolve_run(run_id, root=root))
 
+    def get_run_detail(self, run_id: str, root: str | Path | None = None) -> dict[str, Any]:
+        """Project-consistent alias for lazily loading one selected run."""
+        return self.read_run_metadata_by_id(run_id, root=root)
+
+    def get_run_summary(self, run_id: str, root: str | Path | None = None) -> dict[str, Any]:
+        """Return the cheap list summary for one path-safe run id."""
+        return self.read_run_summary(self.resolve_run(run_id, root=root))
+
+    def read_run_summary(self, run_dir: str | Path) -> dict[str, Any]:
+        """Return cheap, path-free metadata for paginated run lists."""
+        path = self._require_project_path(Path(run_dir))
+        stat = path.stat()
+        status = self.read_run_status(path)
+        selected_part_id = self._read_selected_part_id(path)
+        downloadables = self.list_downloadables(path)
+        return {
+            "run_id": path.name,
+            "updated_at": _timestamp(stat.st_mtime),
+            "status": status,
+            "selected_part_id": selected_part_id,
+            "workflow_review_summary": self.read_workflow_review_summary(path),
+            "has_step": (path / "model.step").exists(),
+            "has_stl": (path / "model.stl").exists(),
+            "child_run_count": self.count_child_runs(path),
+            "downloadables": downloadables,
+        }
+
     def read_run_metadata(self, run_dir: str | Path) -> dict[str, Any]:
         """Return artifact metadata, downloadables, and derived status for a run."""
         path = self._require_project_path(Path(run_dir))
@@ -439,6 +501,17 @@ class WorkflowConsoleBackend:
                 "downloadables": [item["name"] for item in self.list_downloadables(child)],
             })
         return children
+
+    def count_child_runs(self, run_dir: str | Path) -> int:
+        """Count artifact-backed child runs for cheap run list summaries."""
+        path = self._require_project_path(Path(run_dir))
+        if not path.exists():
+            return 0
+        count = 0
+        for child in path.rglob("*"):
+            if child.is_dir() and child != path and _has_workflow_artifact(child):
+                count += 1
+        return count
 
     def read_stage_history(self, run_dir: str | Path) -> list[dict[str, Any]]:
         """Return path-free workflow console stage history for a run."""
@@ -651,6 +724,28 @@ class WorkflowConsoleBackend:
             "planning_summary": _compact_planning_summary(planning),
         }
 
+    def _run_listing_candidate(self, path: Path) -> dict[str, Any]:
+        stat = path.stat()
+        return {
+            "run_id": path.name,
+            "updated_at": _timestamp(stat.st_mtime),
+            "path": path,
+        }
+
+    def _read_selected_part_id(self, path: Path) -> str | None:
+        reviewed_part_handoff = _read_first_json(path, ("reviewed_part_handoff.json", "04_handoff/reviewed_part_handoff.json"))
+        part_request = _read_first_json(path, ("part_create_request.json", "02_part_request/part_create_request.json"))
+        part_result_review = _read_first_json(path, ("part_result_review.json", "06_part_result_review/part_result_review.json"))
+        for value in (
+            (reviewed_part_handoff or {}).get("part_id"),
+            (part_request or {}).get("part_id"),
+            (part_result_review or {}).get("part_id"),
+        ):
+            safe = _safe_summary_text(value)
+            if safe is not None:
+                return safe
+        return None
+
     def _resolved_run_roots(self) -> list[Path]:
         roots = []
         for root in self.run_roots:
@@ -710,6 +805,38 @@ def _has_workflow_artifact(path: Path) -> bool:
             "06_part_result_review/part_result_review.json",
         )
     )
+
+
+def _normalize_limit(limit: int) -> int:
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise ValueError("workflow console run list limit must be an integer")
+    if limit < 1:
+        raise ValueError("workflow console run list limit must be at least 1")
+    return min(limit, MAX_RUN_LIST_LIMIT)
+
+
+def _normalize_offset(offset: int) -> int:
+    if not isinstance(offset, int) or isinstance(offset, bool):
+        raise ValueError("workflow console run list offset must be an integer")
+    if offset < 0:
+        raise ValueError("workflow console run list offset must be at least 0")
+    return offset
+
+
+def _matches_run_filters(item: dict[str, Any], filters: dict[str, Any]) -> bool:
+    search = filters.get("search")
+    if isinstance(search, str) and search.strip():
+        if search.strip().lower() not in str(item.get("run_id", "")).lower():
+            return False
+    return True
+
+
+def _public_run_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    public = {}
+    search = filters.get("search")
+    if isinstance(search, str) and search.strip():
+        public["search"] = search.strip()[:80]
+    return public
 
 
 def _first_existing_artifact_path(root: Path, artifact: str) -> Path:

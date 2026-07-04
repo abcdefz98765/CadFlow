@@ -1569,6 +1569,81 @@ def test_backend_creates_run_without_executing_stages(tmp_path):
     assert (run_dir / "requirement.json").exists()
 
 
+def test_backend_list_runs_respects_default_limit_and_uses_summaries(tmp_path, monkeypatch):
+    for index in range(55):
+        run_dir = tmp_path / "outputs" / f"run_{index:02d}"
+        run_dir.mkdir(parents=True)
+        (run_dir / "prompt.txt").write_text(f"Make run {index}.\n", encoding="utf-8")
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    def fail_if_full_metadata_loaded(run_dir):
+        raise AssertionError(f"full metadata should be lazy-loaded: {run_dir}")
+
+    monkeypatch.setattr(backend, "read_run_metadata", fail_if_full_metadata_loaded)
+
+    runs = backend.list_runs()
+
+    assert len(runs) == 50
+    assert all("run_dir" not in run and "root" not in run for run in runs)
+
+
+def test_backend_list_runs_respects_explicit_limit_offset_and_pagination(tmp_path):
+    for index in range(5):
+        run_dir = tmp_path / "outputs" / f"paged_{index}"
+        run_dir.mkdir(parents=True)
+        (run_dir / "prompt.txt").write_text(f"Make paged {index}.\n", encoding="utf-8")
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    page = backend.list_runs_page(limit=2, offset=2)
+
+    assert len(page["runs"]) == 2
+    assert page["pagination"] == {
+        "limit": 2,
+        "offset": 2,
+        "returned": 2,
+        "total": 5,
+        "has_previous": True,
+        "has_next": True,
+    }
+
+
+def test_backend_list_runs_searches_safe_relative_run_names(tmp_path):
+    for name in ("alpha_bracket", "beta_spacer", "alpha_mount"):
+        run_dir = tmp_path / "outputs" / name
+        run_dir.mkdir(parents=True)
+        (run_dir / "prompt.txt").write_text(f"Make {name}.\n", encoding="utf-8")
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    page = backend.list_runs_page(limit=10, offset=0, filters={"search": "alpha"})
+    serialized = json.dumps(page, sort_keys=True)
+
+    assert {run["run_id"] for run in page["runs"]} == {"alpha_bracket", "alpha_mount"}
+    assert str(tmp_path) not in serialized
+
+
+def test_backend_run_summary_includes_review_and_model_availability(tmp_path):
+    run_dir = tmp_path / "outputs" / "summary_run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a reviewed part.\n", encoding="utf-8")
+    (run_dir / "model.step").write_text("STEP\n", encoding="utf-8")
+    (run_dir / "workflow_review.json").write_text(
+        json.dumps({
+            "overall_status": "accepted_for_preview",
+            "readiness_score": 90,
+            "summary": ["Ready."],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    summary = backend.get_run_summary("summary_run")
+
+    assert summary["workflow_review_summary"]["present"] is True
+    assert summary["workflow_review_summary"]["overall_status"] == "accepted_for_preview"
+    assert summary["has_step"] is True
+    assert summary["has_stl"] is False
+
+
 def test_backend_creates_run_by_safe_id_under_configured_root(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
 
@@ -2032,7 +2107,7 @@ def test_workflow_console_routes_list_nested_reviewed_part_runs_without_paths(tm
     serialized = json.dumps(response, sort_keys=True)
 
     assert response["ok"] is True
-    assert [item["run_id"] for item in response["data"]] == ["base"]
+    assert [item["run_id"] for item in response["data"]["runs"]] == ["base"]
     assert str(tmp_path) not in serialized
     assert "provider_smoke" not in serialized
     assert "model.step" in serialized
@@ -2264,7 +2339,7 @@ def test_workflow_console_reviewed_part_parent_run_summarizes_staged_child_artif
     )
     backend = WorkflowConsoleBackend(project_root=tmp_path)
 
-    runs = dispatch_route(backend, "list_runs")["data"]
+    runs = dispatch_route(backend, "list_runs")["data"]["runs"]
     metadata = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "base"})["data"]
     reviewed = metadata["reviewed_part_summary"]
 

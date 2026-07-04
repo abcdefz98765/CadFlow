@@ -20,6 +20,7 @@ from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8780
+DEFAULT_RUN_PAGE_SIZE = 50
 
 ARTIFACT_PAGE_ARTIFACTS = (
     "report.md",
@@ -88,15 +89,22 @@ def build_console_page_data(
     selected_run_id: str | None = None,
     *,
     root: str | None = None,
+    limit: int = DEFAULT_RUN_PAGE_SIZE,
+    offset: int = 0,
+    search: str | None = None,
 ) -> dict[str, Any]:
     """Build path-free data for the NiceGUI console pages."""
     backend = backend or WorkflowConsoleBackend()
-    runs_response = dispatch_route(backend, "list_runs", query=_query(root))
-    runs = runs_response["data"] if runs_response["ok"] else []
+    runs_response = dispatch_route(backend, "list_runs", query=_query(root, limit=limit, offset=offset, search=search))
+    runs_page = runs_response["data"] if runs_response["ok"] and isinstance(runs_response["data"], dict) else {}
+    runs = runs_page.get("runs") if isinstance(runs_page.get("runs"), list) else []
+    pagination = runs_page.get("pagination") if isinstance(runs_page.get("pagination"), dict) else _empty_pagination(limit, offset)
     selected = selected_run_id or (runs[0]["run_id"] if runs else None)
     run_data = build_selected_run_data(backend, selected, root=root) if selected else empty_selected_run_data()
     return {
         "runs": runs,
+        "pagination": pagination,
+        "run_filters": runs_page.get("filters") if isinstance(runs_page.get("filters"), dict) else {},
         "selected_run_id": selected,
         **run_data,
     }
@@ -379,11 +387,17 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
 
             def refresh() -> None:
                 panels.clear()
-                data = build_console_page_data(console_backend, state.get("selected_run_id"))
+                data = build_console_page_data(
+                    console_backend,
+                    state.get("selected_run_id"),
+                    limit=state.get("limit", DEFAULT_RUN_PAGE_SIZE),
+                    offset=state.get("offset", 0),
+                    search=state.get("search") or None,
+                )
                 state["selected_run_id"] = data.get("selected_run_id")
                 with panels:
                     with ui.tab_panel("Runs"):
-                        _render_runs(ui, data, lambda run_id: select_run(run_id))
+                        _render_runs(ui, data, state, lambda run_id: select_run(run_id), refresh)
                     with ui.tab_panel("Review Report"):
                         _render_workflow_review(ui, data, actions, state, refresh)
                     with ui.tab_panel("Requirement Review"):
@@ -425,9 +439,30 @@ def main(argv: list[str] | None = None) -> None:
     serve(host=args.host, port=args.port, reload=args.reload)
 
 
-def _render_runs(ui: Any, data: dict[str, Any], on_select: Callable[[str], None]) -> None:
+def _render_runs(
+    ui: Any,
+    data: dict[str, Any],
+    state: dict[str, Any],
+    on_select: Callable[[str], None],
+    refresh: Callable[[], None],
+) -> None:
     runs = data.get("runs") or []
     selected = data.get("selected_run_id")
+    pagination = data.get("pagination") if isinstance(data.get("pagination"), dict) else _empty_pagination(DEFAULT_RUN_PAGE_SIZE, 0)
+    with ui.row().classes("w-full items-end gap-3"):
+        search = ui.input("Search runs", value=state.get("search") or "").props("clearable").classes("w-72")
+        page_size = ui.select(options=[25, 50, 100], value=state.get("limit", DEFAULT_RUN_PAGE_SIZE), label="Page size").classes("w-36")
+        ui.button("Apply", icon="search", on_click=lambda: _apply_run_filters(state, search.value, page_size.value, refresh)).props("outline")
+        previous_button = ui.button("Previous", icon="chevron_left", on_click=lambda: _change_run_page(state, -1, pagination, refresh)).props("outline")
+        next_button = ui.button("Next", icon="chevron_right", on_click=lambda: _change_run_page(state, 1, pagination, refresh)).props("outline")
+        ui.label(
+            f"{pagination.get('offset', 0) + 1 if pagination.get('returned') else 0}-"
+            f"{pagination.get('offset', 0) + pagination.get('returned', 0)} of {pagination.get('total', 0)}"
+        ).classes("text-sm text-gray-600")
+        if not pagination.get("has_previous"):
+            previous_button.disable()
+        if not pagination.get("has_next"):
+            next_button.disable()
     if not runs:
         ui.label("No workflow runs found.").classes("text-gray-600")
         return
@@ -448,6 +483,28 @@ def _render_runs(ui: Any, data: dict[str, Any], on_select: Callable[[str], None]
         ui.badge(f"Children: {len(selected_run.get('child_runs') or [])}")
         ui.badge(f"Bridge: {_bridge_status(selected_run)}")
         ui.badge(f"Result review: {_part_result_review_status(selected_run)}")
+
+
+def _apply_run_filters(state: dict[str, Any], search: str | None, limit: Any, refresh: Callable[[], None]) -> None:
+    state["search"] = (search or "").strip()
+    state["limit"] = int(limit or DEFAULT_RUN_PAGE_SIZE)
+    state["offset"] = 0
+    state["selected_run_id"] = None
+    refresh()
+
+
+def _change_run_page(
+    state: dict[str, Any],
+    direction: int,
+    pagination: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    limit = int(pagination.get("limit") or state.get("limit") or DEFAULT_RUN_PAGE_SIZE)
+    offset = int(pagination.get("offset") or 0) + (direction * limit)
+    state["offset"] = max(0, offset)
+    state["limit"] = limit
+    state["selected_run_id"] = None
+    refresh()
 
 
 def _render_workflow_review(
@@ -741,6 +798,7 @@ def _run_row(run: dict[str, Any], selected: str | None) -> dict[str, Any]:
         "status": status.get("status"),
         "stage": status.get("stage"),
         "selected_part_id": _first_present(
+            run.get("selected_part_id"),
             _dict_get(reviewed.get("part_request"), "part_id"),
             _dict_get(reviewed.get("reviewed_part_handoff"), "part_id"),
             _dict_get(reviewed.get("part_result_review"), "part_id"),
@@ -825,8 +883,34 @@ def _list_block(ui: Any, title: str, items: Any) -> None:
         ui.label(json.dumps(item, sort_keys=True) if isinstance(item, dict) else str(item)).classes("text-sm")
 
 
-def _query(root: str | None) -> dict[str, str] | None:
-    return {"root": root} if root else None
+def _query(
+    root: str | None,
+    *,
+    limit: int | None = None,
+    offset: int | None = None,
+    search: str | None = None,
+) -> dict[str, Any] | None:
+    query: dict[str, Any] = {}
+    if root:
+        query["root"] = root
+    if limit is not None:
+        query["limit"] = limit
+    if offset is not None:
+        query["offset"] = offset
+    if search:
+        query["search"] = search
+    return query or None
+
+
+def _empty_pagination(limit: int, offset: int) -> dict[str, Any]:
+    return {
+        "limit": limit,
+        "offset": offset,
+        "returned": 0,
+        "total": 0,
+        "has_previous": False,
+        "has_next": False,
+    }
 
 
 def _unwrap_artifact_data(value: Any) -> Any:

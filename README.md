@@ -468,6 +468,9 @@ POST /api/actions/stage-review
 An experimental-but-supported NiceGUI console is also available for local use.
 It is paged into Runs, Requirement Review, Assembly Plan, Part Workflow, and
 Artifacts so reviewed-part work is less dense than the single-page HTML console.
+The Runs page uses bounded run listing by default and lazy-loads full summaries,
+artifacts, and review panels only for the selected run. This keeps large local
+`outputs/` trees usable before loop queues or overnight execution are added.
 NiceGUI does not bypass `WorkflowConsoleActions`, does not add CAD capability,
 and does not provide batch generation, assembly generation, provider-generated
 CAD/code, or free-form chat.

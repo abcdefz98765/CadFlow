@@ -886,8 +886,10 @@ function updateRunIdSuggestion() {
 
 async function loadRuns(selectFirst = true) {
   try {
-    const runs = await api("list_runs");
+    const page = await api("list_runs");
+    const runs = Array.isArray(page) ? page : (page.runs || []);
     state.runs = runs;
+    state.runPagination = Array.isArray(page) ? null : (page.pagination || null);
     setBridgeState(true);
     renderRuns();
     if (selectFirst && !state.selectedRunId && runs.length) {

@@ -9,6 +9,7 @@ from ai_native_cad.workflow_console.nicegui_app import (
     ARTIFACT_PAGE_ARTIFACTS,
     DEFAULT_HOST,
     DEFAULT_PORT,
+    DEFAULT_RUN_PAGE_SIZE,
     REVIEWED_PART_ACTIONS,
     build_assembly_plan_data,
     build_console_page_data,
@@ -137,6 +138,43 @@ def test_nicegui_console_builds_page_data_from_fake_run_summaries(tmp_path):
     assert data["assembly_plan"]["candidate_part_ids"] == ["base"]
     assert data["assembly_plan"]["interface_count"] == 1
     assert data["part_workflow"]["actions"][0]["available"] is True
+
+
+def test_nicegui_console_uses_paginated_run_list_and_lazy_detail(tmp_path, monkeypatch):
+    for index in range(DEFAULT_RUN_PAGE_SIZE + 3):
+        run_dir = tmp_path / "outputs" / f"page_run_{index:02d}"
+        run_dir.mkdir(parents=True)
+        (run_dir / "prompt.txt").write_text(f"Make run {index}.\n", encoding="utf-8")
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    loaded_details = []
+    original = backend.read_run_metadata
+
+    def track_detail(run_dir):
+        loaded_details.append(Path(run_dir).name)
+        return original(run_dir)
+
+    monkeypatch.setattr(backend, "read_run_metadata", track_detail)
+
+    data = build_console_page_data(backend, limit=25, offset=0)
+
+    assert len(data["runs"]) == 25
+    assert data["pagination"]["limit"] == 25
+    assert data["pagination"]["total"] == DEFAULT_RUN_PAGE_SIZE + 3
+    assert data["pagination"]["has_next"] is True
+    assert loaded_details == [data["selected_run_id"]]
+
+
+def test_nicegui_console_search_filters_run_names(tmp_path):
+    for name in ("alpha_console", "beta_console"):
+        run_dir = tmp_path / "outputs" / name
+        run_dir.mkdir(parents=True)
+        (run_dir / "prompt.txt").write_text(f"Make {name}.\n", encoding="utf-8")
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    data = build_console_page_data(backend, search="alpha")
+
+    assert [run["run_id"] for run in data["runs"]] == ["alpha_console"]
+    assert data["run_filters"] == {"search": "alpha"}
 
 
 def test_nicegui_run_selection_data_excludes_absolute_paths(tmp_path):

@@ -154,7 +154,7 @@ methods and action service rather than introduce new CAD behavior. NiceGUI is
 now introduced only as a local UI shell over the same backend facade and
 `WorkflowConsoleActions`; it is not a replacement backend.
 
-`StageRunner` records local stage history in the existing `logs/runtime.json` artifact under `workflow_console.stages`. This keeps stage status file-based without introducing a database or separate state store. `WorkflowConsoleBackend.read_run_metadata(...)` exposes path-free `stage_history`, `gate_history`, and `report_summary` summaries for UI timelines and review panels, while the raw runtime/report/trace artifacts remain readable for audit. Stage history may include sanitized adapter activity such as operation and local/mock provider identity, but not prompts, transcripts, tokens, or provider secrets. The summary also includes compact, path-free requirement and planning metadata from `requirement.json` and `planning_artifact.json`, including assumptions, missing fields, follow-up fields, `requirement_status.flow_decision`, and planning `flow_gate_status`. When revision artifacts are present, the same summary exposes compact revision metadata such as parent/child run ids, lineage relationship, revision index, plan/status, blocked reason, and requested/actual/validation/repair change counts.
+`StageRunner` records local stage history in the existing `logs/runtime.json` artifact under `workflow_console.stages`. This keeps stage status file-based without introducing a database or separate state store. `WorkflowConsoleBackend.list_runs(...)` and `list_runs_page(...)` expose bounded, path-free run summaries for first console load; they do not build full metadata for every run. `WorkflowConsoleBackend.read_run_metadata(...)` is the lazy detail operation for one selected run and exposes path-free `stage_history`, `gate_history`, and `report_summary` summaries for UI timelines and review panels, while the raw runtime/report/trace artifacts remain readable for audit. Stage history may include sanitized adapter activity such as operation and local/mock provider identity, but not prompts, transcripts, tokens, or provider secrets. The summary also includes compact, path-free requirement and planning metadata from `requirement.json` and `planning_artifact.json`, including assumptions, missing fields, follow-up fields, `requirement_status.flow_decision`, and planning `flow_gate_status`. When revision artifacts are present, the same summary exposes compact revision metadata such as parent/child run ids, lineage relationship, revision index, plan/status, blocked reason, and requested/actual/validation/repair change counts.
 
 The Python facade can run supported stages from an existing run directory by reading upstream artifacts: `prompt.txt` for Requirement or full text pipeline, `requirement.json` for Planning, and `planning_artifact.json` or `input_ir.json` for Part Modeling.
 
@@ -329,7 +329,8 @@ pip install -e ".[web]"
 The NiceGUI UI is intentionally paged:
 
 - Runs: compact run selection, status, child runs, reviewed-part status, and
-  STEP/STL availability.
+  STEP/STL availability. The initial load shows a bounded recent page, supports
+  simple run-name search, and lazy-loads details only after a run is selected.
 - Review Report: deterministic workflow-review status, readiness, risk,
   confidence, summaries, and recommended next actions, plus an explicit
   Create / Refresh action.
@@ -343,6 +344,11 @@ The NiceGUI UI is intentionally paged:
 - Artifacts: collapsed/on-demand allowlisted artifacts and model-file
   availability. Human-facing artifacts are visible by default; review/debug and
   internal artifacts require explicit toggles.
+
+The stdlib HTML console remains available as the fallback/debug view. NiceGUI is
+the preferred UI for large local output trees because it avoids loading every
+run artifact on initial page load, which matters before loop queue and overnight
+execution features multiply the number of file-backed runs.
 
 The browser never becomes the source of truth. Create, stage execution, artifact edits, gate decisions, artifact reads, and downloadable discovery all round-trip through the Python backend and existing run artifacts. Editable artifacts remain limited to `requirement.json`, `planning_artifact.json`, and `input_ir.json`; the UI only enables save controls for those files and the backend remains authoritative for validation.
 
