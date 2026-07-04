@@ -2396,9 +2396,11 @@ def review_part_result(
         "stl_created": (child_path / "model.stl").exists(),
         "input_ir_created": (child_path / "input_ir.json").exists(),
         "report_created": (child_path / "report.json").exists(),
+        "child_scope": _part_result_child_scope(bridge_dir, child_path),
         "single_part_only": _part_result_child_run_is_single_part(child_path, part_id),
         "no_batch_generation": _part_result_no_batch_generation(bridge_dir),
         "no_assembly_generation": _part_result_no_assembly_generation(bridge_dir),
+        "selected_part_id_preserved": _part_result_selected_part_id_preserved(bridge_dir, child_path, part_id),
         "lineage_preserved": _part_result_lineage_preserved(bridge_dir, child_path, handoff),
         "interface_constraints_preserved_in_metadata": _part_result_interfaces_preserved(bridge_dir, child_path, handoff),
     }
@@ -2422,6 +2424,8 @@ def review_part_result(
 
     if not checks["child_run_created"]:
         block("blocked_missing_child_run", "part_result.blocked_missing_child_run", "Child single-part run directory is missing.")
+    else:
+        diagnostic_codes.append("part_result.child_run_found")
     if checks["child_run_created"] and not checks["step_created"]:
         block("blocked_missing_step", "part_result.blocked_missing_step", "Child run did not create model.step.")
     if expected_stl and checks["child_run_created"] and not checks["stl_created"]:
@@ -2432,19 +2436,35 @@ def review_part_result(
         diagnostic_codes.append("part_result.stl_created")
     if not checks["input_ir_created"]:
         revise("part_result.needs_revision_missing_input_ir", "Child run did not preserve input_ir.json.")
+    else:
+        diagnostic_codes.append("part_result.input_ir_found")
     if not checks["report_created"]:
         revise("part_result.needs_revision_missing_report", "Child run did not preserve report.json.")
-    if not checks["single_part_only"] or not checks["no_batch_generation"] or not checks["no_assembly_generation"]:
+    if (
+        not checks["single_part_only"]
+        or checks["child_scope"] not in {"single_part", "single_part_with_features"}
+        or not checks["no_batch_generation"]
+        or not checks["no_assembly_generation"]
+    ):
         block("blocked_scope_violation", "part_result.blocked_scope_violation", "Child output violated single-part scope.")
-    if checks["single_part_only"] and checks["no_batch_generation"] and checks["no_assembly_generation"]:
+    if (
+        checks["single_part_only"]
+        and checks["child_scope"] in {"single_part", "single_part_with_features"}
+        and checks["no_batch_generation"]
+        and checks["no_assembly_generation"]
+    ):
         diagnostic_codes.append("part_result.single_part_scope_preserved")
+    if checks["selected_part_id_preserved"]:
+        diagnostic_codes.append("part_result.selected_part_id_preserved")
+    else:
+        revise("part_result.needs_revision_part_id_not_preserved", "Selected part_id was not preserved in child metadata.")
     if not checks["lineage_preserved"]:
         block("blocked_lineage_missing", "part_result.blocked_lineage_missing", "Lineage does not point back to reviewed handoff context.")
     else:
         diagnostic_codes.append("part_result.lineage_preserved")
     if not checks["interface_constraints_preserved_in_metadata"]:
         revise(
-            "part_result.needs_revision_interface_constraints_not_preserved",
+            "part_result.needs_revision_missing_interface_metadata",
             "Reviewed interface constraints were not found in child metadata or prompt artifacts.",
         )
     else:
@@ -2963,6 +2983,35 @@ def _part_result_child_run_is_single_part(child_path: Path, part_id: Any) -> boo
     return len(child_runs) == 1
 
 
+def _part_result_child_scope(bridge_dir: Path, child_path: Path) -> str:
+    execution_request = _read_json_object(bridge_dir / "part_execution_request.json")
+    execution_mode = _safe_artifact_id(execution_request.get("execution_mode"))
+    if execution_mode in {"single_part_only", "single_part", "single_part_with_features"}:
+        request_scope = "single_part"
+    elif execution_mode:
+        return "assembly_or_multi_part"
+    else:
+        request_scope = None
+
+    report = _read_json_object(child_path / "report.json")
+    requirement = _read_json_object(child_path / "requirement.json")
+    input_ir = _read_json_object(child_path / "input_ir.json")
+    scope_values = [
+        _nested_safe_status(report, ["requirement_status", "scope"]),
+        _nested_safe_status(report, ["provider_create", "scope"]),
+        _nested_safe_status(report, ["provider_create", "requirement", "intent", "scope"]),
+        _nested_safe_status(requirement, ["intent", "scope"]),
+        _nested_safe_status(input_ir, ["source", "planning_handoff", "route"]),
+    ]
+    if any(scope in {"assembly", "multi_part", "multipart"} for scope in scope_values if scope):
+        return "assembly_or_multi_part"
+    if request_scope:
+        return request_scope
+    if child_path.name.startswith("single_part_"):
+        return "single_part"
+    return "unknown"
+
+
 def _part_result_no_batch_generation(bridge_dir: Path) -> bool:
     if not bridge_dir.exists():
         return True
@@ -2978,6 +3027,27 @@ def _part_result_no_assembly_generation(bridge_dir: Path) -> bool:
     if (bridge_dir / "model.step").exists() or (bridge_dir / "model.stl").exists():
         return False
     return not any(path.name.lower() in blocked_names for path in bridge_dir.rglob("*"))
+
+
+def _part_result_selected_part_id_preserved(bridge_dir: Path, child_path: Path, part_id: Any) -> bool:
+    safe_part_id = _safe_artifact_id(part_id)
+    if not safe_part_id:
+        return False
+    lineage = _read_json_object(bridge_dir / "lineage.json")
+    execution_request = _read_json_object(bridge_dir / "part_execution_request.json")
+    report = _read_json_object(child_path / "report.json")
+    input_ir = _read_json_object(child_path / "input_ir.json")
+    candidates = [
+        lineage.get("part_id"),
+        execution_request.get("part_id"),
+        report.get("part_id"),
+        report.get("part_name"),
+        input_ir.get("part_name"),
+    ]
+    present = [_safe_artifact_id(candidate) for candidate in candidates if candidate]
+    if not present:
+        return child_path.name == f"single_part_{safe_part_id}"
+    return any(candidate == safe_part_id for candidate in present)
 
 
 def _part_result_lineage_preserved(bridge_dir: Path, child_path: Path, handoff: dict[str, Any]) -> bool:
@@ -3027,6 +3097,15 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _nested_safe_status(value: dict[str, Any], path: list[str]) -> str | None:
+    current: Any = value
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return _safe_artifact_id(current) if current else None
 
 
 def _safe_artifact_text(paths: list[Path]) -> str:

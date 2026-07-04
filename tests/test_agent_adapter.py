@@ -3433,13 +3433,28 @@ def test_reviewed_part_single_create_outputs_do_not_leak_paths_secrets_or_provid
     assert "raw_response" not in serialized_outputs
 
 
-def _write_part_result_child_run(tmp_path, *, include_step=True, include_stl=True, include_lineage=True, prompt_text=None):
+def _write_part_result_child_run(
+    tmp_path,
+    *,
+    include_step=True,
+    include_stl=True,
+    include_lineage=True,
+    prompt_text=None,
+    execution_mode="single_part_only",
+    requirement_scope="single_part",
+    report_part_id="base",
+):
     bridge_dir = tmp_path / "outputs" / "reviewed_part_single_create"
     child_dir = bridge_dir / "single_part_base"
     child_dir.mkdir(parents=True)
     (child_dir / "input_ir.json").write_text(json.dumps({"part_type": "mounting_plate"}), encoding="utf-8")
+    (child_dir / "requirement.json").write_text(json.dumps({
+        "intent": {"scope": requirement_scope},
+        "part_type": "mounting_plate",
+    }), encoding="utf-8")
     (child_dir / "report.json").write_text(json.dumps({
         "status": "success",
+        "part_id": report_part_id,
         "provider_response": {"raw_response": "secret provider payload"},
         "messages": ["do not leak"],
     }), encoding="utf-8")
@@ -3453,7 +3468,8 @@ def _write_part_result_child_run(tmp_path, *, include_step=True, include_stl=Tru
         (child_dir / "model.stl").write_text("STL", encoding="utf-8")
     (bridge_dir / "part_execution_request.json").write_text(json.dumps({
         "child_run_id": "single_part_base",
-        "execution_mode": "single_part_only",
+        "execution_mode": execution_mode,
+        "part_id": "base",
         "prompt": prompt_text or "Preserve fastener clearance/alignment features and reference fastener clearance envelope.",
         "api_key": "secret",
     }), encoding="utf-8")
@@ -3505,15 +3521,21 @@ def test_part_result_review_accepts_successful_single_part_child_run(tmp_path, m
         "stl_created": True,
         "input_ir_created": True,
         "report_created": True,
+        "child_scope": "single_part",
         "single_part_only": True,
         "no_batch_generation": True,
         "no_assembly_generation": True,
+        "selected_part_id_preserved": True,
         "lineage_preserved": True,
         "interface_constraints_preserved_in_metadata": True,
     }
     assert "part_result.review_created" in review["diagnostic_codes"]
+    assert "part_result.child_run_found" in review["diagnostic_codes"]
     assert "part_result.step_created" in review["diagnostic_codes"]
+    assert "part_result.stl_created" in review["diagnostic_codes"]
+    assert "part_result.input_ir_found" in review["diagnostic_codes"]
     assert "part_result.single_part_scope_preserved" in review["diagnostic_codes"]
+    assert "part_result.selected_part_id_preserved" in review["diagnostic_codes"]
     assert "part_result.lineage_preserved" in review["diagnostic_codes"]
     assert "part_result.interface_constraints_preserved_in_metadata" in review["diagnostic_codes"]
     assert review["revision_notes"] == []
@@ -3557,7 +3579,11 @@ def test_part_result_review_missing_step_blocks(tmp_path, monkeypatch):
 
 def test_part_result_review_scope_violation_blocks(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
-    bridge_dir, child_dir = _write_part_result_child_run(tmp_path)
+    bridge_dir, child_dir = _write_part_result_child_run(
+        tmp_path,
+        execution_mode="assembly",
+        requirement_scope="assembly",
+    )
     (bridge_dir / "single_part_lid").mkdir()
     (bridge_dir / "assembly.step").write_text("ASSEMBLY", encoding="utf-8")
 
@@ -3569,6 +3595,7 @@ def test_part_result_review_scope_violation_blocks(tmp_path, monkeypatch):
 
     review = result["part_result_review"]
     assert result["status"] == "blocked_scope_violation"
+    assert review["checks"]["child_scope"] == "assembly_or_multi_part"
     assert review["checks"]["single_part_only"] is False
     assert review["checks"]["no_batch_generation"] is False
     assert review["checks"]["no_assembly_generation"] is False
@@ -3604,7 +3631,7 @@ def test_part_result_review_interface_metadata_missing_needs_revision(tmp_path, 
     review = result["part_result_review"]
     assert result["status"] == "needs_revision"
     assert review["checks"]["interface_constraints_preserved_in_metadata"] is False
-    assert "part_result.needs_revision_interface_constraints_not_preserved" in review["diagnostic_codes"]
+    assert "part_result.needs_revision_missing_interface_metadata" in review["diagnostic_codes"]
 
 
 def test_part_result_review_outputs_do_not_leak_paths_secrets_or_provider_messages(tmp_path, monkeypatch):
