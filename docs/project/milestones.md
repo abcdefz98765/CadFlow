@@ -121,6 +121,118 @@ Complete as a local/mock foundation; real provider calls remain future work.
 - Reject invalid adapter output before it becomes authoritative.
 - Do not let adapter output bypass schema validation, CAD IR gates, or deterministic execution.
 
+## M1.13: Reviewed Part Single-Part E2E MVP
+
+Done as a real provider-backed checkpoint.
+
+```text
+provider normalized design create
+  -> local requirement compiler
+  -> scope routing
+  -> assembly_plan.json
+  -> part decomposition
+  -> part_create_request.json
+  -> part_request_review.json
+  -> reviewed_part_handoff.json
+  -> explicit reviewed single-part create bridge
+  -> one child single-part STEP/STL
+  -> part_result_review.json
+```
+
+Product meaning: CadFlow can take a multi-part design prompt, plan the assembly,
+select one reviewed candidate part, generate one child single-part CAD run, and
+review the result without claiming full assembly CAD support.
+
+Supported:
+
+- Provider-backed normalized design understanding.
+- Local contract compilation and validation.
+- Scope routing: `single_part`, `single_part_with_features`, `multi_part`,
+  `assembly`, `unsupported`, and `safety_critical`.
+- Valid blocked requirements for unsupported, safety-critical, multi-part, and
+  assembly cases.
+- `assembly_plan.json` planning artifact.
+- Per-part decomposition and generation strategy.
+- `part_create_request.json`.
+- `part_request_review.json`.
+- `reviewed_part_handoff.json`.
+- Explicit one-part single-create bridge.
+- One child single-part STEP/STL run.
+- `part_result_review.json`.
+- Privacy-safe provider traces and smoke summaries.
+
+Not supported yet:
+
+- Full assembly CAD generation.
+- Automatic generation of all parts.
+- STEP assembly export.
+- Assembly constraint solving.
+- Geometric fit validation between parts.
+- Motion or joint simulation.
+- Production-grade engineering validation.
+- Provider-generated CAD IR.
+- Provider-generated CadQuery/Python execution.
+- RAG, vector DB, or embedding retrieval.
+- Full browser CAD editing.
+
+Manual smoke:
+
+```bash
+python examples/provider_smoke/reviewed_part_single_create_smoke.py --provider deepseek --env-file .env
+```
+
+Sanitized example summary:
+
+```json
+{
+  "assembly_plan_created": true,
+  "selected_part_id": "base",
+  "part_request_status": "ready_for_review",
+  "review_status": "approved",
+  "handoff_status": "ready_for_single_part_planning",
+  "bridge_status": "success",
+  "child_run_created": true,
+  "child_run_name": "single_part_base",
+  "step_created": true,
+  "stl_created": true,
+  "part_result_review_created": true,
+  "part_result_review_status": "accepted_for_preview",
+  "no_batch_generation": true,
+  "no_assembly_generation": true,
+  "no_assembly_constraints_solved": true
+}
+```
+
+The smoke summary must not include raw provider messages, environment values,
+API keys, local absolute paths, or generated output paths.
+
+Recommended next steps:
+
+1. Improve part result review quality.
+   - Stronger checks that interface constraints are preserved in child metadata.
+   - Clearer `needs_revision` reasons.
+   - Better lineage/readability.
+   - No geometry fitting yet.
+2. Explicit second-part generation.
+   - Allow user/manual selection of another candidate part such as `lid`.
+   - Use the same request, review, handoff, and result-review gates.
+   - Still one part at a time.
+   - No batch generation.
+3. Staged Web Console review surface.
+   - Inspect `assembly_plan.json`.
+   - Inspect candidate parts.
+   - Approve `part_create_request.json`.
+   - Review `reviewed_part_handoff.json`.
+   - Inspect child single-part result.
+4. Future assembly work, explicitly later.
+   - Part alignment strategy.
+   - Interface constraint propagation.
+   - Fit validation.
+   - Assembly export.
+
+Web Console staged review is likely more valuable next than adding raw geometry
+capability immediately.
+
 ## M2: Parser Quality
 
 Next.
