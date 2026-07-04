@@ -1629,6 +1629,132 @@ def test_workflow_console_reviewed_part_summary_extracts_assembly_plan_and_part_
     assert "SECRET_SHOULD_NOT_APPEAR" not in serialized
 
 
+def test_workflow_console_reviewed_part_parent_run_summarizes_staged_child_artifacts(tmp_path):
+    run_dir = tmp_path / "outputs" / "provider_smoke" / "reviewed_part_single_create" / "base"
+    (run_dir / "01_design").mkdir(parents=True)
+    (run_dir / "02_part_request").mkdir()
+    (run_dir / "03_review").mkdir()
+    (run_dir / "04_handoff").mkdir()
+    (run_dir / "05_single_create" / "single_part_base").mkdir(parents=True)
+    (run_dir / "06_part_result_review").mkdir()
+    (run_dir / "01_design" / "assembly_plan.json").write_text(
+        json.dumps({
+            "artifact_type": "assembly_plan",
+            "scope": "multi_part",
+            "status": "blocked_before_part_generation",
+            "parts": [
+                {
+                    "part_id": "base",
+                    "role": "main enclosure component",
+                    "generation_strategy": "future_part_pipeline",
+                    "part_status": "candidate_for_single_part_generation",
+                    "supported_candidate": True,
+                },
+                {
+                    "part_id": "screws",
+                    "role": "fasteners",
+                    "generation_strategy": "reference_only",
+                    "part_status": "reference_only",
+                    "supported_candidate": False,
+                },
+            ],
+            "interfaces": [{"from": "base", "to": "screws", "kind": "screw_fastened"}],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "02_part_request" / "part_create_request.json").write_text(
+        json.dumps({"part_id": "base", "status": "ready_for_review", "interface_constraints": [{}]}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "03_review" / "part_request_review.json").write_text(
+        json.dumps({"status": "approved", "checks": {"has_interface_constraints": True}}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "04_handoff" / "reviewed_part_handoff.json").write_text(
+        json.dumps({"part_id": "base", "status": "ready_for_single_part_planning", "interface_constraints": [{}]})
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "05_single_create" / "lineage.json").write_text(
+        json.dumps({"relationship": "reviewed_part_single_create_child", "child_run_id": "single_part_base"})
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "05_single_create" / "single_part_base" / "model.step").write_text("STEP\n", encoding="utf-8")
+    (run_dir / "05_single_create" / "single_part_base" / "model.stl").write_text("STL\n", encoding="utf-8")
+    (run_dir / "05_single_create" / "single_part_base" / "report.json").write_text(
+        json.dumps({"status": "success", "success": True}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "06_part_result_review" / "part_result_review.json").write_text(
+        json.dumps({
+            "status": "accepted_for_preview",
+            "part_id": "base",
+            "child_run": "single_part_base",
+            "checks": {
+                "step_created": True,
+                "stl_created": True,
+                "single_part_only": True,
+                "lineage_preserved": True,
+                "interface_constraints_preserved_in_metadata": True,
+            },
+        }) + "\n",
+        encoding="utf-8",
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    runs = dispatch_route(backend, "list_runs")["data"]
+    metadata = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "base"})["data"]
+    reviewed = metadata["reviewed_part_summary"]
+
+    assert "base" in {run["run_id"] for run in runs}
+    assert reviewed["assembly_plan"]["present"] is True
+    assert reviewed["assembly_plan"]["candidate_part_count"] == 1
+    assert reviewed["assembly_plan"]["reference_only_count"] == 1
+    assert reviewed["part_request"]["status"] == "ready_for_review"
+    assert reviewed["part_request_review"]["status"] == "approved"
+    assert reviewed["reviewed_part_handoff"]["status"] == "ready_for_single_part_planning"
+    assert reviewed["lineage"]["child_run_id"] == "single_part_base"
+    assert reviewed["part_result_review"]["status"] == "accepted_for_preview"
+    assert metadata["child_runs"] == [{
+        "run_id": "single_part_base",
+        "status": "success",
+        "stage": None,
+        "artifacts": ["report.json"],
+        "downloadables": ["model.step", "model.stl"],
+    }]
+
+
+def test_workflow_console_reviewed_part_parent_run_shows_blocked_child_without_downloads(tmp_path):
+    run_dir = tmp_path / "outputs" / "provider_smoke" / "reviewed_part_single_create" / "lid"
+    child_dir = run_dir / "05_single_create" / "single_part_lid"
+    child_dir.mkdir(parents=True)
+    (run_dir / "06_part_result_review").mkdir()
+    (child_dir / "report.json").write_text(
+        json.dumps({"status": "blocked_provider_requirement", "success": False}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "06_part_result_review" / "part_result_review.json").write_text(
+        json.dumps({
+            "status": "blocked_missing_step",
+            "child_run": "single_part_lid",
+            "checks": {"step_created": False, "stl_created": False},
+        }) + "\n",
+        encoding="utf-8",
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    metadata = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "lid"})["data"]
+
+    assert metadata["child_runs"] == [{
+        "run_id": "single_part_lid",
+        "status": "blocked_provider_requirement",
+        "stage": None,
+        "artifacts": ["report.json"],
+        "downloadables": [],
+    }]
+
+
 def test_workflow_console_reviewed_part_missing_artifacts_are_graceful(tmp_path):
     run_dir = tmp_path / "outputs" / "partial_reviewed_part"
     run_dir.mkdir(parents=True)

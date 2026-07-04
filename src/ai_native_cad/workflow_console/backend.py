@@ -361,12 +361,15 @@ class WorkflowConsoleBackend:
     def read_reviewed_part_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return compact reviewed-part workflow summaries for console inspection."""
         path = self._require_project_path(Path(run_dir))
-        assembly_plan = _read_json_if_present(path / "assembly_plan.json")
-        part_result_review = _read_json_if_present(path / "part_result_review.json")
-        part_request = _read_json_if_present(path / "part_create_request.json")
-        part_review = _read_json_if_present(path / "part_request_review.json")
-        handoff = _read_json_if_present(path / "reviewed_part_handoff.json")
-        lineage = _read_json_if_present(path / "lineage.json")
+        assembly_plan = _read_first_json(path, ("assembly_plan.json", "01_design/assembly_plan.json"))
+        part_request = _read_first_json(path, ("part_create_request.json", "02_part_request/part_create_request.json"))
+        part_review = _read_first_json(path, ("part_request_review.json", "03_review/part_request_review.json"))
+        handoff = _read_first_json(path, ("reviewed_part_handoff.json", "04_handoff/reviewed_part_handoff.json"))
+        lineage = _read_first_json(path, ("lineage.json", "05_single_create/lineage.json"))
+        part_result_review = _read_first_json(
+            path,
+            ("part_result_review.json", "06_part_result_review/part_result_review.json"),
+        )
         return {
             "assembly_plan": _compact_assembly_plan_summary(assembly_plan),
             "part_request": _compact_part_request_summary(part_request),
@@ -377,13 +380,16 @@ class WorkflowConsoleBackend:
         }
 
     def list_child_runs(self, run_dir: str | Path) -> list[dict[str, Any]]:
-        """List immediate child run directories with artifact-backed output."""
+        """List child run directories with artifact-backed output."""
         path = self._require_project_path(Path(run_dir))
         children: list[dict[str, Any]] = []
         if not path.exists():
             return children
-        for child in sorted(path.iterdir(), key=lambda item: item.name):
-            if not child.is_dir() or not _has_workflow_artifact(child):
+        for child in sorted(path.rglob("*"), key=lambda item: str(item)):
+            if not child.is_dir() or child == path or not _has_workflow_artifact(child):
+                continue
+            has_downloadable = any((child / name).exists() for name in DOWNLOADABLE_FILES)
+            if not has_downloadable and not child.name.startswith("single_part_"):
                 continue
             status = self.read_run_status(child)
             children.append({
@@ -651,13 +657,33 @@ class WorkflowConsoleBackend:
 
 
 def _has_workflow_artifact(path: Path) -> bool:
-    return any((path / name).exists() for name in READABLE_ARTIFACTS | set(DOWNLOADABLE_FILES))
+    if any((path / name).exists() for name in READABLE_ARTIFACTS | set(DOWNLOADABLE_FILES)):
+        return True
+    return any(
+        (path / name).exists()
+        for name in (
+            "01_design/assembly_plan.json",
+            "02_part_request/part_create_request.json",
+            "03_review/part_request_review.json",
+            "04_handoff/reviewed_part_handoff.json",
+            "05_single_create/lineage.json",
+            "06_part_result_review/part_result_review.json",
+        )
+    )
 
 
 def _read_json_if_present(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _read_first_json(root: Path, relative_paths: tuple[str, ...]) -> dict[str, Any] | None:
+    for relative_path in relative_paths:
+        value = _read_json_if_present(root / relative_path)
+        if value is not None:
+            return value
+    return None
 
 
 def _validate_editable_artifact(artifact: str, content: dict[str, Any]) -> None:
