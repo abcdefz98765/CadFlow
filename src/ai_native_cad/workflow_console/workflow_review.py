@@ -16,16 +16,17 @@ def build_workflow_review(run_metadata: dict[str, Any]) -> dict[str, Any]:
     assembly = _dict(reviewed.get("assembly_plan"))
     part_result = _dict(reviewed.get("part_result_review"))
     stage_review = _dict(run_metadata.get("stage_review_summary"))
+    rework_decision = _dict(run_metadata.get("rework_decision_summary"))
     status = _overall_status(run_metadata, assembly, part_result, stage_review)
     checks = _dict(part_result.get("checks"))
     downloadables = {item.get("name") for item in _list(run_metadata.get("downloadables")) if isinstance(item, dict)}
     step_present = "model.step" in downloadables or checks.get("step_created") is True
     stl_present = "model.stl" in downloadables or checks.get("stl_created") is True
     diagnostics = _diagnostic_codes(run_metadata, assembly, part_result, stage_review)
-    risks = _risks(assembly, part_result, checks, step_present, stl_present)
+    risks = _risks(assembly, part_result, checks, step_present, stl_present, rework_decision)
     readiness_score = _readiness_score(status, step_present, stl_present, part_result, stage_review, risks)
     risk_level = _risk_level(status, risks, readiness_score)
-    summary = _summary_lines(assembly, part_result, step_present, stl_present, stage_review)
+    summary = _summary_lines(assembly, part_result, step_present, stl_present, stage_review, rework_decision)
     return {
         "schema_version": 1,
         "overall_status": status,
@@ -41,7 +42,7 @@ def build_workflow_review(run_metadata: dict[str, Any]) -> dict[str, Any]:
         "summary": summary,
         "key_diagnostics": diagnostics[:20],
         "risks": risks,
-        "recommended_next_actions": _recommended_next_actions(status, risks, step_present, stl_present, stage_review),
+        "recommended_next_actions": _recommended_next_actions(status, risks, step_present, stl_present, stage_review, rework_decision),
         "scoring_explanation": _scoring_explanation(status, step_present, stl_present, part_result, risks),
     }
 
@@ -132,8 +133,19 @@ def _risk_level(status: str, risks: list[str], readiness_score: int) -> str:
     return "low"
 
 
-def _summary_lines(assembly: dict[str, Any], part_result: dict[str, Any], step_present: bool, stl_present: bool, stage_review: dict[str, Any]) -> list[str]:
+def _summary_lines(
+    assembly: dict[str, Any],
+    part_result: dict[str, Any],
+    step_present: bool,
+    stl_present: bool,
+    stage_review: dict[str, Any],
+    rework_decision: dict[str, Any],
+) -> list[str]:
     lines = []
+    if rework_decision.get("present"):
+        status = rework_decision.get("execution_status") or "recorded"
+        target = rework_decision.get("target_rework_stage") or "unknown"
+        lines.append(f"User-triggered rework for {target} is {status}.")
     part_id = part_result.get("part_id") or stage_review.get("stage")
     if part_id:
         lines.append(f"{part_id} is the current reviewed workflow focus.")
@@ -150,8 +162,17 @@ def _summary_lines(assembly: dict[str, Any], part_result: dict[str, Any], step_p
     return lines[:6]
 
 
-def _risks(assembly: dict[str, Any], part_result: dict[str, Any], checks: dict[str, Any], step_present: bool, stl_present: bool) -> list[str]:
+def _risks(
+    assembly: dict[str, Any],
+    part_result: dict[str, Any],
+    checks: dict[str, Any],
+    step_present: bool,
+    stl_present: bool,
+    rework_decision: dict[str, Any],
+) -> list[str]:
     risks = ["No geometric fit validation with related assembly parts.", "Interface constraints are metadata-only in this pass."]
+    if rework_decision.get("present"):
+        risks.append("User requested rework; review the rework decision before accepting downstream artifacts.")
     if not step_present:
         risks.insert(0, "Primary STEP output is missing.")
     if checks.get("stl_created") is False or (step_present and not stl_present):
@@ -161,7 +182,16 @@ def _risks(assembly: dict[str, Any], part_result: dict[str, Any], checks: dict[s
     return risks[:8]
 
 
-def _recommended_next_actions(status: str, risks: list[str], step_present: bool, stl_present: bool, stage_review: dict[str, Any]) -> list[str]:
+def _recommended_next_actions(
+    status: str,
+    risks: list[str],
+    step_present: bool,
+    stl_present: bool,
+    stage_review: dict[str, Any],
+    rework_decision: dict[str, Any],
+) -> list[str]:
+    if rework_decision.get("present"):
+        return ["Review rework_decision.json and the refreshed Workflow Review.", "Use only explicit stage actions for any further rework.", "Keep loop queue, batch, and assembly generation disabled."]
     if status == "blocked":
         return ["Open the Workflow Review and Stage Review summaries.", "Resolve blocked diagnostics before attempting generation.", "Keep batch/all-part/assembly generation disabled."]
     if status == "needs_revision":

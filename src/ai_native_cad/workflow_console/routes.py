@@ -142,6 +142,13 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="Create one deterministic local workflow review report.",
     ),
     RouteSpec(
+        name="action_run_rework",
+        method="POST",
+        path="/api/actions/rework",
+        backend_operation="WorkflowConsoleActions.run_rework",
+        description="Run one explicit local rework action from a saved stage review.",
+    ),
+    RouteSpec(
         name="write_artifact",
         method="PUT",
         path="/workflow/runs/{run_id}/artifacts/{artifact}",
@@ -489,6 +496,18 @@ def _action_create_workflow_review(
     )
 
 
+def _action_run_rework(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return WorkflowConsoleActions(backend).run_rework(
+        _require_value(body, "run_id"),
+        root=query.get("root"),
+    )
+
+
 RouteHandler = Callable[
     [WorkflowConsoleBackend, dict[str, Any], dict[str, Any], dict[str, Any]],
     Any,
@@ -515,6 +534,7 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "action_part_result_review": _action_part_result_review,
     "action_save_stage_review": _action_save_stage_review,
     "action_create_workflow_review": _action_create_workflow_review,
+    "action_run_rework": _action_run_rework,
 }
 
 
@@ -530,6 +550,7 @@ def _success_status_code(route_name: str) -> int:
         "action_part_result_review",
         "action_save_stage_review",
         "action_create_workflow_review",
+        "action_run_rework",
     }:
         return 201
     return 200

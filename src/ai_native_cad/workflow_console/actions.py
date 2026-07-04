@@ -44,6 +44,7 @@ ACTION_NAMES = {
     "reviewed_part_create",
     "part_result_review",
     "save_stage_review",
+    "run_rework",
     "create_workflow_review",
 }
 
@@ -57,6 +58,15 @@ STAGE_REVIEW_STAGES = {
     "handoff",
     "single_part_result",
 }
+REWORK_EXECUTION_STATUSES = {
+    "completed",
+    "needs_revision",
+    "blocked",
+    "blocked_unsupported_target",
+    "blocked_invalid_review",
+}
+SUPPORTED_REWORK_TARGETS = {"workflow_review"}
+KNOWN_REWORK_TARGETS = {"assembly_plan", "part_request", "workflow_review"}
 STAGE_REVIEW_STATUSES = {"approved", "needs_revision", "blocked"}
 STAGE_REWORK_TARGETS = {
     "requirement",
@@ -67,6 +77,7 @@ STAGE_REWORK_TARGETS = {
     "part_review",
     "handoff",
     "single_part_result",
+    "workflow_review",
 }
 STAGE_REVIEW_NOTE_LIMIT = 1200
 STAGE_REVIEW_CHANGE_LIMIT = 12
@@ -235,6 +246,95 @@ class WorkflowConsoleActions:
             "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
         }
 
+    def run_rework(
+        self,
+        run_id: str,
+        *,
+        root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Execute one explicit rework request from saved stage_review.json."""
+        run_path = self.backend.resolve_run(run_id, root=root)
+        stage_review_path = self.backend._require_child_path(run_path, "stage_review.json")
+        stage_review = _read_json_if_present(stage_review_path)
+        if stage_review is None:
+            raise FileNotFoundError("workflow console rework requires stage_review.json")
+        _validate_stage_review_for_rework(stage_review)
+        target = stage_review.get("target_rework_stage")
+        if target not in KNOWN_REWORK_TARGETS:
+            raise ValueError(f"unsupported workflow console rework target stage: {target}")
+
+        if target not in SUPPORTED_REWORK_TARGETS:
+            decision = _build_rework_decision(
+                parent_run_id=run_path.name,
+                stage_review=stage_review,
+                execution_status="blocked_unsupported_target",
+                diagnostic_codes=["rework.unsupported_target_stage"],
+                created_artifacts=[],
+                child_run_id=None,
+            )
+            self._write_rework_decision(run_path, decision)
+            self._record_action(run_path, {"action": "run_rework", "status": decision["execution_status"], "success": False, "stage_count": 0})
+            return {
+                "action": "run_rework",
+                "stage_count": 0,
+                "summary": _compact_rework_decision_summary(decision),
+                "decision": _sanitize_public_value(decision),
+                "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
+            }
+
+        child_path = self._next_rework_child_dir(run_path, target)
+        child_path.mkdir(parents=True, exist_ok=False)
+        child_run_id = child_path.name
+        stage_review_snapshot = _sanitize_stage_review_snapshot(stage_review)
+        (child_path / "stage_review.json").write_text(
+            json.dumps(stage_review_snapshot, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (child_path / "parent_run_id.txt").write_text(f"{run_path.name}\n", encoding="utf-8")
+        lineage = {
+            "schema_version": 1,
+            "relationship": "explicit_rework_child",
+            "parent_run_id": run_path.name,
+            "child_run_id": child_run_id,
+            "target_rework_stage": target,
+        }
+        (child_path / "lineage.json").write_text(json.dumps(lineage, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        parent_metadata = self.backend.read_run_metadata(run_path)
+        decision = _build_rework_decision(
+            parent_run_id=run_path.name,
+            stage_review=stage_review,
+            execution_status="completed",
+            diagnostic_codes=["rework.workflow_review_refreshed"],
+            created_artifacts=["workflow_review.json", "workflow_review.md", "lineage.json", "stage_review.json"],
+            child_run_id=child_run_id,
+        )
+        child_metadata = {
+            **parent_metadata,
+            "run_id": child_run_id,
+            "stage_review_summary": _compact_stage_review_summary(stage_review_snapshot),
+            "rework_decision_summary": _compact_rework_decision_summary(decision),
+            "child_runs": [],
+            "artifacts": _merge_artifact_name_rows(
+                parent_metadata.get("artifacts"),
+                ("stage_review.json", "lineage.json", "rework_decision.json"),
+            ),
+        }
+        review = build_workflow_review(child_metadata)
+        files = write_workflow_review_files(child_path, review)
+        decision["created_artifacts"] = sorted(set(decision["created_artifacts"] + list(files.values())))
+        self._write_rework_decision(run_path, decision)
+        self._write_rework_decision(child_path, decision)
+        self._record_action(run_path, {"action": "run_rework", "status": decision["execution_status"], "success": True, "stage_count": 1})
+        return {
+            "action": "run_rework",
+            "stage_count": 1,
+            "summary": _compact_rework_decision_summary(decision),
+            "decision": _sanitize_public_value(decision),
+            "files": files,
+            "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
+        }
+
     def _run_action(
         self,
         run_path: Path,
@@ -290,12 +390,24 @@ class WorkflowConsoleActions:
             "action": summary.get("action"),
             "status": summary.get("status"),
             "success": summary.get("success"),
-            "stage_count": 1,
+            "stage_count": summary.get("stage_count", 1),
         }
         actions.append(entry)
         console["latest_action"] = entry
         console["action_count"] = len(actions)
         runtime_path.write_text(json.dumps(runtime, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    def _write_rework_decision(self, run_path: Path, decision: dict[str, Any]) -> None:
+        path = self.backend._require_child_path(run_path, "rework_decision.json")
+        path.write_text(json.dumps(decision, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    def _next_rework_child_dir(self, run_path: Path, target: str) -> Path:
+        safe_target = _safe_run_token(target)
+        for index in range(1, 10_000):
+            child = self.backend._require_child_path(run_path, f"rework_{safe_target}_{index}")
+            if not child.exists():
+                return child
+        raise FileExistsError(f"workflow console rework child id space is exhausted for: {run_path.name}")
 
 
 def _sanitize_action_summary(action: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -330,6 +442,7 @@ def _public_run_summary(metadata: dict[str, Any]) -> dict[str, Any]:
         "report_summary": _sanitize_public_value(metadata.get("report_summary")),
         "reviewed_part_summary": _sanitize_public_value(metadata.get("reviewed_part_summary")),
         "stage_review_summary": _sanitize_public_value(metadata.get("stage_review_summary")),
+        "rework_decision_summary": _sanitize_public_value(metadata.get("rework_decision_summary")),
         "workflow_review_summary": _sanitize_public_value(metadata.get("workflow_review_summary")),
         "artifacts": [
             {"name": item["name"]}
@@ -395,6 +508,146 @@ def _compact_stage_review_summary(artifact: dict[str, Any] | None) -> dict[str, 
             if code is not None
         ][:20],
     }
+
+
+def _validate_stage_review_for_rework(stage_review: dict[str, Any]) -> None:
+    if stage_review.get("review_status") != "needs_revision":
+        raise ValueError("workflow console rework requires stage_review review_status=needs_revision")
+    target = stage_review.get("target_rework_stage")
+    if not isinstance(target, str) or not target:
+        raise ValueError("workflow console rework requires target_rework_stage")
+    if not isinstance(stage_review.get("stage"), str) or stage_review.get("stage") not in STAGE_REVIEW_STAGES:
+        raise ValueError("workflow console rework requires a valid source stage")
+
+
+def _build_rework_decision(
+    *,
+    parent_run_id: str,
+    stage_review: dict[str, Any],
+    execution_status: str,
+    diagnostic_codes: list[str],
+    created_artifacts: list[str],
+    child_run_id: str | None,
+) -> dict[str, Any]:
+    if execution_status not in REWORK_EXECUTION_STATUSES:
+        raise ValueError(f"unsupported workflow console rework execution status: {execution_status}")
+    requested_changes = [
+        safe
+        for safe in (_safe_review_text(str(item), STAGE_REVIEW_CHANGE_TEXT_LIMIT) for item in _as_list(stage_review.get("requested_changes")))
+        if safe
+    ][:STAGE_REVIEW_CHANGE_LIMIT]
+    target = _safe_text(stage_review.get("target_rework_stage"))
+    decision = {
+        "schema_version": 1,
+        "parent_run_id": _safe_text(parent_run_id),
+        "source_stage_review": {
+            "stage": _safe_text(stage_review.get("stage")),
+            "review_status": _safe_text(stage_review.get("review_status")),
+            "target_rework_stage": target,
+        },
+        "execution_status": execution_status,
+        "target_rework_stage": target,
+        "requested_changes": requested_changes,
+        "created_artifacts": sorted(
+            {
+                safe
+                for safe in (_safe_artifact_name(item) for item in created_artifacts)
+                if safe is not None
+            }
+        ),
+        "child_run_id": _safe_text(child_run_id) if child_run_id is not None else None,
+        "diagnostic_codes": [
+            safe
+            for safe in (_safe_text(item) for item in diagnostic_codes)
+            if safe is not None
+        ][:20],
+    }
+    return decision
+
+
+def _sanitize_stage_review_snapshot(stage_review: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in {
+            "schema_version": 1,
+            "stage": _safe_text(stage_review.get("stage")),
+            "review_status": _safe_text(stage_review.get("review_status")),
+            "target_rework_stage": _safe_text(stage_review.get("target_rework_stage")),
+            "user_notes": _safe_review_text(str(stage_review.get("user_notes") or ""), STAGE_REVIEW_NOTE_LIMIT),
+            "requested_changes": [
+                safe
+                for safe in (
+                    _safe_review_text(str(item), STAGE_REVIEW_CHANGE_TEXT_LIMIT)
+                    for item in _as_list(stage_review.get("requested_changes"))
+                )
+                if safe
+            ][:STAGE_REVIEW_CHANGE_LIMIT],
+            "diagnostic_codes": [
+                safe
+                for safe in (_safe_text(item) for item in _as_list(stage_review.get("diagnostic_codes")))
+                if safe is not None
+            ][:20],
+        }.items()
+        if value not in (None, [], "")
+    }
+
+
+def _compact_rework_decision_summary(decision: dict[str, Any] | None) -> dict[str, Any]:
+    decision = decision or {}
+    artifacts = _as_list(decision.get("created_artifacts"))
+    changes = _as_list(decision.get("requested_changes"))
+    return {
+        "present": bool(decision),
+        "schema_version": decision.get("schema_version") if isinstance(decision.get("schema_version"), int) else None,
+        "execution_status": _safe_text(decision.get("execution_status")),
+        "target_rework_stage": _safe_text(decision.get("target_rework_stage")),
+        "child_run_id": _safe_text(decision.get("child_run_id")),
+        "created_artifact_count": len(artifacts),
+        "requested_changes_preview": [
+            safe
+            for safe in (_safe_text(item) for item in changes[:3])
+            if safe is not None
+        ],
+        "diagnostic_codes": [
+            safe
+            for safe in (_safe_text(item) for item in _as_list(decision.get("diagnostic_codes")))
+            if safe is not None
+        ][:20],
+    }
+
+
+def _safe_artifact_name(value: Any) -> str | None:
+    safe = _basename_text(value)
+    if safe is None or "/" in safe or "\\" in safe or safe in {".", ".."}:
+        return None
+    return safe
+
+
+def _merge_artifact_name_rows(existing: Any, names: tuple[str, ...]) -> list[dict[str, str]]:
+    merged = []
+    seen = set()
+    for item in _as_list(existing):
+        if not isinstance(item, dict):
+            continue
+        safe = _safe_artifact_name(item.get("name"))
+        if safe is not None and safe not in seen:
+            merged.append({"name": safe})
+            seen.add(safe)
+    for name in names:
+        safe = _safe_artifact_name(name)
+        if safe is not None and safe not in seen:
+            merged.append({"name": safe})
+            seen.add(safe)
+    return merged
+
+
+def _safe_run_token(value: str) -> str:
+    safe = "".join(char.lower() if char.isalnum() else "_" for char in value).strip("_")
+    return safe or "rework"
+
+
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 
 
 def _sanitize_note(value: str | None) -> str:

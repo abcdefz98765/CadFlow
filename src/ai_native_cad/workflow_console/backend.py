@@ -415,6 +415,7 @@ class WorkflowConsoleBackend:
             "status": status,
             "selected_part_id": selected_part_id,
             "workflow_review_summary": self.read_workflow_review_summary(path),
+            "rework_decision_summary": self.read_rework_decision_summary(path),
             "has_step": (path / "model.step").exists(),
             "has_stl": (path / "model.stl").exists(),
             "child_run_count": self.count_child_runs(path),
@@ -436,6 +437,7 @@ class WorkflowConsoleBackend:
             "report_summary": self.read_report_summary(path),
             "reviewed_part_summary": self.read_reviewed_part_summary(path),
             "stage_review_summary": self.read_stage_review_summary(path),
+            "rework_decision_summary": self.read_rework_decision_summary(path),
             "workflow_review_summary": self.read_workflow_review_summary(path),
             "child_runs": self.list_child_runs(path),
             "artifacts": self.list_artifacts(path),
@@ -447,6 +449,12 @@ class WorkflowConsoleBackend:
         path = self._require_project_path(Path(run_dir))
         review = _read_json_if_present(path / "stage_review.json")
         return _compact_stage_review_summary(review)
+
+    def read_rework_decision_summary(self, run_dir: str | Path) -> dict[str, Any]:
+        """Return a compact sanitized summary of the latest explicit rework execution."""
+        path = self._require_project_path(Path(run_dir))
+        decision = _read_json_if_present(path / "rework_decision.json")
+        return _compact_rework_decision_summary(decision)
 
     def read_workflow_review_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return a compact sanitized summary of the deterministic workflow review."""
@@ -1231,6 +1239,26 @@ def _compact_stage_review_summary(review: dict[str, Any] | None) -> dict[str, An
         "requested_changes_count": len(changes),
         "user_notes_preview": _safe_summary_text(review.get("user_notes")),
         "diagnostic_codes": _compact_code_list(review.get("diagnostic_codes")),
+    }
+
+
+def _compact_rework_decision_summary(decision: dict[str, Any] | None) -> dict[str, Any]:
+    decision = decision or {}
+    changes = decision.get("requested_changes") if isinstance(decision.get("requested_changes"), list) else []
+    artifacts = decision.get("created_artifacts") if isinstance(decision.get("created_artifacts"), list) else []
+    return {
+        "present": bool(decision),
+        "schema_version": decision.get("schema_version") if isinstance(decision.get("schema_version"), int) else None,
+        "execution_status": _safe_summary_text(decision.get("execution_status")),
+        "target_rework_stage": _safe_summary_text(decision.get("target_rework_stage")),
+        "child_run_id": _safe_summary_text(decision.get("child_run_id")),
+        "created_artifact_count": len(artifacts),
+        "requested_changes_preview": [
+            safe
+            for safe in (_safe_summary_text(item) for item in changes[:3])
+            if safe is not None
+        ],
+        "diagnostic_codes": _compact_code_list(decision.get("diagnostic_codes")),
     }
 
 

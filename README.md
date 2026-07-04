@@ -463,6 +463,8 @@ POST /api/actions/reviewed-handoff
 POST /api/actions/reviewed-part-create
 POST /api/actions/part-result-review
 POST /api/actions/stage-review
+POST /api/actions/workflow-review
+POST /api/actions/rework
 ```
 
 An experimental-but-supported NiceGUI console is also available for local use.
@@ -479,9 +481,17 @@ The first user-agent negotiation surface is the Stage Review / Rework Artifact
 MVP. From the NiceGUI Requirement Review and Assembly Plan pages, a user can save
 a structured `stage_review.json` with an explicit stage, review status
 (`approved`, `needs_revision`, or `blocked`), optional rework target, notes, and
-requested changes. This is save-only in the current pass: it records intent for
-review and future rework, but it does not rerun stages, call providers, enqueue
-overnight jobs, start an autonomous loop, or generate batches/assemblies.
+requested changes.
+
+The Rework Execution MVP is explicit and user-triggered only. `Run Rework`
+reads the saved `stage_review.json`, validates that it is `needs_revision`,
+and writes a sanitized `rework_decision.json`. The only executable target in
+this pass is `workflow_review`, which creates a child rework run and writes a
+refreshed deterministic `workflow_review.json` / `workflow_review.md` there
+with parent lineage preserved. `assembly_plan` and `part_request` are recorded
+as blocked unsupported targets until safe deterministic rework paths exist. The
+original run's CAD outputs are not overwritten, and this does not enqueue jobs,
+start an autonomous loop, call providers, or generate batches/assemblies.
 
 NiceGUI also includes a Human-readable Workflow Review / Agent Report MVP. The
 explicit Create / Refresh Workflow Review action writes deterministic local
@@ -493,8 +503,9 @@ self-certification, and the action does not call a provider, rerun CAD, or add
 new CAD capability.
 
 Artifact display is intentionally tiered. Human-facing artifacts such as
-`workflow_review.md`, `workflow_review.json`, `stage_review.json`, `report.md`,
-assembly-plan summaries, part-result summaries, and STEP/STL availability are
+`workflow_review.md`, `workflow_review.json`, `stage_review.json`,
+`rework_decision.json`, `report.md`, assembly-plan summaries, part-result
+summaries, and STEP/STL availability are
 shown by default. Review/debug artifacts such as `requirement.json`,
 `design_brief.json`, handoff JSON, lineage, and sanitized trace summaries are
 collapsed behind "Show debug artifacts". Internal/schema-heavy artifacts such as

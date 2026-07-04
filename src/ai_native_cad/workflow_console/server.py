@@ -106,6 +106,7 @@ def make_handler(
                 "/api/actions/part-result-review": "action_part_result_review",
                 "/api/actions/stage-review": "action_save_stage_review",
                 "/api/actions/workflow-review": "action_create_workflow_review",
+                "/api/actions/rework": "action_run_rework",
             }.get(path)
             if route_name is None:
                 self._send_json(error_response(FileNotFoundError("workflow console API action not found")))

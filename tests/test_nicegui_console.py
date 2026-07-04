@@ -232,6 +232,55 @@ def test_nicegui_stage_review_view_model_handles_empty_and_saved_states(tmp_path
     assert data["stage_review"]["saved"]["target_rework_stage"] == "requirement"
     assert data["stage_review"]["saved"]["requested_changes_count"] == 1
     assert build_stage_review_data(data["selected_run"])["saved"]["user_notes_preview"] == "Treat lid as flat cover."
+    assert data["stage_review"]["rework_available"] is False
+    assert "workflow_review" in data["stage_review"]["target_rework_stage_options"]
+
+
+def test_nicegui_rework_view_model_handles_unsupported_and_completed_states(tmp_path):
+    _sample_run(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    no_review = build_console_page_data(backend, "nicegui_run")
+
+    assert no_review["stage_review"]["saved"] is None
+    assert no_review["stage_review"]["rework_decision"] is None
+    assert no_review["stage_review"]["rework_available"] is False
+
+    dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={
+            "run_id": "nicegui_run",
+            "stage": "assembly_plan",
+            "review_status": "needs_revision",
+            "target_rework_stage": "assembly_plan",
+            "requested_changes": ["Treat lid as flat cover."],
+        },
+    )
+    unsupported = build_console_page_data(backend, "nicegui_run")
+
+    assert unsupported["stage_review"]["rework_available"] is True
+    assert unsupported["stage_review"]["rework_supported"] is False
+    assert "not supported" in unsupported["stage_review"]["rework_blocked_reason"]
+
+    dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={
+            "run_id": "nicegui_run",
+            "stage": "assembly_plan",
+            "review_status": "needs_revision",
+            "target_rework_stage": "workflow_review",
+            "requested_changes": ["Refresh workflow review."],
+        },
+    )
+    rework = dispatch_route(backend, "action_run_rework", body={"run_id": "nicegui_run"})
+    completed = build_console_page_data(backend, "nicegui_run")
+
+    assert rework["ok"] is True
+    assert completed["stage_review"]["rework_available"] is True
+    assert completed["stage_review"]["rework_supported"] is True
+    assert completed["stage_review"]["rework_decision"]["execution_status"] == "completed"
+    assert completed["stage_review"]["rework_decision"]["child_run_id"] == "rework_workflow_review_1"
 
 
 def test_nicegui_workflow_review_view_model_handles_empty_and_saved_states(tmp_path):

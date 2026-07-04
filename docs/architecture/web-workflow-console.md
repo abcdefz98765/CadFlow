@@ -177,6 +177,7 @@ POST /api/actions/reviewed-part-create
 POST /api/actions/part-result-review
 POST /api/actions/stage-review
 POST /api/actions/workflow-review
+POST /api/actions/rework
 ```
 
 The existing `POST /api/route` bridge remains for the static frontend, and the
@@ -202,11 +203,17 @@ operations:
   user review/rework intent for an explicit stage.
 - `workflow-review`: writes deterministic local `workflow_review.json` and
   `workflow_review.md` artifacts from existing run summaries and diagnostics.
+- `rework`: reads a saved `stage_review.json`, requires `needs_revision`, and
+  writes a sanitized `rework_decision.json`. In this MVP only
+  `workflow_review` executes, by creating a child rework run with lineage and a
+  refreshed deterministic workflow review. `assembly_plan` and `part_request`
+  produce blocked unsupported-target decisions.
 
 These actions wrap existing pipeline functions only. They do not add assembly
 generation, automatic all-part generation, batch generation, new CAD templates,
-assembly constraint solving, provider-generated CAD IR/code, or free-form Web
-chat. Public action results are sanitized summaries: no absolute paths, no API
+assembly constraint solving, provider-generated CAD IR/code, automatic rework
+loops, overnight queue execution, or free-form Web chat. Public action results
+are sanitized summaries: no absolute paths, no API
 keys, no environment values, no provider raw payloads, and no transcripts.
 
 `stage_review.json` is the Stage Review / Rework Artifact MVP and the first
@@ -214,11 +221,12 @@ save-only user-agent negotiation surface. It allows `review_status` values
 `approved`, `needs_revision`, and `blocked`; explicit `stage` values such as
 `requirement`, `design_brief`, `assembly_plan`, `candidate_parts`,
 `part_request`, `part_review`, `handoff`, and `single_part_result`; and explicit
-`target_rework_stage` values from the same controlled vocabulary. Notes and
-requested changes are sanitized and length-limited. Saving this artifact does
-not call a provider, rerun a pipeline stage, modify CAD artifacts, create a loop
-queue, or trigger batch/all-part/assembly generation. Rework execution and
-overnight one-part-at-a-time queues remain future work.
+`target_rework_stage` values from a controlled vocabulary that also includes
+`workflow_review`. Notes and requested changes are sanitized and length-limited.
+Saving this artifact does not call a provider, rerun a pipeline stage, modify
+CAD artifacts, create a loop queue, or trigger batch/all-part/assembly
+generation. Rework execution happens only through the separate explicit
+`rework` action, and overnight one-part-at-a-time queues remain future work.
 
 `workflow_review.json` and `workflow_review.md` are the Human-readable Workflow
 Review / Agent Report MVP. The report is deterministic and local; it reads
@@ -338,7 +346,7 @@ The NiceGUI UI is intentionally paged:
   such as assumptions, missing information, clarification questions, blocked
   reason, and diagnostics, plus save-only Stage Review controls.
 - Assembly Plan: compact assembly status and a parts table, not full JSON by
-  default, plus save-only Stage Review controls.
+  default, plus Stage Review controls and explicit Rework Execution status.
 - Part Workflow: one-stage reviewed-part action cards gated by upstream
   artifacts.
 - Artifacts: collapsed/on-demand allowlisted artifacts and model-file
@@ -360,6 +368,8 @@ The current UI supports the first usable local workflow loop:
 - run Requirement, Planning, Part Modeling, Review, Outputs, or the full text pipeline by safe run id;
 - inspect readable artifacts;
 - inspect a human-readable workflow review report;
+- run explicit rework from a saved Stage Review, with unsupported targets
+  recorded as blocked `rework_decision.json` artifacts;
 - inspect a compact report/trace summary without opening raw JSON;
 - inspect existing reviewed-part E2E artifacts, including assembly-plan parts,
   candidate status, part result review status, STEP/STL checks, single-part

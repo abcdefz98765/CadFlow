@@ -124,6 +124,7 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         "WorkflowConsoleActions.review_part_result",
         "WorkflowConsoleActions.save_stage_review",
         "WorkflowConsoleActions.create_workflow_review",
+        "WorkflowConsoleActions.run_rework",
     }
 
     assert {spec.backend_operation for spec in ROUTE_SPECS} == expected_operations
@@ -141,6 +142,7 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
             "WorkflowConsoleActions.review_part_result",
             "WorkflowConsoleActions.save_stage_review",
             "WorkflowConsoleActions.create_workflow_review",
+            "WorkflowConsoleActions.run_rework",
         }
         for spec in ROUTE_SPECS
     )
@@ -200,6 +202,7 @@ def test_workflow_console_route_contract_includes_edit_and_gate_routes():
     assert ROUTE_SPECS_BY_NAME["action_part_result_review"].path == "/api/actions/part-result-review"
     assert ROUTE_SPECS_BY_NAME["action_save_stage_review"].path == "/api/actions/stage-review"
     assert ROUTE_SPECS_BY_NAME["action_create_workflow_review"].path == "/api/actions/workflow-review"
+    assert ROUTE_SPECS_BY_NAME["action_run_rework"].path == "/api/actions/rework"
 
 
 def test_workflow_console_internal_error_shape_does_not_leak_local_paths():
@@ -373,6 +376,7 @@ def test_workflow_console_staged_action_routes_do_not_include_batch_or_assembly_
         "action_part_result_review",
         "action_save_stage_review",
         "action_create_workflow_review",
+        "action_run_rework",
     }
     assert all("batch" not in spec.path for spec in action_specs)
     assert all("assembly-generation" not in spec.path for spec in action_specs)
@@ -559,6 +563,179 @@ def test_workflow_console_stage_review_makes_no_provider_or_cad_pipeline_call(tm
 
     assert response["ok"] is True
     assert response["data"]["summary"]["stage"] == "requirement"
+
+
+def test_workflow_console_rework_rejects_missing_stage_review(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "missing_rework_review"}, body={"prompt": "Make a bracket."})
+
+    response = dispatch_route(backend, "action_run_rework", body={"run_id": "missing_rework_review"})
+
+    assert response["ok"] is False
+    assert response["status_code"] == 404
+    assert "stage_review.json" in response["error"]["message"]
+
+
+def test_workflow_console_rework_rejects_approved_stage_review(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "approved_rework"}, body={"prompt": "Make a bracket."})
+    dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={"run_id": "approved_rework", "stage": "assembly_plan", "review_status": "approved"},
+    )
+
+    response = dispatch_route(backend, "action_run_rework", body={"run_id": "approved_rework"})
+
+    assert response["ok"] is False
+    assert response["status_code"] == 400
+    assert "needs_revision" in response["error"]["message"]
+
+
+def test_workflow_console_rework_rejects_unknown_target_and_traversal(tmp_path):
+    run_dir = tmp_path / "outputs" / "unknown_rework"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a bracket.\n", encoding="utf-8")
+    (run_dir / "stage_review.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "stage": "assembly_plan",
+            "review_status": "needs_revision",
+            "target_rework_stage": "unknown_target",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    unknown = dispatch_route(backend, "action_run_rework", body={"run_id": "unknown_rework"})
+    traversal = dispatch_route(backend, "action_run_rework", body={"run_id": "../unknown_rework"})
+
+    assert unknown["ok"] is False
+    assert unknown["status_code"] == 400
+    assert "rework target stage" in unknown["error"]["message"]
+    assert traversal["ok"] is False
+    assert traversal["status_code"] == 400
+
+
+def test_workflow_console_rework_unsupported_target_writes_blocked_decision(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "blocked_rework"}, body={"prompt": "Make an enclosure."})
+    dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={
+            "run_id": "blocked_rework",
+            "stage": "assembly_plan",
+            "review_status": "needs_revision",
+            "target_rework_stage": "assembly_plan",
+            "requested_changes": ["Treat lid as a flat cover candidate"],
+        },
+    )
+
+    response = dispatch_route(backend, "action_run_rework", body={"run_id": "blocked_rework"})
+    decision = json.loads((tmp_path / "outputs" / "blocked_rework" / "rework_decision.json").read_text(encoding="utf-8"))
+    metadata = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "blocked_rework"})["data"]
+
+    assert response["ok"] is True
+    assert decision["execution_status"] == "blocked_unsupported_target"
+    assert decision["child_run_id"] is None
+    assert decision["diagnostic_codes"] == ["rework.unsupported_target_stage"]
+    assert metadata["rework_decision_summary"]["execution_status"] == "blocked_unsupported_target"
+    assert metadata["rework_decision_summary"]["requested_changes_preview"] == ["Treat lid as a flat cover candidate"]
+
+
+def test_workflow_console_rework_workflow_review_creates_child_without_overwriting_parent(tmp_path):
+    run_dir = tmp_path / "outputs" / "workflow_review_rework"
+    _write_reviewed_part_run(run_dir)
+    original_step = (run_dir / "model.step").read_text(encoding="utf-8")
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={
+            "run_id": "workflow_review_rework",
+            "stage": "assembly_plan",
+            "review_status": "needs_revision",
+            "target_rework_stage": "workflow_review",
+            "requested_changes": ["Refresh the review with user rework notes."],
+        },
+    )
+
+    response = dispatch_route(backend, "action_run_rework", body={"run_id": "workflow_review_rework"})
+    decision = json.loads((run_dir / "rework_decision.json").read_text(encoding="utf-8"))
+    child_dir = run_dir / decision["child_run_id"]
+    child_review = json.loads((child_dir / "workflow_review.json").read_text(encoding="utf-8"))
+    child_decision = json.loads((child_dir / "rework_decision.json").read_text(encoding="utf-8"))
+
+    assert response["ok"] is True
+    assert response["data"]["summary"]["execution_status"] == "completed"
+    assert decision["execution_status"] == "completed"
+    assert decision["child_run_id"] == "rework_workflow_review_1"
+    assert (run_dir / "model.step").read_text(encoding="utf-8") == original_step
+    assert not (run_dir / "workflow_review.json").exists()
+    assert (child_dir / "stage_review.json").exists()
+    assert (child_dir / "lineage.json").exists()
+    assert child_decision == decision
+    assert any("User-triggered rework" in item for item in child_review["summary"])
+    assert any("rework_decision.json" in item for item in child_review["recommended_next_actions"])
+
+
+def test_workflow_console_rework_makes_no_provider_or_cad_pipeline_call(tmp_path, monkeypatch):
+    run_dir = tmp_path / "outputs" / "local_rework"
+    _write_reviewed_part_run(run_dir)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={
+            "run_id": "local_rework",
+            "stage": "assembly_plan",
+            "review_status": "needs_revision",
+            "target_rework_stage": "workflow_review",
+        },
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("provider or CAD pipeline should not be called by rework MVP")
+
+    monkeypatch.setattr(backend.stage_runner.agent_adapter, "parse_requirement", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_assembly_part_request_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_part_request_review_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_part_result_review_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_reviewed_part_handoff_pipeline", fail_if_called)
+    monkeypatch.setattr("ai_native_cad.workflow_console.actions.run_reviewed_part_single_create_pipeline", fail_if_called)
+
+    response = dispatch_route(backend, "action_run_rework", body={"run_id": "local_rework"})
+
+    assert response["ok"] is True
+    assert response["data"]["summary"]["execution_status"] == "completed"
+
+
+def test_workflow_console_rework_summary_is_sanitized(tmp_path):
+    run_dir = tmp_path / "outputs" / "rework_privacy"
+    run_dir.mkdir(parents=True)
+    (run_dir / "prompt.txt").write_text("Make a bracket.\n", encoding="utf-8")
+    (run_dir / "stage_review.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "stage": "assembly_plan",
+            "review_status": "needs_revision",
+            "target_rework_stage": "assembly_plan",
+            "requested_changes": [str(tmp_path / "secret_path"), "API_KEY=secret", "Use a flat cover."],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    response = dispatch_route(backend, "action_run_rework", body={"run_id": "rework_privacy"})
+    metadata = dispatch_route(backend, "read_run_metadata", path_params={"run_id": "rework_privacy"})["data"]
+    serialized = json.dumps({"response": response, "metadata": metadata}, sort_keys=True)
+
+    assert response["ok"] is True
+    assert _does_not_contain_absolute_paths(response)
+    assert str(tmp_path) not in serialized
+    assert "API_KEY" not in serialized
+    assert metadata["rework_decision_summary"]["requested_changes_preview"] == ["Use a flat cover."]
 
 
 def _write_reviewed_part_run(run_dir: Path, *, accepted: bool = True) -> None:

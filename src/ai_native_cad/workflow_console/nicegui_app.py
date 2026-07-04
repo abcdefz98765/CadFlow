@@ -36,6 +36,7 @@ ARTIFACT_PAGE_ARTIFACTS = (
     "part_execution_request.json",
     "part_result_review.json",
     "stage_review.json",
+    "rework_decision.json",
     "lineage.json",
     "agent_trace.json",
 )
@@ -240,8 +241,16 @@ def build_assembly_plan_data(run: dict[str, Any]) -> dict[str, Any]:
 def build_stage_review_data(run: dict[str, Any]) -> dict[str, Any]:
     """Return saved stage-review state plus explicit selector options."""
     summary = run.get("stage_review_summary") if isinstance(run.get("stage_review_summary"), dict) else {}
+    rework = run.get("rework_decision_summary") if isinstance(run.get("rework_decision_summary"), dict) else {}
+    target = summary.get("target_rework_stage")
     return {
         "saved": summary if summary.get("present") else None,
+        "rework_decision": rework if rework.get("present") else None,
+        "rework_available": summary.get("review_status") == "needs_revision" and target in {"workflow_review", "assembly_plan", "part_request"},
+        "rework_supported": target == "workflow_review",
+        "rework_blocked_reason": None
+        if target in (None, "workflow_review")
+        else "Target rework stage is recorded but execution is not supported in this MVP.",
         "stage_options": sorted(STAGE_REVIEW_STAGES),
         "review_status_options": sorted(STAGE_REVIEW_STATUSES),
         "target_rework_stage_options": sorted(STAGE_REWORK_TARGETS),
@@ -618,6 +627,7 @@ def _render_stage_review_form(
                 "Requested changes": saved.get("requested_changes_count", 0),
                 "Notes": saved.get("user_notes_preview") or "Empty",
             })
+            _render_rework_panel(ui, data, actions, state, refresh, review_data)
         else:
             ui.label("No stage review saved for this run.").classes("text-sm text-gray-500")
 
@@ -653,6 +663,41 @@ def _render_stage_review_form(
             ),
         )
         if not run_id:
+            button.disable()
+
+
+def _render_rework_panel(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    review_data: dict[str, Any],
+) -> None:
+    run_id = data.get("selected_run_id")
+    saved = review_data.get("saved") or {}
+    decision = review_data.get("rework_decision")
+    with ui.card().classes("w-full"):
+        ui.label("Rework Execution").classes("text-lg font-medium")
+        _key_values(ui, {
+            "Available": review_data.get("rework_available"),
+            "Supported now": review_data.get("rework_supported"),
+            "Target": saved.get("target_rework_stage") or "Empty",
+            "Requested changes": saved.get("requested_changes_count", 0),
+            "Blocked reason": review_data.get("rework_blocked_reason") or "Empty",
+        })
+        if decision is not None:
+            _key_values(ui, {
+                "Last execution": decision.get("execution_status") or "Empty",
+                "Child run": decision.get("child_run_id") or "Empty",
+                "Created artifacts": decision.get("created_artifact_count", 0),
+                "Diagnostics": ", ".join(decision.get("diagnostic_codes") or []) or "Empty",
+            })
+            _list_block(ui, "Requested changes preview", decision.get("requested_changes_preview"))
+        if state.get("rework_result") is not None:
+            ui.markdown(f"```json\n{json.dumps(state['rework_result'], indent=2, sort_keys=True)}\n```").classes("w-full")
+        button = ui.button("Run Rework", icon="play_arrow", on_click=lambda: _run_rework_ui(actions, run_id, state, refresh))
+        if not run_id or saved.get("review_status") != "needs_revision":
             button.disable()
 
 
@@ -769,6 +814,23 @@ def _save_stage_review_ui(
         )
     except Exception as exc:
         state[result_key] = {"ok": False, "error": str(exc)}
+    refresh()
+
+
+def _run_rework_ui(
+    actions: WorkflowConsoleActions,
+    run_id: str | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    if run_id is None:
+        state["rework_result"] = {"ok": False, "error": "Select a run first."}
+        refresh()
+        return
+    try:
+        state["rework_result"] = actions.run_rework(run_id)
+    except Exception as exc:
+        state["rework_result"] = {"ok": False, "error": str(exc)}
     refresh()
 
 

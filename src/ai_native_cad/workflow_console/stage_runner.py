@@ -36,6 +36,7 @@ READABLE_ARTIFACTS = {
     "part_execution_request.json",
     "part_result_review.json",
     "stage_review.json",
+    "rework_decision.json",
     "revision_request.json",
     "change_intent.json",
     "revision_plan.json",
