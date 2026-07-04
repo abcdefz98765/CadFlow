@@ -113,11 +113,12 @@ python examples/provider_smoke/reviewed_part_single_create_smoke.py --provider d
 
 - Verifies: the staged path from an assembly prompt to `assembly_plan.json`,
   selection of at most one candidate part when appropriate, a
-  `part_create_request`, review, handoff, and an optional child single-part
-  create attempt.
+  `part_create_request`, review, handoff, one child single-part create attempt,
+  and local `part_result_review.json` when child artifacts exist.
 - Does not verify: automatic generation of all parts, full assembly CAD,
   assembly constraint solving, STEP assembly export, batch generation, new CAD
-  templates, provider-backed CAD IR, or provider-generated Python/CadQuery.
+  templates, provider-backed CAD IR, provider-generated Python/CadQuery, or
+  geometric fit between generated parts.
 - Real provider: yes.
 - Ignored outputs: yes, keeps staged artifacts under ignored
   `outputs/provider_smoke/reviewed_part_single_create/` by default.
@@ -134,18 +135,66 @@ Design a two-part electronics enclosure with base and lid, four screws, and PCB 
 Expected staging is:
 
 ```text
-assembly prompt
+multi-part prompt
+  -> normalized provider design create
   -> assembly_plan.json
   -> one selected candidate part, such as base or lid
   -> part_create_request.json
   -> part_request_review.json
   -> reviewed_part_handoff.json
-  -> optional child single-part create or a clear block
+  -> one child single-part run
+  -> model.step / model.stl
+  -> part_result_review.json
 ```
 
 Base and lid may be candidate parts for reviewed single-part planning. Screws
 and other fasteners are reference-only and must not be selected. This workflow
-is a planning/staged handoff example, not full assembly CAD generation.
+is a reviewed single-part checkpoint for one selected part, not full assembly
+CAD generation.
+
+Latest manual command:
+
+```bash
+python examples/provider_smoke/reviewed_part_single_create_smoke.py --provider deepseek --env-file .env
+```
+
+Sanitized example summary:
+
+```json
+{
+  "assembly_plan_created": true,
+  "selected_part_id": "base",
+  "part_request_status": "ready_for_review",
+  "review_status": "approved",
+  "handoff_status": "ready_for_single_part_planning",
+  "bridge_status": "success",
+  "child_run_created": true,
+  "child_run_name": "single_part_base",
+  "step_created": true,
+  "stl_created": true,
+  "part_result_review_created": true,
+  "part_result_review_status": "accepted_for_preview",
+  "part_result_diagnostic_codes": [
+    "part_result.interface_constraints_preserved_in_metadata",
+    "part_result.lineage_preserved",
+    "part_result.review_created",
+    "part_result.single_part_scope_preserved",
+    "part_result.step_created",
+    "part_result.stl_created"
+  ],
+  "part_result_step_check": true,
+  "part_result_stl_check": true,
+  "part_result_single_part_scope_check": true,
+  "part_result_lineage_check": true,
+  "part_result_interface_metadata_check": true,
+  "no_batch_generation": true,
+  "no_assembly_generation": true,
+  "no_assembly_constraints_solved": true
+}
+```
+
+The summary intentionally excludes raw provider messages, secrets, environment
+values, local absolute paths, and generated output paths.
 
 ## Prompt Expectations
 

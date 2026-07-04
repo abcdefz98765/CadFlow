@@ -106,6 +106,26 @@ It does not currently mean:
 - motion simulation
 - production-ready assembly release
 
+Reviewed Part Single-Part E2E MVP:
+
+```text
+multi-part prompt
+  -> normalized provider design create
+  -> assembly_plan.json
+  -> part_create_request.json
+  -> part_request_review.json
+  -> reviewed_part_handoff.json
+  -> one child single-part run
+  -> model.step / model.stl
+  -> part_result_review.json
+```
+
+This checkpoint supports planning a multi-part prompt, selecting one reviewed
+candidate part, generating only that child single-part STEP/STL through the
+existing single-part path, and reviewing the child result locally. It does not
+generate a full assembly, generate all parts, solve assembly constraints, export
+a STEP assembly, or geometrically validate fit between parts yet.
+
 ## 当前定位
 
 - **Workflow First**：每次任务都保留输入、结构化需求、建模计划、模型代码、审查报告、导出文件和日志。

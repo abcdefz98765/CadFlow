@@ -203,6 +203,37 @@ unsupported, multi-part, or assembly-shaped handoffs are blocked before provider
 or CAD execution. This bridge does not batch parts, generate assemblies, solve
 assembly constraints, or export STEP assemblies.
 
+`run_part_result_review_pipeline(...)` is a local deterministic review of that
+one child single-part run. It consumes `reviewed_part_handoff.json`, the child
+single-part run artifacts, and nearby lineage metadata, then writes
+`part_result_review.json`, `report.json`, `report.md`, and `agent_trace.json`.
+It checks that the child run exists, `model.step` exists, `model.stl` exists
+when expected, `input_ir.json` and child `report.json` exist, only one
+single-part child run was created, no batch or assembly artifacts were written,
+lineage points back to `reviewed_part_handoff.json`, `part_create_request.json`,
+and `assembly_plan.json` where available, and interface constraints are
+preserved in metadata or prompt artifacts. It does not run CAD generation,
+call providers, solve assembly constraints, export STEP assemblies, or
+geometrically validate fit between parts.
+
+The current Reviewed Part Single-Part E2E MVP is:
+
+```text
+multi-part prompt
+  -> normalized provider design create
+  -> assembly_plan.json
+  -> part_create_request.json
+  -> part_request_review.json
+  -> reviewed_part_handoff.json
+  -> one child single-part run
+  -> model.step / model.stl
+  -> part_result_review.json
+```
+
+The boundary remains explicit: this MVP does not generate a full assembly, does
+not generate all parts, does not solve assembly constraints, does not export a
+STEP assembly, and does not geometrically validate fit between parts yet.
+
 ### Text Pipeline Fallback
 
 `examples/prompt_pipeline/` is a debug and exploration path from natural

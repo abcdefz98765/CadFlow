@@ -103,6 +103,14 @@ logs/runtime.json
 
 Artifacts are the stable record of a run. `model.step` is the primary CAD artifact. `model.stl` is derived mesh output. `input_ir.json` is the internal structured design contract.
 
+Reviewed assembly-to-one-part checkpoints add planning and review artifacts:
+`assembly_plan.json`, `part_create_request.json`, `part_request_review.json`,
+`reviewed_part_handoff.json`, one child single-part run, and
+`part_result_review.json`. This path proves one selected part can be routed from
+multi-part planning into the existing single-part STEP/STL pipeline. It does
+not represent full assembly CAD, all-part generation, assembly constraint
+solving, STEP assembly export, or geometric fit validation between parts.
+
 Revision workflows add child-run artifacts such as `revision_request.json`,
 `change_intent.json`, `revision_plan.json`, `patch.json`,
 `comparison.json`, `revision_report.md`, and `lineage.json`. Parent runs must
