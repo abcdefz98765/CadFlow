@@ -396,6 +396,7 @@ class WorkflowConsoleActions:
         console["latest_action"] = entry
         console["action_count"] = len(actions)
         runtime_path.write_text(json.dumps(runtime, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        self.backend.invalidate_work_index()
 
     def _write_rework_decision(self, run_path: Path, decision: dict[str, Any]) -> None:
         path = self.backend._require_child_path(run_path, "rework_decision.json")

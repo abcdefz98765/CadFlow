@@ -132,7 +132,7 @@ NiceGUI Work Dashboard MVP:
 
 ```text
 Work / Project
-  mutable user-visible engineering task inferred from run artifacts
+  mutable user-visible engineering task with an optional manifest
   -> current state pointer, part matrix, workflow nodes, products, actions
 
 Run
@@ -144,14 +144,27 @@ Part Job
   -> may have multiple attempts/runs
 ```
 
-The NiceGUI console now defaults to a Work-oriented dashboard instead of a raw
-run list. Works are inferred locally from existing artifacts such as
-`assembly_plan.json`, `workflow_review.json`, `stage_review.json`, lineage,
-reviewed-part bridge artifacts, part result reviews, and rework decisions. The
-dashboard shows overall status, part counts, readiness/risk, current/latest run,
-next action, ordered workflow nodes, a first-class Parts Matrix, human-facing
-products, and append-only run history. Unclassified low-level runs are grouped
-as `Unclassified / Debug Runs` and hidden unless the debug toggle is enabled.
+The NiceGUI console now defaults to a workspace-oriented local console instead
+of a raw run list. Workspace state lives under the explicitly selected
+workspace root, which may be outside the repository: `workspace.json`
+identifies the local workspace, `config.json` stores provider/model/retry
+settings plus the workflow advancement mode, and new Works are real local
+entities backed by `<workspace>/works/<work_id>/work_manifest.json`. Older Works
+can still be
+inferred from existing artifacts such as `assembly_plan.json`,
+`workflow_review.json`, `stage_review.json`, lineage, reviewed-part bridge
+artifacts, part result reviews, and rework decisions. The dashboard shows
+overall status, part counts, readiness/risk, current/latest run, next action,
+ordered workflow nodes, a first-class Parts Matrix, human-facing products, and
+append-only run history. Low-level and unclassified runs are available from the
+Runs page behind explicit detail toggles, not mixed into the Work list.
+Legacy manifests under `outputs/_works/<work_id>/work_manifest.json` are read
+for compatibility, but new project/work state belongs under the selected
+workspace. Work requirement input creates a root run under `<workspace>/runs/`;
+part split confirmation creates per-part run containers there. `manual_confirm`
+pauses for user confirmation, while `auto_advance` can create follow-on run
+containers when split artifacts are available. Neither mode adds automatic
+all-part CAD generation.
 
 Rework creates new runs/attempts and may update the inferred Work current state;
 old run artifacts are not overwritten or mutated. This MVP adds no new CAD

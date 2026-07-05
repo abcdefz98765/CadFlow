@@ -9,18 +9,28 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import quote
 
 from ai_native_cad.workflow_console.actions import WorkflowConsoleActions
 from ai_native_cad.workflow_console.actions import STAGE_REVIEW_STATUSES, STAGE_REVIEW_STAGES, STAGE_REWORK_TARGETS
 from ai_native_cad.workflow_console.artifact_display import filter_artifacts_for_display
 from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, WorkflowConsoleBackend
 from ai_native_cad.workflow_console.routes import dispatch_route
+from ai_native_cad.workflow_console.server import resolve_downloadable
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8780
 DEFAULT_RUN_PAGE_SIZE = 50
+WEB_VIEWER_ROOT = Path(__file__).resolve().parents[3] / "web-viewer"
+WORK_USER_PAGES = (
+    ("overview", "dashboard", "Overview"),
+    ("workflow", "account_tree", "Workflow"),
+    ("parts", "view_list", "Parts"),
+    ("runs", "history", "Runs"),
+)
 
 ARTIFACT_PAGE_ARTIFACTS = (
     "report.md",
@@ -90,7 +100,11 @@ def build_console_page_data(
     selected_run_id: str | None = None,
     *,
     selected_work_id: str | None = None,
+    active_page: str = "workspace",
+    selected_node_id: str | None = None,
     show_debug_works: bool = False,
+    show_unclassified_runs: bool = False,
+    show_low_level_details: bool = False,
     root: str | None = None,
     limit: int = DEFAULT_RUN_PAGE_SIZE,
     offset: int = 0,
@@ -101,28 +115,59 @@ def build_console_page_data(
     works_response = dispatch_route(
         backend,
         "list_works",
-        query={"limit": 50, "offset": 0, "show_debug": show_debug_works},
+        query={"limit": 50, "offset": 0, "show_debug": False},
     )
+    workspace_response = dispatch_route(backend, "read_workspace")
+    config_response = dispatch_route(backend, "read_workspace_config")
     works_page = works_response["data"] if works_response["ok"] and isinstance(works_response["data"], dict) else {}
     works = works_page.get("works") if isinstance(works_page.get("works"), list) else []
-    selected_work = selected_work_id or (works[0]["work_id"] if works else None)
+    selected_work = selected_work_id
     work_detail = build_selected_work_data(backend, selected_work) if selected_work else empty_selected_work_data()
-    runs_response = dispatch_route(backend, "list_runs", query=_query(root, limit=limit, offset=offset, search=search))
-    runs_page = runs_response["data"] if runs_response["ok"] and isinstance(runs_response["data"], dict) else {}
-    runs = runs_page.get("runs") if isinstance(runs_page.get("runs"), list) else []
-    pagination = runs_page.get("pagination") if isinstance(runs_page.get("pagination"), dict) else _empty_pagination(limit, offset)
-    selected = selected_run_id or _dict_get(work_detail.get("summary"), "latest_run_id") or (runs[0]["run_id"] if runs else None)
-    run_data = build_selected_run_data(backend, selected, root=root) if selected else empty_selected_run_data()
+    runs: list[dict[str, Any]] = []
+    pagination = _empty_pagination(limit, offset)
+    run_filters: dict[str, Any] = {}
+    selected = selected_run_id or _dict_get(work_detail.get("summary"), "latest_run_id")
+    load_runs = (
+        (active_page == "runs" and show_unclassified_runs)
+        or selected_run_id is not None
+        or search is not None
+        or offset != 0
+        or limit != DEFAULT_RUN_PAGE_SIZE
+    )
+    if load_runs:
+        runs_response = dispatch_route(backend, "list_runs", query=_query(root, limit=limit, offset=offset, search=search))
+        runs_page = runs_response["data"] if runs_response["ok"] and isinstance(runs_response["data"], dict) else {}
+        runs = runs_page.get("runs") if isinstance(runs_page.get("runs"), list) else []
+        pagination = runs_page.get("pagination") if isinstance(runs_page.get("pagination"), dict) else _empty_pagination(limit, offset)
+        run_filters = runs_page.get("filters") if isinstance(runs_page.get("filters"), dict) else {}
+        selected = selected_run_id or (runs[0]["run_id"] if runs else selected)
+    elif active_page == "runs":
+        runs = [_run_history_row_as_run(row) for row in work_detail.get("run_history", []) if isinstance(row, dict)]
+        selected = selected_run_id or (runs[0]["run_id"] if runs else selected)
+    run_data = (
+        build_selected_run_data(backend, selected, root=root)
+        if selected and (active_page in {"review", "products", "runs"} or selected_run_id is not None or load_runs)
+        else empty_selected_run_data()
+    )
+    provider = build_provider_config_data(backend) if active_page == "config" else {"provider_config": None, "provider_check": None}
     return {
+        "workspace": workspace_response["data"] if workspace_response["ok"] else {"present": False, "relative_path": "workspace"},
+        "workspace_config": config_response["data"] if config_response["ok"] else {"advancement_mode": "manual_confirm"},
         "works": works,
         "works_pagination": works_page.get("pagination") if isinstance(works_page.get("pagination"), dict) else _empty_pagination(50, 0),
         "work_filters": works_page.get("filters") if isinstance(works_page.get("filters"), dict) else {"show_debug": show_debug_works},
         "selected_work_id": selected_work,
         "selected_work": work_detail,
+        "active_page": active_page,
+        "show_unclassified_runs": show_unclassified_runs,
+        "show_low_level_details": show_low_level_details,
+        "selected_node_id": selected_node_id,
+        "selected_node": _selected_node(work_detail, selected_node_id),
         "runs": runs,
         "pagination": pagination,
-        "run_filters": runs_page.get("filters") if isinstance(runs_page.get("filters"), dict) else {},
+        "run_filters": run_filters,
         "selected_run_id": selected,
+        **provider,
         **run_data,
     }
 
@@ -132,7 +177,9 @@ def build_selected_work_data(backend: WorkflowConsoleBackend, work_id: str) -> d
     response = dispatch_route(backend, "read_work", path_params={"work_id": work_id})
     if not response["ok"]:
         return {**empty_selected_work_data(), "error": response["error"]}
-    return response["data"]
+    data = response["data"]
+    data["workflow_graph"] = build_workflow_graph_data(data)
+    return data
 
 
 def empty_selected_work_data() -> dict[str, Any]:
@@ -143,6 +190,13 @@ def empty_selected_work_data() -> dict[str, Any]:
         "current_state": None,
         "parts": [],
         "nodes": [],
+        "workflow_graph": {
+            "stage_nodes": [],
+            "part_nodes": [],
+            "review_nodes": [],
+            "has_parts": False,
+            "layout": "empty",
+        },
         "run_history": [],
         "products": {"human_facing": [], "downloadables": [], "artifacts_secondary_by_default": True},
         "available_actions": [],
@@ -153,6 +207,54 @@ def empty_selected_work_data() -> dict[str, Any]:
         },
         "error": None,
     }
+
+
+def build_provider_config_data(backend: WorkflowConsoleBackend) -> dict[str, Any]:
+    """Return sanitized provider configuration view data."""
+    response = dispatch_route(backend, "read_provider_config")
+    return {
+        "provider_config": response["data"] if response["ok"] else {"provider_identity": {}},
+        "provider_check": None,
+    }
+
+
+def build_workflow_graph_data(work: dict[str, Any]) -> dict[str, Any]:
+    """Build a presentation-only workflow graph from Work nodes and parts."""
+    nodes = [node for node in work.get("nodes") or [] if isinstance(node, dict)]
+    parts = [part for part in work.get("parts") or [] if isinstance(part, dict)]
+    by_id = {node.get("id"): node for node in nodes if isinstance(node.get("id"), str)}
+    plan_node = by_id.get("assembly_plan") or by_id.get("planning")
+    stage_nodes = [
+        _graph_node(by_id.get("requirement"), fallback_id="requirement", fallback_label="Requirement"),
+        _graph_node(plan_node, fallback_id="planning", fallback_label="Planning"),
+    ]
+    graph_parts = _workflow_graph_parts(parts)
+    part_nodes = [_graph_part_node(part, by_id.get(f"part:{part.get('part_id')}")) for part in graph_parts]
+    if not part_nodes:
+        synthetic_part = _graph_single_part_node(work)
+        if synthetic_part is not None:
+            part_nodes.append(synthetic_part)
+    if not part_nodes and by_id.get("part"):
+        part_nodes.append(_graph_node(by_id.get("part"), fallback_id="part", fallback_label="Part"))
+    review_nodes = [_graph_result_node(work)]
+    return {
+        "stage_nodes": stage_nodes,
+        "part_nodes": part_nodes,
+        "review_nodes": review_nodes,
+        "has_parts": bool(part_nodes),
+        "layout": "multi_part" if len(part_nodes) > 1 else ("single_part" if part_nodes else "planning_only"),
+    }
+
+
+def _workflow_graph_parts(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    active = [
+        part for part in parts
+        if part.get("attempt_count")
+        or part.get("has_step")
+        or part.get("has_stl")
+        or part.get("status") in {"accepted", "completed", "blocked", "needs_review"}
+    ]
+    return active or parts
 
 
 def build_selected_run_data(
@@ -413,63 +515,97 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
     """Create the NiceGUI UI. Importing NiceGUI is optional until this is called."""
     try:
         from nicegui import app, ui
+        from starlette.responses import FileResponse
     except ImportError as exc:  # pragma: no cover - exercised only without optional dependency at runtime
         raise RuntimeError("NiceGUI is not installed. Install the web extra, for example: cadflow[web].") from exc
 
     console_backend = backend or WorkflowConsoleBackend()
     actions = WorkflowConsoleActions(console_backend)
-    state: dict[str, Any] = {"selected_work_id": None, "selected_run_id": None, "last_action_result": None}
+    if WEB_VIEWER_ROOT.exists():
+        app.add_static_files("/web-viewer", str(WEB_VIEWER_ROOT))
+
+    @app.get("/api/downloads/{run_id}/{filename}")
+    def download_file(run_id: str, filename: str, root: str | None = None) -> FileResponse:
+        return FileResponse(resolve_downloadable(console_backend, run_id, filename, root=root))
+
+    state: dict[str, Any] = {
+        "_backend": console_backend,
+        "selected_work_id": None,
+        "selected_run_id": None,
+        "selected_node_id": None,
+        "active_page": "workspace",
+        "last_action_result": None,
+    }
 
     @ui.page("/")
     def index() -> None:
-        ui.add_head_html("<style>body{background:#f7f8fa}.mono{font-family:ui-monospace, SFMono-Regular, Consolas, monospace}</style>")
-        with ui.column().classes("w-full max-w-7xl mx-auto gap-4 p-4"):
-            with ui.row().classes("w-full items-center justify-between"):
-                ui.label("CadFlow Workflow Console").classes("text-2xl font-semibold")
-                ui.button("Refresh", icon="refresh", on_click=lambda: refresh()).props("outline")
-            ui.label("Local NiceGUI shell for Work state, reviewed-part workflow actions, and run debugging.").classes("text-sm text-gray-600")
-            tabs = ui.tabs().classes("w-full")
-            with tabs:
-                ui.tab("Works")
-                ui.tab("Workflow")
-                ui.tab("Parts")
-                ui.tab("Review & Rework")
-                ui.tab("Products")
-                ui.tab("Runs / Debug")
-            panels = ui.tab_panels(tabs, value="Works").classes("w-full")
+        ui.add_head_html(
+            "<style>"
+            "body{background:#f7f8fa}.mono{font-family:ui-monospace, SFMono-Regular, Consolas, monospace}"
+            ".sidebar{background:#ffffff;border-right:1px solid #e5e7eb;min-height:100vh}"
+            ".content{min-height:100vh}.nav-btn{justify-content:flex-start;width:100%}"
+            ".work-tree-item{border:1px solid transparent;border-radius:6px;padding:8px 10px;width:100%;cursor:pointer}"
+            ".work-tree-item:hover{background:#f8fafc}.work-tree-item-active{background:#eef6ff;border-color:#bfdbfe}"
+            ".work-page-tree{border-left:2px solid #dbeafe;margin-left:14px;padding-left:10px}"
+            ".work-page-btn{font-size:12px;min-height:30px;justify-content:flex-start;width:100%}"
+            ".workflow-graph{background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;padding:18px}"
+            ".workflow-step{align-items:center;gap:8px;cursor:pointer;min-width:92px}"
+            ".workflow-dot{width:18px;height:18px;border-radius:999px;border:2px solid #fff;box-shadow:0 0 0 2px #cbd5e1}"
+            ".workflow-dot.accepted,.workflow-dot.completed,.workflow-dot.available{background:#16a34a;box-shadow:0 0 0 2px #86efac}"
+            ".workflow-dot.ready,.workflow-dot.running{background:#2563eb;box-shadow:0 0 0 2px #93c5fd}"
+            ".workflow-dot.needs_review,.workflow-dot.partial_success{background:#ca8a04;box-shadow:0 0 0 2px #fde68a}"
+            ".workflow-dot.blocked{background:#dc2626;box-shadow:0 0 0 2px #fecaca}"
+            ".workflow-dot.reference_only{background:#64748b;box-shadow:0 0 0 2px #cbd5e1}"
+            ".workflow-dot.not_started,.workflow-dot.unknown,.workflow-dot.incomplete{background:#e5e7eb;box-shadow:0 0 0 2px #cbd5e1}"
+            ".workflow-arrow{color:#94a3b8;font-size:22px;line-height:1;text-align:center}"
+            ".part-preview{border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#f8fafc;min-height:240px}"
+            ".part-preview iframe{width:100%;height:260px;border:0;pointer-events:none}"
+            "</style>"
+        )
+        with ui.row().classes("w-full gap-0"):
+            sidebar = ui.column().classes("sidebar w-80 gap-3 p-4")
+            content = ui.column().classes("content flex-1 gap-4 p-5")
 
             def refresh() -> None:
-                panels.clear()
+                sidebar.clear()
+                content.clear()
                 data = build_console_page_data(
                     console_backend,
                     state.get("selected_run_id"),
                     selected_work_id=state.get("selected_work_id"),
-                    show_debug_works=bool(state.get("show_debug_works")),
+                    active_page=state.get("active_page", "workspace"),
+                    selected_node_id=state.get("selected_node_id"),
+                    show_unclassified_runs=bool(state.get("show_unclassified_runs")),
+                    show_low_level_details=bool(state.get("show_low_level_details")),
                     limit=state.get("limit", DEFAULT_RUN_PAGE_SIZE),
                     offset=state.get("offset", 0),
                     search=state.get("search") or None,
                 )
                 state["selected_work_id"] = data.get("selected_work_id")
                 state["selected_run_id"] = data.get("selected_run_id")
-                with panels:
-                    with ui.tab_panel("Works"):
-                        _render_works(ui, data, state, lambda work_id: select_work(work_id), refresh)
-                    with ui.tab_panel("Workflow"):
-                        _render_workflow_nodes(ui, data)
-                    with ui.tab_panel("Parts"):
-                        _render_parts_matrix(ui, data)
-                    with ui.tab_panel("Review & Rework"):
-                        _render_workflow_review(ui, data, actions, state, refresh)
-                        _render_stage_review_form(ui, data, actions, state, refresh, stage="workflow_review")
-                        _render_part_workflow(ui, data, actions, state, refresh)
-                    with ui.tab_panel("Products"):
-                        _render_artifacts(ui, data, console_backend)
-                    with ui.tab_panel("Runs / Debug"):
-                        _render_runs(ui, data, state, lambda run_id: select_run(run_id), refresh)
+                with sidebar:
+                    _render_sidebar(ui, data, state, select_work, select_page, refresh)
+                with content:
+                    if state.get("active_page") in {"overview", "workflow", "node", "parts", "review", "products", "runs"}:
+                        _render_work_header(ui, data)
+                    _render_active_page(ui, data, actions, state, refresh, select_node, lambda run_id: select_run(run_id), select_work, select_page)
 
             def select_work(work_id: str) -> None:
                 state["selected_work_id"] = work_id
                 state["selected_run_id"] = None
+                state["selected_node_id"] = None
+                state["active_page"] = "overview"
+                refresh()
+
+            def select_page(page: str) -> None:
+                state["active_page"] = page
+                if page != "node":
+                    state["selected_node_id"] = None
+                refresh()
+
+            def select_node(node_id: str) -> None:
+                state["active_page"] = "node"
+                state["selected_node_id"] = node_id
                 refresh()
 
             def select_run(run_id: str) -> None:
@@ -481,6 +617,265 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
     return app
 
 
+def _render_sidebar(
+    ui: Any,
+    data: dict[str, Any],
+    state: dict[str, Any],
+    on_select_work: Callable[[str], None],
+    on_select_page: Callable[[str], None],
+    refresh: Callable[[], None],
+) -> None:
+    workspace = data.get("workspace") if isinstance(data.get("workspace"), dict) else {}
+    ui.label("CadFlow").classes("text-2xl font-semibold")
+    ui.label("Work Console").classes("text-sm text-gray-500")
+    ui.button("Refresh", icon="refresh", on_click=refresh).props("outline dense").classes("w-full").tooltip("重新读取当前 workspace、work 和页面数据。")
+    for page, icon, text in (
+        ("workspace", "folder", "Workspace"),
+        ("works", "workspaces", "Works"),
+        ("config", "settings", "Config"),
+    ):
+        button = ui.button(text, icon=icon, on_click=lambda p=page: on_select_page(p))
+        button.props("flat dense" if state.get("active_page") != page else "unelevated dense color=primary").classes("nav-btn")
+        button.tooltip(_nav_help(page))
+    ui.label(f"Workspace: {workspace.get('name') or 'workspace'}").classes("text-xs text-gray-500")
+    ui.label(workspace.get("display_path") or workspace.get("relative_path") or "workspace").classes("text-xs text-gray-500 break-all")
+    ui.separator()
+    ui.label("Works").classes("text-sm font-medium text-gray-500")
+    for work in data.get("works") or []:
+        _render_sidebar_work_item(ui, work, data, state, on_select_work, on_select_page)
+
+
+def _render_sidebar_work_item(
+    ui: Any,
+    work: dict[str, Any],
+    data: dict[str, Any],
+    state: dict[str, Any],
+    on_select_work: Callable[[str], None],
+    on_select_page: Callable[[str], None],
+) -> None:
+    selected = work.get("work_id") == data.get("selected_work_id")
+    counts = work.get("part_counts") if isinstance(work.get("part_counts"), dict) else {}
+    status = work.get("overall_status") or "unknown"
+    item_classes = "work-tree-item work-tree-item-active" if selected else "work-tree-item"
+    with ui.column().classes("w-full gap-1"):
+        row = ui.row().classes(item_classes + " items-start gap-2")
+        row.on("click", lambda _event, w=work: on_select_work(w["work_id"]))
+        with row:
+            ui.icon("folder_open" if selected else "folder").classes("text-blue-500 mt-1")
+            with ui.column().classes("gap-1 flex-1 min-w-0"):
+                ui.label(work.get("title") or work.get("work_id")).classes("text-sm font-medium leading-snug line-clamp-2")
+                with ui.row().classes("items-center gap-2"):
+                    ui.badge(status).classes(_badge_class(status))
+                    ui.label(_sidebar_part_count_label(counts)).classes("text-xs text-gray-500")
+        if selected:
+            with ui.column().classes("work-page-tree w-full gap-1"):
+                for page, icon, text in WORK_USER_PAGES:
+                    item = ui.button(text, icon=icon, on_click=lambda p=page: on_select_page(p))
+                    item.props("flat dense" if state.get("active_page") != page else "unelevated dense color=secondary")
+                    item.classes("work-page-btn")
+                    item.tooltip(_nav_help(page))
+
+
+def _render_work_header(ui: Any, data: dict[str, Any]) -> None:
+    summary = _dict_get(data.get("selected_work"), "summary") or {}
+    if not summary:
+        ui.label("No Work selected").classes("text-2xl font-semibold")
+        return
+    counts = summary.get("part_counts") if isinstance(summary.get("part_counts"), dict) else {}
+    with ui.row().classes("w-full items-start justify-between"):
+        with ui.column().classes("gap-1"):
+            ui.label(summary.get("title") or summary.get("work_id")).classes("text-2xl font-semibold")
+            ui.label(f"Work: {summary.get('work_id')}").classes("text-sm text-gray-500")
+        with ui.row().classes("gap-2"):
+            ui.badge(summary.get("overall_status") or "unknown").classes(_badge_class(summary.get("overall_status")))
+            ui.badge(f"Current run: {summary.get('latest_run_id') or 'none'}")
+            ui.badge(f"Parts: {counts.get('accepted', 0)} accepted / {counts.get('blocked', 0)} blocked")
+    ui.label(summary.get("next_action") or "").classes("text-sm text-gray-700")
+
+
+def _render_active_page(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    on_select_node: Callable[[str], None],
+    on_select_run: Callable[[str], None],
+    on_select_work: Callable[[str], None],
+    on_select_page: Callable[[str], None],
+) -> None:
+    page = data.get("active_page") or "overview"
+    if page == "workspace":
+        _render_workspace_page(ui, data, state, refresh, on_select_work)
+    elif page == "works":
+        _render_works(ui, data, state, on_select_work, refresh)
+    elif page == "overview":
+        _render_work_overview(ui, data, state, refresh)
+    elif page == "workflow":
+        _render_workflow_nodes(ui, data, on_select_node=on_select_node, on_select_page=on_select_page)
+    elif page == "node":
+        _render_node_detail(ui, data, actions, state, refresh, on_back_to_workflow=lambda: on_select_page("workflow"))
+    elif page == "parts":
+        _render_parts_matrix(ui, data)
+    elif page == "review":
+        _render_workflow_review(ui, data, actions, state, refresh)
+        _render_stage_review_form(ui, data, actions, state, refresh, stage="workflow_review")
+        _render_part_workflow(ui, data, actions, state, refresh)
+    elif page == "products":
+        _render_work_products(ui, data)
+        _render_artifacts(ui, data, console_backend_from_actions(actions))
+    elif page == "runs":
+        _render_runs(ui, data, state, on_select_run, refresh)
+    elif page == "config":
+        _render_config(ui, data, actions.backend, state, refresh)
+    else:
+        ui.label(f"Unknown page: {page}").classes("text-negative")
+
+
+def console_backend_from_actions(actions: WorkflowConsoleActions) -> WorkflowConsoleBackend:
+    return actions.backend
+
+
+def _render_workspace_page(
+    ui: Any,
+    data: dict[str, Any],
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    on_select_work: Callable[[str], None],
+) -> None:
+    workspace = data.get("workspace") if isinstance(data.get("workspace"), dict) else {}
+    config = data.get("workspace_config") if isinstance(data.get("workspace_config"), dict) else {}
+    with ui.row().classes("w-full items-center justify-between"):
+        with ui.column().classes("gap-1"):
+            _label_with_help(ui, "Workspace", "当前本地工作区。Work、配置和新的 run 都会写入这个 workspace。", "text-2xl font-semibold")
+            ui.label(workspace.get("display_path") or "No workspace path").classes("text-sm text-gray-600 break-all")
+        with ui.row().classes("gap-2"):
+            _workspace_dialog_button(ui, "New Workspace", "create_new_folder", "create", workspace, state, refresh)
+            _workspace_dialog_button(ui, "Load Workspace", "folder_open", "load", workspace, state, refresh)
+    _key_values(ui, {
+        "Name": workspace.get("name") or "workspace",
+        "Initialized": workspace.get("present"),
+        "External": workspace.get("is_external"),
+        "Works": workspace.get("work_count", 0),
+        "Runs": workspace.get("run_count", 0),
+        "Advancement mode": config.get("advancement_mode") or workspace.get("advancement_mode") or "manual_confirm",
+    })
+    if state.get("workspace_result"):
+        ui.markdown(f"```json\n{json.dumps(state['workspace_result'], indent=2, sort_keys=True)}\n```").classes("w-full mono")
+    _label_with_help(ui, "Works", "当前 workspace 中的 Work/Project 列表，点击一行可进入对应 Work。", "text-lg font-medium")
+    _render_work_table(ui, data.get("works") or [], data.get("selected_work_id"), on_select_work)
+
+
+def _workspace_dialog_button(
+    ui: Any,
+    label: str,
+    icon: str,
+    action: str,
+    workspace: dict[str, Any],
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    dialog = ui.dialog()
+    with dialog, ui.card().classes("w-[640px] max-w-full"):
+        _label_with_help(ui, label, "创建或加载一个明确的 workspace 根目录，避免误用默认路径。", "text-xl font-semibold")
+        ui.label("Choose an explicit local workspace path. The path can be outside this repository.").classes("text-sm text-gray-600")
+        default_path = workspace.get("display_path") or workspace.get("relative_path") or "workspace"
+        with ui.row().classes("w-full items-center gap-2"):
+            path = ui.input("Workspace path", value=default_path).classes("flex-1")
+            _help_icon(ui, "workspace 的完整本地路径。可以在仓库外，例如 D:\\CadFlowWorkspaces\\client_a。")
+        with ui.row().classes("w-full items-center gap-2"):
+            name = ui.input("Workspace name", value=workspace.get("name") or "workspace").classes("flex-1")
+            _help_icon(ui, "显示用名称，只用于帮助你识别当前 workspace，不影响文件路径。")
+        include_examples = None
+        if action != "load":
+            with ui.row().classes("w-full items-center gap-2"):
+                include_examples = ui.checkbox("Include example Works", value=False)
+                _help_icon(ui, "初始化 3 个静态示例 Work：单 part、多 part planning、以及多 part 中推进一个 part。不会调用 provider 或 CAD。")
+        ui.label(
+            "New initializes workspace.json/config.json. Load only accepts an existing initialized workspace."
+            if action == "load"
+            else "New creates the directory if needed and initializes workspace.json/config.json. Optional examples are copied into this workspace."
+        ).classes("text-sm text-gray-600")
+        with ui.row().classes("gap-2 justify-end"):
+            ui.button("Cancel", on_click=dialog.close).props("outline").tooltip("关闭弹框，不改变当前 workspace。")
+            ui.button(
+                "Confirm",
+                icon="check",
+                on_click=lambda: _confirm_workspace_dialog(
+                    action,
+                    path.value,
+                    name.value,
+                    bool(include_examples.value) if include_examples is not None else False,
+                    state,
+                    refresh,
+                    dialog,
+                ),
+            ).tooltip("确认创建或加载该 workspace。")
+    ui.button(label, icon=icon, on_click=dialog.open).props("outline").tooltip("打开路径确认弹框。")
+
+
+def _confirm_workspace_dialog(
+    action: str,
+    path: str | None,
+    name: str | None,
+    include_examples: bool,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    dialog: Any,
+) -> None:
+    dialog.close()
+    if action == "load":
+        _load_workspace_ui(path, state, refresh)
+    else:
+        _create_workspace_ui(path, name, include_examples, state, refresh)
+
+
+def _render_work_overview(ui: Any, data: dict[str, Any], state: dict[str, Any], refresh: Callable[[], None]) -> None:
+    work = data.get("selected_work") or {}
+    summary = work.get("summary") if isinstance(work.get("summary"), dict) else {}
+    entity = work.get("entity_state") if isinstance(work.get("entity_state"), dict) else {}
+    current = work.get("current_state") if isinstance(work.get("current_state"), dict) else {}
+    workspace_config = data.get("workspace_config") if isinstance(data.get("workspace_config"), dict) else {}
+    counts = current.get("part_counts") if isinstance(current.get("part_counts"), dict) else {}
+    with ui.grid(columns=4).classes("w-full gap-3"):
+        _overview_metric(ui, "Status", summary.get("overall_status") or "incomplete")
+        _overview_metric(ui, "Current stage", _friendly_current_stage(work))
+        _overview_metric(ui, "Parts", _sidebar_part_count_label(counts))
+        _overview_metric(ui, "Mode", entity.get("advancement_mode") or workspace_config.get("advancement_mode") or "manual_confirm")
+    with ui.card().classes("w-full shadow-none border border-blue-100 bg-blue-50"):
+        ui.label("Next action").classes("text-sm font-medium text-blue-900")
+        ui.label(current.get("next_action") or "Inspect workflow.").classes("text-base text-blue-950")
+    if entity.get("description"):
+        ui.label(entity["description"]).classes("text-sm text-gray-700")
+    requirement = entity.get("requirement") if isinstance(entity.get("requirement"), dict) else {}
+    with ui.card().classes("w-full"):
+        _label_with_help(ui, "Requirement", "Work 的需求入口。这里会创建 root run，保存用户输入和后续结构化需求文件。", "text-lg font-medium")
+        _key_values(ui, {
+            "Status": requirement.get("status") or "not_started",
+            "Confirmation": "required" if requirement.get("confirmation_required") else "not required",
+        })
+        with ui.row().classes("w-full items-start gap-2"):
+            prompt = ui.textarea("Requirement input", placeholder="Describe the product/work to start a root workflow run.").props("outlined autogrow").classes("flex-1")
+            _help_icon(ui, "输入当前 Work 的原始需求。MVP 不做完整聊天 UI，而是把需求写入 root run 供后续 workflow 使用。")
+        button = ui.button("Create Root Run", icon="play_arrow", on_click=lambda: _create_work_requirement_run_ui(summary.get("work_id"), prompt.value, state, refresh))
+        button.tooltip("为当前 Work 创建 root run；不会直接批量生成所有 CAD。")
+        if not summary.get("work_id"):
+            button.disable()
+        if state.get("requirement_run_result") is not None:
+            with ui.expansion("Action result").classes("w-full"):
+                ui.markdown(f"```json\n{json.dumps(state['requirement_run_result'], indent=2, sort_keys=True)}\n```").classes("w-full mono")
+    with ui.card().classes("w-full"):
+        _label_with_help(ui, "Part Runs", "根据拆分出的 parts 创建每个 part 对应的 run 容器。人工确认模式下需要手动点击。", "text-lg font-medium")
+        ui.label("Manual mode creates part runs after you confirm the split; auto mode creates them when split artifacts are available.").classes("text-sm text-gray-600")
+        button = ui.button("Confirm Split / Create Part Runs", icon="account_tree", on_click=lambda: _create_work_part_runs_ui(summary.get("work_id"), state, refresh))
+        button.tooltip("确认当前 parts split，并为候选 part 创建 run 容器；不会自动执行批量 CAD。")
+        if not summary.get("work_id") or not current.get("root_run_id"):
+            button.disable()
+        if state.get("part_runs_result") is not None:
+            with ui.expansion("Action result").classes("w-full"):
+                ui.markdown(f"```json\n{json.dumps(state['part_runs_result'], indent=2, sort_keys=True)}\n```").classes("w-full mono")
+
+
 def _render_works(
     ui: Any,
     data: dict[str, Any],
@@ -490,16 +885,35 @@ def _render_works(
 ) -> None:
     works = data.get("works") or []
     selected = data.get("selected_work_id")
-    with ui.row().classes("w-full items-center gap-3"):
-        debug_toggle = ui.checkbox("Show debug/unclassified runs", value=bool(state.get("show_debug_works")))
+    with ui.card().classes("w-full"):
+        _label_with_help(ui, "Create Work", "创建一个真实 Work/Project 实体，只写 manifest，不启动 provider 或 CAD。", "text-lg font-medium")
+        with ui.row().classes("w-full items-center gap-2"):
+            title = ui.input("Title").classes("flex-1")
+            _help_icon(ui, "Work 的显示标题。会用于生成默认 work_id。")
+        with ui.row().classes("w-full items-start gap-2"):
+            description = ui.textarea("Description").props("outlined autogrow").classes("flex-1")
+            _help_icon(ui, "Work 的简短说明。只保存在 workspace manifest 中。")
+        result_key = "create_work_result"
+        if state.get(result_key):
+            ui.label(str(state[result_key])).classes("text-sm text-gray-600")
         ui.button(
-            "Apply",
-            icon="tune",
-            on_click=lambda: _apply_work_filters(state, bool(debug_toggle.value), refresh),
-        ).props("outline")
+            "Create Work",
+            icon="add_circle",
+            on_click=lambda: _create_work_ui(title.value, description.value, state, result_key, refresh),
+        ).tooltip("创建 Work manifest，不创建 run，不调用 provider。")
+    _label_with_help(ui, "Works", "当前 workspace 下的 Work 列表。点击行会切换到该 Work 的 Overview。", "text-xl font-semibold")
     if not works:
-        ui.label("No Works inferred from existing runs yet.").classes("text-gray-600")
+        ui.label("No Works in this workspace yet.").classes("text-gray-600")
         return
+    _render_work_table(ui, works, selected, on_select)
+
+
+def _render_work_table(
+    ui: Any,
+    works: list[dict[str, Any]],
+    selected: str | None,
+    on_select: Callable[[str], None],
+) -> None:
     columns = [
         {"name": "title", "label": "Work", "field": "title", "align": "left"},
         {"name": "overall_status", "label": "Status", "field": "overall_status", "align": "left"},
@@ -513,31 +927,28 @@ def _render_works(
     rows = [_work_row(work, selected) for work in works]
     table = ui.table(columns=columns, rows=rows, row_key="work_id").classes("w-full")
     table.on("rowClick", lambda event: on_select(event.args[1]["work_id"]))
-    summary = _dict_get(data.get("selected_work"), "summary") or {}
-    with ui.row().classes("gap-3"):
-        ui.badge(f"Selected Work: {summary.get('title') or 'none'}")
-        ui.badge(f"Current run: {summary.get('latest_run_id') or 'none'}")
-        ui.badge("Run history is append-only")
 
 
-def _apply_work_filters(state: dict[str, Any], show_debug: bool, refresh: Callable[[], None]) -> None:
-    state["show_debug_works"] = show_debug
-    state["selected_work_id"] = None
-    state["selected_run_id"] = None
-    refresh()
-
-
-def _render_workflow_nodes(ui: Any, data: dict[str, Any]) -> None:
+def _render_workflow_nodes(
+    ui: Any,
+    data: dict[str, Any],
+    on_select_node: Callable[[str], None] | None = None,
+    on_select_page: Callable[[str], None] | None = None,
+) -> None:
     work = data.get("selected_work") or {}
     current = work.get("current_state") if isinstance(work.get("current_state"), dict) else {}
+    graph = work.get("workflow_graph") if isinstance(work.get("workflow_graph"), dict) else {}
+    _label_with_help(ui, "Workflow", "按阶段和 part 展示当前 Work 的节点、状态、输入输出文件和可执行动作。", "text-xl font-semibold")
     _key_values(ui, {
         "Current state": current.get("current_run_id") or "Empty",
         "Root run": current.get("root_run_id") or "Empty",
         "Next action": current.get("next_action") or "Empty",
         "History": current.get("immutability_note") or "Runs are immutable.",
     })
+    _render_workflow_graph(ui, graph, on_select_node, on_select_page)
+    _label_with_help(ui, "Node Details", "紧凑节点清单。流程图用于理解结构，这里保留 artifact/action 细节。", "text-lg font-medium")
     for node in work.get("nodes") or []:
-        with ui.card().classes("w-full"):
+        with ui.card().classes("w-full shadow-none border border-gray-200"):
             with ui.row().classes("w-full items-center justify-between"):
                 ui.label(node.get("label") or node.get("id")).classes("text-lg font-medium")
                 ui.badge(node.get("status") or "unknown").classes(_badge_class(node.get("status")))
@@ -547,13 +958,564 @@ def _render_workflow_nodes(ui: Any, data: dict[str, Any]) -> None:
                 "Artifacts": ", ".join(node.get("artifacts") or []) or "Empty",
                 "Actions": ", ".join(node.get("actions") or []) or "Empty",
             })
+            if on_select_node is not None:
+                ui.button("Open node", icon="open_in_new", on_click=lambda n=node: on_select_node(n["id"])).props("outline").tooltip("打开该节点详情，查看输入文件、输出文件、启动条件和 review/rework 操作。")
+
+
+def _render_workflow_graph(
+    ui: Any,
+    graph: dict[str, Any],
+    on_select_node: Callable[[str], None] | None,
+    on_select_page: Callable[[str], None] | None,
+) -> None:
+    stage_nodes = graph.get("stage_nodes") if isinstance(graph.get("stage_nodes"), list) else []
+    part_nodes = graph.get("part_nodes") if isinstance(graph.get("part_nodes"), list) else []
+    review_nodes = graph.get("review_nodes") if isinstance(graph.get("review_nodes"), list) else []
+    with ui.column().classes("workflow-graph w-full gap-4"):
+        with ui.row().classes("w-full items-start gap-3"):
+            for index, node in enumerate(stage_nodes):
+                _render_graph_node_card(ui, node, "stage", on_select_node)
+                if index < len(stage_nodes):
+                    ui.label("->").classes("workflow-arrow self-center")
+        if part_nodes:
+            with ui.grid(columns=min(max(len(part_nodes), 1), 4)).classes("w-full gap-4"):
+                for node in part_nodes:
+                    _render_graph_node_card(ui, node, "part", on_select_node)
+        else:
+            with ui.card().classes("w-full shadow-none border border-dashed border-gray-300 bg-gray-50"):
+                ui.label("No part split yet").classes("text-sm font-medium text-gray-600")
+                ui.label("Requirement and planning nodes are available; part lanes appear after a split/assembly plan.").classes("text-xs text-gray-500")
+        if review_nodes:
+            with ui.row().classes("w-full items-start gap-3"):
+                ui.label("->").classes("workflow-arrow self-center")
+                for node in review_nodes:
+                    can_open = node.get("id") not in {"products", "result"}
+                    _render_graph_node_card(ui, node, "review", on_select_node if can_open else None, on_select_page)
+
+
+def _render_graph_node_card(
+    ui: Any,
+    node: dict[str, Any],
+    group: str,
+    on_select_node: Callable[[str], None] | None,
+    on_select_page: Callable[[str], None] | None = None,
+) -> None:
+    status = node.get("status") or "unknown"
+    step = ui.column().classes("workflow-step")
+    step.tooltip(_graph_tooltip(node))
+    if on_select_node is not None and node.get("id") not in {"products", "result"} and not node.get("synthetic"):
+        step.on("click", lambda _event, n=node: on_select_node(str(n.get("id"))))
+    with step:
+        ui.element("div").classes(f"workflow-dot {_dot_status(status)}")
+        ui.label(node.get("label") or node.get("id")).classes("text-sm font-semibold text-center")
+        ui.label(str(status)).classes("text-xs text-gray-500 text-center")
+        if node.get("role"):
+            ui.label(str(node.get("role"))).classes("text-xs text-gray-500")
+        if group == "part":
+            flags = []
+            flags.append("STEP" if node.get("has_step") else "no STEP")
+            flags.append("STL" if node.get("has_stl") else "no STL")
+            ui.label(" / ".join(flags)).classes("text-xs text-gray-600 text-center")
+        if node.get("id") in {"products", "result"} and on_select_page is not None:
+            with ui.row().classes("gap-2"):
+                ui.button("Parts", icon="view_list", on_click=lambda: on_select_page("parts")).props("outline dense").tooltip("打开当前 Work 的 Part 预览与下载。")
+                ui.button("Runs", icon="history", on_click=lambda: on_select_page("runs")).props("outline dense").tooltip("打开当前 Work 的 run history。")
+
+
+def _render_node_detail(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    *,
+    on_back_to_workflow: Callable[[], None],
+) -> None:
+    node = data.get("selected_node") if isinstance(data.get("selected_node"), dict) else None
+    if node is None:
+        ui.label("Select a workflow node.").classes("text-gray-600")
+        _render_workflow_nodes(ui, data)
+        return
+    summary = _dict_get(data.get("selected_work"), "summary") or {}
+    with ui.row().classes("w-full items-center justify-between"):
+        ui.label(f"{summary.get('title') or 'Work'} > Workflow > {node.get('label') or node.get('id')}").classes("text-sm text-gray-500")
+        ui.button("Back to Workflow", icon="arrow_back", on_click=on_back_to_workflow).props("outline dense").tooltip("返回当前 Work 的 Workflow 流程图。")
+    with ui.card().classes("w-full shadow-none border border-gray-200"):
+        with ui.row().classes("w-full items-center justify-between"):
+            _label_with_help(ui, node.get("label") or node.get("id"), "核心状态已放在 Workflow dot hover 中；这里保留本节点可执行的 review/rework 操作。", "text-xl font-semibold")
+            ui.badge(node.get("status") or "unknown").classes(_badge_class(node.get("status")))
+        ui.label(node.get("summary") or "Hover the workflow dot for inputs, outputs, start flag, review status, and next action.").classes("text-sm text-gray-700")
+        artifacts = node.get("artifacts") or []
+        actions_list = node.get("actions") or []
+        with ui.row().classes("gap-2"):
+            ui.badge(f"Review: {_node_review_status(data.get('selected_work') or {}, node)}")
+            ui.badge(f"Outputs: {len(artifacts)}")
+            ui.badge(f"Start: {_node_start_flag(node)}")
+        if actions_list:
+            ui.label("Available actions: " + ", ".join(actions_list)).classes("text-xs text-gray-500")
+    if "stage_review" in actions_list or node.get("kind") == "stage":
+        _render_stage_review_form(ui, data, actions, state, refresh, stage=_node_stage_for_review(node))
+    if "run_rework" in actions_list:
+        ui.label("Rework is available from this node context when a needs_revision stage review is saved.").classes("text-sm text-gray-600")
+
+
+def _render_work_products(ui: Any, data: dict[str, Any]) -> None:
+    products = _dict_get(data.get("selected_work"), "products") or {}
+    human = products.get("human_facing") if isinstance(products.get("human_facing"), list) else []
+    downloads = products.get("downloadables") if isinstance(products.get("downloadables"), list) else []
+    with ui.card().classes("w-full"):
+        _label_with_help(ui, "Work Products", "优先展示面向用户的产物和下载文件，调试类 artifact 默认折叠或隐藏。", "text-xl font-semibold")
+        if downloads:
+            for item in downloads:
+                ui.badge(f"{item.get('name')}: available")
+        else:
+            ui.label("No downloadable Work products found.").classes("text-sm text-gray-500")
+        ui.label("Human-facing artifacts").classes("font-medium")
+        if not human:
+            ui.label("Empty").classes("text-sm text-gray-500")
+        for artifact in human:
+            ui.badge(artifact.get("name") or "artifact")
+
+
+def _node_report_title(node: dict[str, Any]) -> str:
+    node_id = str(node.get("id") or "")
+    if node_id == "requirement":
+        return "Requirement Review"
+    if node_id == "planning":
+        return "Planning Review"
+    if node_id == "assembly_plan":
+        return "Split / Assembly Plan Review"
+    if node_id.startswith("part:") or node.get("kind") == "part":
+        return "Part Result Review"
+    return "Step Review"
+
+
+def _node_review_status(work: dict[str, Any], node: dict[str, Any]) -> str:
+    node_id = str(node.get("id") or "")
+    if node_id.startswith("part:"):
+        part = _part_by_id(work, node_id.split(":", 1)[1])
+        return str(part.get("review_status") or part.get("status") or node.get("review_status") or "Empty")
+    if node.get("review_status"):
+        return str(node.get("review_status"))
+    if node_id == "requirement":
+        summary = work.get("summary") if isinstance(work.get("summary"), dict) else {}
+        return str(summary.get("requirement_status") or node.get("status") or "Empty")
+    if node_id in {"planning", "assembly_plan"}:
+        artifacts = node.get("artifacts") if isinstance(node.get("artifacts"), list) else []
+        if "stage_review.json" in artifacts:
+            return "stage review available"
+        return str(node.get("status") or "Empty")
+    return str(node.get("status") or "Empty")
+
+
+def _render_node_report(ui: Any, data: dict[str, Any], node: dict[str, Any]) -> None:
+    work = data.get("selected_work") if isinstance(data.get("selected_work"), dict) else {}
+    node_id = str(node.get("id") or "")
+    with ui.card().classes("w-full shadow-none border border-gray-200"):
+        _label_with_help(ui, _node_report_title(node), "当前节点对应的 review/report 摘要。Review 不再作为独立页面，而是挂在相关节点下。", "text-lg font-medium")
+        if node_id.startswith("part:"):
+            part_id = node_id.split(":", 1)[1]
+            part = _part_by_id(work, part_id)
+            _key_values(ui, {
+                "Part": part_id,
+                "Status": part.get("status") or node.get("status") or "unknown",
+                "Review": part.get("review_status") or "Empty",
+                "Next action": part.get("next_action") or "Empty",
+            })
+            return
+        summary = work.get("summary") if isinstance(work.get("summary"), dict) else {}
+        current = work.get("current_state") if isinstance(work.get("current_state"), dict) else {}
+        if node_id == "requirement":
+            _key_values(ui, {
+                "Requirement": summary.get("requirement_status") or node.get("status") or "Empty",
+                "Review": _node_review_status(work, node),
+                "Output": ", ".join(node.get("artifacts") or []) or "Empty",
+                "Next action": current.get("next_action") or "Empty",
+            })
+            return
+        if node_id in {"planning", "assembly_plan"}:
+            _key_values(ui, {
+                "Planning": node.get("status") or "Empty",
+                "Review": _node_review_status(work, node),
+                "Parts": summary.get("part_count") if summary.get("part_count") is not None else len(work.get("parts") or []),
+                "Output": ", ".join(node.get("artifacts") or []) or "Empty",
+                "Next action": current.get("next_action") or "Empty",
+            })
+            return
+        _key_values(ui, {
+            "Status": node.get("status") or "unknown",
+            "Review": _node_review_status(work, node),
+            "Artifacts": ", ".join(node.get("artifacts") or []) or "Empty",
+            "Next action": current.get("next_action") or "Empty",
+        })
+
+
+def _render_config(
+    ui: Any,
+    data: dict[str, Any],
+    backend: WorkflowConsoleBackend,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    config = data.get("provider_config") if isinstance(data.get("provider_config"), dict) else {}
+    identity = config.get("provider_identity") if isinstance(config.get("provider_identity"), dict) else {}
+    workspace_config = data.get("workspace_config") if isinstance(data.get("workspace_config"), dict) else {}
+    with ui.card().classes("w-full"):
+        _label_with_help(ui, "Workspace Configuration", "当前 workspace 级配置。这里只保存 provider、模型、超时、重试和推进模式，不保存 API key。", "text-xl font-semibold")
+        _key_values(ui, {
+            "Provider": workspace_config.get("provider") or identity.get("provider") or "local/mock",
+            "Model": workspace_config.get("model") or identity.get("model") or "Empty",
+            "Timeout": workspace_config.get("timeout_seconds") or identity.get("timeout_seconds") or "Empty",
+            "Retries": workspace_config.get("max_retries") if workspace_config.get("max_retries") is not None else "Empty",
+            "Advancement mode": workspace_config.get("advancement_mode") or "manual_confirm",
+            "API keys": "Read from environment only; never shown or saved here.",
+        })
+        with ui.row().classes("w-full items-center gap-2"):
+            provider = ui.select(options=["local", "deepseek", "openai"], value=_provider_select_value(workspace_config or identity), label="Provider").classes("flex-1")
+            _help_icon(ui, "选择当前 workspace 使用的 provider。local 用于本地/mock；deepseek/openai 需要环境变量中已有 API key。")
+        with ui.row().classes("w-full items-center gap-2"):
+            mode = ui.select(options=["manual_confirm", "auto_advance"], value=workspace_config.get("advancement_mode") or "manual_confirm", label="Advancement mode").classes("flex-1")
+            _help_icon(ui, "manual_confirm 会等待人工确认再推进 part runs；auto_advance 在满足输入条件后自动创建下一步 run 容器。")
+        with ui.row().classes("w-full items-center gap-2"):
+            model = ui.input("Model", value=str(workspace_config.get("model") or "")).classes("flex-1")
+            _help_icon(ui, "provider 使用的模型名称。留空时使用后端默认模型或环境配置。")
+        with ui.row().classes("w-full items-center gap-2"):
+            timeout = ui.number("Timeout seconds", value=workspace_config.get("timeout_seconds") or None, min=1, max=300).classes("flex-1")
+            _help_icon(ui, "单次 provider 请求的超时时间，单位是秒。")
+        with ui.row().classes("w-full items-center gap-2"):
+            retries = ui.number("Max retries", value=workspace_config.get("max_retries") if workspace_config.get("max_retries") is not None else None, min=0, max=5).classes("flex-1")
+            _help_icon(ui, "provider 请求失败时的最大重试次数。")
+        with ui.row().classes("gap-2"):
+            ui.button("Save", icon="save", on_click=lambda: _save_workspace_config_ui(backend, provider.value, mode.value, model.value, timeout.value, retries.value, state, refresh)).tooltip("保存 workspace 级配置到 config.json，不写入 API key。")
+            ui.button("Test", icon="check_circle", on_click=lambda: _test_provider_ui(backend, state, refresh)).props("outline").tooltip("使用当前配置测试 provider 连接；API key 仍只从环境变量读取。")
+        if state.get("config_result") is not None:
+            ui.markdown(f"```json\n{json.dumps(state['config_result'], indent=2, sort_keys=True)}\n```").classes("w-full mono")
+
+
+def _create_work_ui(
+    title: str | None,
+    description: str | None,
+    state: dict[str, Any],
+    result_key: str,
+    refresh: Callable[[], None],
+) -> None:
+    backend = state.get("_backend")
+    if backend is None:
+        state[result_key] = {"ok": False, "error": "Backend is unavailable."}
+        refresh()
+        return
+    response = dispatch_route(
+        backend,
+        "create_work",
+        body={"title": title or "", "description": description or ""},
+    )
+    state[result_key] = response["data"] if response["ok"] else response["error"]
+    if response["ok"]:
+        state["selected_work_id"] = response["data"]["work"]["work_id"]
+        state["active_page"] = "overview"
+    refresh()
+
+
+def _create_workspace_ui(
+    workspace_path: str | None,
+    name: str | None,
+    include_examples: bool,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    backend = state.get("_backend")
+    body = {"path": workspace_path or "workspace", "name": name or "workspace", "include_examples": include_examples}
+    response = dispatch_route(backend, "create_workspace", body=body) if backend is not None else {"ok": False, "error": "Backend is unavailable."}
+    state["workspace_result"] = response["data"] if response.get("ok") else response.get("error")
+    state["selected_work_id"] = None
+    state["selected_run_id"] = None
+    refresh()
+
+
+def _load_workspace_ui(
+    workspace_path: str | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    backend = state.get("_backend")
+    body = {"path": workspace_path or "workspace"}
+    response = dispatch_route(backend, "load_workspace", body=body) if backend is not None else {"ok": False, "error": "Backend is unavailable."}
+    state["workspace_result"] = response["data"] if response.get("ok") else response.get("error")
+    state["selected_work_id"] = None
+    state["selected_run_id"] = None
+    refresh()
+
+
+def _create_work_requirement_run_ui(
+    work_id: str | None,
+    prompt: str | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    backend = state.get("_backend")
+    if backend is None or not work_id:
+        state["requirement_run_result"] = {"ok": False, "error": "Select a Work first."}
+        refresh()
+        return
+    response = dispatch_route(
+        backend,
+        "create_work_requirement_run",
+        path_params={"work_id": work_id},
+        body={"prompt": prompt or ""},
+    )
+    state["requirement_run_result"] = response["data"] if response["ok"] else response["error"]
+    if response["ok"]:
+        state["selected_run_id"] = response["data"]["run"]["run_id"]
+    refresh()
+
+
+def _create_work_part_runs_ui(
+    work_id: str | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    backend = state.get("_backend")
+    if backend is None or not work_id:
+        state["part_runs_result"] = {"ok": False, "error": "Select a Work first."}
+        refresh()
+        return
+    response = dispatch_route(backend, "create_work_part_runs", path_params={"work_id": work_id})
+    state["part_runs_result"] = response["data"] if response["ok"] else response["error"]
+    refresh()
+
+
+def _save_workspace_config_ui(
+    backend: WorkflowConsoleBackend,
+    provider: str,
+    advancement_mode: str,
+    model: str | None,
+    timeout_seconds: Any,
+    max_retries: Any,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    body: dict[str, Any] = {"provider": provider, "advancement_mode": advancement_mode}
+    if model:
+        body["model"] = str(model).strip()
+    if timeout_seconds not in (None, ""):
+        body["timeout_seconds"] = int(timeout_seconds)
+    if max_retries not in (None, ""):
+        body["max_retries"] = int(max_retries)
+    state["config_result"] = dispatch_route(backend, "write_workspace_config", body=body)
+    refresh()
+
+
+def _configure_provider_ui(
+    backend: WorkflowConsoleBackend,
+    provider: str,
+    model: str | None,
+    timeout_seconds: Any,
+    max_retries: Any,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    body: dict[str, Any] = {"provider": provider}
+    if model:
+        body["model"] = str(model).strip()
+    if timeout_seconds not in (None, ""):
+        body["timeout_seconds"] = int(timeout_seconds)
+    if max_retries not in (None, ""):
+        body["max_retries"] = int(max_retries)
+    state["provider_result"] = dispatch_route(backend, "configure_provider", body=body)
+    refresh()
+
+
+def _test_provider_ui(backend: WorkflowConsoleBackend, state: dict[str, Any], refresh: Callable[[], None]) -> None:
+    state["config_result"] = dispatch_route(backend, "test_provider_connection")
+    refresh()
+
+
+def _provider_select_value(identity: dict[str, Any]) -> str:
+    provider = str(identity.get("provider") or "local/mock").lower()
+    if provider in {"deepseek", "openai"}:
+        return provider
+    return "local"
+
+
+def _graph_node(
+    node: dict[str, Any] | None,
+    *,
+    fallback_id: str,
+    fallback_label: str,
+) -> dict[str, Any]:
+    node = node or {}
+    return {
+        "id": node.get("id") or fallback_id,
+        "label": node.get("label") or fallback_label,
+        "kind": node.get("kind") or "stage",
+        "status": node.get("status") or "not_started",
+        "summary": node.get("summary") or "",
+        "artifacts": node.get("artifacts") if isinstance(node.get("artifacts"), list) else [],
+        "actions": node.get("actions") if isinstance(node.get("actions"), list) else [],
+    }
+
+
+def _graph_part_node(part: dict[str, Any], node: dict[str, Any] | None) -> dict[str, Any]:
+    graph = _graph_node(
+        node,
+        fallback_id=f"part:{part.get('part_id') or 'part'}",
+        fallback_label=str(part.get("part_id") or "part"),
+    )
+    graph.update({
+        "part_id": part.get("part_id"),
+        "role": part.get("role"),
+        "current_stage": part.get("current_stage"),
+        "has_step": bool(part.get("has_step")),
+        "has_stl": bool(part.get("has_stl")),
+        "has_preview": bool(part.get("has_preview")),
+        "download_run_id": part.get("download_run_id") or part.get("latest_run_id"),
+        "next_action": part.get("next_action"),
+        "review_status": part.get("review_status"),
+    })
+    return graph
+
+
+def _graph_result_node(work: dict[str, Any]) -> dict[str, Any]:
+    products = work.get("products") if isinstance(work.get("products"), dict) else {}
+    downloads = products.get("downloadables") if isinstance(products.get("downloadables"), list) else []
+    human = products.get("human_facing") if isinstance(products.get("human_facing"), list) else []
+    available = len(downloads) + len(human)
+    return {
+        "id": "result",
+        "label": "Result / Downloads",
+        "kind": "summary",
+        "status": "available" if available else "not_started",
+        "summary": f"{available} user-facing outputs or files." if available else "Products and run history will appear here.",
+        "artifacts": [item.get("name") for item in human if isinstance(item, dict) and item.get("name")],
+        "actions": ["open_products", "open_runs"],
+    }
+
+
+def _graph_single_part_node(work: dict[str, Any]) -> dict[str, Any] | None:
+    summary = work.get("summary") if isinstance(work.get("summary"), dict) else {}
+    products = work.get("products") if isinstance(work.get("products"), dict) else {}
+    downloads = products.get("downloadables") if isinstance(products.get("downloadables"), list) else []
+    if not downloads and summary.get("overall_status") not in {"accepted", "completed"}:
+        return None
+    names = {item.get("name") for item in downloads if isinstance(item, dict)}
+    artifacts = [name for name in ("model.step", "model.stl", "preview.png") if name in names]
+    return {
+        "id": "single_part",
+        "label": "Single Part",
+        "kind": "part",
+        "status": summary.get("overall_status") or "completed",
+        "summary": "Single-part output is available.",
+        "artifacts": artifacts,
+        "actions": [],
+        "part_id": "single_part",
+        "role": "single_part",
+        "current_stage": "outputs",
+        "has_step": "model.step" in names,
+        "has_stl": "model.stl" in names,
+        "has_preview": "preview.png" in names,
+        "download_run_id": summary.get("latest_run_id") or summary.get("root_run_id"),
+        "next_action": "View products",
+        "review_status": summary.get("review_status") or summary.get("overall_status"),
+        "synthetic": True,
+    }
+
+
+def _graph_tooltip(node: dict[str, Any]) -> str:
+    parts = [
+        f"步骤：{node.get('label') or node.get('id')}",
+        f"状态：{node.get('status') or 'unknown'}",
+    ]
+    if node.get("role"):
+        parts.append(f"角色：{node.get('role')}")
+    inputs = _node_input_artifacts(node)
+    if inputs:
+        parts.append(f"输入：{', '.join(inputs[:5])}")
+    artifacts = node.get("artifacts") if isinstance(node.get("artifacts"), list) else []
+    if artifacts:
+        parts.append(f"输出：{', '.join(str(item) for item in artifacts[:5])}")
+    parts.append(f"启动标志：{_node_start_flag(node)}")
+    if node.get("review_status"):
+        parts.append(f"Review：{node.get('review_status')}")
+    if node.get("next_action"):
+        parts.append(f"下一步：{node.get('next_action')}")
+    if node.get("summary"):
+        parts.append(str(node.get("summary")))
+    return "\n".join(parts)
+
+
+def _dot_status(status: Any) -> str:
+    value = str(status or "unknown")
+    if value in {"accepted_for_preview", "success"}:
+        return "accepted"
+    if value in {"completed", "accepted", "available", "ready", "running", "needs_review", "partial_success", "blocked", "reference_only", "not_started", "incomplete"}:
+        return value
+    if "blocked" in value:
+        return "blocked"
+    return "unknown"
+
+
+def _selected_node(work: dict[str, Any], node_id: str | None) -> dict[str, Any] | None:
+    if not node_id:
+        return None
+    for node in work.get("nodes") or []:
+        if isinstance(node, dict) and node.get("id") == node_id:
+            return node
+    return None
+
+
+def _node_input_artifacts(node: dict[str, Any]) -> list[str]:
+    node_id = node.get("id")
+    if node_id == "planning":
+        return ["requirement.json"]
+    if node_id == "assembly_plan":
+        return ["requirement.json", "design_brief.json"]
+    if isinstance(node_id, str) and node_id.startswith("part:"):
+        return ["assembly_plan.json", "reviewed_part_handoff.json"]
+    if node_id in {"workflow_review", "stage_review", "rework_decision"}:
+        return ["run summaries", "review artifacts"]
+    return ["prompt.txt"] if node_id == "requirement" else []
+
+
+def _node_start_flag(node: dict[str, Any]) -> str:
+    status = node.get("status")
+    if status in {"completed", "accepted"}:
+        return "completed"
+    if status == "blocked":
+        return "blocked"
+    if node.get("artifacts"):
+        return "ready"
+    return "waiting_for_inputs"
+
+
+def _node_stage_for_review(node: dict[str, Any]) -> str:
+    node_id = str(node.get("id") or "")
+    if node_id == "assembly_plan":
+        return "assembly_plan"
+    if node_id == "planning":
+        return "requirement"
+    if node_id.startswith("part:"):
+        return "single_part_result"
+    if node_id in STAGE_REVIEW_STAGES:
+        return node_id
+    return "workflow_review"
 
 
 def _render_parts_matrix(ui: Any, data: dict[str, Any]) -> None:
     work = data.get("selected_work") or {}
+    graph = work.get("workflow_graph") if isinstance(work.get("workflow_graph"), dict) else {}
     parts = work.get("parts") or []
-    if not parts:
+    display_parts = parts or graph.get("part_nodes") or []
+    _label_with_help(ui, "Parts", "当前 Work 的 part 状态、预览、报告和下载。", "text-xl font-semibold")
+    _render_planning_artifact_downloads(ui, work)
+    if not display_parts:
         ui.label("No part jobs inferred for this Work.").classes("text-gray-600")
+        return
+    with ui.grid(columns=2).classes("w-full gap-4"):
+        for part in display_parts:
+            _render_part_card(ui, part)
+    _label_with_help(ui, "Parts Matrix", "紧凑扫描视图，方便比较 base/lid/screws 等状态。", "text-lg font-medium")
+    if not parts:
+        ui.label("No split parts yet; showing single-part preview above.").classes("text-sm text-gray-500")
         return
     columns = [
         {"name": key, "label": label, "field": key, "align": "left"}
@@ -570,6 +1532,70 @@ def _render_parts_matrix(ui: Any, data: dict[str, Any]) -> None:
     ]
     rows = [{**part, "step_stl": f"{'yes' if part.get('has_step') else 'no'} / {'yes' if part.get('has_stl') else 'no'}"} for part in parts]
     ui.table(columns=columns, rows=rows, row_key="part_id").classes("w-full")
+
+
+def _render_planning_artifact_downloads(ui: Any, work: dict[str, Any]) -> None:
+    products = work.get("products") if isinstance(work.get("products"), dict) else {}
+    human = products.get("human_facing") if isinstance(products.get("human_facing"), list) else []
+    planning = [
+        item.get("name")
+        for item in human
+        if isinstance(item, dict) and item.get("name") in {"assembly_plan.md", "assembly_plan.json", "workflow_review.md"}
+    ]
+    if planning:
+        with ui.row().classes("gap-2"):
+            for name in planning:
+                ui.badge(str(name))
+
+
+def _render_part_card(ui: Any, part: dict[str, Any]) -> None:
+    part_id = part.get("part_id") or part.get("label") or "part"
+    run_id = part.get("download_run_id") or part.get("latest_run_id")
+    with ui.card().classes("w-full"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label(str(part_id)).classes("text-lg font-semibold")
+            ui.badge(part.get("status") or "unknown").classes(_badge_class(part.get("status")))
+        _key_values(ui, {
+            "Role": part.get("role") or "Empty",
+            "Stage": part.get("current_stage") or "Empty",
+            "Review": part.get("review_status") or "Empty",
+            "Next": part.get("next_action") or "Empty",
+        })
+        _render_part_preview(ui, part, run_id if isinstance(run_id, str) else None)
+        _render_part_downloads(ui, part, run_id if isinstance(run_id, str) else None)
+
+
+def _render_part_preview(ui: Any, part: dict[str, Any], run_id: str | None) -> None:
+    with ui.element("div").classes("part-preview w-full"):
+        viewer_url = _part_viewer_url(part, run_id)
+        if viewer_url:
+            ui.html(f'<iframe title="STL preview" src="{viewer_url}"></iframe>')
+        elif run_id and part.get("has_preview"):
+            ui.image(f"/api/downloads/{quote(run_id, safe='')}/preview.png").classes("w-full")
+        else:
+            with ui.column().classes("w-full h-full items-center justify-center p-6"):
+                ui.icon("view_in_ar").classes("text-4xl text-gray-400")
+                ui.label("No 3D preview yet").classes("text-sm text-gray-500")
+
+
+def _render_part_downloads(ui: Any, part: dict[str, Any], run_id: str | None) -> None:
+    if not run_id:
+        ui.label("No downloadable run yet.").classes("text-sm text-gray-500")
+        return
+    with ui.row().classes("gap-2"):
+        if part.get("has_step"):
+            ui.link("STEP", f"/api/downloads/{quote(run_id, safe='')}/model.step").classes("text-sm")
+        if part.get("has_stl"):
+            ui.link("STL", f"/api/downloads/{quote(run_id, safe='')}/model.stl").classes("text-sm")
+        if part.get("has_preview"):
+            ui.link("Preview PNG", f"/api/downloads/{quote(run_id, safe='')}/preview.png").classes("text-sm")
+
+
+def _part_viewer_url(part: dict[str, Any], run_id: str | None) -> str | None:
+    if not run_id or not part.get("has_stl"):
+        return None
+    file_url = quote(f"/api/downloads/{quote(run_id, safe='')}/model.stl", safe="")
+    return f"/web-viewer/index.html?file={file_url}"
 
 
 def _work_row(work: dict[str, Any], selected: str | None) -> dict[str, Any]:
@@ -591,6 +1617,42 @@ def _work_row(work: dict[str, Any], selected: str | None) -> dict[str, Any]:
     }
 
 
+def _overview_metric(ui: Any, label: str, value: Any) -> None:
+    with ui.card().classes("w-full shadow-none border border-gray-200"):
+        ui.label(label).classes("text-xs uppercase text-gray-500")
+        ui.label(str(value or "Empty")).classes("text-base font-semibold")
+
+
+def _friendly_current_stage(work: dict[str, Any]) -> str:
+    parts = work.get("parts") if isinstance(work.get("parts"), list) else []
+    if any(isinstance(part, dict) and part.get("status") == "blocked" for part in parts):
+        return "Review needed"
+    if any(isinstance(part, dict) and part.get("status") == "accepted" for part in parts):
+        return "Part result"
+    nodes = work.get("nodes") if isinstance(work.get("nodes"), list) else []
+    for node in reversed(nodes):
+        if isinstance(node, dict) and node.get("status") in {"completed", "accepted", "available"}:
+            return str(node.get("label") or node.get("id") or "Workflow")
+    return "Requirement"
+
+
+def _sidebar_part_count_label(counts: dict[str, Any]) -> str:
+    total = int(counts.get("total") or 0)
+    accepted = int(counts.get("accepted") or 0)
+    blocked = int(counts.get("blocked") or 0)
+    reference = int(counts.get("reference_only") or 0)
+    if total <= 0:
+        return "0 parts"
+    details = []
+    if accepted:
+        details.append(f"{accepted} accepted")
+    if blocked:
+        details.append(f"{blocked} blocked")
+    if reference:
+        details.append(f"{reference} ref")
+    return f"{total} parts" + (f" ({', '.join(details)})" if details else "")
+
+
 def _badge_class(status: Any) -> str:
     if status in {"accepted", "completed"}:
         return "bg-green-600"
@@ -601,6 +1663,34 @@ def _badge_class(status: Any) -> str:
     if status in {"ready", "running"}:
         return "bg-blue-600"
     return "bg-gray-500"
+
+
+def _label_with_help(ui: Any, text: Any, help_text: str, classes: str = "") -> None:
+    with ui.row().classes("items-center gap-1"):
+        ui.label(str(text)).classes(classes)
+        _help_icon(ui, help_text)
+
+
+def _help_icon(ui: Any, help_text: str) -> None:
+    ui.label("?").classes(
+        "inline-flex items-center justify-center rounded-full border border-gray-300 "
+        "text-gray-500 text-xs w-4 h-4 cursor-help"
+    ).tooltip(help_text)
+
+
+def _nav_help(page: str) -> str:
+    return {
+        "workspace": "查看当前 workspace，创建或加载 workspace，并从 workspace 进入 Work。",
+        "works": "查看和创建当前 workspace 下的 Work/Project。",
+        "config": "配置当前 workspace 的 provider、模型、超时、重试和推进模式。",
+        "overview": "查看当前 Work 的基本状态、需求入口、root run 和 part run 创建入口。",
+        "workflow": "查看当前 Work 的阶段/part 节点、状态和文件关系。",
+        "parts": "查看当前 Work 拆分出的 part job、run、状态和产物。",
+        "review": "执行阶段 review、workflow review 和明确的 rework/打回操作。",
+        "products": "查看面向用户的产物和可下载文件。",
+        "runs": "查看当前 Work 的 run history；按需打开低层/未归类 runs。",
+        "node": "查看选中 workflow 节点的输入、输出、状态和可执行动作。",
+    }.get(page, "切换到该页面。")
 
 
 def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *, reload: bool = False) -> None:
@@ -634,16 +1724,31 @@ def _render_runs(
     runs = data.get("runs") or []
     selected = data.get("selected_run_id")
     pagination = data.get("pagination") if isinstance(data.get("pagination"), dict) else _empty_pagination(DEFAULT_RUN_PAGE_SIZE, 0)
+    _label_with_help(ui, "Runs", "当前 Work 的 immutable run history。默认只显示用户相关摘要，低层细节需要手动打开。", "text-xl font-semibold")
+    with ui.row().classes("w-full items-center gap-4"):
+        low_level = ui.checkbox("Show low-level details", value=bool(state.get("show_low_level_details")))
+        _help_icon(ui, "显示 child runs、bridge、review 等低层调试字段；默认关闭以减少干扰。")
+        unclassified = ui.checkbox("Show unclassified runs", value=bool(state.get("show_unclassified_runs")))
+        _help_icon(ui, "显示未归属到当前 Work 的 legacy/unclassified runs；它们不会被伪装成 Work。")
+        low_level.on_value_change(lambda event: _toggle_run_detail_option(state, "show_low_level_details", bool(event.value), refresh))
+        unclassified.on_value_change(lambda event: _toggle_run_detail_option(state, "show_unclassified_runs", bool(event.value), refresh))
     with ui.row().classes("w-full items-end gap-3"):
         search = ui.input("Search runs", value=state.get("search") or "").props("clearable").classes("w-72")
+        _help_icon(ui, "按 run id、stage 或摘要搜索 run history。只在打开 unclassified runs 时用于全局 run 列表。")
         page_size = ui.select(options=[25, 50, 100], value=state.get("limit", DEFAULT_RUN_PAGE_SIZE), label="Page size").classes("w-36")
-        ui.button("Apply", icon="search", on_click=lambda: _apply_run_filters(state, search.value, page_size.value, refresh)).props("outline")
-        previous_button = ui.button("Previous", icon="chevron_left", on_click=lambda: _change_run_page(state, -1, pagination, refresh)).props("outline")
-        next_button = ui.button("Next", icon="chevron_right", on_click=lambda: _change_run_page(state, 1, pagination, refresh)).props("outline")
+        _help_icon(ui, "每页显示的 run 数量。分页用于避免一次加载过多历史文件。")
+        ui.button("Apply", icon="search", on_click=lambda: _apply_run_filters(state, search.value, page_size.value, refresh)).props("outline").tooltip("应用搜索和分页设置。")
+        previous_button = ui.button("Previous", icon="chevron_left", on_click=lambda: _change_run_page(state, -1, pagination, refresh)).props("outline").tooltip("上一页 run history。")
+        next_button = ui.button("Next", icon="chevron_right", on_click=lambda: _change_run_page(state, 1, pagination, refresh)).props("outline").tooltip("下一页 run history。")
         ui.label(
             f"{pagination.get('offset', 0) + 1 if pagination.get('returned') else 0}-"
             f"{pagination.get('offset', 0) + pagination.get('returned', 0)} of {pagination.get('total', 0)}"
         ).classes("text-sm text-gray-600")
+        if not data.get("show_unclassified_runs"):
+            search.disable()
+            page_size.disable()
+            previous_button.disable()
+            next_button.disable()
         if not pagination.get("has_previous"):
             previous_button.disable()
         if not pagination.get("has_next"):
@@ -665,9 +1770,22 @@ def _render_runs(
     selected_run = data.get("selected_run") or {}
     with ui.row().classes("gap-3"):
         ui.badge(f"Selected: {selected or 'none'}")
-        ui.badge(f"Children: {len(selected_run.get('child_runs') or [])}")
-        ui.badge(f"Bridge: {_bridge_status(selected_run)}")
-        ui.badge(f"Result review: {_part_result_review_status(selected_run)}")
+        if data.get("show_low_level_details"):
+            ui.badge(f"Children: {len(selected_run.get('child_runs') or [])}")
+            ui.badge(f"Bridge: {_bridge_status(selected_run)}")
+            ui.badge(f"Result review: {_part_result_review_status(selected_run)}")
+
+
+def _toggle_run_detail_option(
+    state: dict[str, Any],
+    key: str,
+    value: bool,
+    refresh: Callable[[], None],
+) -> None:
+    state[key] = value
+    state["selected_run_id"] = None
+    state["offset"] = 0
+    refresh()
 
 
 def _apply_run_filters(state: dict[str, Any], search: str | None, limit: Any, refresh: Callable[[], None]) -> None:
@@ -703,7 +1821,7 @@ def _render_workflow_review(
     review = data.get("workflow_review") or {}
     last = state.get("workflow_review_result")
     with ui.card().classes("w-full"):
-        ui.label("Workflow Review").classes("text-xl font-semibold")
+        _label_with_help(ui, "Workflow Review", "汇总当前 run/workflow 的整体状态、风险、readiness 和下一步建议。", "text-xl font-semibold")
         if review.get("present"):
             _key_values(ui, {
                 "Overall status": review.get("overall_status") or "Empty",
@@ -718,6 +1836,7 @@ def _render_workflow_review(
         if last is not None:
             ui.markdown(f"```json\n{json.dumps(last, indent=2, sort_keys=True)}\n```").classes("w-full")
         button = ui.button("Create / Refresh Workflow Review", icon="summarize", on_click=lambda: _create_workflow_review_ui(actions, run_id, state, refresh))
+        button.tooltip("基于当前选中 run 生成或刷新 workflow review。")
         if not run_id:
             button.disable()
 
@@ -794,7 +1913,7 @@ def _render_stage_review_form(
     review_data = data.get("stage_review") or {}
     saved = review_data.get("saved") if isinstance(review_data.get("saved"), dict) else None
     with ui.card().classes("w-full"):
-        ui.label("Stage Review").classes("text-lg font-medium")
+        _label_with_help(ui, "Stage Review", "对当前阶段进行人工 review。approved 表示通过，needs_revision 会开启 rework 入口，blocked 表示阻塞。", "text-lg font-medium")
         if saved is not None:
             _key_values(ui, {
                 "Saved stage": saved.get("stage") or "Empty",
@@ -807,18 +1926,26 @@ def _render_stage_review_form(
         else:
             ui.label("No stage review saved for this run.").classes("text-sm text-gray-500")
 
-        status = ui.select(
-            options=review_data.get("review_status_options") or ["approved", "needs_revision", "blocked"],
-            value="approved",
-            label="Review status",
-        ).classes("w-full")
-        target = ui.select(
-            options=review_data.get("target_rework_stage_options") or ["requirement", "assembly_plan"],
-            value="assembly_plan" if stage == "requirement" else "requirement",
-            label="Target rework stage",
-        ).classes("w-full")
-        notes = ui.textarea("User notes").props("outlined autogrow").classes("w-full")
-        changes = ui.textarea("Requested changes").props("outlined autogrow").classes("w-full")
+        with ui.row().classes("w-full items-center gap-2"):
+            status = ui.select(
+                options=review_data.get("review_status_options") or ["approved", "needs_revision", "blocked"],
+                value="approved",
+                label="Review status",
+            ).classes("flex-1")
+            _help_icon(ui, "选择当前阶段的 review 结论。needs_revision 会要求填写打回目标和修改说明。")
+        with ui.row().classes("w-full items-center gap-2"):
+            target = ui.select(
+                options=review_data.get("target_rework_stage_options") or ["requirement", "assembly_plan"],
+                value="assembly_plan" if stage == "requirement" else "requirement",
+                label="Target rework stage",
+            ).classes("flex-1")
+            _help_icon(ui, "如果需要打回，这里选择要回到哪个阶段重新处理。")
+        with ui.row().classes("w-full items-start gap-2"):
+            notes = ui.textarea("User notes").props("outlined autogrow").classes("flex-1")
+            _help_icon(ui, "人工 review 备注，会保存在 stage review artifact 中。")
+        with ui.row().classes("w-full items-start gap-2"):
+            changes = ui.textarea("Requested changes").props("outlined autogrow").classes("flex-1")
+            _help_icon(ui, "需要 rework 时写清具体修改要求。后续 rework run 会读取这些内容。")
         result_key = f"stage_review_result_{stage}"
         if state.get(result_key) is not None:
             ui.markdown(f"```json\n{json.dumps(state[result_key], indent=2, sort_keys=True)}\n```").classes("w-full")
@@ -840,6 +1967,7 @@ def _render_stage_review_form(
         )
         if not run_id:
             button.disable()
+        button.tooltip("保存当前阶段 review。不会修改旧 run，只会写入新的 review artifact。")
 
 
 def _render_rework_panel(
@@ -854,7 +1982,7 @@ def _render_rework_panel(
     saved = review_data.get("saved") or {}
     decision = review_data.get("rework_decision")
     with ui.card().classes("w-full"):
-        ui.label("Rework Execution").classes("text-lg font-medium")
+        _label_with_help(ui, "Rework Execution", "当 stage review 为 needs_revision 时，从指定阶段创建新的 rework run。旧 run 保持 immutable。", "text-lg font-medium")
         _key_values(ui, {
             "Available": review_data.get("rework_available"),
             "Supported now": review_data.get("rework_supported"),
@@ -873,6 +2001,7 @@ def _render_rework_panel(
         if state.get("rework_result") is not None:
             ui.markdown(f"```json\n{json.dumps(state['rework_result'], indent=2, sort_keys=True)}\n```").classes("w-full")
         button = ui.button("Run Rework", icon="play_arrow", on_click=lambda: _run_rework_ui(actions, run_id, state, refresh))
+        button.tooltip("按已保存的 needs_revision review 启动 rework。不会覆盖旧 run。")
         if not run_id or saved.get("review_status") != "needs_revision":
             button.disable()
 
@@ -894,7 +2023,7 @@ def _render_part_workflow(
     for card in (data.get("part_workflow") or {}).get("actions", []):
         with ui.card().classes("w-full"):
             with ui.row().classes("w-full items-center justify-between"):
-                ui.label(card["title"]).classes("text-lg font-medium")
+                _label_with_help(ui, card["title"], "当前 part workflow 可执行动作。可用性由上游 artifact 是否存在决定。", "text-lg font-medium")
                 ui.badge(card["current_status"])
             _key_values(ui, {
                 "Required upstream artifact": card["required_upstream_artifact"],
@@ -902,6 +2031,7 @@ def _render_part_workflow(
                 "Available": card["available"],
             })
             button = ui.button(card["action_label"], on_click=lambda c=card: _run_ui_action(actions, run_id, c, state, refresh))
+            button.tooltip("执行该阶段动作并写入新的 artifact；如果缺少上游文件则按钮不可用。")
             if not card["available"]:
                 button.disable()
 
@@ -914,7 +2044,9 @@ def _render_artifacts(ui: Any, data: dict[str, Any], backend: WorkflowConsoleBac
     artifact_options = {"show_debug": False, "show_internal": False}
     with ui.row().classes("gap-4"):
         debug_toggle = ui.checkbox("Show debug artifacts", value=False)
+        _help_icon(ui, "显示调试类 artifact。默认隐藏，避免暴露不必要的低层信息。")
         internal_toggle = ui.checkbox("Show internal artifacts", value=False)
+        _help_icon(ui, "显示内部流程 artifact。默认隐藏，用户产物优先显示。")
     current_page = build_artifacts_page_data(data.get("selected_run") or {}, **artifact_options)
 
     def refresh_artifacts() -> None:
@@ -1047,6 +2179,18 @@ def _run_row(run: dict[str, Any], selected: str | None) -> dict[str, Any]:
     }
 
 
+def _run_history_row_as_run(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "run_id": row.get("run_id"),
+        "status": {"status": row.get("status")},
+        "stage": row.get("kind"),
+        "selected_part_id": None,
+        "downloadables": [],
+        "child_runs": [],
+        "reviewed_part_summary": {},
+    }
+
+
 def _artifact_names(run: dict[str, Any]) -> set[str]:
     return {
         item["name"]
@@ -1172,6 +2316,18 @@ def _drop_path_like_keys(value: Any) -> Any:
 
 def _dict_get(value: Any, key: str) -> Any:
     return value.get(key) if isinstance(value, dict) else None
+
+
+def _part_by_id(work: dict[str, Any], part_id: str) -> dict[str, Any]:
+    for part in work.get("parts") or []:
+        if isinstance(part, dict) and part.get("part_id") == part_id:
+            return part
+    graph = _dict_get(work, "workflow_graph")
+    graph_parts = graph.get("part_nodes", []) if isinstance(graph, dict) else []
+    for part in graph_parts:
+        if isinstance(part, dict) and part.get("part_id") == part_id:
+            return part
+    return {}
 
 
 def _as_list(value: Any) -> list[Any]:

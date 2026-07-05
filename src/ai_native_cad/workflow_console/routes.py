@@ -30,6 +30,41 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="Create a file-backed workflow run from a safe run id.",
     ),
     RouteSpec(
+        name="read_workspace",
+        method="GET",
+        path="/api/workspace",
+        backend_operation="read_workspace",
+        description="Read the active local workspace identity.",
+    ),
+    RouteSpec(
+        name="create_workspace",
+        method="POST",
+        path="/api/workspace",
+        backend_operation="create_workspace",
+        description="Create or initialize a local workspace, optionally outside the repository.",
+    ),
+    RouteSpec(
+        name="load_workspace",
+        method="POST",
+        path="/api/workspace/load",
+        backend_operation="load_workspace",
+        description="Load an existing initialized local workspace.",
+    ),
+    RouteSpec(
+        name="read_workspace_config",
+        method="GET",
+        path="/api/config",
+        backend_operation="read_workspace_config",
+        description="Read workspace-scoped console config without secrets.",
+    ),
+    RouteSpec(
+        name="write_workspace_config",
+        method="PUT",
+        path="/api/config",
+        backend_operation="write_workspace_config",
+        description="Persist workspace-scoped provider and workflow mode config.",
+    ),
+    RouteSpec(
         name="list_runs",
         method="GET",
         path="/api/runs",
@@ -44,11 +79,32 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="List inferred user-visible Works under configured run roots.",
     ),
     RouteSpec(
+        name="create_work",
+        method="POST",
+        path="/api/works",
+        backend_operation="create_work",
+        description="Create a real local Work entity without executing workflow stages.",
+    ),
+    RouteSpec(
         name="read_work",
         method="GET",
         path="/api/works/{work_id}",
         backend_operation="get_work_detail",
         description="Read one inferred Work detail by safe Work id.",
+    ),
+    RouteSpec(
+        name="create_work_requirement_run",
+        method="POST",
+        path="/api/works/{work_id}/requirement-run",
+        backend_operation="create_work_requirement_run",
+        description="Create a root requirement run for one Work.",
+    ),
+    RouteSpec(
+        name="create_work_part_runs",
+        method="POST",
+        path="/api/works/{work_id}/part-runs",
+        backend_operation="create_work_part_runs",
+        description="Create part run containers for one Work after split confirmation.",
     ),
     RouteSpec(
         name="read_provider_config",
@@ -275,6 +331,59 @@ def _create_run(
     )
 
 
+def _read_workspace(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.read_workspace()
+
+
+def _create_workspace(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    return backend.create_workspace(
+        body.get("path"),
+        name=body.get("name"),
+        advancement_mode=body.get("advancement_mode"),
+        include_examples=_optional_bool(body, "include_examples", False),
+    )
+
+
+def _load_workspace(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    return backend.load_workspace(_require_value(body, "path"))
+
+
+def _read_workspace_config(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.read_workspace_config()
+
+
+def _write_workspace_config(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    return backend.write_workspace_config(body, merge=True)
+
+
 def _list_runs(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -307,6 +416,24 @@ def _list_works(
     )
 
 
+def _create_work(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    metadata = body.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        raise ValueError("workflow console work metadata must be a dictionary")
+    return backend.create_work(
+        _require_value(body, "title"),
+        description=body.get("description"),
+        work_id=body.get("work_id"),
+        metadata=metadata,
+    )
+
+
 def _read_work(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -314,6 +441,29 @@ def _read_work(
     query: dict[str, Any],
 ) -> dict[str, Any]:
     return backend.get_work_detail(_require_value(path_params, "work_id"))
+
+
+def _create_work_requirement_run(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    return backend.create_work_requirement_run(
+        _require_value(path_params, "work_id"),
+        _require_value(body, "prompt"),
+        run_id=body.get("run_id"),
+    )
+
+
+def _create_work_part_runs(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.create_work_part_runs(_require_value(path_params, "work_id"))
 
 
 def _read_run_metadata(
@@ -554,9 +704,17 @@ RouteHandler = Callable[
 
 _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "create_run": _create_run,
+    "read_workspace": _read_workspace,
+    "create_workspace": _create_workspace,
+    "load_workspace": _load_workspace,
+    "read_workspace_config": _read_workspace_config,
+    "write_workspace_config": _write_workspace_config,
     "list_runs": _list_runs,
     "list_works": _list_works,
+    "create_work": _create_work,
     "read_work": _read_work,
+    "create_work_requirement_run": _create_work_requirement_run,
+    "create_work_part_runs": _create_work_part_runs,
     "read_provider_config": _read_provider_config,
     "configure_provider": _configure_provider,
     "test_provider_connection": _test_provider_connection,
@@ -582,6 +740,12 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
 def _success_status_code(route_name: str) -> int:
     if route_name in {
         "create_run",
+        "create_workspace",
+        "load_workspace",
+        "write_workspace_config",
+        "create_work",
+        "create_work_requirement_run",
+        "create_work_part_runs",
         "run_revision",
         "record_gate_decision",
         "action_part_request",
@@ -662,6 +826,9 @@ def _public_route_data(value: Any) -> Any:
     public = {}
     for key, item in value.items():
         if key in {"path", "run_dir", "root", "output_dir", "payload"}:
+            continue
+        if key == "display_path" and isinstance(item, str):
+            public[key] = item
             continue
         if key == "files" and isinstance(item, dict):
             public[key] = _public_file_refs(item)

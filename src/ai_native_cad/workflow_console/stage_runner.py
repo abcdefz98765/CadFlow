@@ -85,9 +85,11 @@ class StageRunner:
         self,
         project_root: str | Path | None = None,
         agent_adapter: AgentAdapter | None = None,
+        allowed_roots: tuple[str | Path, ...] | None = None,
     ) -> None:
         self.project_root = Path(project_root or PROJECT_ROOT).resolve()
         self.agent_adapter = agent_adapter or DeterministicAgentAdapter()
+        self.allowed_roots = tuple(Path(root).resolve() for root in (allowed_roots or ()))
 
     def create_run(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Create a local run directory with prompt.txt but do not execute stages."""
@@ -309,11 +311,14 @@ class StageRunner:
 
     def _require_project_path(self, path: Path) -> Path:
         resolved = path.resolve()
-        try:
-            resolved.relative_to(self.project_root)
-        except ValueError as exc:
-            raise ValueError(f"workflow console paths must stay inside project root: {self.project_root}") from exc
-        return resolved
+        allowed_roots = (self.project_root, *getattr(self, "allowed_roots", ()))
+        for root in allowed_roots:
+            try:
+                resolved.relative_to(root)
+                return resolved
+            except ValueError:
+                continue
+        raise ValueError(f"workflow console paths must stay inside allowed roots: {self.project_root}")
 
     def _write_stage_runtime(
         self,

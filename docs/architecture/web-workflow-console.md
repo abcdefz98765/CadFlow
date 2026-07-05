@@ -160,15 +160,23 @@ The Python facade can run supported stages from an existing run directory by rea
 
 It can also create a run without executing stages, writing only `prompt.txt` and local runtime status so a future UI can advance the workflow stage by stage.
 
-For future HTTP routes, `WorkflowConsoleBackend` also exposes run-id based operations that create or resolve runs only under configured local run roots, currently `outputs/` and `runs/`. These methods reject absolute paths, traversal segments, path separators, duplicate create targets, and unconfigured run roots so routes do not need to accept arbitrary filesystem paths.
+For future HTTP routes, `WorkflowConsoleBackend` also exposes run-id based operations that create or resolve runs only under configured local run roots: the active `<workspace>/runs/` root plus read-compatible legacy `outputs/` and `runs/` roots. These methods reject absolute paths, traversal segments, path separators, duplicate create targets, and unconfigured run roots so routes do not need to accept arbitrary filesystem paths.
 
 The route contract scaffold defines future method/path semantics without importing a web framework or starting an HTTP server. It also provides a small in-process dispatcher that accepts a route name plus path/body/query dictionaries and calls an explicit allowlist of by-id backend methods. The dispatcher removes local path fields such as `run_dir`, `root`, `path`, and `output_dir` from public route response data while preserving artifact content. Generated file references in route result metadata are reduced to filenames; downloadable lookup still goes through the whitelisted download route. Gate-decision payloads remain in `logs/runtime.json` for audit, but public metadata and route responses expose only compact payload summaries. The `run_revision` route can execute a structured CadFlow-native revision from a valid parent run into an explicit safe child run id, returning path-free metadata while the child run stores `model.step`, `model.stl`, comparison, lineage, revision report, and trace artifacts. Future FastAPI or other HTTP adapters must wrap the by-id backend methods only, such as `create_run_by_id`, `run_stage_by_id`, `run_revision_by_id`, `read_artifact_by_id`, `write_artifact_by_id`, and `record_gate_decision_by_id`; direct local `run_dir` operations remain internal Python APIs.
 
 The explicit read/action API shape is:
 
 ```text
+GET  /api/workspace
+POST /api/workspace
+POST /api/workspace/load
+GET  /api/config
+PUT  /api/config
 GET  /api/works
+POST /api/works
 GET  /api/works/{work_id}
+POST /api/works/{work_id}/requirement-run
+POST /api/works/{work_id}/part-runs
 GET  /api/runs
 GET  /api/runs/{run_id}/summary
 GET  /api/runs/{run_id}/artifacts/{artifact_name}
@@ -187,15 +195,24 @@ stdlib server also exposes the API-shaped aliases above. Each action accepts a
 safe run id and optional action-specific fields; none accept arbitrary local
 filesystem paths.
 
-The Work API is a deterministic view model over existing file artifacts, not a
-database or migration. A Work is the mutable user-visible engineering task; a
-Run is an immutable append-only execution record; a Part Job is a part-level
-task inside a Work that may have multiple attempts/runs. Work inference uses
-root-like artifacts (`assembly_plan.json`, `workflow_review.json`,
+The Work API is a file-backed Work entity plus a deterministic view model over
+existing run artifacts, not a database or migration. The active workspace may
+live outside the repository and owns `workspace.json`, workspace-scoped
+`config.json`, Work manifests, and new workspace run containers. A Work is the
+mutable user-visible engineering task; a Run is an immutable append-only
+execution record; a Part Job is a part-level task inside a Work that may have
+multiple attempts/runs. `POST /api/works` creates
+`<workspace>/works/<work_id>/work_manifest.json` with title, description,
+status, current/root run pointers, run ids, part jobs, timestamps, advancement
+mode, and metadata; it does not create a run, call a provider, or execute CAD.
+Legacy manifests under
+`outputs/_works/<work_id>/work_manifest.json` are read for compatibility.
+Existing legacy runs remain discoverable by
+inference from root-like artifacts (`assembly_plan.json`, `workflow_review.json`,
 `stage_review.json`), reviewed-part lineage and bridge artifacts, child run
 references, part result reviews, and `rework_decision.json`. Runs that cannot be
-confidently grouped are assigned to `Unclassified / Debug Runs`, hidden from the
-default Work dashboard unless explicitly enabled.
+confidently grouped remain available only from the Runs page when unclassified
+visibility is explicitly enabled; they are not mixed into the Work list.
 
 `GET /api/works` returns sanitized Work summaries: title, overall status,
 root/current run ids, part counts, review/report state, readiness/risk, next
@@ -205,7 +222,15 @@ workflow nodes, run history, products/artifacts, available safe actions, and an
 explicit history-semantics block declaring that runs are immutable and rework
 creates new runs. Public Work responses contain no absolute paths, raw provider
 payloads, secrets, environment values, runtime transcripts, or arbitrary
-filesystem browsing.
+filesystem browsing. The explicit workspace display path is the only intended
+absolute-path field in the local UI/API surface.
+
+Workspace config controls workflow advancement: `manual_confirm` pauses after
+file-backed requirement/split outputs so the user can inspect and confirm;
+`auto_advance` may create follow-on run containers when the required split
+artifacts are available. Both modes preserve append-only runs and do not imply
+automatic all-part CAD generation, batch generation, assembly generation, or a
+loop queue.
 
 `WorkflowConsoleActions` maps the reviewed-part workflow to explicit one-stage
 operations:
@@ -356,26 +381,32 @@ group:
 pip install -e ".[web]"
 ```
 
-The NiceGUI UI is intentionally Work-oriented and paged:
+The NiceGUI UI is intentionally workspace-oriented and uses a left navigation
+shell:
 
-- Works: default landing dashboard. Shows Work title, overall status, part
-  counts, readiness, risk/report/review status, last update, and next action.
-  Debug/unclassified runs are hidden by default behind an explicit toggle.
-- Workflow: ordered stage/part nodes with deterministic statuses and colored
-  badges. It separates current Work state from append-only run history.
+- Sidebar: main Workspace, Works, and Config entries; selected Work page links
+  appear below the selected Work.
+- Workspace: current workspace name, full local path, initialization state,
+  work/run counts, advancement mode, New/Load workspace dialogs, and a Work
+  list that can jump to a Work.
+- Works: current workspace Work list plus Work creation.
+- Overview: concise user-facing Work state, current stage, part overview, next
+  action, root requirement input, and split confirmation for part run
+  containers.
+- Workflow: a dot-and-arrow graph with Requirement, Planning or Split/Assembly
+  Plan, active part lanes, and Result/Downloads. Dot hover shows status,
+  inputs, outputs, start flag, review state, and next action; clicking a node
+  opens the associated review/action context.
 - Parts: first-class Parts Matrix with `part_id`, role, status, current stage,
-  attempt count, STEP/STL availability, review status, and next action.
-- Review & Rework: deterministic workflow review summary, stage review summary,
-  rework decision summary, explicit save stage review, run rework, create/refresh
-  workflow review, and existing reviewed-part staged actions. Unsupported
-  actions are disabled with a reason rather than silently hidden.
-- Products: human-facing products first, including workflow reports,
-  report summaries, STEP/STL availability, part result review, and stage review.
-  Artifacts are secondary, collapsed/on-demand, and still gated by the display
-  policy toggles.
-- Runs / Debug: compact raw run selection, paginated run loading, run-name
-  search, status, child runs, reviewed-part status, and STEP/STL availability.
-  Details are lazy-loaded only after a run is selected.
+  attempt count, STEP/STL availability, STL preview when available, review
+  status, next action, and downloads. Product downloads live here instead of in
+  a separate Products page.
+- Runs: current Work run history by default. Explicit toggles expose low-level
+  details and unclassified/global runs; details are lazy-loaded only after this
+  page is selected.
+- Config: workspace-level provider/model/timeout/retry settings and advancement
+  mode. API keys stay in environment variables and are never shown or saved by
+  the UI.
 
 The stdlib HTML console remains available as the fallback/debug view. NiceGUI is
 the preferred UI for large local output trees because it avoids loading every
@@ -386,8 +417,11 @@ The browser never becomes the source of truth. Create, stage execution, artifact
 
 The current UI supports the first usable local workflow loop:
 
-- list existing runs under `outputs/` and `runs/`;
-- create a run from a prompt without executing stages;
+- create or load an explicit workspace, including one outside the repository;
+- create Work manifests and bind root/part run containers under
+  `<workspace>/runs/`;
+- list workspace Works and current Work run history, with legacy/global runs
+  available through explicit debug toggles;
 - select a run and inspect status/current stage plus stage/gate history;
 - run Requirement, Planning, Part Modeling, Review, Outputs, or the full text pipeline by safe run id;
 - inspect readable artifacts;

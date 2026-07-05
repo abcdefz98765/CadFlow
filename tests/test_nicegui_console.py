@@ -19,6 +19,8 @@ from ai_native_cad.workflow_console.nicegui_app import (
     build_workflow_review_data,
     build_artifacts_page_data,
     read_artifact_page_content,
+    WORK_USER_PAGES,
+    _part_viewer_url,
 )
 from ai_native_cad.workflow_console.routes import dispatch_route
 
@@ -205,11 +207,24 @@ def test_nicegui_console_builds_page_data_from_fake_run_summaries(tmp_path):
     assert data["part_workflow"]["actions"][0]["available"] is True
 
 
-def test_nicegui_work_dashboard_infers_work_and_hides_debug_by_default(tmp_path):
+def test_nicegui_defaults_to_workspace_page_without_selecting_first_work(tmp_path):
     _sample_work(tmp_path)
     backend = WorkflowConsoleBackend(project_root=tmp_path)
 
     data = build_console_page_data(backend)
+
+    assert data["active_page"] == "workspace"
+    assert data["selected_work_id"] is None
+    assert data["selected_work"]["summary"] is None
+    assert data["workspace"]["display_path"] == str((tmp_path / "workspace").resolve())
+    assert data["workspace"]["work_count"] == 0
+
+
+def test_nicegui_work_dashboard_infers_work_and_hides_debug_by_default(tmp_path):
+    _sample_work(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    data = build_console_page_data(backend, selected_work_id="enclosure_work", active_page="overview")
     works = data["works"]
     detail = data["selected_work"]
 
@@ -250,7 +265,7 @@ def test_nicegui_work_detail_separates_current_state_parts_nodes_and_products(tm
     assert _does_not_contain_absolute_paths(detail, tmp_path)
 
 
-def test_nicegui_work_dashboard_can_show_debug_group_explicitly(tmp_path):
+def test_nicegui_work_dashboard_does_not_mix_debug_group_into_work_list(tmp_path):
     _sample_work(tmp_path)
     backend = WorkflowConsoleBackend(project_root=tmp_path)
 
@@ -258,7 +273,236 @@ def test_nicegui_work_dashboard_can_show_debug_group_explicitly(tmp_path):
     shown = build_console_page_data(backend, show_debug_works=True)
 
     assert "__debug_runs__" not in {work["work_id"] for work in hidden["works"]}
-    assert "__debug_runs__" in {work["work_id"] for work in shown["works"]}
+    assert "__debug_runs__" not in {work["work_id"] for work in shown["works"]}
+
+
+def test_nicegui_real_work_entity_can_be_created_without_runs_or_cad(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    response = dispatch_route(
+        backend,
+        "create_work",
+        body={"work_id": "electronics_enclosure", "title": "Electronics Enclosure", "description": "Base and lid project."},
+    )
+    data = build_console_page_data(backend, selected_work_id="electronics_enclosure")
+    manifest = json.loads((tmp_path / "workspace" / "works" / "electronics_enclosure" / "work_manifest.json").read_text(encoding="utf-8"))
+
+    assert response["ok"] is True
+    assert response["status_code"] == 201
+    assert response["data"]["work"]["work_id"] == "electronics_enclosure"
+    assert manifest["run_ids"] == []
+    assert data["selected_work"]["entity_state"]["present"] is True
+    assert data["selected_work"]["summary"]["overall_status"] == "incomplete"
+    assert data["selected_work"]["run_history"] == []
+    assert not (tmp_path / "outputs" / "electronics_enclosure").exists()
+    assert not (tmp_path / "outputs" / "_works" / "electronics_enclosure").exists()
+
+
+def test_nicegui_workspace_config_and_requirement_run_are_work_scoped(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_workspace", body={"path": "workspace", "advancement_mode": "manual_confirm"})
+    dispatch_route(backend, "write_workspace_config", body={"provider": "local", "advancement_mode": "manual_confirm"})
+    dispatch_route(backend, "create_work", body={"work_id": "fixture", "title": "Fixture"})
+    dispatch_route(
+        backend,
+        "create_work_requirement_run",
+        path_params={"work_id": "fixture"},
+        body={"prompt": "Create a fixture with two clamp blocks."},
+    )
+
+    data = build_console_page_data(backend, selected_work_id="fixture", active_page="overview")
+
+    assert data["workspace"]["relative_path"] == "workspace"
+    assert data["workspace_config"]["advancement_mode"] == "manual_confirm"
+    assert data["selected_work"]["entity_state"]["requirement"]["root_run_id"] == "fixture_root"
+    assert data["selected_work"]["entity_state"]["requirement"]["confirmation_required"] is True
+    assert {row["run_id"] for row in data["selected_work"]["run_history"]} == {"fixture_root"}
+    assert data["runs"] == []
+
+
+def test_nicegui_workspace_examples_are_visible_as_workspace_works(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    response = dispatch_route(backend, "create_workspace", body={"path": "workspace", "include_examples": True})
+
+    workspace_data = build_console_page_data(backend, active_page="workspace")
+    planning_data = build_console_page_data(
+        backend,
+        selected_work_id="multi_part_enclosure_planning",
+        active_page="parts",
+    )
+    reviewed_data = build_console_page_data(
+        backend,
+        selected_work_id="reviewed_one_part_enclosure_base",
+        active_page="products",
+    )
+
+    assert response["ok"] is True
+    assert workspace_data["workspace"]["work_count"] == 3
+    assert {work["work_id"] for work in workspace_data["works"]} == {
+        "single_part_mounting_plate",
+        "multi_part_enclosure_planning",
+        "reviewed_one_part_enclosure_base",
+    }
+    assert {part["part_id"] for part in planning_data["selected_work"]["parts"]} >= {"base", "lid", "screws"}
+    assert any(
+        item["name"] == "model.step"
+        for item in reviewed_data["selected_work"]["products"]["downloadables"]
+    )
+    assert _does_not_contain_text(reviewed_data["selected_work"], ["api_key", "secret", "bearer"])
+
+
+def test_nicegui_workflow_graph_groups_examples_by_stage_parts_and_review(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_workspace", body={"path": "workspace", "include_examples": True})
+
+    single = build_console_page_data(
+        backend,
+        selected_work_id="single_part_mounting_plate",
+        active_page="workflow",
+    )["selected_work"]["workflow_graph"]
+    planning = build_console_page_data(
+        backend,
+        selected_work_id="multi_part_enclosure_planning",
+        active_page="workflow",
+    )["selected_work"]["workflow_graph"]
+    reviewed = build_console_page_data(
+        backend,
+        selected_work_id="reviewed_one_part_enclosure_base",
+        active_page="workflow",
+    )["selected_work"]["workflow_graph"]
+    reviewed_detail = build_console_page_data(
+        backend,
+        selected_work_id="reviewed_one_part_enclosure_base",
+        active_page="parts",
+    )["selected_work"]
+
+    assert [node["id"] for node in single["stage_nodes"]] == ["requirement", "planning"]
+    assert [node["status"] for node in single["stage_nodes"]] == ["completed", "completed"]
+    assert single["layout"] == "single_part"
+    assert single["part_nodes"][0]["label"] == "Single Part"
+    assert single["part_nodes"][0]["synthetic"] is True
+    assert set(single["part_nodes"][0]["artifacts"]) == {"model.step", "model.stl"}
+    assert {node["part_id"] for node in planning["part_nodes"]} >= {"base", "lid", "screws"}
+    assert planning["layout"] == "multi_part"
+    reviewed_parts = {node["part_id"]: node for node in reviewed["part_nodes"]}
+    assert reviewed_parts["base"]["status"] == "accepted"
+    assert set(reviewed_parts) == {"base"}
+    assert [node["id"] for node in reviewed["review_nodes"]] == ["result"]
+    assert reviewed_parts["base"]["review_status"] == "accepted_for_preview"
+    assert reviewed_parts["base"]["download_run_id"] == "single_part_enclosure_base_result"
+    detail_parts = {part["part_id"]: part for part in reviewed_detail["parts"]}
+    assert detail_parts["lid"]["download_run_id"] is None
+    assert detail_parts["lid"]["has_stl"] is False
+    assert detail_parts["screws"]["download_run_id"] is None
+    assert detail_parts["screws"]["has_step"] is False
+    assert _part_viewer_url(reviewed_parts["base"], reviewed_parts["base"]["download_run_id"]) == (
+        "/web-viewer/index.html?file=%2Fapi%2Fdownloads%2Fsingle_part_enclosure_base_result%2Fmodel.stl"
+    )
+
+
+def test_nicegui_user_pages_hide_review_and_products_from_work_nav_contract():
+    user_pages = [page for page, _icon, _text in WORK_USER_PAGES]
+
+    assert "review" not in user_pages
+    assert "products" not in user_pages
+    assert user_pages == ["overview", "workflow", "parts", "runs"]
+
+
+def test_nicegui_legacy_work_manifest_under_outputs_is_still_loaded(tmp_path):
+    legacy_manifest = tmp_path / "outputs" / "_works" / "legacy_work" / "work_manifest.json"
+    _write_json(
+        legacy_manifest,
+        {
+            "schema_version": 1,
+            "work_id": "legacy_work",
+            "title": "Legacy Work",
+            "description": "Created before workspace storage.",
+            "status": "incomplete",
+            "run_ids": [],
+            "metadata": {},
+        },
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    data = build_console_page_data(backend, selected_work_id="legacy_work")
+
+    assert data["selected_work"]["entity_state"]["present"] is True
+    assert data["selected_work"]["summary"]["title"] == "Legacy Work"
+
+
+def test_nicegui_workspace_work_manifest_wins_over_legacy_manifest(tmp_path):
+    _write_json(
+        tmp_path / "workspace" / "works" / "same_work" / "work_manifest.json",
+        {
+            "schema_version": 1,
+            "work_id": "same_work",
+            "title": "Workspace Work",
+            "status": "incomplete",
+            "run_ids": [],
+            "metadata": {},
+        },
+    )
+    _write_json(
+        tmp_path / "outputs" / "_works" / "same_work" / "work_manifest.json",
+        {
+            "schema_version": 1,
+            "work_id": "same_work",
+            "title": "Legacy Work",
+            "status": "incomplete",
+            "run_ids": [],
+            "metadata": {},
+        },
+    )
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    data = build_console_page_data(backend, selected_work_id="same_work")
+
+    assert data["selected_work"]["summary"]["title"] == "Workspace Work"
+
+
+def test_nicegui_real_work_entity_rejects_unsafe_ids_and_secrets(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    bad_path = dispatch_route(backend, "create_work", body={"work_id": "../bad", "title": "Bad"})
+    secret = dispatch_route(backend, "create_work", body={"work_id": "bad_secret", "title": "api_key secret"})
+
+    assert bad_path["ok"] is False
+    assert bad_path["status_code"] == 400
+    assert secret["ok"] is False
+    assert secret["status_code"] == 400
+
+
+def test_nicegui_work_switch_does_not_load_runs_debug_page(tmp_path, monkeypatch):
+    _sample_work(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    calls = []
+
+    def fail_run_page(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        raise AssertionError("Runs / Debug should be lazy-loaded only when active.")
+
+    monkeypatch.setattr(backend, "list_runs_page", fail_run_page)
+
+    data = build_console_page_data(backend, selected_work_id="enclosure_work", active_page="overview")
+
+    assert data["selected_work_id"] == "enclosure_work"
+    assert data["runs"] == []
+    assert calls == []
+
+
+def test_nicegui_workflow_node_detail_points_to_selected_work_node(tmp_path):
+    _sample_work(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    data = build_console_page_data(
+        backend,
+        selected_work_id="enclosure_work",
+        active_page="node",
+        selected_node_id="part:lid",
+    )
+
+    assert data["selected_node"]["id"] == "part:lid"
+    assert data["selected_node"]["status"] == "blocked"
 
 
 def test_nicegui_console_uses_paginated_run_list_and_lazy_detail(tmp_path, monkeypatch):
@@ -276,7 +520,7 @@ def test_nicegui_console_uses_paginated_run_list_and_lazy_detail(tmp_path, monke
 
     monkeypatch.setattr(backend, "read_run_metadata", track_detail)
 
-    data = build_console_page_data(backend, limit=25, offset=0)
+    data = build_console_page_data(backend, active_page="runs", show_unclassified_runs=True, limit=25, offset=0)
 
     assert len(data["runs"]) == 25
     assert data["pagination"]["limit"] == 25
@@ -292,7 +536,7 @@ def test_nicegui_console_search_filters_run_names(tmp_path):
         (run_dir / "prompt.txt").write_text(f"Make {name}.\n", encoding="utf-8")
     backend = WorkflowConsoleBackend(project_root=tmp_path)
 
-    data = build_console_page_data(backend, search="alpha")
+    data = build_console_page_data(backend, active_page="runs", show_unclassified_runs=True, search="alpha")
 
     assert [run["run_id"] for run in data["runs"]] == ["alpha_console"]
     assert data["run_filters"] == {"search": "alpha"}
@@ -303,6 +547,7 @@ def test_nicegui_run_selection_data_excludes_absolute_paths(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
 
     data = build_console_page_data(backend, "nicegui_run")
+    data["workspace"]["display_path"] = "workspace"
 
     assert _does_not_contain_absolute_paths(data, tmp_path)
 

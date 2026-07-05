@@ -33,6 +33,11 @@ from ai_native_cad.workflow_control import (
 DOWNLOADABLE_FILES = ("model.step", "model.stl", "preview.png", "model.py")
 DEFAULT_RUN_LIST_LIMIT = 50
 MAX_RUN_LIST_LIMIT = 200
+WORKSPACE_MANIFEST_NAME = "workspace.json"
+WORKSPACE_CONFIG_NAME = "config.json"
+WORKSPACE_SCHEMA_VERSION = 1
+WORKSPACE_ADVANCEMENT_MODES = {"manual_confirm", "auto_advance"}
+DEFAULT_WORKSPACE_ADVANCEMENT_MODE = "manual_confirm"
 EDITABLE_ARTIFACTS = {"requirement.json", "planning_artifact.json", "input_ir.json"}
 STAGED_READABLE_ARTIFACTS = {
     "assembly_plan.json": ("01_design/assembly_plan.json",),
@@ -71,14 +76,146 @@ class WorkflowConsoleBackend:
     def __init__(
         self,
         project_root: str | Path | None = None,
+        workspace_root: str | Path | None = None,
         run_roots: tuple[str | Path, ...] | None = None,
         stage_runner: StageRunner | None = None,
         provider_adapter_factory: Any | None = None,
     ) -> None:
         self.project_root = Path(project_root or PROJECT_ROOT).resolve()
-        self.run_roots = tuple(Path(root) for root in (run_roots or ("outputs", "runs")))
+        workspace_path = Path(workspace_root or "workspace")
+        if not workspace_path.is_absolute():
+            workspace_path = self.project_root / workspace_path
+        self.workspace_root = workspace_path.resolve()
+        default_workspace_runs = self.workspace_root / "runs"
+        self.run_roots = tuple(Path(root) for root in (run_roots or (default_workspace_runs, "outputs", "runs")))
         self.stage_runner = stage_runner or StageRunner(self.project_root)
+        self.stage_runner.allowed_roots = (self.workspace_root,)
         self._provider_adapter_factory = provider_adapter_factory or make_json_contract_adapter_from_env
+        self._work_index_cache: dict[bool, dict[str, Any]] = {}
+        self._run_listing_cache: list[dict[str, Any]] | None = None
+
+    def read_workspace(self) -> dict[str, Any]:
+        """Return sanitized workspace identity and storage state."""
+        manifest_path = self._resolve_workspace_path(WORKSPACE_MANIFEST_NAME)
+        manifest = _read_json_if_present(manifest_path) or {}
+        return {
+            "schema_version": manifest.get("schema_version") if isinstance(manifest.get("schema_version"), int) else WORKSPACE_SCHEMA_VERSION,
+            "name": _safe_summary_text(manifest.get("name")) or self.workspace_root.name,
+            "display_path": str(self.workspace_root),
+            "relative_path": self._relative_project_path_or_none(self.workspace_root),
+            "is_external": not self._is_project_child(self.workspace_root),
+            "present": manifest_path.exists(),
+            "works_path": "works",
+            "runs_path": "runs",
+            "config_path": WORKSPACE_CONFIG_NAME,
+            "work_count": self._workspace_child_dir_count("works"),
+            "run_count": self._workspace_child_dir_count("runs"),
+            "advancement_mode": self.read_workspace_config()["advancement_mode"],
+        }
+
+    def create_workspace(
+        self,
+        workspace_path: str | Path | None = None,
+        *,
+        name: str | None = None,
+        advancement_mode: str | None = None,
+        include_examples: bool = False,
+    ) -> dict[str, Any]:
+        """Create or initialize a local workspace under the project root."""
+        if workspace_path is not None:
+            self._set_workspace_root(workspace_path)
+        self.workspace_root.mkdir(parents=True, exist_ok=True)
+        self._resolve_workspace_path("works").mkdir(parents=True, exist_ok=True)
+        self._resolve_workspace_path("runs").mkdir(parents=True, exist_ok=True)
+        manifest_path = self._resolve_workspace_path(WORKSPACE_MANIFEST_NAME)
+        existing = _read_json_if_present(manifest_path) or {}
+        now = _now_timestamp()
+        manifest = {
+            "schema_version": WORKSPACE_SCHEMA_VERSION,
+            "name": _safe_workspace_text(name or existing.get("name") or self.workspace_root.name, "workspace name", limit=120),
+            "created_at": existing.get("created_at") if isinstance(existing.get("created_at"), str) else now,
+            "updated_at": now,
+        }
+        _write_json(manifest_path, manifest)
+        if not self._resolve_workspace_path(WORKSPACE_CONFIG_NAME).exists() or advancement_mode is not None:
+            self.write_workspace_config({"advancement_mode": advancement_mode or DEFAULT_WORKSPACE_ADVANCEMENT_MODE}, merge=True)
+        examples = None
+        if include_examples:
+            from ai_native_cad.workflow_console.example_seed import seed_example_works
+
+            examples = seed_example_works(self)["examples"]
+        self.invalidate_work_index()
+        response = {"workspace": self.read_workspace(), "config": self.read_workspace_config()}
+        if examples is not None:
+            response["examples"] = examples
+        return response
+
+    def load_workspace(self, workspace_path: str | Path) -> dict[str, Any]:
+        """Switch the backend to an explicitly initialized local workspace root."""
+        previous_root = self.workspace_root
+        previous_run_roots = self.run_roots
+        previous_allowed_roots = getattr(self.stage_runner, "allowed_roots", ())
+        try:
+            self._set_workspace_root(workspace_path)
+            if not self.workspace_root.exists():
+                raise FileNotFoundError(f"workflow console workspace does not exist: {workspace_path}")
+            if not self._resolve_workspace_path(WORKSPACE_MANIFEST_NAME).exists():
+                raise FileNotFoundError("workflow console workspace is not initialized; create it first")
+        except Exception:
+            self.workspace_root = previous_root
+            self.run_roots = previous_run_roots
+            self.stage_runner.allowed_roots = previous_allowed_roots
+            self.invalidate_work_index()
+            raise
+        self.invalidate_work_index()
+        return {"workspace": self.read_workspace(), "config": self.read_workspace_config()}
+
+    def read_workspace_config(self) -> dict[str, Any]:
+        """Return workspace-scoped console config without secrets."""
+        config = _read_json_if_present(self._resolve_workspace_path(WORKSPACE_CONFIG_NAME)) or {}
+        provider = _safe_summary_text(config.get("provider")) or "local/mock"
+        model = _safe_summary_text(config.get("model"))
+        timeout_seconds = config.get("timeout_seconds") if isinstance(config.get("timeout_seconds"), int) else None
+        max_retries = config.get("max_retries") if isinstance(config.get("max_retries"), int) else None
+        advancement_mode = config.get("advancement_mode")
+        if advancement_mode not in WORKSPACE_ADVANCEMENT_MODES:
+            advancement_mode = DEFAULT_WORKSPACE_ADVANCEMENT_MODE
+        return {
+            "provider": provider,
+            "model": model,
+            "timeout_seconds": timeout_seconds,
+            "max_retries": max_retries,
+            "advancement_mode": advancement_mode,
+        }
+
+    def write_workspace_config(self, config: dict[str, Any], *, merge: bool = False) -> dict[str, Any]:
+        """Persist workspace-scoped provider and workflow mode config."""
+        if not isinstance(config, dict):
+            raise ValueError("workflow console workspace config must be a dictionary")
+        _reject_secret_config(config)
+        current = self.read_workspace_config() if merge else {}
+        next_config = {**current, **config}
+        provider = _safe_workspace_text(next_config.get("provider") or "local/mock", "provider", limit=80)
+        model = _safe_optional_workspace_text(next_config.get("model"), "model", limit=120)
+        timeout_seconds = _optional_positive_int(next_config.get("timeout_seconds"), "timeout_seconds")
+        max_retries = _optional_nonnegative_int(next_config.get("max_retries"), "max_retries")
+        advancement_mode = next_config.get("advancement_mode") or DEFAULT_WORKSPACE_ADVANCEMENT_MODE
+        if advancement_mode not in WORKSPACE_ADVANCEMENT_MODES:
+            raise ValueError(f"unsupported workspace advancement mode: {advancement_mode}")
+        value = {
+            "schema_version": WORKSPACE_SCHEMA_VERSION,
+            "provider": provider,
+            "model": model,
+            "timeout_seconds": timeout_seconds,
+            "max_retries": max_retries,
+            "advancement_mode": advancement_mode,
+            "updated_at": _now_timestamp(),
+        }
+        self.workspace_root.mkdir(parents=True, exist_ok=True)
+        _write_json(self._resolve_workspace_path(WORKSPACE_CONFIG_NAME), value)
+        if provider:
+            self.configure_provider(provider, model=model, timeout_seconds=timeout_seconds, max_retries=max_retries)
+        return {"config": self.read_workspace_config()}
 
     def read_provider_config(self) -> dict[str, Any]:
         """Return the active console adapter identity without secrets."""
@@ -174,21 +311,224 @@ class WorkflowConsoleBackend:
         """List inferred user-visible Works without executing providers or CAD."""
         from ai_native_cad.workflow_console.work_index import list_works
 
-        return list_works(self, limit=limit, offset=offset, filters=filters)
+        filters = filters or {}
+        show_debug = bool(filters.get("show_debug"))
+        return list_works(self, limit=limit, offset=offset, filters=filters, index=self._get_work_index(show_debug=show_debug))
+
+    def create_work(
+        self,
+        title: str,
+        description: str | None = None,
+        work_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create a real local Work entity without creating runs or CAD artifacts."""
+        from ai_native_cad.workflow_console.work_index import create_work_manifest
+
+        result = create_work_manifest(
+            self,
+            title=title,
+            description=description,
+            work_id=work_id,
+            metadata=metadata,
+        )
+        self.invalidate_work_index()
+        return result
+
+    def create_work_requirement_run(
+        self,
+        work_id: str,
+        prompt: str,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create the root requirement run for a Work under workspace/runs."""
+        self._require_safe_run_id(work_id)
+        prompt_text = _safe_prompt_text(prompt)
+        manifest = self._read_work_manifest(work_id)
+        if run_id is None:
+            run_id = self._next_workspace_run_id(f"{work_id}_root")
+        self._require_safe_run_id(run_id)
+        created = self.create_run_by_id(run_id, prompt_text, root=self._workspace_runs_root_name())
+        config = self.read_workspace_config()
+        manifest["root_run_id"] = run_id
+        manifest["current_run_id"] = run_id
+        manifest["status"] = "active"
+        manifest["advancement_mode"] = config["advancement_mode"]
+        manifest["requirement"] = {
+            "status": "needs_confirmation" if config["advancement_mode"] == "manual_confirm" else "draft",
+            "root_run_id": run_id,
+            "prompt_present": True,
+            "confirmation_required": config["advancement_mode"] == "manual_confirm",
+        }
+        manifest["run_ids"] = _append_unique_strings(manifest.get("run_ids"), [run_id])
+        manifest["updated_at"] = _now_timestamp()
+        stages = []
+        if config["advancement_mode"] == "auto_advance":
+            for stage in ("requirement", "planning"):
+                try:
+                    stage_result = self.run_stage_by_id(run_id, stage, root=self._workspace_runs_root_name())
+                except Exception as exc:
+                    stages.append({"stage": stage, "status": "blocked", "error": type(exc).__name__})
+                    break
+                stages.append({"stage": stage, "status": stage_result["result"].get("stage_status")})
+            manifest["requirement"]["status"] = "confirmed"
+            manifest["requirement"]["confirmation_required"] = False
+        self._write_work_manifest(work_id, manifest)
+        part_runs = self.create_work_part_runs(work_id, auto_only=True) if config["advancement_mode"] == "auto_advance" else {"part_jobs": manifest.get("part_jobs") or [], "created_runs": []}
+        self.invalidate_work_index()
+        return {
+            "work": self.get_work_detail(work_id),
+            "run": created["run"],
+            "stages": stages,
+            "part_runs": part_runs,
+        }
+
+    def create_work_part_runs(self, work_id: str, *, auto_only: bool = False) -> dict[str, Any]:
+        """Create file-backed part run containers for planned Work parts."""
+        self._require_safe_run_id(work_id)
+        config = self.read_workspace_config()
+        if auto_only and config["advancement_mode"] != "auto_advance":
+            return {"part_jobs": [], "created_runs": []}
+        manifest = self._read_work_manifest(work_id)
+        root_run_id = manifest.get("root_run_id")
+        if not isinstance(root_run_id, str) or not root_run_id:
+            raise ValueError("workflow console Work must have a root run before creating part runs")
+        root_run = self.read_run_metadata_by_id(root_run_id, root=self._workspace_runs_root_name())
+        planned_parts = self._planned_parts_from_run(root_run)
+        if not planned_parts:
+            raise ValueError("workflow console Work has no planned parts to create runs for")
+        existing_jobs = [
+            item for item in manifest.get("part_jobs", [])
+            if isinstance(item, dict) and isinstance(item.get("part_id"), str)
+        ]
+        existing_by_part = {item["part_id"]: item for item in existing_jobs}
+        created_runs = []
+        for part in planned_parts:
+            part_id = part["part_id"]
+            job = existing_by_part.get(part_id)
+            if job and job.get("run_id"):
+                continue
+            run_id = self._next_workspace_run_id(f"{work_id}_{part_id}")
+            prompt = f"Create part '{part_id}' for Work '{work_id}'."
+            created = self.create_run_by_id(run_id, prompt, root=self._workspace_runs_root_name())
+            created_runs.append(created["run"])
+            existing_by_part[part_id] = {
+                "part_id": part_id,
+                "role": part.get("role"),
+                "status": "incomplete",
+                "run_id": run_id,
+                "source": "assembly_plan",
+            }
+        manifest["part_jobs"] = list(existing_by_part.values())
+        manifest["run_ids"] = _append_unique_strings(
+            manifest.get("run_ids"),
+            [root_run_id, *[item["run_id"] for item in manifest["part_jobs"] if item.get("run_id")]],
+        )
+        manifest["current_run_id"] = created_runs[-1]["run_id"] if created_runs else manifest.get("current_run_id")
+        manifest["updated_at"] = _now_timestamp()
+        self._write_work_manifest(work_id, manifest)
+        self.invalidate_work_index()
+        return {"part_jobs": manifest["part_jobs"], "created_runs": created_runs}
 
     def get_work_summary(self, work_id: str) -> dict[str, Any]:
         """Return one inferred Work summary."""
-        from ai_native_cad.workflow_console.work_index import get_work_summary
+        from ai_native_cad.workflow_console.work_index import get_work_summary_from_index
 
         self._require_safe_run_id(work_id)
-        return get_work_summary(self, work_id)
+        return get_work_summary_from_index(self._get_work_index(show_debug=work_id == "__debug_runs__"), work_id)
 
     def get_work_detail(self, work_id: str) -> dict[str, Any]:
         """Return one inferred Work detail with current state and history separated."""
         from ai_native_cad.workflow_console.work_index import get_work_detail
 
         self._require_safe_run_id(work_id)
-        return get_work_detail(self, work_id)
+        return get_work_detail(self, work_id, index=self._get_work_index(show_debug=work_id == "__debug_runs__"))
+
+    def _read_work_manifest(self, work_id: str) -> dict[str, Any]:
+        self._require_safe_run_id(work_id)
+        path = self._work_manifest_path(work_id)
+        manifest = _read_json_if_present(path)
+        if manifest is None:
+            raise FileNotFoundError(f"workflow console Work does not exist: {work_id}")
+        return manifest
+
+    def _write_work_manifest(self, work_id: str, manifest: dict[str, Any]) -> None:
+        self._require_safe_run_id(work_id)
+        path = self._work_manifest_path(work_id)
+        if not path.exists():
+            raise FileNotFoundError(f"workflow console Work does not exist: {work_id}")
+        _write_json(path, manifest)
+
+    def _work_manifest_path(self, work_id: str) -> Path:
+        work_dir = self._require_child_path(self._resolve_workspace_path("works"), work_id)
+        return self._require_child_path(work_dir, "work_manifest.json")
+
+    def _workspace_runs_root_name(self) -> str:
+        return str(self._resolve_workspace_path("runs"))
+
+    def _next_workspace_run_id(self, base: str) -> str:
+        candidate_base = _safe_run_name(base) or "work_run"
+        runs_root = self._resolve_workspace_path("runs")
+        for index in range(1, 10_000):
+            candidate = candidate_base if index == 1 else f"{candidate_base}_{index}"
+            self._require_safe_run_id(candidate)
+            if not self._require_child_path(runs_root, candidate).exists():
+                return candidate
+        raise FileExistsError(f"workflow console run id space is exhausted for: {base}")
+
+    def _planned_parts_from_run(self, run: dict[str, Any]) -> list[dict[str, Any]]:
+        reviewed = run.get("reviewed_part_summary") if isinstance(run.get("reviewed_part_summary"), dict) else {}
+        assembly = reviewed.get("assembly_plan") if isinstance(reviewed.get("assembly_plan"), dict) else {}
+        parts = []
+        for item in assembly.get("parts") or []:
+            if not isinstance(item, dict):
+                continue
+            part_id = _safe_summary_text(item.get("part_id"))
+            if not part_id:
+                continue
+            if item.get("reference_only") or item.get("part_status") == "reference_only":
+                continue
+            if item.get("supported_candidate") is False and item.get("part_status") == "blocked":
+                continue
+            parts.append({"part_id": part_id, "role": _safe_summary_text(item.get("role"))})
+        return parts
+
+    def invalidate_work_index(self) -> None:
+        """Clear the short-lived in-process Work index cache."""
+        self._work_index_cache = {}
+        self.invalidate_run_listing()
+
+    def invalidate_run_listing(self) -> None:
+        """Clear the in-process run listing cache."""
+        self._run_listing_cache = None
+
+    def _get_work_index(self, *, show_debug: bool = False) -> dict[str, Any]:
+        """Build or reuse the local Work index for a UI refresh/action cycle."""
+        if show_debug not in self._work_index_cache:
+            from ai_native_cad.workflow_console.work_index import build_work_index
+
+            self._work_index_cache[show_debug] = build_work_index(self, include_debug=show_debug)
+        return self._work_index_cache[show_debug]
+
+    def _get_run_listing_candidates(self) -> list[dict[str, Any]]:
+        if self._run_listing_cache is None:
+            matched: list[dict[str, Any]] = []
+            seen: set[Path] = set()
+            for root in self._resolved_run_roots():
+                if not root.exists():
+                    continue
+                directories = [root, *sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: str(path))]
+                for child in directories:
+                    if child.name in STAGED_ARTIFACT_DIRS:
+                        continue
+                    resolved = child.resolve()
+                    if resolved in seen:
+                        continue
+                    if child.is_dir() and _has_workflow_artifact(child):
+                        seen.add(resolved)
+                        matched.append(self._run_listing_candidate(child))
+            self._run_listing_cache = matched
+        return self._run_listing_cache
 
     def list_runs_page(
         self,
@@ -200,23 +540,11 @@ class WorkflowConsoleBackend:
         limit = _normalize_limit(limit)
         offset = _normalize_offset(offset)
         filters = filters or {}
-        matched: list[dict[str, Any]] = []
-        seen: set[Path] = set()
-        for root in self._resolved_run_roots():
-            if not root.exists():
-                continue
-            directories = [root, *sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: str(path))]
-            for child in directories:
-                if child.name in STAGED_ARTIFACT_DIRS:
-                    continue
-                resolved = child.resolve()
-                if resolved in seen:
-                    continue
-                if child.is_dir() and _has_workflow_artifact(child):
-                    seen.add(resolved)
-                    item = self._run_listing_candidate(child)
-                    if _matches_run_filters(item, filters):
-                        matched.append(item)
+        matched = [
+            item
+            for item in self._get_run_listing_candidates()
+            if _matches_run_filters(item, filters)
+        ]
         sorted_candidates = sorted(matched, key=lambda item: (item.get("updated_at") or "", item["run_id"]), reverse=True)
         page_candidates = sorted_candidates[offset : offset + limit]
         runs = [self.read_run_summary(item["path"]) for item in page_candidates]
@@ -250,6 +578,7 @@ class WorkflowConsoleBackend:
                 root = self.project_root / root
             context["output_dir"] = root / _safe_run_name(run_name)
         result = self.stage_runner.run_text_pipeline(prompt, context=context)
+        self.invalidate_work_index()
         metadata = self.read_run_metadata(result["output_dir"])
         return {"result": result, "run": metadata}
 
@@ -266,6 +595,7 @@ class WorkflowConsoleBackend:
         if output_root is not None:
             context["output_root"] = output_root
         result = self.stage_runner.create_run(prompt, context=context)
+        self.invalidate_work_index()
         return {"result": result, "run": self.read_run_metadata(result["output_dir"])}
 
     def create_run_by_id(
@@ -281,6 +611,7 @@ class WorkflowConsoleBackend:
         if output_dir.exists():
             raise FileExistsError(f"workflow console run already exists: {run_id}")
         result = self.stage_runner.create_run(prompt, context={"output_dir": output_dir})
+        self.invalidate_work_index()
         return {"result": result, "run": self.read_run_metadata(result["output_dir"])}
 
     def run_stage(
@@ -293,8 +624,9 @@ class WorkflowConsoleBackend:
         """Run a supported deterministic stage for an existing local run."""
         if stage not in SUPPORTED_STAGES:
             raise ValueError(f"unsupported workflow console stage: {stage}")
-        run_path = self._require_project_path(Path(run_dir))
+        run_path = self._require_console_path(Path(run_dir))
         result = self.stage_runner.run_stage(stage, run_path, prompt=prompt, context=context)
+        self.invalidate_work_index()
         return {"result": result, "run": self.read_run_metadata(run_path)}
 
     def run_stage_by_id(
@@ -335,6 +667,7 @@ class WorkflowConsoleBackend:
             self.stage_runner.agent_adapter,
             output_dir=child_path,
         )
+        self.invalidate_work_index()
         return {"result": result, "run": self.read_run_metadata(child_path)}
 
     def _next_revision_child_run_id(self, parent_run_id: str, output_root: Path) -> str:
@@ -380,7 +713,7 @@ class WorkflowConsoleBackend:
         if payload is not None and not isinstance(payload, dict):
             raise ValueError("workflow console gate decision payload must be a dictionary")
 
-        run_path = self._require_project_path(Path(run_dir))
+        run_path = self._require_console_path(Path(run_dir))
         runtime_path = self._require_child_path(run_path, "logs/runtime.json")
         runtime_path.parent.mkdir(parents=True, exist_ok=True)
         runtime = _read_json_if_present(runtime_path) or {}
@@ -399,6 +732,7 @@ class WorkflowConsoleBackend:
         console["latest_gate_decision"] = decision
         console["gate_decision_count"] = len(decisions)
         _write_json(runtime_path, runtime)
+        self.invalidate_work_index()
         return {"decision": decision, "run": self.read_run_metadata(run_path)}
 
     def resolve_run(self, run_id: str, root: str | Path | None = None) -> Path:
@@ -411,7 +745,7 @@ class WorkflowConsoleBackend:
                 return candidate
             for nested in sorted(run_root.rglob(run_id), key=lambda path: str(path)):
                 if nested.name == run_id and nested.is_dir() and _has_workflow_artifact(nested):
-                    return self._require_project_path(nested)
+                    return self._require_console_path(nested)
         root_labels = ", ".join(str(path) for path in search_roots)
         raise FileNotFoundError(f"workflow console run not found: {run_id} under {root_labels}")
 
@@ -429,7 +763,7 @@ class WorkflowConsoleBackend:
 
     def read_run_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return cheap, path-free metadata for paginated run lists."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         stat = path.stat()
         status = self.read_run_status(path)
         selected_part_id = self._read_selected_part_id(path)
@@ -449,7 +783,7 @@ class WorkflowConsoleBackend:
 
     def read_run_metadata(self, run_dir: str | Path) -> dict[str, Any]:
         """Return artifact metadata, downloadables, and derived status for a run."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         stat = path.stat()
         return {
             "run_id": path.name,
@@ -471,19 +805,19 @@ class WorkflowConsoleBackend:
 
     def read_stage_review_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return a compact sanitized summary of the latest local stage review."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         review = _read_json_if_present(path / "stage_review.json")
         return _compact_stage_review_summary(review)
 
     def read_rework_decision_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return a compact sanitized summary of the latest explicit rework execution."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         decision = _read_json_if_present(path / "rework_decision.json")
         return _compact_rework_decision_summary(decision)
 
     def read_workflow_review_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return a compact sanitized summary of the deterministic workflow review."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         review = _read_json_if_present(path / "workflow_review.json")
         summary = compact_workflow_review_summary(review)
         summary["artifact_availability"] = {
@@ -494,7 +828,7 @@ class WorkflowConsoleBackend:
 
     def read_reviewed_part_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return compact reviewed-part workflow summaries for console inspection."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         assembly_plan = _read_first_json(path, ("assembly_plan.json", "01_design/assembly_plan.json"))
         part_request = _read_first_json(path, ("part_create_request.json", "02_part_request/part_create_request.json"))
         part_review = _read_first_json(path, ("part_request_review.json", "03_review/part_request_review.json"))
@@ -515,7 +849,7 @@ class WorkflowConsoleBackend:
 
     def list_child_runs(self, run_dir: str | Path) -> list[dict[str, Any]]:
         """List child run directories with artifact-backed output."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         children: list[dict[str, Any]] = []
         if not path.exists():
             return children
@@ -537,7 +871,7 @@ class WorkflowConsoleBackend:
 
     def count_child_runs(self, run_dir: str | Path) -> int:
         """Count artifact-backed child runs for cheap run list summaries."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         if not path.exists():
             return 0
         count = 0
@@ -548,7 +882,7 @@ class WorkflowConsoleBackend:
 
     def read_stage_history(self, run_dir: str | Path) -> list[dict[str, Any]]:
         """Return path-free workflow console stage history for a run."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         runtime = _read_json_if_present(path / "logs" / "runtime.json") or {}
         stages = ((runtime.get("workflow_console") or {}).get("stages") or [])
         history = []
@@ -567,7 +901,7 @@ class WorkflowConsoleBackend:
 
     def read_report_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return a compact report/trace summary for the local console UI."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         requirement = _read_json_if_present(path / "requirement.json")
         planning = _read_json_if_present(path / "planning_artifact.json")
         report = _read_json_if_present(path / "report.json")
@@ -606,7 +940,7 @@ class WorkflowConsoleBackend:
 
     def read_gate_history(self, run_dir: str | Path) -> list[dict[str, Any]]:
         """Return path-free workflow console gate decision history for a run."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         runtime = _read_json_if_present(path / "logs" / "runtime.json") or {}
         decisions = ((runtime.get("workflow_console") or {}).get("gate_decisions") or [])
         history = []
@@ -630,7 +964,7 @@ class WorkflowConsoleBackend:
 
     def list_artifacts(self, run_dir: str | Path) -> list[dict[str, Any]]:
         """List known readable artifacts present in a run directory."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         artifacts = []
         for name in sorted(READABLE_ARTIFACTS):
             artifact_path = _first_existing_artifact_path(path, name)
@@ -665,10 +999,11 @@ class WorkflowConsoleBackend:
             raise ValueError(f"workflow console editable artifact must be a JSON object: {artifact}")
         _validate_editable_artifact(artifact, content)
 
-        run_path = self._require_project_path(Path(run_dir))
+        run_path = self._require_console_path(Path(run_dir))
         artifact_path = self._require_child_path(run_path, artifact)
         _write_json(artifact_path, content)
         edit = self._record_artifact_edit(run_path, artifact)
+        self.invalidate_work_index()
         return {
             "artifact": self.read_artifact(run_path, artifact),
             "edit": edit,
@@ -679,7 +1014,7 @@ class WorkflowConsoleBackend:
         """Read a whitelisted artifact by relative artifact name."""
         if artifact not in READABLE_ARTIFACTS:
             raise ValueError(f"artifact is not readable by the workflow console: {artifact}")
-        run_path = self._require_project_path(Path(run_dir))
+        run_path = self._require_console_path(Path(run_dir))
         artifact_path = _first_existing_artifact_path(run_path, artifact)
         if not artifact_path.exists():
             raise FileNotFoundError(str(artifact_path))
@@ -711,7 +1046,7 @@ class WorkflowConsoleBackend:
 
     def list_downloadables(self, run_dir: str | Path) -> list[dict[str, Any]]:
         """List generated output files that can be served or downloaded."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         return [
             _file_metadata(name, path / name)
             for name in DOWNLOADABLE_FILES
@@ -720,7 +1055,7 @@ class WorkflowConsoleBackend:
 
     def read_run_status(self, run_dir: str | Path) -> dict[str, Any]:
         """Derive status from report.json and agent_trace.json when present."""
-        path = self._require_project_path(Path(run_dir))
+        path = self._require_console_path(Path(run_dir))
         requirement = _read_json_if_present(path / "requirement.json")
         planning = _read_json_if_present(path / "planning_artifact.json")
         report = _read_json_if_present(path / "report.json")
@@ -783,18 +1118,55 @@ class WorkflowConsoleBackend:
         roots = []
         for root in self.run_roots:
             path = root if root.is_absolute() else self.project_root / root
-            roots.append(self._require_project_path(path))
+            roots.append(self._require_console_path(path))
         return roots
 
     def _resolve_run_root(self, root: str | Path) -> Path:
         candidate = Path(root)
         if not candidate.is_absolute():
             candidate = self.project_root / candidate
-        resolved = self._require_project_path(candidate)
+        resolved = self._require_console_path(candidate)
         allowed_roots = self._resolved_run_roots()
         if resolved not in allowed_roots:
             raise ValueError(f"workflow console run root is not configured: {root}")
         return resolved
+
+    def _set_workspace_root(self, workspace_path: str | Path) -> None:
+        if not isinstance(workspace_path, (str, Path)):
+            raise ValueError("workflow console workspace path must be a string")
+        path = Path(workspace_path)
+        if ".." in path.parts:
+            raise ValueError("workflow console workspace path must not contain traversal")
+        if len(path.parts) == 0 or str(path) in {"", "."}:
+            raise ValueError("workflow console workspace path must be a named directory")
+        if not path.is_absolute() and any(part in {"outputs", "runs", ".git"} for part in path.parts):
+            raise ValueError("workflow console workspace path must not be outputs, runs, or .git")
+        self.workspace_root = (path if path.is_absolute() else self.project_root / path).resolve()
+        self.run_roots = (self.workspace_root / "runs", Path("outputs"), Path("runs"))
+        self.stage_runner.allowed_roots = (self.workspace_root,)
+        self.invalidate_work_index()
+
+    def _resolve_workspace_path(self, relative_path: str | Path = ".") -> Path:
+        relative = Path(relative_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"invalid workspace path: {relative_path}")
+        return self._require_child_path(self.workspace_root, str(relative))
+
+    def _relative_project_path(self, path: Path) -> str:
+        relative = path.resolve().relative_to(self.project_root)
+        return relative.as_posix()
+
+    def _relative_project_path_or_none(self, path: Path) -> str | None:
+        try:
+            return self._relative_project_path(path)
+        except ValueError:
+            return None
+
+    def _workspace_child_dir_count(self, name: str) -> int:
+        path = self._resolve_workspace_path(name)
+        if not path.exists():
+            return 0
+        return sum(1 for item in path.iterdir() if item.is_dir())
 
     def _require_safe_run_id(self, run_id: str) -> None:
         if not run_id or run_id in {".", ".."}:
@@ -812,6 +1184,23 @@ class WorkflowConsoleBackend:
         except ValueError as exc:
             raise ValueError(f"workflow console paths must stay inside project root: {self.project_root}") from exc
         return resolved
+
+    def _require_console_path(self, path: Path) -> Path:
+        resolved = path.resolve()
+        for root in (self.project_root, self.workspace_root):
+            try:
+                resolved.relative_to(root)
+                return resolved
+            except ValueError:
+                continue
+        raise ValueError("workflow console paths must stay inside project or workspace root")
+
+    def _is_project_child(self, path: Path) -> bool:
+        try:
+            path.resolve().relative_to(self.project_root)
+            return True
+        except ValueError:
+            return False
 
     def _require_child_path(self, root: Path, relative_path: str) -> Path:
         if Path(relative_path).is_absolute() or ".." in Path(relative_path).parts:
@@ -854,6 +1243,72 @@ def _normalize_offset(offset: int) -> int:
     if offset < 0:
         raise ValueError("workflow console run list offset must be at least 0")
     return offset
+
+
+def _reject_secret_config(config: dict[str, Any]) -> None:
+    blocked = {"api_key", "apikey", "token", "secret", "password", "credential", "authorization"}
+    for key, value in config.items():
+        lowered_key = str(key).lower()
+        if any(marker in lowered_key for marker in blocked):
+            raise ValueError("workflow console workspace config must not include secrets")
+        if isinstance(value, str):
+            lowered_value = value.lower()
+            if any(marker in lowered_value for marker in ("api_key", "apikey", "bearer ", "secret", "password")):
+                raise ValueError("workflow console workspace config must not include secrets")
+            if Path(value).is_absolute() or ":\\" in value or "\\\\" in value:
+                raise ValueError("workflow console workspace config must not include local paths")
+
+
+def _safe_workspace_text(value: Any, label: str, *, limit: int) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"workflow console workspace {label} must be a non-empty string")
+    text = value.strip()
+    _reject_secret_config({label: text})
+    return text[:limit]
+
+
+def _safe_prompt_text(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("workflow console Work prompt must be a non-empty string")
+    return value.strip()[:4000]
+
+
+def _safe_optional_workspace_text(value: Any, label: str, *, limit: int) -> str | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"workflow console workspace {label} must be a string")
+    text = value.strip()
+    if not text:
+        return None
+    _reject_secret_config({label: text})
+    return text[:limit]
+
+
+def _optional_positive_int(value: Any, label: str) -> int | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ValueError(f"workflow console workspace {label} must be a positive integer")
+    return value
+
+
+def _optional_nonnegative_int(value: Any, label: str) -> int | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"workflow console workspace {label} must be a non-negative integer")
+    return value
+
+
+def _append_unique_strings(existing: Any, values: list[str]) -> list[str]:
+    result = [item for item in existing or [] if isinstance(item, str) and item]
+    seen = set(result)
+    for value in values:
+        if isinstance(value, str) and value and value not in seen:
+            result.append(value)
+            seen.add(value)
+    return result
 
 
 def _matches_run_filters(item: dict[str, Any], filters: dict[str, Any]) -> bool:

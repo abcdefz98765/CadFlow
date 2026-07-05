@@ -46,6 +46,7 @@ temp/
 Thumbs.db
 
 # Project generated outputs
+workspace/
 outputs/
 runs/
 tmp_outputs/

@@ -9,6 +9,8 @@ examples/
     circular_button/
   prompt_pipeline/
     run_prompt_examples.py
+  workflow_console/
+    example_works.json
   assemblies/
     pet_button/
       parts/
@@ -67,6 +69,15 @@ report and trace for review. Each run also writes `prompt_summary.json` and
 `prompt_summary.md` for quick inspection of requirement status, CAD Brief
 targets, measured report targets, agent attempts, and file paths. Benchmarks
 remain IR-first under `benchmarks/`.
+
+## Workflow Console Workspace Examples
+
+Workflow Console examples live in `examples/workflow_console/`. They are
+path-independent static Work templates for the NiceGUI console. In the New
+Workspace dialog, enable `Include example Works` to copy the examples into the
+selected workspace. This initializes three offline Works for single-part,
+multi-part planning, and reviewed one-part workflow inspection without calling
+providers, running CAD, or generating assemblies.
 
 ## Assemblies
 

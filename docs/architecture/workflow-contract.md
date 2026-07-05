@@ -6,26 +6,71 @@ CadFlow runs produce file-based artifacts. Future interfaces, including the Web 
 
 The console distinguishes three state concepts:
 
-- Work / Project: the mutable user-visible engineering task inferred from local
-  run artifacts. It owns the current state pointer, summary, workflow nodes,
-  part matrix, products, and available actions.
+- Work / Project: the mutable user-visible engineering task, backed by an
+  optional `work_manifest.json` and enriched by local run artifacts. It owns the
+  current state pointer, summary, workflow nodes, part matrix, products, and
+  available actions.
 - Run: an immutable append-only execution record. A run represents one
   attempt, stage, action result, or rework child and must not be overwritten by
   later rework.
 - Part Job: a part-level task inside a Work. It can have multiple attempts/runs,
   result reviews, generated products, or a reference-only/skipped state.
 
-Workflow self-checks and rework create new runs/attempts and update the inferred
-Work current state. Old runs remain visible in run history. No database or
-migration is required; Work state is a deterministic local view model over the
-existing artifact contract.
+Workflow self-checks and rework create new runs/attempts and update the Work
+current state. Old runs remain visible in run history. No database or migration
+is required; Work state is a local workspace manifest plus a deterministic view
+model over the existing artifact contract.
+
+## Work Manifest Contract
+
+New Works are created under the selected workspace root, which may be outside
+the repository:
+
+```text
+<workspace>/
+  workspace.json
+  config.json
+  works/
+    <work_id>/
+      work_manifest.json
+  runs/
+    <run_id>/
+      ...
+```
+
+Legacy manifests under `outputs/_works/<work_id>/work_manifest.json` are still
+read for compatibility, but new Work/Project state belongs in the selected
+workspace root.
+
+```text
+outputs/_works/<work_id>/
+  work_manifest.json
+```
+
+`workspace.json` stores workspace identity. `config.json` stores workspace-level
+provider/model/timeout/retry settings and the advancement mode
+(`manual_confirm` or `auto_advance`); API keys remain environment-only.
+
+The Work manifest stores `schema_version`, `work_id`, `title`, `description`,
+`status`, `created_at`, `updated_at`, `current_run_id`, `root_run_id`,
+`run_ids`, `part_jobs`, `requirement`, `advancement_mode`, and `metadata`.
+Creating a manifest-only Work must not create a run, call a provider, execute
+CAD, or mutate existing run artifacts.
+
+Submitting Work requirement input creates one root run under `<workspace>/runs/`
+and binds it to the Work manifest. When split artifacts identify candidate
+parts, `manual_confirm` requires an explicit user confirmation before creating
+per-part run containers; `auto_advance` may create those run containers when
+the split is available. Creating part run containers does not run batch CAD,
+all-part generation, assembly generation, or overwrite any previous run.
 
 ## Run Output Contract
 
-Runs may live under either `runs/<run_id>/` or `outputs/<part_name>/`:
+Runs may live under `<workspace>/runs/<run_id>/`, legacy `runs/<run_id>/`, or
+legacy `outputs/<part_name>/`:
 
 ```text
-runs/<run_id>/ or outputs/<part_name>/
+<workspace>/runs/<run_id>/ or runs/<run_id>/ or outputs/<part_name>/
   prompt.txt
   requirement.json
   planning_artifact.json

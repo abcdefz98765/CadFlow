@@ -1,0 +1,517 @@
+{
+  "schema_version": 1,
+  "examples": [
+    {
+      "work_manifest": {
+        "schema_version": 1,
+        "work_id": "single_part_mounting_plate",
+        "title": "Example: Single Part Mounting Plate",
+        "description": "Static example Work showing a single-part successful workflow.",
+        "status": "active",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "current_run_id": "single_part_mounting_plate_root",
+        "root_run_id": "single_part_mounting_plate_root",
+        "run_ids": ["single_part_mounting_plate_root"],
+        "part_jobs": [],
+        "requirement": {
+          "status": "confirmed",
+          "root_run_id": "single_part_mounting_plate_root",
+          "prompt_present": true,
+          "confirmation_required": false
+        },
+        "advancement_mode": "manual_confirm",
+        "metadata": {
+          "example": true,
+          "example_kind": "single_part"
+        }
+      },
+      "runs": [
+        {
+          "run_id": "single_part_mounting_plate_root",
+          "files": [
+            {
+              "path": "prompt.txt",
+              "text": "Make an 80 x 40 x 5 mm mounting plate with four M4 clearance holes."
+            },
+            {
+              "path": "requirement.json",
+              "json": {
+                "schema_version": 1,
+                "scope": "single_part",
+                "part_type": "mounting_plate",
+                "part_family": "plate",
+                "product_family": "mounting_plate",
+                "status": "accepted",
+                "dimensions": {
+                  "length_mm": 80,
+                  "width_mm": 40,
+                  "thickness_mm": 5,
+                  "hole_count": 4
+                },
+                "flow_decision": {
+                  "action": "proceed_with_assumptions",
+                  "to_stage": "planning"
+                },
+                "diagnostic_codes": ["example.static_requirement"]
+              }
+            },
+            {
+              "path": "planning_artifact.json",
+              "json": {
+                "schema_version": 1,
+                "scope": "single_part",
+                "status": "accepted",
+                "part_type": "mounting_plate",
+                "flow_gate": {
+                  "action": "proceed_with_assumptions",
+                  "proceed_to": "part_modeling"
+                },
+                "diagnostic_codes": ["example.static_planning"]
+              }
+            },
+            {
+              "path": "report.json",
+              "json": {
+                "schema_version": 1,
+                "status": "success",
+                "success": true,
+                "warnings": [],
+                "errors": [],
+                "flow_decision": {
+                  "action": "proceed_with_assumptions",
+                  "proceed_to": "outputs"
+                }
+              }
+            },
+            {
+              "path": "report.md",
+              "text": "# Mounting Plate Report\n\nStatic example report for a successful single-part Work.\n"
+            },
+            {
+              "path": "workflow_review.json",
+              "json": {
+                "schema_version": 1,
+                "overall_status": "accepted",
+                "readiness_score": 92,
+                "risk_level": "low",
+                "summary": "Single-part static example is ready for product review.",
+                "risks": [],
+                "recommended_next_actions": ["View report and downloadable placeholders."]
+              }
+            },
+            {
+              "path": "workflow_review.md",
+              "text": "# Workflow Review\n\nSingle-part static example is ready for product review.\n"
+            },
+            {
+              "path": "model.step",
+              "text": "ISO-10303-21;\n/* Static placeholder STEP for Workflow Console example. */\nEND-ISO-10303-21;\n"
+            },
+            {
+              "path": "model.stl",
+              "text": "solid mounting_plate_example\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 80 0 0\n      vertex 0 40 0\n    endloop\n  endfacet\n  facet normal 0 0 1\n    outer loop\n      vertex 80 0 0\n      vertex 80 40 0\n      vertex 0 40 0\n    endloop\n  endfacet\n  facet normal 0 -1 0\n    outer loop\n      vertex 0 0 0\n      vertex 80 0 0\n      vertex 40 20 8\n    endloop\n  endfacet\n  facet normal 1 0 0\n    outer loop\n      vertex 80 0 0\n      vertex 80 40 0\n      vertex 40 20 8\n    endloop\n  endfacet\n  facet normal 0 1 0\n    outer loop\n      vertex 80 40 0\n      vertex 0 40 0\n      vertex 40 20 8\n    endloop\n  endfacet\n  facet normal -1 0 0\n    outer loop\n      vertex 0 40 0\n      vertex 0 0 0\n      vertex 40 20 8\n    endloop\n  endfacet\nendsolid mounting_plate_example\n"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "work_manifest": {
+        "schema_version": 1,
+        "work_id": "multi_part_enclosure_planning",
+        "title": "Example: Multi-Part Enclosure Planning",
+        "description": "Static example Work showing multi-part planning without all-part generation.",
+        "status": "active",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "current_run_id": "multi_part_enclosure_planning_root",
+        "root_run_id": "multi_part_enclosure_planning_root",
+        "run_ids": ["multi_part_enclosure_planning_root"],
+        "part_jobs": [],
+        "requirement": {
+          "status": "confirmed",
+          "root_run_id": "multi_part_enclosure_planning_root",
+          "prompt_present": true,
+          "confirmation_required": false
+        },
+        "advancement_mode": "manual_confirm",
+        "metadata": {
+          "example": true,
+          "example_kind": "multi_part_planning"
+        }
+      },
+      "runs": [
+        {
+          "run_id": "multi_part_enclosure_planning_root",
+          "files": [
+            {
+              "path": "prompt.txt",
+              "text": "Design a two-part electronics enclosure with base, lid, screws, and PCB standoffs."
+            },
+            {
+              "path": "requirement.json",
+              "json": {
+                "schema_version": 1,
+                "scope": "multi_part",
+                "product_family": "electronics_enclosure",
+                "status": "accepted",
+                "flow_decision": {
+                  "action": "proceed_with_assumptions",
+                  "to_stage": "planning"
+                },
+                "diagnostic_codes": ["example.static_requirement"]
+              }
+            },
+            {
+              "path": "01_design/assembly_plan.json",
+              "json": {
+                "schema_version": 1,
+                "scope": "multi_part_planning",
+                "status": "needs_confirmation",
+                "parts": [
+                  {
+                    "part_id": "base",
+                    "role": "housing",
+                    "generation_strategy": "reviewed_single_part_candidate",
+                    "part_status": "candidate_for_single_part_generation",
+                    "supported_candidate": true
+                  },
+                  {
+                    "part_id": "lid",
+                    "role": "cover",
+                    "generation_strategy": "reviewed_single_part_candidate",
+                    "part_status": "candidate_for_single_part_generation",
+                    "supported_candidate": true
+                  },
+                  {
+                    "part_id": "screws",
+                    "role": "fastener",
+                    "generation_strategy": "reference_only",
+                    "part_status": "reference_only",
+                    "supported_candidate": false
+                  }
+                ],
+                "interfaces": [
+                  {
+                    "from": "base",
+                    "to": "lid",
+                    "type": "mating_flange"
+                  },
+                  {
+                    "from": "base",
+                    "to": "screws",
+                    "type": "fastener_reference"
+                  }
+                ],
+                "fasteners": [{"part_id": "screws", "count": 4}],
+                "quality": {
+                  "part_status_counts": {
+                    "candidate_for_single_part_generation": 2,
+                    "reference_only": 1
+                  },
+                  "part_generation_strategy_counts": {
+                    "reviewed_single_part_candidate": 2,
+                    "reference_only": 1
+                  }
+                },
+                "diagnostic_codes": ["example.no_all_part_generation"]
+              }
+            },
+            {
+              "path": "assembly_plan.md",
+              "text": "# Assembly Plan\n\nBase and lid are candidate parts. Screws are reference-only. This example stops before all-part or assembly generation.\n"
+            },
+            {
+              "path": "workflow_review.json",
+              "json": {
+                "schema_version": 1,
+                "overall_status": "needs_review",
+                "readiness_score": 45,
+                "risk_level": "medium",
+                "summary": "Multi-part planning is available; part runs require manual confirmation.",
+                "risks": ["No all-part generation in this MVP."],
+                "recommended_next_actions": ["Confirm split and create part runs when ready."]
+              }
+            },
+            {
+              "path": "workflow_review.md",
+              "text": "# Workflow Review\n\nPlanning is ready for review. No assembly CAD has been generated.\n"
+            },
+            {
+              "path": "report.json",
+              "json": {
+                "schema_version": 1,
+                "status": "running_or_incomplete",
+                "success": false,
+                "warnings": [{"code": "example.planning_only"}],
+                "errors": []
+              }
+            },
+            {
+              "path": "report.md",
+              "text": "# Planning Report\n\nStatic planning-only example. No assembly generation was performed.\n"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "work_manifest": {
+        "schema_version": 1,
+        "work_id": "reviewed_one_part_enclosure_base",
+        "title": "Example: Reviewed One-Part Enclosure Base",
+        "description": "Static example Work showing a multi-part plan with one reviewed selected part.",
+        "status": "active",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "current_run_id": "reviewed_one_part_enclosure_base_base",
+        "root_run_id": "reviewed_one_part_enclosure_base_root",
+        "run_ids": [
+          "reviewed_one_part_enclosure_base_root",
+          "reviewed_one_part_enclosure_base_base",
+          "single_part_enclosure_base_result"
+        ],
+        "part_jobs": [
+          {
+            "part_id": "base",
+            "role": "housing",
+            "status": "accepted",
+            "run_id": "reviewed_one_part_enclosure_base_base",
+            "source": "assembly_plan"
+          },
+          {
+            "part_id": "lid",
+            "role": "cover",
+            "status": "incomplete",
+            "run_id": null,
+            "source": "assembly_plan"
+          }
+        ],
+        "requirement": {
+          "status": "confirmed",
+          "root_run_id": "reviewed_one_part_enclosure_base_root",
+          "prompt_present": true,
+          "confirmation_required": false
+        },
+        "advancement_mode": "manual_confirm",
+        "metadata": {
+          "example": true,
+          "example_kind": "reviewed_one_part"
+        }
+      },
+      "runs": [
+        {
+          "run_id": "reviewed_one_part_enclosure_base_root",
+          "files": [
+            {
+              "path": "prompt.txt",
+              "text": "Design a small electronics enclosure, then generate only the reviewed base part."
+            },
+            {
+              "path": "requirement.json",
+              "json": {
+                "schema_version": 1,
+                "scope": "multi_part",
+                "product_family": "electronics_enclosure",
+                "status": "accepted",
+                "flow_decision": {
+                  "action": "proceed_with_assumptions",
+                  "to_stage": "planning"
+                },
+                "diagnostic_codes": ["example.static_requirement"]
+              }
+            },
+            {
+              "path": "01_design/assembly_plan.json",
+              "json": {
+                "schema_version": 1,
+                "scope": "multi_part_reviewed_single_part",
+                "status": "confirmed",
+                "parts": [
+                  {
+                    "part_id": "base",
+                    "role": "housing",
+                    "generation_strategy": "reviewed_single_part_candidate",
+                    "part_status": "candidate_for_single_part_generation",
+                    "supported_candidate": true
+                  },
+                  {
+                    "part_id": "lid",
+                    "role": "cover",
+                    "generation_strategy": "reviewed_single_part_candidate",
+                    "part_status": "candidate_for_single_part_generation",
+                    "supported_candidate": true
+                  },
+                  {
+                    "part_id": "screws",
+                    "role": "fastener",
+                    "generation_strategy": "reference_only",
+                    "part_status": "reference_only",
+                    "supported_candidate": false
+                  }
+                ],
+                "interfaces": [{"from": "base", "to": "lid", "type": "mating_flange"}],
+                "quality": {
+                  "part_status_counts": {
+                    "candidate_for_single_part_generation": 2,
+                    "reference_only": 1
+                  },
+                  "part_generation_strategy_counts": {
+                    "reviewed_single_part_candidate": 2,
+                    "reference_only": 1
+                  }
+                },
+                "diagnostic_codes": ["example.one_part_only"]
+              }
+            },
+            {
+              "path": "workflow_review.json",
+              "json": {
+                "schema_version": 1,
+                "overall_status": "partial_success",
+                "readiness_score": 67,
+                "risk_level": "medium",
+                "summary": "Base part has a reviewed result; lid remains incomplete and screws are reference-only.",
+                "risks": ["Only one selected part is generated in this MVP."],
+                "recommended_next_actions": ["Review base product or create a run for another candidate part."]
+              }
+            },
+            {
+              "path": "workflow_review.md",
+              "text": "# Workflow Review\n\nBase part has a reviewed result; lid remains incomplete and screws are reference-only.\n"
+            }
+          ]
+        },
+        {
+          "run_id": "reviewed_one_part_enclosure_base_base",
+          "files": [
+            {
+              "path": "prompt.txt",
+              "text": "Create part 'base' for Work 'reviewed_one_part_enclosure_base'."
+            },
+            {
+              "path": "02_part_request/part_create_request.json",
+              "json": {
+                "schema_version": 1,
+                "part_id": "base",
+                "status": "ready",
+                "generation_strategy": "reviewed_single_part_candidate",
+                "interface_constraints": [{"type": "mating_flange", "with": "lid"}],
+                "diagnostic_codes": ["example.static_part_request"]
+              }
+            },
+            {
+              "path": "03_review/part_request_review.json",
+              "json": {
+                "schema_version": 1,
+                "status": "approved",
+                "diagnostic_codes": ["example.static_part_request_review"],
+                "checks": {
+                  "is_reference_only": false,
+                  "is_blocked": false,
+                  "has_interface_constraints": true,
+                  "has_provider_generated_code": false,
+                  "has_provider_generated_cad_ir": false,
+                  "has_arbitrary_provider_fields": false
+                }
+              }
+            },
+            {
+              "path": "04_handoff/reviewed_part_handoff.json",
+              "json": {
+                "schema_version": 1,
+                "part_id": "base",
+                "status": "ready",
+                "source_part_request": "part_create_request.json",
+                "source_review": "part_request_review.json",
+                "interface_constraints": [{"type": "mating_flange", "with": "lid"}],
+                "diagnostic_codes": ["example.static_handoff"]
+              }
+            },
+            {
+              "path": "05_single_create/lineage.json",
+              "json": {
+                "schema_version": 1,
+                "relationship": "reviewed_part_child",
+                "part_id": "base",
+                "child_run_id": "single_part_enclosure_base_result",
+                "assembly_plan_artifact": "assembly_plan.json",
+                "part_create_request_artifact": "part_create_request.json",
+                "part_request_review_artifact": "part_request_review.json",
+                "reviewed_part_handoff_artifact": "reviewed_part_handoff.json"
+              }
+            },
+            {
+              "path": "06_part_result_review/part_result_review.json",
+              "json": {
+                "schema_version": 1,
+                "status": "accepted_for_preview",
+                "part_id": "base",
+                "child_run": "single_part_enclosure_base_result",
+                "diagnostic_codes": ["example.static_result_review"],
+                "checks": {
+                  "child_run_created": true,
+                  "step_created": true,
+                  "stl_created": true,
+                  "input_ir_created": true,
+                  "report_created": true,
+                  "single_part_only": true,
+                  "no_batch_generation": true,
+                  "no_assembly_generation": true,
+                  "selected_part_id_preserved": true,
+                  "lineage_preserved": true,
+                  "interface_constraints_preserved_in_metadata": true,
+                  "child_scope": "single_part"
+                }
+              }
+            },
+            {
+              "path": "stage_review.json",
+              "json": {
+                "schema_version": 1,
+                "stage": "single_part_result",
+                "review_status": "approved",
+                "target_rework_stage": null,
+                "requested_changes": [],
+                "user_notes": "Static example review accepted for preview.",
+                "diagnostic_codes": ["example.static_stage_review"]
+              }
+            }
+          ]
+        },
+        {
+          "run_id": "single_part_enclosure_base_result",
+          "files": [
+            {
+              "path": "prompt.txt",
+              "text": "Generate the reviewed enclosure base as a single part."
+            },
+            {
+              "path": "report.json",
+              "json": {
+                "schema_version": 1,
+                "status": "success",
+                "success": true,
+                "warnings": [],
+                "errors": []
+              }
+            },
+            {
+              "path": "report.md",
+              "text": "# Enclosure Base Result\n\nStatic placeholder result for one reviewed part.\n"
+            },
+            {
+              "path": "model.step",
+              "text": "ISO-10303-21;\n/* Static placeholder STEP for reviewed one-part example. */\nEND-ISO-10303-21;\n"
+            },
+            {
+              "path": "model.stl",
+              "text": "solid enclosure_base_example\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 70 0 0\n      vertex 0 50 0\n    endloop\n  endfacet\n  facet normal 0 0 1\n    outer loop\n      vertex 70 0 0\n      vertex 70 50 0\n      vertex 0 50 0\n    endloop\n  endfacet\n  facet normal 0 -1 0\n    outer loop\n      vertex 0 0 0\n      vertex 70 0 0\n      vertex 35 25 12\n    endloop\n  endfacet\n  facet normal 1 0 0\n    outer loop\n      vertex 70 0 0\n      vertex 70 50 0\n      vertex 35 25 12\n    endloop\n  endfacet\n  facet normal 0 1 0\n    outer loop\n      vertex 70 50 0\n      vertex 0 50 0\n      vertex 35 25 12\n    endloop\n  endfacet\n  facet normal -1 0 0\n    outer loop\n      vertex 0 50 0\n      vertex 0 0 0\n      vertex 35 25 12\n    endloop\n  endfacet\nendsolid enclosure_base_example\n"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

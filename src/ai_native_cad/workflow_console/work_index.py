@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,11 @@ from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, STAGED_AR
 
 DEBUG_WORK_ID = "__debug_runs__"
 DEBUG_WORK_TITLE = "Unclassified / Debug Runs"
+WORKSPACE_WORKS_DIR_NAME = "works"
+LEGACY_WORKS_DIR_NAME = "_works"
+WORKS_DIR_NAME = LEGACY_WORKS_DIR_NAME
+WORK_MANIFEST_NAME = "work_manifest.json"
+WORK_MANIFEST_SCHEMA_VERSION = 1
 
 
 def list_works(
@@ -18,10 +24,11 @@ def list_works(
     limit: int = 50,
     offset: int = 0,
     filters: dict[str, Any] | None = None,
+    index: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return paginated inferred Works without provider or CAD execution."""
-    index = build_work_index(backend)
     show_debug = bool((filters or {}).get("show_debug"))
+    index = index or build_work_index(backend, include_debug=show_debug)
     works = [
         work["summary"]
         for work in index["works"]
@@ -50,9 +57,14 @@ def get_work_summary(backend: Any, work_id: str) -> dict[str, Any]:
     return _find_work(build_work_index(backend), work_id)["summary"]
 
 
-def get_work_detail(backend: Any, work_id: str) -> dict[str, Any]:
+def get_work_summary_from_index(index: dict[str, Any], work_id: str) -> dict[str, Any]:
+    """Return one Work summary from a prebuilt index."""
+    return _find_work(index, work_id)["summary"]
+
+
+def get_work_detail(backend: Any, work_id: str, *, index: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return detail for one inferred Work with current state separated from history."""
-    work = _find_work(build_work_index(backend), work_id)
+    work = _find_work(index or build_work_index(backend, include_debug=work_id == DEBUG_WORK_ID), work_id)
     summary = work["summary"]
     current_run_id = summary.get("latest_run_id") or summary.get("root_run_id")
     current_run = work["runs_by_id"].get(current_run_id) or {}
@@ -63,6 +75,7 @@ def get_work_detail(backend: Any, work_id: str) -> dict[str, Any]:
     return {
         "work_id": summary["work_id"],
         "summary": summary,
+        "entity_state": work.get("entity_state") or _empty_entity_state(summary["work_id"]),
         "current_state": {
             "current_run_id": current_run_id,
             "root_run_id": summary.get("root_run_id"),
@@ -85,9 +98,17 @@ def get_work_detail(backend: Any, work_id: str) -> dict[str, Any]:
     }
 
 
-def build_work_index(backend: Any) -> dict[str, Any]:
+def build_work_index(backend: Any, *, include_debug: bool = False) -> dict[str, Any]:
     """Infer Works from existing runs and lineage artifacts under configured roots."""
-    runs = _load_all_runs(backend)
+    runs = _load_work_relevant_runs(backend)
+    manifests = _load_work_manifests(backend)
+    for manifest in manifests.values():
+        for run_id in _manifest_run_ids(manifest):
+            if run_id in runs:
+                continue
+            path = _find_run_path_by_name(backend, run_id)
+            if path is not None:
+                runs[run_id] = _read_metadata(backend, path)
     root_ids = [run_id for run_id, run in runs.items() if _is_root_candidate(run)]
     member_to_root: dict[str, str] = {}
     for root_id in root_ids:
@@ -102,20 +123,109 @@ def build_work_index(backend: Any) -> dict[str, Any]:
 
     works = []
     assigned = set()
+    for work_id, manifest in sorted(manifests.items()):
+        member_ids = [
+            run_id
+            for run_id in _manifest_run_ids(manifest)
+            if run_id in runs
+        ]
+        root_run_id = manifest.get("root_run_id")
+        if isinstance(root_run_id, str) and root_run_id in runs and root_run_id not in member_ids:
+            member_ids.insert(0, root_run_id)
+        current_run_id = manifest.get("current_run_id")
+        if isinstance(current_run_id, str) and current_run_id in runs and current_run_id not in member_ids:
+            member_ids.append(current_run_id)
+        assigned.update(member_ids)
+        works.append(_build_work(work_id, member_ids, runs, debug_only=False, manifest=manifest))
+
     for root_id in sorted(root_ids):
         if root_id in member_to_root:
+            continue
+        if root_id in assigned:
+            continue
+        if root_id in manifests:
             continue
         member_ids = sorted({root_id, *[run_id for run_id, owner in member_to_root.items() if owner == root_id]})
         assigned.update(member_ids)
         works.append(_build_work(root_id, member_ids, runs, debug_only=False))
 
-    debug_ids = sorted(run_id for run_id in runs if run_id not in assigned)
-    if debug_ids:
-        works.append(_build_work(DEBUG_WORK_ID, debug_ids, runs, debug_only=True))
+    if include_debug:
+        debug_runs = _load_debug_runs(backend, assigned | set(runs))
+        debug_ids = sorted(debug_runs)
+        if debug_ids:
+            runs.update(debug_runs)
+            works.append(_build_work(DEBUG_WORK_ID, debug_ids, runs, debug_only=True))
     return {"works": works}
 
 
-def _load_all_runs(backend: Any) -> dict[str, dict[str, Any]]:
+def create_work_manifest(
+    backend: Any,
+    *,
+    title: str,
+    description: str | None = None,
+    work_id: str | None = None,
+    status: str = "incomplete",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create a file-backed Work entity without creating runs or executing CAD."""
+    title = _validate_manifest_text(title, "title", limit=120, required=True)
+    description = _validate_manifest_text(description or "", "description", limit=1000, required=False)
+    if work_id is None:
+        from ai_native_cad.workflow_console.stage_runner import _safe_run_name
+
+        work_id = _safe_run_name(title) or "work"
+    backend._require_safe_run_id(work_id)
+    if work_id in {DEBUG_WORK_ID, WORKSPACE_WORKS_DIR_NAME, LEGACY_WORKS_DIR_NAME}:
+        raise ValueError(f"workflow console work id is reserved: {work_id}")
+    if status not in {"incomplete", "active", "paused", "archived"}:
+        raise ValueError(f"unsupported workflow console work status: {status}")
+    if metadata is not None and not isinstance(metadata, dict):
+        raise ValueError("workflow console work metadata must be a dictionary")
+    safe_metadata = _safe_metadata(metadata or {})
+    works_root = _works_root(backend)
+    work_dir = backend._require_child_path(works_root, work_id)
+    manifest_path = backend._require_child_path(work_dir, WORK_MANIFEST_NAME)
+    if manifest_path.exists():
+        raise FileExistsError(f"workflow console work already exists: {work_id}")
+    work_dir.mkdir(parents=True, exist_ok=False)
+    now = _now_timestamp()
+    manifest = {
+        "schema_version": WORK_MANIFEST_SCHEMA_VERSION,
+        "work_id": work_id,
+        "title": title,
+        "description": description,
+        "status": status,
+        "created_at": now,
+        "updated_at": now,
+        "current_run_id": None,
+        "root_run_id": None,
+        "run_ids": [],
+        "part_jobs": [],
+        "requirement": {"status": "not_started", "root_run_id": None},
+        "advancement_mode": backend.read_workspace_config().get("advancement_mode", "manual_confirm"),
+        "metadata": safe_metadata,
+    }
+    manifest_path.write_text(_json_dumps(manifest), encoding="utf-8")
+    return {"work": _public_manifest(manifest)}
+
+
+def _load_work_relevant_runs(backend: Any) -> dict[str, dict[str, Any]]:
+    paths = _find_root_candidate_paths(backend)
+    runs = {path.name: _read_metadata(backend, path) for path in sorted(paths, key=lambda item: str(item))}
+
+    referenced = set()
+    for run in runs.values():
+        referenced.update(_referenced_child_run_ids(run))
+    for run_id in sorted(referenced):
+        if run_id in runs:
+            continue
+        path = _find_run_path_by_name(backend, run_id)
+        if path is not None:
+            runs[run_id] = _read_metadata(backend, path)
+    return runs
+
+
+def _load_debug_runs(backend: Any, excluded_run_ids: set[str]) -> dict[str, dict[str, Any]]:
     paths: dict[str, Path] = {}
     seen: set[Path] = set()
     for root in backend._resolved_run_roots():
@@ -123,7 +233,9 @@ def _load_all_runs(backend: Any) -> dict[str, dict[str, Any]]:
             continue
         directories = [root, *sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: str(path))]
         for path in directories:
-            if path.name in STAGED_ARTIFACT_DIRS:
+            if path.name in STAGED_ARTIFACT_DIRS or path.name in {WORKSPACE_WORKS_DIR_NAME, LEGACY_WORKS_DIR_NAME}:
+                continue
+            if _work_storage_dir_in_parts(path.relative_to(root).parts):
                 continue
             resolved = path.resolve()
             if resolved in seen:
@@ -133,28 +245,309 @@ def _load_all_runs(backend: Any) -> dict[str, dict[str, Any]]:
             seen.add(resolved)
             paths[path.name] = path
 
-    runs: dict[str, dict[str, Any]] = {}
-    root_names = {name for name, path in paths.items() if _path_is_root_candidate(path)}
-    for name in sorted(root_names):
-        runs[name] = _read_metadata(backend, paths[name])
+    return {
+        name: _cheap_debug_run(path)
+        for name, path in paths.items()
+        if name not in excluded_run_ids
+    }
 
-    referenced = set()
-    for run in runs.values():
-        referenced.update(_referenced_child_run_ids(run))
-    for name in sorted(referenced):
-        if name in paths and name not in runs:
-            runs[name] = _read_metadata(backend, paths[name])
 
-    for name, path in paths.items():
-        if name not in runs:
-            runs[name] = backend.read_run_summary(path)
-    return runs
+def _cheap_debug_run(path: Path) -> dict[str, Any]:
+    stat = path.stat()
+    return {
+        "run_id": path.name,
+        "updated_at": _timestamp(stat.st_mtime),
+        "status": {"status": "debug_only"},
+        "selected_part_id": None,
+        "workflow_review_summary": {},
+        "rework_decision_summary": {},
+        "has_step": (path / "model.step").exists(),
+        "has_stl": (path / "model.stl").exists(),
+        "child_run_count": 0,
+        "downloadables": [],
+        "artifacts": [],
+    }
+
+
+def _find_root_candidate_paths(backend: Any) -> set[Path]:
+    candidates: set[Path] = set()
+    for root in backend._resolved_run_roots():
+        if not root.exists():
+            continue
+        for artifact in (
+            "assembly_plan.json",
+            "workflow_review.json",
+            "stage_review.json",
+            "rework_decision.json",
+            "part_result_review.json",
+        ):
+            for path in root.rglob(artifact):
+                owner = _artifact_owner_dir(root, path)
+                if owner is not None and _has_artifact(owner):
+                    candidates.add(owner)
+    return candidates
+
+
+def _artifact_owner_dir(root: Path, artifact_path: Path) -> Path | None:
+    try:
+        parts = artifact_path.relative_to(root).parts
+    except ValueError:
+        return None
+    if _work_storage_dir_in_parts(parts):
+        return None
+    parent = artifact_path.parent
+    if parent.name in STAGED_ARTIFACT_DIRS:
+        parent = parent.parent
+    if parent.name in STAGED_ARTIFACT_DIRS or parent == root:
+        return None
+    return parent
+
+
+def _find_run_path_by_name(backend: Any, run_id: str) -> Path | None:
+    try:
+        backend._require_safe_run_id(run_id)
+    except ValueError:
+        return None
+    for root in backend._resolved_run_roots():
+        direct = root / run_id
+        if direct.is_dir() and _has_artifact(direct):
+            return direct
+        for path in root.rglob(run_id):
+            try:
+                parts = path.relative_to(root).parts
+            except ValueError:
+                continue
+            if _work_storage_dir_in_parts(parts):
+                continue
+            if path.name == run_id and path.is_dir() and _has_artifact(path):
+                return path
+    return None
+
+
+def _load_work_manifests(backend: Any) -> dict[str, dict[str, Any]]:
+    manifests = {}
+    for works_root in _work_manifest_roots(backend):
+        if not works_root.exists():
+            continue
+        for manifest_path in sorted(works_root.glob(f"*/{WORK_MANIFEST_NAME}"), key=lambda path: str(path)):
+            manifest = _read_json_if_present(manifest_path)
+            public = _public_manifest(manifest)
+            if public is not None and public["work_id"] not in manifests:
+                manifests[public["work_id"]] = public
+    return manifests
 
 
 def _read_metadata(backend: Any, path: Path) -> dict[str, Any]:
     metadata = backend.read_run_metadata(path)
     metadata["run_id"] = path.name
     return metadata
+
+
+def _works_root(backend: Any) -> Path:
+    return backend._resolve_workspace_path(WORKSPACE_WORKS_DIR_NAME)
+
+
+def _work_manifest_roots(backend: Any) -> list[Path]:
+    roots = [_works_root(backend)]
+    for root in backend._resolved_run_roots():
+        legacy = root / LEGACY_WORKS_DIR_NAME
+        if legacy not in roots:
+            roots.append(legacy)
+    return roots
+
+
+def _work_storage_dir_in_parts(parts: tuple[str, ...]) -> bool:
+    return WORKSPACE_WORKS_DIR_NAME in parts or LEGACY_WORKS_DIR_NAME in parts
+
+
+def _read_json_if_present(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _public_manifest(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    work_id = value.get("work_id")
+    title = value.get("title")
+    if not isinstance(work_id, str) or not work_id or not isinstance(title, str) or not title:
+        return None
+    public = {
+        "schema_version": value.get("schema_version") if isinstance(value.get("schema_version"), int) else WORK_MANIFEST_SCHEMA_VERSION,
+        "work_id": work_id,
+        "title": _validate_manifest_text(title, "title", limit=120, required=True),
+        "description": _validate_manifest_text(value.get("description") or "", "description", limit=1000, required=False),
+        "status": value.get("status") if value.get("status") in {"incomplete", "active", "paused", "archived"} else "incomplete",
+        "created_at": _safe_optional_text(value.get("created_at"), limit=80),
+        "updated_at": _safe_optional_text(value.get("updated_at"), limit=80),
+        "current_run_id": _safe_optional_text(value.get("current_run_id"), limit=120),
+        "root_run_id": _safe_optional_text(value.get("root_run_id"), limit=120),
+        "run_ids": [
+            item
+            for item in value.get("run_ids", [])
+            if isinstance(item, str) and item and "/" not in item and "\\" not in item and ":" not in item
+        ][:200],
+        "part_jobs": _safe_part_jobs(value.get("part_jobs")),
+        "requirement": _safe_requirement_state(value.get("requirement")),
+        "advancement_mode": value.get("advancement_mode") if value.get("advancement_mode") in {"manual_confirm", "auto_advance"} else "manual_confirm",
+        "metadata": _safe_metadata(value.get("metadata") if isinstance(value.get("metadata"), dict) else {}),
+    }
+    return public
+
+
+def _entity_state(work_id: str, manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if manifest is None:
+        return _empty_entity_state(work_id)
+    return {
+        "present": True,
+        "schema_version": manifest.get("schema_version"),
+        "work_id": manifest.get("work_id"),
+        "title": manifest.get("title"),
+        "description": manifest.get("description"),
+        "status": manifest.get("status"),
+        "created_at": manifest.get("created_at"),
+        "updated_at": manifest.get("updated_at"),
+        "current_run_id": manifest.get("current_run_id"),
+        "root_run_id": manifest.get("root_run_id"),
+        "run_ids": manifest.get("run_ids") or [],
+        "part_jobs": manifest.get("part_jobs") or [],
+        "requirement": manifest.get("requirement") or {},
+        "advancement_mode": manifest.get("advancement_mode") or "manual_confirm",
+        "metadata": manifest.get("metadata") or {},
+    }
+
+
+def _empty_entity_state(work_id: str) -> dict[str, Any]:
+    return {
+        "present": False,
+        "schema_version": None,
+        "work_id": work_id,
+        "title": None,
+        "description": None,
+        "status": None,
+        "created_at": None,
+        "updated_at": None,
+        "current_run_id": None,
+        "root_run_id": None,
+        "run_ids": [],
+        "part_jobs": [],
+        "requirement": {"status": "not_started", "root_run_id": None},
+        "advancement_mode": "manual_confirm",
+        "metadata": {},
+    }
+
+
+def _manifest_run_ids(manifest: dict[str, Any]) -> list[str]:
+    return [item for item in manifest.get("run_ids", []) if isinstance(item, str) and item]
+
+
+def _validate_manifest_text(value: Any, label: str, *, limit: int, required: bool) -> str:
+    if value is None:
+        if required:
+            raise ValueError(f"workflow console work {label} is required")
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"workflow console work {label} must be a string")
+    text = value.strip()
+    if required and not text:
+        raise ValueError(f"workflow console work {label} is required")
+    lowered = text.lower()
+    if any(marker in lowered for marker in ("password", "secret", "token", "api_key", "apikey", "bearer ")):
+        raise ValueError("workflow console work manifest must not include secrets")
+    if ":\\" in text or "\\\\" in text:
+        raise ValueError(f"workflow console work {label} must not include local paths")
+    return text[:limit]
+
+
+def _safe_optional_text(value: Any, *, limit: int) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    lowered = value.lower()
+    if any(marker in lowered for marker in ("password", "secret", "token", "api_key", "apikey", "bearer ")):
+        return None
+    if ":\\" in value or "\\\\" in value:
+        return None
+    return value[:limit]
+
+
+def _safe_metadata(value: dict[str, Any]) -> dict[str, Any]:
+    public = {}
+    for key, item in value.items():
+        safe_key = _safe_optional_text(key, limit=80)
+        if safe_key is None:
+            continue
+        if isinstance(item, (str, int, float, bool)) or item is None:
+            safe_value = _safe_optional_text(item, limit=240) if isinstance(item, str) else item
+            if safe_value is not None:
+                public[safe_key] = safe_value
+        if len(public) == 20:
+            break
+    return public
+
+
+def _safe_requirement_state(value: Any) -> dict[str, Any]:
+    state = value if isinstance(value, dict) else {}
+    status = state.get("status") if state.get("status") in {"not_started", "draft", "needs_confirmation", "confirmed", "blocked"} else "not_started"
+    return {
+        "status": status,
+        "root_run_id": _safe_run_ref(state.get("root_run_id")),
+        "prompt_present": bool(state.get("prompt_present")),
+        "confirmation_required": bool(state.get("confirmation_required")),
+    }
+
+
+def _safe_part_jobs(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    jobs = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        part_id = _safe_optional_text(item.get("part_id"), limit=120)
+        if not part_id:
+            continue
+        run_id = _safe_run_ref(item.get("run_id"))
+        jobs.append({
+            "part_id": part_id,
+            "role": _safe_optional_text(item.get("role"), limit=160),
+            "status": _safe_optional_text(item.get("status"), limit=80) or "planned",
+            "run_id": run_id,
+            "source": _safe_optional_text(item.get("source"), limit=80) or "manifest",
+        })
+        if len(jobs) == 200:
+            break
+    return jobs
+
+
+def _safe_run_ref(value: Any) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    if "/" in value or "\\" in value or ":" in value or value in {".", ".."}:
+        return None
+    return value[:120]
+
+
+def _json_dumps(value: dict[str, Any]) -> str:
+    return json.dumps(value, indent=2, sort_keys=True) + "\n"
+
+
+def _now_timestamp() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _timestamp(seconds: float) -> str:
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
 
 
 def _has_artifact(path: Path) -> bool:
@@ -184,28 +577,48 @@ def _is_root_candidate(run: dict[str, Any]) -> bool:
     )
 
 
-def _build_work(root_id: str, member_ids: list[str], runs: dict[str, dict[str, Any]], *, debug_only: bool) -> dict[str, Any]:
+def _build_work(
+    root_id: str,
+    member_ids: list[str],
+    runs: dict[str, dict[str, Any]],
+    *,
+    debug_only: bool,
+    manifest: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     runs_by_id = {run_id: runs[run_id] for run_id in member_ids if run_id in runs}
-    latest_run_id = _latest_work_state_run_id(root_id, runs_by_id) or (member_ids[0] if member_ids else root_id)
-    root_run = runs_by_id.get(root_id) or runs_by_id.get(latest_run_id) or {}
-    parts = _build_parts({"summary": {"root_run_id": root_id}, "runs_by_id": runs_by_id})
+    latest_run_id = (
+        manifest.get("current_run_id")
+        if manifest and isinstance(manifest.get("current_run_id"), str) and manifest.get("current_run_id") in runs_by_id
+        else _latest_work_state_run_id(root_id, runs_by_id)
+    ) or (member_ids[0] if member_ids else None)
+    root_run_id = (
+        manifest.get("root_run_id")
+        if manifest and isinstance(manifest.get("root_run_id"), str) and manifest.get("root_run_id") in runs_by_id
+        else (None if debug_only else (root_id if root_id in runs_by_id else latest_run_id))
+    )
+    root_run = runs_by_id.get(root_run_id) or runs_by_id.get(root_id) or runs_by_id.get(latest_run_id) or {}
+    parts = _build_parts({"summary": {"root_run_id": root_run_id or root_id}, "runs_by_id": runs_by_id})
     part_counts = _part_counts(parts)
+    title = DEBUG_WORK_TITLE if debug_only else ((manifest or {}).get("title") or _work_title(root_run, root_id))
+    status = (manifest or {}).get("status") or "incomplete"
     summary = {
         "work_id": root_id,
-        "title": DEBUG_WORK_TITLE if debug_only else _work_title(root_run, root_id),
+        "title": title,
         "overall_status": "debug_only" if debug_only else _overall_status(part_counts, root_run),
-        "root_run_id": None if debug_only else root_id,
+        "root_run_id": root_run_id,
         "latest_run_id": latest_run_id,
+        "entity_status": status,
+        "has_manifest": manifest is not None,
         "part_counts": part_counts,
         "review_status": _review_status(root_run, parts),
         "report_status": _report_status(root_run),
         "readiness_score": _readiness_score(root_run, part_counts),
         "risk_level": _risk_level(root_run, part_counts),
         "next_action": _next_action(part_counts, root_run),
-        "updated_at": max((run.get("updated_at") or "" for run in runs_by_id.values()), default=None),
+        "updated_at": max([str((manifest or {}).get("updated_at") or ""), *[run.get("updated_at") or "" for run in runs_by_id.values()]], default=None),
         "diagnostic_codes": _diagnostic_codes(root_run, parts),
     }
-    return {"summary": summary, "runs_by_id": runs_by_id}
+    return {"summary": summary, "runs_by_id": runs_by_id, "entity_state": _entity_state(root_id, manifest)}
 
 
 def _build_parts(work: dict[str, Any]) -> list[dict[str, Any]]:
@@ -223,11 +636,35 @@ def _build_parts(work: dict[str, Any]) -> list[dict[str, Any]]:
             "status": status,
             "current_stage": _part_stage(status, review),
             "latest_run_id": latest_run_id,
+            "download_run_id": _part_download_run_id(part_id, work["runs_by_id"]),
             "attempt_count": _part_attempt_count(part_id, work["runs_by_id"]),
             "has_step": _part_has_download(part_id, work["runs_by_id"], "model.step"),
             "has_stl": _part_has_download(part_id, work["runs_by_id"], "model.stl"),
+            "has_preview": _part_has_download(part_id, work["runs_by_id"], "preview.png"),
             "review_status": _dict(review).get("status") or part.get("part_status"),
             "next_action": _part_next_action(status),
+        })
+    manifest_jobs = _dict(work.get("entity_state")).get("part_jobs") or []
+    existing_ids = {row.get("part_id") for row in rows}
+    for job in manifest_jobs:
+        if not isinstance(job, dict) or job.get("part_id") in existing_ids:
+            continue
+        run_id = job.get("run_id")
+        run = work["runs_by_id"].get(run_id) if isinstance(run_id, str) else None
+        status = job.get("status") or ("incomplete" if run_id else "planned")
+        rows.append({
+            "part_id": job.get("part_id"),
+            "role": job.get("role"),
+            "status": status,
+            "current_stage": "part_run" if run_id else "planned",
+            "latest_run_id": run_id,
+            "download_run_id": _part_download_run_id(job.get("part_id"), work["runs_by_id"]),
+            "attempt_count": 1 if run_id else 0,
+            "has_step": bool(run and _has_download(run, "model.step")),
+            "has_stl": bool(run and _has_download(run, "model.stl")),
+            "has_preview": bool(run and _has_download(run, "preview.png")),
+            "review_status": None,
+            "next_action": "Open part run" if run_id else "Create part run",
         })
     if rows:
         return rows
@@ -240,9 +677,11 @@ def _build_parts(work: dict[str, Any]) -> list[dict[str, Any]]:
                 "status": "accepted" if run.get("has_step") or _has_download(run, "model.step") else "incomplete",
                 "current_stage": "single_part_generation",
                 "latest_run_id": run_id,
+                "download_run_id": run_id if any(_has_download(run, name) for name in DOWNLOADABLE_FILES) else None,
                 "attempt_count": 1,
                 "has_step": bool(run.get("has_step")) or _has_download(run, "model.step"),
                 "has_stl": bool(run.get("has_stl")) or _has_download(run, "model.stl"),
+                "has_preview": _has_download(run, "preview.png"),
                 "review_status": _dict(_dict(run.get("reviewed_part_summary")).get("part_result_review")).get("status"),
                 "next_action": "View products",
             })
@@ -253,6 +692,13 @@ def _build_nodes(work: dict[str, Any], parts: list[dict[str, Any]]) -> list[dict
     root_id = work["summary"].get("root_run_id")
     root = work["runs_by_id"].get(root_id) or _latest_run(work["runs_by_id"]) or {}
     artifacts = _artifact_names(root)
+    assembly_parts = _assembly_parts(root)
+    has_assembly_plan = "assembly_plan.json" in artifacts
+    plan_node_id = "assembly_plan" if has_assembly_plan or assembly_parts else "planning"
+    plan_label = "Split / Assembly Plan" if plan_node_id == "assembly_plan" else "Planning"
+    plan_artifacts = [name for name in ("assembly_plan.json", "planning_artifact.json") if name in artifacts]
+    plan_status = "completed" if plan_artifacts or assembly_parts else "not_started"
+    plan_summary = f"{len(assembly_parts)} parts detected." if plan_node_id == "assembly_plan" else "Single-part planning artifact is present."
     nodes = [
         {
             "id": "requirement",
@@ -264,13 +710,13 @@ def _build_nodes(work: dict[str, Any], parts: list[dict[str, Any]]) -> list[dict
             "actions": ["stage_review"],
         },
         {
-            "id": "assembly_plan",
-            "label": "Assembly Plan",
+            "id": plan_node_id,
+            "label": plan_label,
             "kind": "stage",
-            "status": "completed" if _assembly_parts(root) else "not_started",
-            "summary": f"{len(_assembly_parts(root))} parts detected.",
-            "artifacts": ["assembly_plan.json"] if "assembly_plan.json" in artifacts else [],
-            "actions": ["stage_review"] if "assembly_plan.json" in artifacts else [],
+            "status": plan_status,
+            "summary": plan_summary if plan_status == "completed" else "Planning has not started.",
+            "artifacts": plan_artifacts,
+            "actions": ["stage_review"] if plan_artifacts else [],
         },
     ]
     for part in parts:
@@ -402,17 +848,55 @@ def _part_review_for(part_id: Any, runs: dict[str, dict[str, Any]]) -> dict[str,
 
 
 def _part_has_download(part_id: Any, runs: dict[str, dict[str, Any]], name: str) -> bool:
-    for run in runs.values():
+    for run_id, run in runs.items():
         review = _dict(_dict(run.get("reviewed_part_summary")).get("part_result_review"))
         selected = run.get("selected_part_id") or review.get("part_id")
         if part_id is not None and selected not in {part_id, None}:
             continue
+        if part_id is not None and selected is None and not _run_id_matches_part(run_id, part_id):
+            continue
         if _has_download(run, name):
             return True
         for child in run.get("child_runs", []):
-            if isinstance(child, dict) and name in (child.get("downloadables") or []):
+            if isinstance(child, dict) and _child_matches_part(child, part_id) and name in (child.get("downloadables") or []):
                 return True
     return False
+
+
+def _part_download_run_id(part_id: Any, runs: dict[str, dict[str, Any]]) -> str | None:
+    for name in ("model.stl", "model.step", "preview.png"):
+        for run_id, run in runs.items():
+            review = _dict(_dict(run.get("reviewed_part_summary")).get("part_result_review"))
+            selected = run.get("selected_part_id") or review.get("part_id")
+            if part_id is not None and selected not in {part_id, None}:
+                continue
+            if part_id is not None and selected is None and not _run_id_matches_part(run_id, part_id):
+                continue
+            if _has_download(run, name):
+                return run_id
+            for child in run.get("child_runs", []):
+                if isinstance(child, dict) and _child_matches_part(child, part_id) and name in (child.get("downloadables") or []):
+                    child_id = child.get("run_id")
+                    return child_id if isinstance(child_id, str) and child_id else None
+    return None
+
+
+def _child_matches_part(child: dict[str, Any], part_id: Any) -> bool:
+    if part_id is None:
+        return True
+    child_part = child.get("part_id") or child.get("selected_part_id")
+    if child_part is not None:
+        return child_part == part_id
+    child_id = child.get("run_id")
+    return _run_id_matches_part(child_id, part_id)
+
+
+def _run_id_matches_part(run_id: Any, part_id: Any) -> bool:
+    if not isinstance(run_id, str):
+        return False
+    normalized = str(part_id).lower().replace("-", "_")
+    tokens = {token for token in run_id.lower().replace("-", "_").split("_") if token}
+    return normalized in tokens
 
 
 def _has_download(run: dict[str, Any], name: str) -> bool:

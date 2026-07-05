@@ -105,15 +105,23 @@ def test_stage_runner_runs_requirement_and_planning_to_artifacts(tmp_path):
 def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
     expected_operations = {
         "configure_provider",
+        "create_workspace",
+        "load_workspace",
+        "create_work",
+        "create_work_requirement_run",
+        "create_work_part_runs",
         "create_run_by_id",
         "get_work_detail",
         "list_works",
         "list_runs",
         "read_provider_config",
+        "read_workspace",
+        "read_workspace_config",
         "read_run_metadata_by_id",
         "run_stage_by_id",
         "run_revision_by_id",
         "test_provider_connection",
+        "write_workspace_config",
         "list_artifacts_by_id",
         "read_artifact_by_id",
         "write_artifact_by_id",
@@ -135,7 +143,15 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         or spec.backend_operation in {
             "list_runs",
             "list_works",
+            "read_workspace",
+            "create_workspace",
+            "load_workspace",
+            "create_work",
+            "create_work_requirement_run",
+            "create_work_part_runs",
             "get_work_detail",
+            "read_workspace_config",
+            "write_workspace_config",
             "read_provider_config",
             "configure_provider",
             "test_provider_connection",
@@ -151,6 +167,179 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         for spec in ROUTE_SPECS
     )
     assert "run_dir" not in {spec.backend_operation for spec in ROUTE_SPECS}
+
+
+def test_workspace_create_and_config_are_file_backed_without_secrets(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    workspace = dispatch_route(
+        backend,
+        "create_workspace",
+        body={"path": "workspace_demo", "name": "Demo Workspace", "advancement_mode": "manual_confirm"},
+    )
+    config = dispatch_route(
+        backend,
+        "write_workspace_config",
+        body={"provider": "local", "model": "mock-model", "timeout_seconds": 30, "max_retries": 2, "advancement_mode": "auto_advance"},
+    )
+    secret = dispatch_route(backend, "write_workspace_config", body={"provider": "local", "api_key": "secret"})
+
+    assert workspace["ok"] is True
+    assert workspace["data"]["workspace"]["relative_path"] == "workspace_demo"
+    assert (tmp_path / "workspace_demo" / "workspace.json").exists()
+    assert (tmp_path / "workspace_demo" / "config.json").exists()
+    assert config["ok"] is True
+    assert config["data"]["config"]["advancement_mode"] == "auto_advance"
+    assert secret["ok"] is False
+    assert workspace["data"]["workspace"]["display_path"] == str((tmp_path / "workspace_demo").resolve())
+    assert _does_not_contain_text(config["data"], ["api_key", "secret"])
+
+
+def test_workspace_can_be_external_and_load_requires_initialized_marker(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path / "repo")
+    external = tmp_path / "external_workspace"
+    uninitialized = tmp_path / "plain_directory"
+    uninitialized.mkdir()
+
+    created = dispatch_route(
+        backend,
+        "create_workspace",
+        body={"path": str(external), "name": "External Workspace"},
+    )
+    loaded = dispatch_route(backend, "load_workspace", body={"path": str(external)})
+    plain = dispatch_route(backend, "load_workspace", body={"path": str(uninitialized)})
+
+    assert created["ok"] is True
+    assert created["data"]["workspace"]["is_external"] is True
+    assert created["data"]["workspace"]["display_path"] == str(external.resolve())
+    assert (external / "workspace.json").exists()
+    assert loaded["ok"] is True
+    assert plain["ok"] is False
+    assert plain["status_code"] == 404
+    assert backend.read_workspace()["display_path"] == str(external.resolve())
+
+
+def test_workspace_can_seed_static_example_works_under_external_root(tmp_path, monkeypatch):
+    backend = WorkflowConsoleBackend(project_root=tmp_path / "repo")
+    external = tmp_path / "example_workspace"
+    monkeypatch.setattr(backend.stage_runner, "create_run", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("examples must not create runs")))
+    monkeypatch.setattr(backend.stage_runner, "run_stage", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("examples must not run stages")))
+
+    created = dispatch_route(
+        backend,
+        "create_workspace",
+        body={"path": str(external), "name": "Example Workspace", "include_examples": True},
+    )
+    works = dispatch_route(backend, "list_works")
+    detail = dispatch_route(backend, "read_work", path_params={"work_id": "reviewed_one_part_enclosure_base"})
+
+    assert created["ok"] is True
+    assert created["data"]["examples"]["seeded_work_ids"] == [
+        "single_part_mounting_plate",
+        "multi_part_enclosure_planning",
+        "reviewed_one_part_enclosure_base",
+    ]
+    assert created["data"]["workspace"]["work_count"] == 3
+    assert (external / "works" / "single_part_mounting_plate" / "work_manifest.json").exists()
+    assert (external / "runs" / "multi_part_enclosure_planning_root" / "01_design" / "assembly_plan.json").exists()
+    assert (external / "runs" / "single_part_enclosure_base_result" / "model.step").exists()
+    assert "facet normal" in (external / "runs" / "single_part_enclosure_base_result" / "model.stl").read_text(encoding="utf-8")
+    assert {work["work_id"] for work in works["data"]["works"]} == {
+        "single_part_mounting_plate",
+        "multi_part_enclosure_planning",
+        "reviewed_one_part_enclosure_base",
+    }
+    assert {part["part_id"] for part in detail["data"]["parts"]} >= {"base", "lid", "screws"}
+    assert any(item["name"] == "model.step" for item in detail["data"]["products"]["downloadables"])
+
+
+def test_workspace_example_seed_rejects_existing_work_without_overwrite(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path / "repo")
+    external = tmp_path / "example_workspace"
+    first = dispatch_route(backend, "create_workspace", body={"path": str(external), "include_examples": True})
+    marker = external / "works" / "single_part_mounting_plate" / "work_manifest.json"
+    before = marker.read_text(encoding="utf-8")
+
+    second = dispatch_route(backend, "create_workspace", body={"path": str(external), "include_examples": True})
+
+    assert first["ok"] is True
+    assert second["ok"] is False
+    assert second["status_code"] == 409
+    assert marker.read_text(encoding="utf-8") == before
+
+
+def test_external_workspace_work_and_runs_are_written_outside_repo(tmp_path):
+    repo = tmp_path / "repo"
+    external = tmp_path / "external_workspace"
+    backend = WorkflowConsoleBackend(project_root=repo)
+    dispatch_route(backend, "create_workspace", body={"path": str(external)})
+    dispatch_route(backend, "create_work", body={"work_id": "fixture", "title": "Fixture"})
+
+    response = dispatch_route(
+        backend,
+        "create_work_requirement_run",
+        path_params={"work_id": "fixture"},
+        body={"prompt": "Create a fixture with two clamp blocks."},
+    )
+
+    assert response["ok"] is True
+    assert (external / "works" / "fixture" / "work_manifest.json").exists()
+    assert (external / "runs" / "fixture_root" / "prompt.txt").exists()
+    assert not (repo / "workspace" / "works" / "fixture").exists()
+
+
+def test_work_requirement_run_is_created_under_workspace_and_bound_to_work(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_workspace", body={"path": "workspace"})
+    dispatch_route(backend, "create_work", body={"work_id": "enclosure", "title": "Enclosure"})
+
+    response = dispatch_route(
+        backend,
+        "create_work_requirement_run",
+        path_params={"work_id": "enclosure"},
+        body={"prompt": "Design an electronics enclosure with base and lid."},
+    )
+    manifest = json.loads((tmp_path / "workspace" / "works" / "enclosure" / "work_manifest.json").read_text(encoding="utf-8"))
+    detail = dispatch_route(backend, "read_work", path_params={"work_id": "enclosure"})
+
+    assert response["ok"] is True
+    assert response["data"]["run"]["run_id"] == "enclosure_root"
+    assert (tmp_path / "workspace" / "runs" / "enclosure_root" / "prompt.txt").exists()
+    assert manifest["root_run_id"] == "enclosure_root"
+    assert manifest["requirement"]["confirmation_required"] is True
+    assert "enclosure_root" in {row["run_id"] for row in detail["data"]["run_history"]}
+    assert _does_not_contain_absolute_paths(response["data"])
+
+
+def test_work_part_runs_are_created_after_manual_split_confirmation(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_workspace", body={"path": "workspace"})
+    dispatch_route(backend, "create_work", body={"work_id": "enclosure", "title": "Enclosure"})
+    dispatch_route(
+        backend,
+        "create_work_requirement_run",
+        path_params={"work_id": "enclosure"},
+        body={"prompt": "Design an electronics enclosure with base and lid."},
+    )
+    _write_json = lambda path, value: (path.parent.mkdir(parents=True, exist_ok=True), path.write_text(json.dumps(value) + "\n", encoding="utf-8"))
+    _write_json(
+        tmp_path / "workspace" / "runs" / "enclosure_root" / "01_design" / "assembly_plan.json",
+        {
+            "parts": [
+                {"part_id": "base", "role": "housing", "supported_candidate": True, "part_status": "candidate_for_single_part_generation"},
+                {"part_id": "lid", "role": "cover", "supported_candidate": True, "part_status": "candidate_for_single_part_generation"},
+                {"part_id": "screws", "role": "fastener", "part_status": "reference_only"},
+            ]
+        },
+    )
+
+    response = dispatch_route(backend, "create_work_part_runs", path_params={"work_id": "enclosure"})
+    detail = dispatch_route(backend, "read_work", path_params={"work_id": "enclosure"})
+
+    assert response["ok"] is True
+    assert {run["run_id"] for run in response["data"]["created_runs"]} == {"enclosure_base", "enclosure_lid"}
+    assert (tmp_path / "workspace" / "runs" / "enclosure_base" / "prompt.txt").exists()
+    assert {part["part_id"] for part in detail["data"]["parts"]} >= {"base", "lid", "screws"}
 
 
 def test_workflow_console_route_paths_do_not_accept_filesystem_paths():
