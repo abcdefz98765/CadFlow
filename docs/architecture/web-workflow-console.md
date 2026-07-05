@@ -167,6 +167,8 @@ The route contract scaffold defines future method/path semantics without importi
 The explicit read/action API shape is:
 
 ```text
+GET  /api/works
+GET  /api/works/{work_id}
 GET  /api/runs
 GET  /api/runs/{run_id}/summary
 GET  /api/runs/{run_id}/artifacts/{artifact_name}
@@ -184,6 +186,26 @@ The existing `POST /api/route` bridge remains for the static frontend, and the
 stdlib server also exposes the API-shaped aliases above. Each action accepts a
 safe run id and optional action-specific fields; none accept arbitrary local
 filesystem paths.
+
+The Work API is a deterministic view model over existing file artifacts, not a
+database or migration. A Work is the mutable user-visible engineering task; a
+Run is an immutable append-only execution record; a Part Job is a part-level
+task inside a Work that may have multiple attempts/runs. Work inference uses
+root-like artifacts (`assembly_plan.json`, `workflow_review.json`,
+`stage_review.json`), reviewed-part lineage and bridge artifacts, child run
+references, part result reviews, and `rework_decision.json`. Runs that cannot be
+confidently grouped are assigned to `Unclassified / Debug Runs`, hidden from the
+default Work dashboard unless explicitly enabled.
+
+`GET /api/works` returns sanitized Work summaries: title, overall status,
+root/current run ids, part counts, review/report state, readiness/risk, next
+action, last update, and diagnostic codes. `GET /api/works/{work_id}` returns
+the Work detail view model: summary, current state, Parts Matrix, ordered
+workflow nodes, run history, products/artifacts, available safe actions, and an
+explicit history-semantics block declaring that runs are immutable and rework
+creates new runs. Public Work responses contain no absolute paths, raw provider
+payloads, secrets, environment values, runtime transcripts, or arbitrary
+filesystem browsing.
 
 `WorkflowConsoleActions` maps the reviewed-part workflow to explicit one-stage
 operations:
@@ -334,24 +356,26 @@ group:
 pip install -e ".[web]"
 ```
 
-The NiceGUI UI is intentionally paged:
+The NiceGUI UI is intentionally Work-oriented and paged:
 
-- Runs: compact run selection, status, child runs, reviewed-part status, and
-  STEP/STL availability. The initial load shows a bounded recent page, supports
-  simple run-name search, and lazy-loads details only after a run is selected.
-- Review Report: deterministic workflow-review status, readiness, risk,
-  confidence, summaries, and recommended next actions, plus an explicit
-  Create / Refresh action.
-- Requirement Review: read-only original prompt and available negotiation fields
-  such as assumptions, missing information, clarification questions, blocked
-  reason, and diagnostics, plus save-only Stage Review controls.
-- Assembly Plan: compact assembly status and a parts table, not full JSON by
-  default, plus Stage Review controls and explicit Rework Execution status.
-- Part Workflow: one-stage reviewed-part action cards gated by upstream
-  artifacts.
-- Artifacts: collapsed/on-demand allowlisted artifacts and model-file
-  availability. Human-facing artifacts are visible by default; review/debug and
-  internal artifacts require explicit toggles.
+- Works: default landing dashboard. Shows Work title, overall status, part
+  counts, readiness, risk/report/review status, last update, and next action.
+  Debug/unclassified runs are hidden by default behind an explicit toggle.
+- Workflow: ordered stage/part nodes with deterministic statuses and colored
+  badges. It separates current Work state from append-only run history.
+- Parts: first-class Parts Matrix with `part_id`, role, status, current stage,
+  attempt count, STEP/STL availability, review status, and next action.
+- Review & Rework: deterministic workflow review summary, stage review summary,
+  rework decision summary, explicit save stage review, run rework, create/refresh
+  workflow review, and existing reviewed-part staged actions. Unsupported
+  actions are disabled with a reason rather than silently hidden.
+- Products: human-facing products first, including workflow reports,
+  report summaries, STEP/STL availability, part result review, and stage review.
+  Artifacts are secondary, collapsed/on-demand, and still gated by the display
+  policy toggles.
+- Runs / Debug: compact raw run selection, paginated run loading, run-name
+  search, status, child runs, reviewed-part status, and STEP/STL availability.
+  Details are lazy-loaded only after a run is selected.
 
 The stdlib HTML console remains available as the fallback/debug view. NiceGUI is
 the preferred UI for large local output trees because it avoids loading every

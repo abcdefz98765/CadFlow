@@ -128,6 +128,37 @@ a STEP assembly, or geometrically validate fit between parts yet. The current
 checkpoint is validated through CLI/manual smoke runs; the Web Workflow Console
 is the intended future review surface for this staged artifact workflow.
 
+NiceGUI Work Dashboard MVP:
+
+```text
+Work / Project
+  mutable user-visible engineering task inferred from run artifacts
+  -> current state pointer, part matrix, workflow nodes, products, actions
+
+Run
+  immutable append-only execution record
+  -> one attempt, stage, action result, or rework child
+
+Part Job
+  part-level task inside a Work
+  -> may have multiple attempts/runs
+```
+
+The NiceGUI console now defaults to a Work-oriented dashboard instead of a raw
+run list. Works are inferred locally from existing artifacts such as
+`assembly_plan.json`, `workflow_review.json`, `stage_review.json`, lineage,
+reviewed-part bridge artifacts, part result reviews, and rework decisions. The
+dashboard shows overall status, part counts, readiness/risk, current/latest run,
+next action, ordered workflow nodes, a first-class Parts Matrix, human-facing
+products, and append-only run history. Unclassified low-level runs are grouped
+as `Unclassified / Debug Runs` and hidden unless the debug toggle is enabled.
+
+Rework creates new runs/attempts and may update the inferred Work current state;
+old run artifacts are not overwritten or mutated. This MVP adds no new CAD
+capability: no loop queue, overnight execution, automatic all-part generation,
+batch generation, assembly generation, STEP assembly export, new CAD templates,
+or lid/cover support.
+
 ## 当前定位
 
 - **Workflow First**：每次任务都保留输入、结构化需求、建模计划、模型代码、审查报告、导出文件和日志。

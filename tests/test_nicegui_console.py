@@ -126,6 +126,71 @@ def _add_workflow_review(run_dir: Path):
     (run_dir / "workflow_review.md").write_text("# Workflow Review\n", encoding="utf-8")
 
 
+def _sample_work(tmp_path):
+    root = tmp_path / "outputs" / "enclosure_work"
+    child = root / "05_single_create" / "single_part_base"
+    child.mkdir(parents=True)
+    (root / "prompt.txt").write_text("Two-part electronics enclosure with base, lid, and screws.\n", encoding="utf-8")
+    _write_json(root / "requirement.json", {"product_family": "electronics enclosure", "scope": "multi_part"})
+    _write_json(
+        root / "01_design" / "assembly_plan.json",
+        {
+            "scope": "multi_part",
+            "status": "blocked_before_part_generation",
+            "parts": [
+                {
+                    "part_id": "base",
+                    "role": "base",
+                    "generation_strategy": "future_part_pipeline",
+                    "part_status": "candidate_for_single_part_generation",
+                    "supported_candidate": True,
+                },
+                {
+                    "part_id": "lid",
+                    "role": "lid",
+                    "generation_strategy": "future_part_pipeline",
+                    "part_status": "blocked",
+                    "supported_candidate": False,
+                    "blocked_reasons": [{"code": "unsupported_part_type.lid"}],
+                },
+                {
+                    "part_id": "screws",
+                    "role": "fastener",
+                    "generation_strategy": "reference_only",
+                    "part_status": "reference_only",
+                    "supported_candidate": False,
+                },
+            ],
+            "interfaces": [{"from": "base", "to": "lid"}],
+        },
+    )
+    _write_json(root / "05_single_create" / "lineage.json", {"relationship": "reviewed_part_single_create_child", "part_id": "base", "child_run_id": "single_part_base"})
+    _write_json(
+        root / "06_part_result_review" / "part_result_review.json",
+        {
+            "part_id": "base",
+            "child_run": "single_part_base",
+            "status": "accepted_for_preview",
+            "checks": {"step_created": True, "stl_created": True},
+            "diagnostic_codes": ["part_result.step_created"],
+        },
+    )
+    _write_json(root / "workflow_review.json", {"overall_status": "needs_revision", "readiness_score": 68, "risk_level": "medium", "summary": ["Base accepted; lid blocked."]})
+    (root / "workflow_review.md").write_text("# Workflow Review\n", encoding="utf-8")
+    _write_json(root / "stage_review.json", {"stage": "assembly_plan", "review_status": "needs_revision", "target_rework_stage": "workflow_review"})
+    _write_json(root / "rework_decision.json", {"execution_status": "completed", "target_rework_stage": "workflow_review", "child_run_id": "rework_workflow_review_1"})
+    rework = tmp_path / "outputs" / "rework_workflow_review_1"
+    rework.mkdir(parents=True)
+    _write_json(rework / "workflow_review.json", {"overall_status": "needs_revision", "risk_level": "medium"})
+    (child / "model.step").write_text("STEP\n", encoding="utf-8")
+    (child / "model.stl").write_text("STL\n", encoding="utf-8")
+    _write_json(child / "report.json", {"status": "success", "success": True})
+    debug = tmp_path / "outputs" / "debug_probe"
+    debug.mkdir(parents=True)
+    (debug / "prompt.txt").write_text("Tiny debug run.\n", encoding="utf-8")
+    return root
+
+
 def test_nicegui_console_builds_page_data_from_fake_run_summaries(tmp_path):
     _sample_run(tmp_path)
     backend = WorkflowConsoleBackend(project_root=tmp_path)
@@ -138,6 +203,62 @@ def test_nicegui_console_builds_page_data_from_fake_run_summaries(tmp_path):
     assert data["assembly_plan"]["candidate_part_ids"] == ["base"]
     assert data["assembly_plan"]["interface_count"] == 1
     assert data["part_workflow"]["actions"][0]["available"] is True
+
+
+def test_nicegui_work_dashboard_infers_work_and_hides_debug_by_default(tmp_path):
+    _sample_work(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    data = build_console_page_data(backend)
+    works = data["works"]
+    detail = data["selected_work"]
+
+    assert [work["work_id"] for work in works] == ["enclosure_work"]
+    assert works[0]["overall_status"] == "partial_success"
+    assert works[0]["part_counts"] == {
+        "total": 3,
+        "accepted": 1,
+        "blocked": 1,
+        "needs_review": 0,
+        "reference_only": 1,
+        "incomplete": 0,
+    }
+    assert works[0]["readiness_score"] == 68
+    assert detail["current_state"]["current_run_id"] in {"enclosure_work", "rework_workflow_review_1"}
+    assert detail["history_semantics"]["runs_are_immutable"] is True
+    assert {row["run_id"] for row in detail["run_history"]} == {"enclosure_work", "single_part_base", "rework_workflow_review_1"}
+
+
+def test_nicegui_work_detail_separates_current_state_parts_nodes_and_products(tmp_path):
+    _sample_work(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    detail = build_console_page_data(backend, selected_work_id="enclosure_work")["selected_work"]
+    parts = {part["part_id"]: part for part in detail["parts"]}
+    node_status = {node["id"]: node["status"] for node in detail["nodes"]}
+    products = detail["products"]
+
+    assert parts["base"]["status"] == "accepted"
+    assert parts["base"]["has_step"] is True
+    assert parts["lid"]["status"] == "blocked"
+    assert parts["screws"]["status"] == "reference_only"
+    assert node_status["assembly_plan"] == "completed"
+    assert node_status["part:base"] == "accepted"
+    assert node_status["part:lid"] == "blocked"
+    assert "workflow_review.md" in {item["name"] for item in products["human_facing"]}
+    assert products["artifacts_secondary_by_default"] is True
+    assert _does_not_contain_absolute_paths(detail, tmp_path)
+
+
+def test_nicegui_work_dashboard_can_show_debug_group_explicitly(tmp_path):
+    _sample_work(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    hidden = build_console_page_data(backend)
+    shown = build_console_page_data(backend, show_debug_works=True)
+
+    assert "__debug_runs__" not in {work["work_id"] for work in hidden["works"]}
+    assert "__debug_runs__" in {work["work_id"] for work in shown["works"]}
 
 
 def test_nicegui_console_uses_paginated_run_list_and_lazy_detail(tmp_path, monkeypatch):

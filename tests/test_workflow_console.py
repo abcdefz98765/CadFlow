@@ -106,6 +106,8 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
     expected_operations = {
         "configure_provider",
         "create_run_by_id",
+        "get_work_detail",
+        "list_works",
         "list_runs",
         "read_provider_config",
         "read_run_metadata_by_id",
@@ -132,6 +134,8 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         spec.backend_operation.endswith("_by_id")
         or spec.backend_operation in {
             "list_runs",
+            "list_works",
+            "get_work_detail",
             "read_provider_config",
             "configure_provider",
             "test_provider_connection",

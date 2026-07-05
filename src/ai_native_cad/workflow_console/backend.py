@@ -165,6 +165,31 @@ class WorkflowConsoleBackend:
         """List a bounded page of workflow runs without loading full run details."""
         return self.list_runs_page(limit=limit, offset=offset, filters=filters)["runs"]
 
+    def list_works(
+        self,
+        limit: int = DEFAULT_RUN_LIST_LIMIT,
+        offset: int = 0,
+        filters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """List inferred user-visible Works without executing providers or CAD."""
+        from ai_native_cad.workflow_console.work_index import list_works
+
+        return list_works(self, limit=limit, offset=offset, filters=filters)
+
+    def get_work_summary(self, work_id: str) -> dict[str, Any]:
+        """Return one inferred Work summary."""
+        from ai_native_cad.workflow_console.work_index import get_work_summary
+
+        self._require_safe_run_id(work_id)
+        return get_work_summary(self, work_id)
+
+    def get_work_detail(self, work_id: str) -> dict[str, Any]:
+        """Return one inferred Work detail with current state and history separated."""
+        from ai_native_cad.workflow_console.work_index import get_work_detail
+
+        self._require_safe_run_id(work_id)
+        return get_work_detail(self, work_id)
+
     def list_runs_page(
         self,
         limit: int = DEFAULT_RUN_LIST_LIMIT,

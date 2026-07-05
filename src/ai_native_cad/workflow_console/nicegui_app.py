@@ -89,6 +89,8 @@ def build_console_page_data(
     backend: WorkflowConsoleBackend | None = None,
     selected_run_id: str | None = None,
     *,
+    selected_work_id: str | None = None,
+    show_debug_works: bool = False,
     root: str | None = None,
     limit: int = DEFAULT_RUN_PAGE_SIZE,
     offset: int = 0,
@@ -96,18 +98,60 @@ def build_console_page_data(
 ) -> dict[str, Any]:
     """Build path-free data for the NiceGUI console pages."""
     backend = backend or WorkflowConsoleBackend()
+    works_response = dispatch_route(
+        backend,
+        "list_works",
+        query={"limit": 50, "offset": 0, "show_debug": show_debug_works},
+    )
+    works_page = works_response["data"] if works_response["ok"] and isinstance(works_response["data"], dict) else {}
+    works = works_page.get("works") if isinstance(works_page.get("works"), list) else []
+    selected_work = selected_work_id or (works[0]["work_id"] if works else None)
+    work_detail = build_selected_work_data(backend, selected_work) if selected_work else empty_selected_work_data()
     runs_response = dispatch_route(backend, "list_runs", query=_query(root, limit=limit, offset=offset, search=search))
     runs_page = runs_response["data"] if runs_response["ok"] and isinstance(runs_response["data"], dict) else {}
     runs = runs_page.get("runs") if isinstance(runs_page.get("runs"), list) else []
     pagination = runs_page.get("pagination") if isinstance(runs_page.get("pagination"), dict) else _empty_pagination(limit, offset)
-    selected = selected_run_id or (runs[0]["run_id"] if runs else None)
+    selected = selected_run_id or _dict_get(work_detail.get("summary"), "latest_run_id") or (runs[0]["run_id"] if runs else None)
     run_data = build_selected_run_data(backend, selected, root=root) if selected else empty_selected_run_data()
     return {
+        "works": works,
+        "works_pagination": works_page.get("pagination") if isinstance(works_page.get("pagination"), dict) else _empty_pagination(50, 0),
+        "work_filters": works_page.get("filters") if isinstance(works_page.get("filters"), dict) else {"show_debug": show_debug_works},
+        "selected_work_id": selected_work,
+        "selected_work": work_detail,
         "runs": runs,
         "pagination": pagination,
         "run_filters": runs_page.get("filters") if isinstance(runs_page.get("filters"), dict) else {},
         "selected_run_id": selected,
         **run_data,
+    }
+
+
+def build_selected_work_data(backend: WorkflowConsoleBackend, work_id: str) -> dict[str, Any]:
+    """Build the selected Work view-model lazily."""
+    response = dispatch_route(backend, "read_work", path_params={"work_id": work_id})
+    if not response["ok"]:
+        return {**empty_selected_work_data(), "error": response["error"]}
+    return response["data"]
+
+
+def empty_selected_work_data() -> dict[str, Any]:
+    """Return empty Work state for consoles with no inferred Works."""
+    return {
+        "work_id": None,
+        "summary": None,
+        "current_state": None,
+        "parts": [],
+        "nodes": [],
+        "run_history": [],
+        "products": {"human_facing": [], "downloadables": [], "artifacts_secondary_by_default": True},
+        "available_actions": [],
+        "history_semantics": {
+            "runs_are_immutable": True,
+            "rework_creates_new_runs": True,
+            "old_runs_remain_visible": True,
+        },
+        "error": None,
     }
 
 
@@ -374,7 +418,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
 
     console_backend = backend or WorkflowConsoleBackend()
     actions = WorkflowConsoleActions(console_backend)
-    state: dict[str, Any] = {"selected_run_id": None, "last_action_result": None}
+    state: dict[str, Any] = {"selected_work_id": None, "selected_run_id": None, "last_action_result": None}
 
     @ui.page("/")
     def index() -> None:
@@ -383,40 +427,50 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
             with ui.row().classes("w-full items-center justify-between"):
                 ui.label("CadFlow Workflow Console").classes("text-2xl font-semibold")
                 ui.button("Refresh", icon="refresh", on_click=lambda: refresh()).props("outline")
-            ui.label("Local NiceGUI shell for reviewed-part workflow actions.").classes("text-sm text-gray-600")
+            ui.label("Local NiceGUI shell for Work state, reviewed-part workflow actions, and run debugging.").classes("text-sm text-gray-600")
             tabs = ui.tabs().classes("w-full")
             with tabs:
-                ui.tab("Runs")
-                ui.tab("Review Report")
-                ui.tab("Requirement Review")
-                ui.tab("Assembly Plan")
-                ui.tab("Part Workflow")
-                ui.tab("Artifacts")
-            panels = ui.tab_panels(tabs, value="Runs").classes("w-full")
+                ui.tab("Works")
+                ui.tab("Workflow")
+                ui.tab("Parts")
+                ui.tab("Review & Rework")
+                ui.tab("Products")
+                ui.tab("Runs / Debug")
+            panels = ui.tab_panels(tabs, value="Works").classes("w-full")
 
             def refresh() -> None:
                 panels.clear()
                 data = build_console_page_data(
                     console_backend,
                     state.get("selected_run_id"),
+                    selected_work_id=state.get("selected_work_id"),
+                    show_debug_works=bool(state.get("show_debug_works")),
                     limit=state.get("limit", DEFAULT_RUN_PAGE_SIZE),
                     offset=state.get("offset", 0),
                     search=state.get("search") or None,
                 )
+                state["selected_work_id"] = data.get("selected_work_id")
                 state["selected_run_id"] = data.get("selected_run_id")
                 with panels:
-                    with ui.tab_panel("Runs"):
-                        _render_runs(ui, data, state, lambda run_id: select_run(run_id), refresh)
-                    with ui.tab_panel("Review Report"):
+                    with ui.tab_panel("Works"):
+                        _render_works(ui, data, state, lambda work_id: select_work(work_id), refresh)
+                    with ui.tab_panel("Workflow"):
+                        _render_workflow_nodes(ui, data)
+                    with ui.tab_panel("Parts"):
+                        _render_parts_matrix(ui, data)
+                    with ui.tab_panel("Review & Rework"):
                         _render_workflow_review(ui, data, actions, state, refresh)
-                    with ui.tab_panel("Requirement Review"):
-                        _render_requirement_review(ui, data, actions, state, refresh)
-                    with ui.tab_panel("Assembly Plan"):
-                        _render_assembly_plan(ui, data, actions, state, refresh)
-                    with ui.tab_panel("Part Workflow"):
+                        _render_stage_review_form(ui, data, actions, state, refresh, stage="workflow_review")
                         _render_part_workflow(ui, data, actions, state, refresh)
-                    with ui.tab_panel("Artifacts"):
+                    with ui.tab_panel("Products"):
                         _render_artifacts(ui, data, console_backend)
+                    with ui.tab_panel("Runs / Debug"):
+                        _render_runs(ui, data, state, lambda run_id: select_run(run_id), refresh)
+
+            def select_work(work_id: str) -> None:
+                state["selected_work_id"] = work_id
+                state["selected_run_id"] = None
+                refresh()
 
             def select_run(run_id: str) -> None:
                 state["selected_run_id"] = run_id
@@ -425,6 +479,128 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
             refresh()
 
     return app
+
+
+def _render_works(
+    ui: Any,
+    data: dict[str, Any],
+    state: dict[str, Any],
+    on_select: Callable[[str], None],
+    refresh: Callable[[], None],
+) -> None:
+    works = data.get("works") or []
+    selected = data.get("selected_work_id")
+    with ui.row().classes("w-full items-center gap-3"):
+        debug_toggle = ui.checkbox("Show debug/unclassified runs", value=bool(state.get("show_debug_works")))
+        ui.button(
+            "Apply",
+            icon="tune",
+            on_click=lambda: _apply_work_filters(state, bool(debug_toggle.value), refresh),
+        ).props("outline")
+    if not works:
+        ui.label("No Works inferred from existing runs yet.").classes("text-gray-600")
+        return
+    columns = [
+        {"name": "title", "label": "Work", "field": "title", "align": "left"},
+        {"name": "overall_status", "label": "Status", "field": "overall_status", "align": "left"},
+        {"name": "parts", "label": "Parts", "field": "parts", "align": "left"},
+        {"name": "readiness_score", "label": "Readiness", "field": "readiness_score", "align": "left"},
+        {"name": "risk_level", "label": "Risk", "field": "risk_level", "align": "left"},
+        {"name": "review_status", "label": "Review", "field": "review_status", "align": "left"},
+        {"name": "next_action", "label": "Next", "field": "next_action", "align": "left"},
+        {"name": "updated_at", "label": "Updated", "field": "updated_at", "align": "left"},
+    ]
+    rows = [_work_row(work, selected) for work in works]
+    table = ui.table(columns=columns, rows=rows, row_key="work_id").classes("w-full")
+    table.on("rowClick", lambda event: on_select(event.args[1]["work_id"]))
+    summary = _dict_get(data.get("selected_work"), "summary") or {}
+    with ui.row().classes("gap-3"):
+        ui.badge(f"Selected Work: {summary.get('title') or 'none'}")
+        ui.badge(f"Current run: {summary.get('latest_run_id') or 'none'}")
+        ui.badge("Run history is append-only")
+
+
+def _apply_work_filters(state: dict[str, Any], show_debug: bool, refresh: Callable[[], None]) -> None:
+    state["show_debug_works"] = show_debug
+    state["selected_work_id"] = None
+    state["selected_run_id"] = None
+    refresh()
+
+
+def _render_workflow_nodes(ui: Any, data: dict[str, Any]) -> None:
+    work = data.get("selected_work") or {}
+    current = work.get("current_state") if isinstance(work.get("current_state"), dict) else {}
+    _key_values(ui, {
+        "Current state": current.get("current_run_id") or "Empty",
+        "Root run": current.get("root_run_id") or "Empty",
+        "Next action": current.get("next_action") or "Empty",
+        "History": current.get("immutability_note") or "Runs are immutable.",
+    })
+    for node in work.get("nodes") or []:
+        with ui.card().classes("w-full"):
+            with ui.row().classes("w-full items-center justify-between"):
+                ui.label(node.get("label") or node.get("id")).classes("text-lg font-medium")
+                ui.badge(node.get("status") or "unknown").classes(_badge_class(node.get("status")))
+            ui.label(node.get("summary") or "").classes("text-sm text-gray-700")
+            _key_values(ui, {
+                "Kind": node.get("kind"),
+                "Artifacts": ", ".join(node.get("artifacts") or []) or "Empty",
+                "Actions": ", ".join(node.get("actions") or []) or "Empty",
+            })
+
+
+def _render_parts_matrix(ui: Any, data: dict[str, Any]) -> None:
+    work = data.get("selected_work") or {}
+    parts = work.get("parts") or []
+    if not parts:
+        ui.label("No part jobs inferred for this Work.").classes("text-gray-600")
+        return
+    columns = [
+        {"name": key, "label": label, "field": key, "align": "left"}
+        for key, label in (
+            ("part_id", "part_id"),
+            ("role", "role"),
+            ("status", "status"),
+            ("current_stage", "current_stage"),
+            ("attempt_count", "attempts"),
+            ("step_stl", "STEP/STL"),
+            ("review_status", "review"),
+            ("next_action", "next_action"),
+        )
+    ]
+    rows = [{**part, "step_stl": f"{'yes' if part.get('has_step') else 'no'} / {'yes' if part.get('has_stl') else 'no'}"} for part in parts]
+    ui.table(columns=columns, rows=rows, row_key="part_id").classes("w-full")
+
+
+def _work_row(work: dict[str, Any], selected: str | None) -> dict[str, Any]:
+    counts = work.get("part_counts") if isinstance(work.get("part_counts"), dict) else {}
+    return {
+        "work_id": work.get("work_id"),
+        "title": work.get("title"),
+        "overall_status": work.get("overall_status"),
+        "parts": (
+            f"{counts.get('accepted', 0)} accepted, {counts.get('blocked', 0)} blocked, "
+            f"{counts.get('reference_only', 0)} reference"
+        ),
+        "readiness_score": work.get("readiness_score"),
+        "risk_level": work.get("risk_level"),
+        "review_status": work.get("review_status"),
+        "next_action": work.get("next_action"),
+        "updated_at": work.get("updated_at"),
+        "selected": work.get("work_id") == selected,
+    }
+
+
+def _badge_class(status: Any) -> str:
+    if status in {"accepted", "completed"}:
+        return "bg-green-600"
+    if status in {"needs_review", "partial_success"}:
+        return "bg-yellow-600"
+    if status == "blocked":
+        return "bg-red-600"
+    if status in {"ready", "running"}:
+        return "bg-blue-600"
+    return "bg-gray-500"
 
 
 def serve(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, *, reload: bool = False) -> None:

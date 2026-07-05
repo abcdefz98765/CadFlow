@@ -2,6 +2,24 @@
 
 CadFlow runs produce file-based artifacts. Future interfaces, including the Web Workflow Console, should consume these files instead of inventing separate state formats.
 
+## Work, Run, and Part Job
+
+The console distinguishes three state concepts:
+
+- Work / Project: the mutable user-visible engineering task inferred from local
+  run artifacts. It owns the current state pointer, summary, workflow nodes,
+  part matrix, products, and available actions.
+- Run: an immutable append-only execution record. A run represents one
+  attempt, stage, action result, or rework child and must not be overwritten by
+  later rework.
+- Part Job: a part-level task inside a Work. It can have multiple attempts/runs,
+  result reviews, generated products, or a reference-only/skipped state.
+
+Workflow self-checks and rework create new runs/attempts and update the inferred
+Work current state. Old runs remain visible in run history. No database or
+migration is required; Work state is a deterministic local view model over the
+existing artifact contract.
+
 ## Run Output Contract
 
 Runs may live under either `runs/<run_id>/` or `outputs/<part_name>/`:
@@ -108,6 +126,7 @@ artifacts.
 
 The future Web Workflow Console should read this contract directly:
 
+- Work dashboard from inferred Work summaries and detail view models.
 - Run list from run/output directories.
 - Status from `report.json` and `agent_trace.json`.
 - User review from `report.md`.
@@ -116,7 +135,7 @@ The future Web Workflow Console should read this contract directly:
 - Revision review from `revision_plan.json`, `patch.json`,
   `comparison.json`, `revision_report.md`, and `lineage.json` when present.
 
-The v0.4a Python backend scaffold in `ai_native_cad.workflow_console` already follows this rule: it lists run directories, reads only whitelisted artifact files, derives status from existing report/trace artifacts, and reports downloadable files without creating a second state store.
+The v0.4a Python backend scaffold in `ai_native_cad.workflow_console` already follows this rule: it lists run directories, reads only whitelisted artifact files, derives status from existing report/trace artifacts, infers Works from root/lineage/rework artifacts, and reports downloadable files without creating a second state store.
 
 For future HTTP routes, the backend has path-safe run-id operations that create or resolve a single directory name only under configured run roots, currently `outputs/` and `runs/`. These operations reject absolute paths, traversal, path separators, duplicate create targets, and unconfigured roots. Existing artifact files remain the source of truth; no database or separate state store has been introduced.
 
@@ -133,7 +152,9 @@ The Web Console may cache or index metadata, but it should not become the author
 ## Immutability and Lineage
 
 - Parent runs are immutable workflow records.
-- Revisions create child runs.
+- Revisions and rework create child runs.
+- Work current state points at the latest relevant root/rework artifacts without
+  mutating previous runs.
 - Child runs record `parent_run_id.txt` and `lineage.json`.
 - Comparison artifacts identify the parent and child artifacts used.
 - User-requested changes should be distinguishable from validation repair

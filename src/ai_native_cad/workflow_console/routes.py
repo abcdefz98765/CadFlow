@@ -37,6 +37,20 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="List workflow runs under configured run roots.",
     ),
     RouteSpec(
+        name="list_works",
+        method="GET",
+        path="/api/works",
+        backend_operation="list_works",
+        description="List inferred user-visible Works under configured run roots.",
+    ),
+    RouteSpec(
+        name="read_work",
+        method="GET",
+        path="/api/works/{work_id}",
+        backend_operation="get_work_detail",
+        description="Read one inferred Work detail by safe Work id.",
+    ),
+    RouteSpec(
         name="read_provider_config",
         method="GET",
         path="/workflow/provider",
@@ -275,6 +289,31 @@ def _list_runs(
         offset=_optional_int(query, "offset", 0),
         filters=filters,
     )
+
+
+def _list_works(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    filters = {}
+    if query.get("show_debug") is not None:
+        filters["show_debug"] = _optional_bool(query, "show_debug", False)
+    return backend.list_works(
+        limit=_optional_int(query, "limit", 50),
+        offset=_optional_int(query, "offset", 0),
+        filters=filters,
+    )
+
+
+def _read_work(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.get_work_detail(_require_value(path_params, "work_id"))
 
 
 def _read_run_metadata(
@@ -516,6 +555,8 @@ RouteHandler = Callable[
 _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "create_run": _create_run,
     "list_runs": _list_runs,
+    "list_works": _list_works,
+    "read_work": _read_work,
     "read_provider_config": _read_provider_config,
     "configure_provider": _configure_provider,
     "test_provider_connection": _test_provider_connection,
@@ -585,6 +626,17 @@ def _optional_int(values: dict[str, Any], key: str, default: int) -> int:
     if isinstance(value, str) and value.isdigit():
         return int(value)
     raise ValueError(f"workflow console route value must be an integer: {key}")
+
+
+def _optional_bool(values: dict[str, Any], key: str, default: bool) -> bool:
+    value = values.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.lower() in {"1", "true", "yes", "on"}:
+        return True
+    if isinstance(value, str) and value.lower() in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"workflow console route value must be a boolean: {key}")
 
 
 def _reject_secret_fields(value: Any) -> None:
