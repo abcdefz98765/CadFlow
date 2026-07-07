@@ -239,6 +239,13 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         backend_operation="record_gate_decision_by_id",
         description="Record an approve/reject/return/override gate decision.",
     ),
+    RouteSpec(
+        name="apply_requirement_clarification",
+        method="POST",
+        path="/api/actions/requirement-clarification",
+        backend_operation="apply_requirement_clarification_by_id",
+        description="Apply structured requirement clarification answers and write requirement_v2.json.",
+    ),
 )
 
 ROUTE_SPECS_BY_NAME = {spec.name: spec for spec in ROUTE_SPECS}
@@ -571,6 +578,7 @@ def _write_artifact(
         _require_value(path_params, "artifact"),
         _require_value(body, "content"),
         root=query.get("root"),
+        edit_reason=body.get("edit_reason"),
     )
 
 
@@ -595,6 +603,21 @@ def _record_gate_decision(
         action=_require_value(body, "action"),
         reason=body.get("reason"),
         payload=body.get("payload"),
+        root=query.get("root"),
+    )
+
+
+def _apply_requirement_clarification(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    return backend.apply_requirement_clarification_by_id(
+        _require_value(body, "run_id"),
+        answers=_require_value(body, "answers"),
+        notes=body.get("notes"),
         root=query.get("root"),
     )
 
@@ -726,6 +749,7 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "write_artifact": _write_artifact,
     "list_downloadables": _list_downloadables,
     "record_gate_decision": _record_gate_decision,
+    "apply_requirement_clarification": _apply_requirement_clarification,
     "action_part_request": _action_part_request,
     "action_part_review": _action_part_review,
     "action_reviewed_handoff": _action_reviewed_handoff,
@@ -748,6 +772,7 @@ def _success_status_code(route_name: str) -> int:
         "create_work_part_runs",
         "run_revision",
         "record_gate_decision",
+        "apply_requirement_clarification",
         "action_part_request",
         "action_part_review",
         "action_reviewed_handoff",

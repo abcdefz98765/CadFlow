@@ -15,7 +15,7 @@ from ai_native_cad.cad_ir.schema import CADIR
 from ai_native_cad.cad_ir.validator import validate_ir
 from ai_native_cad.pipeline.agent_loop import run_agent_loop
 from ai_native_cad.pipeline.report import write_pipeline_report
-from ai_native_cad.planning import PlanningHandoffBlocked, create_planning_artifact
+from ai_native_cad.planning import PlanningHandoffBlocked, assembly_plan_from_planning_artifact, create_planning_artifact
 from ai_native_cad.requirements import RequirementAgent
 from ai_native_cad.workflow_control import cad_ir_to_part_modeling_decision, is_proceed_action
 
@@ -225,7 +225,7 @@ def run_provider_normalized_create_pipeline(
     output_root: str | Path | None = None,
     fallback_mode: str = "none",
 ) -> dict[str, Any]:
-    """Run the recommended provider-backed normalized create workflow.
+    """Run the conservative provider-backed normalized create fallback/eval path.
 
     Workflow:
     prompt -> provider extraction -> local requirement/planning compiler ->
@@ -752,6 +752,9 @@ def run_text_pipeline(
         json.dumps(planning_artifact, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    assembly_plan = assembly_plan_from_planning_artifact(planning_artifact)
+    if assembly_plan is not None:
+        _write_json(output_dir / "assembly_plan.json", assembly_plan)
     planning_decision = planning_artifact.get("flow_gate_status", {}).get("rework_decision", {})
     if not is_proceed_action(planning_decision.get("action")):
         return _write_blocked_text_pipeline_result(
@@ -918,6 +921,7 @@ def _collect_files(output_dir: Path, *, repo_relative: bool = False) -> dict[str
         "part_request_review.json": "part_request_review",
         "reviewed_part_handoff.json": "reviewed_part_handoff",
         "part_execution_request.json": "part_execution_request",
+        "cad_ir_draft.json": "cad_ir_draft",
         "part_result_review.json": "part_result_review",
         "input_ir.json": "input_ir",
         "model.py": "model_py",
@@ -2266,7 +2270,7 @@ def run_reviewed_part_single_create_pipeline(
     output_dir: str | Path | None = None,
     output_root: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Explicitly execute one reviewed part handoff through normalized create."""
+    """Execute one reviewed part handoff through agent-driven CAD IR synthesis."""
 
     handoff, source_handoff, default_output = _load_reviewed_part_handoff_input(reviewed_part_handoff)
     output_path = _resolve_output_dir("reviewed_part_single_create", output_root, output_dir or default_output)
@@ -2288,11 +2292,32 @@ def run_reviewed_part_single_create_pipeline(
     execution_request = _compile_part_execution_request(sanitized_handoff, source_handoff=source_handoff)
     _write_json(output_path / "part_execution_request.json", execution_request)
     child_output_dir = output_path / execution_request["child_run_id"]
-    child_result = run_provider_normalized_create_pipeline(
-        execution_request["prompt"],
-        adapter,
-        output_dir=child_output_dir,
-    )
+    context = {
+        "workflow_stage": "reviewed_part_agent_ir_create",
+        "target_contract": "reviewed_part_create_part_ir_v0.1",
+        "part_execution_request": execution_request,
+        "prompt": execution_request["prompt"],
+    }
+    try:
+        input_ir = adapter.create_part_ir(sanitized_handoff, context=context)
+        _reject_reviewed_part_ir_bypass(input_ir)
+        _write_json(output_path / "cad_ir_draft.json", input_ir)
+        validate_input_ir_draft(input_ir)
+        ir_validation = validate_ir(input_ir)
+        if not ir_validation["valid"]:
+            raise ValueError("input_ir.json failed CAD IR validation")
+    except Exception as exc:
+        return _write_blocked_reviewed_part_agent_ir_result(
+            output_path=output_path,
+            child_output_dir=child_output_dir,
+            handoff=sanitized_handoff,
+            source_handoff=source_handoff,
+            execution_request=execution_request,
+            adapter=adapter,
+            error=exc,
+        )
+
+    child_result = run_ir_pipeline(input_ir, output_dir=child_output_dir)
     lineage = _reviewed_part_single_create_lineage(
         output_path=output_path,
         child_output_dir=child_output_dir,
@@ -2303,25 +2328,33 @@ def run_reviewed_part_single_create_pipeline(
 
     metadata = {
         "workflow": "reviewed_part_single_create",
-        "version": "reviewed-part-single-create-v0.1",
+        "version": "reviewed-part-agent-ir-create-v0.2",
+        "workflow_mode": "agent_ir_synthesis",
         "status": child_result.get("status", "unknown"),
         "part_id": sanitized_handoff.get("part_id"),
+        "adapter": _safe_provider_identity(adapter),
         "local_authority": [
             "reviewed_part_handoff.json",
             "part_execution_request.json",
-            "run_provider_normalized_create_pipeline",
+            "adapter.create_part_ir",
+            "validate_input_ir_draft",
+            "validate_ir",
+            "run_ir_pipeline",
             "lineage.json",
         ],
         "stages": [
             "load_reviewed_part_handoff",
             "validate_review_gate",
             "compile_single_part_execution_request",
-            "run_provider_normalized_create_pipeline",
+            "create_part_ir",
+            "validate_agent_generated_cad_ir",
+            "run_ir_pipeline",
             "record_lineage",
         ],
         "artifacts": {
             "reviewed_part_handoff": "reviewed_part_handoff.json",
             "part_execution_request": "part_execution_request.json",
+            "cad_ir_draft": "cad_ir_draft.json",
             "child_run_dir": _repo_relative_string(child_output_dir),
             "lineage": "lineage.json",
         },
@@ -2369,6 +2402,7 @@ def run_reviewed_part_single_create_pipeline(
         "child_output_dir": str(child_output_dir),
         "reviewed_part_handoff": sanitized_handoff,
         "part_execution_request": execution_request,
+        "input_ir": input_ir,
         "child_result": child_result,
         "lineage": lineage,
         "agent_trace": trace,
@@ -2376,6 +2410,28 @@ def run_reviewed_part_single_create_pipeline(
         "report_json": str(output_path / "report.json"),
         "report_md": str(output_path / "report.md"),
     }
+
+
+def run_reviewed_part_agent_ir_create_pipeline(
+    reviewed_part_handoff: dict[str, Any] | str | Path,
+    adapter: AgentAdapter,
+    *,
+    output_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Named reviewed-part CAD IR synthesis entry point.
+
+    This is the primary reviewed-part create architecture. The legacy
+    ``run_reviewed_part_single_create_pipeline`` name is retained for route and
+    smoke-test compatibility.
+    """
+
+    return run_reviewed_part_single_create_pipeline(
+        reviewed_part_handoff,
+        adapter,
+        output_dir=output_dir,
+        output_root=output_root,
+    )
 
 
 def review_part_result(
@@ -3390,6 +3446,159 @@ def _write_blocked_reviewed_part_single_create_result(
     }
 
 
+def _write_blocked_reviewed_part_agent_ir_result(
+    *,
+    output_path: Path,
+    child_output_dir: Path,
+    handoff: dict[str, Any],
+    source_handoff: str,
+    execution_request: dict[str, Any],
+    adapter: AgentAdapter,
+    error: Exception,
+) -> dict[str, Any]:
+    status = "blocked_cad_ir_validation"
+    diagnostic_codes = [
+        "reviewed_part_single_create.agent_ir_invalid",
+        "reviewed_part_single_create.blocked_at_cad_ir_validation",
+    ]
+    lineage = _reviewed_part_single_create_lineage(
+        output_path=output_path,
+        child_output_dir=child_output_dir,
+        handoff=handoff,
+        source_handoff=source_handoff,
+    )
+    _write_json(output_path / "lineage.json", lineage)
+    error_category = _cad_ir_error_category(error)
+    metadata = {
+        "workflow": "reviewed_part_single_create",
+        "version": "reviewed-part-agent-ir-create-v0.2",
+        "workflow_mode": "agent_ir_synthesis",
+        "status": status,
+        "blocked_stage": "cad_ir_validation",
+        "error_category": error_category,
+        "part_id": handoff.get("part_id"),
+        "adapter": _safe_provider_identity(adapter),
+        "local_authority": [
+            "reviewed_part_handoff.json",
+            "part_execution_request.json",
+            "adapter.create_part_ir",
+            "validate_input_ir_draft",
+            "validate_ir",
+            "lineage.json",
+        ],
+        "stages": [
+            "load_reviewed_part_handoff",
+            "validate_review_gate",
+            "compile_single_part_execution_request",
+            "create_part_ir",
+            "validate_agent_generated_cad_ir",
+            "record_lineage",
+        ],
+        "artifacts": {
+            "reviewed_part_handoff": "reviewed_part_handoff.json",
+            "part_execution_request": "part_execution_request.json",
+            "cad_ir_draft": "cad_ir_draft.json" if (output_path / "cad_ir_draft.json").exists() else None,
+            "lineage": "lineage.json",
+        },
+        "cad_ir_created": False,
+        "part_modeling_started": False,
+        "diagnostic_codes": diagnostic_codes,
+    }
+    trace = {
+        "total_attempts": 0,
+        "steps": [
+            {
+                "attempt": 0,
+                "status": "blocked",
+                "stage": "cad_ir_validation",
+                "error_category": error_category,
+                "diagnostic_codes": diagnostic_codes,
+            }
+        ],
+        "final_selected_candidate": None,
+        "reviewed_part_single_create": metadata,
+    }
+    _write_json(output_path / "agent_trace.json", trace)
+    report = {
+        "success": False,
+        "status": status,
+        "blocked_stage": "cad_ir_validation",
+        "error_category": error_category,
+        "diagnostic_codes": diagnostic_codes,
+        "blocked_reasons": [
+            {
+                "code": "reviewed_part_single_create.agent_ir_invalid",
+                "message": "Agent-generated CAD IR was invalid or unsupported by the current CAD IR validator.",
+            }
+        ],
+        "part_id": handoff.get("part_id"),
+        "source_handoff": "reviewed_part_handoff.json",
+        "child_run_dir": _repo_relative_string(child_output_dir),
+        "cad_ir_created": False,
+        "part_modeling_started": False,
+        "reviewed_part_handoff": handoff,
+        "part_execution_request": execution_request,
+        "reviewed_part_single_create": metadata,
+        "lineage": lineage,
+        "files": _collect_files(output_path, repo_relative=True),
+    }
+    _write_json(output_path / "report.json", report)
+    _write_reviewed_part_single_create_report_md(output_path, report)
+    files = _collect_files(output_path, repo_relative=True)
+    report["files"] = files
+    _write_json(output_path / "report.json", report)
+    return {
+        "status": status,
+        "success": False,
+        "blocked_stage": "cad_ir_validation",
+        "error_category": error_category,
+        "diagnostic_codes": diagnostic_codes,
+        "output_dir": str(output_path),
+        "child_output_dir": str(child_output_dir),
+        "reviewed_part_handoff": handoff,
+        "part_execution_request": execution_request,
+        "lineage": lineage,
+        "agent_trace": trace,
+        "files": files,
+        "report_json": str(output_path / "report.json"),
+        "report_md": str(output_path / "report.md"),
+    }
+
+
+def _reject_reviewed_part_ir_bypass(value: Any, path: str = "") -> None:
+    forbidden = {
+        "cad_code",
+        "cadquery_code",
+        "command",
+        "model_code",
+        "python_code",
+        "shell",
+        "shell_command",
+        "script",
+    }
+    if isinstance(value, dict):
+        for key, child in value.items():
+            key_text = str(key)
+            child_path = f"{path}.{key_text}" if path else key_text
+            if key_text.lower() in forbidden:
+                raise ValueError(f"adapter output contains forbidden bypass field: {child_path}")
+            _reject_reviewed_part_ir_bypass(child, child_path)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _reject_reviewed_part_ir_bypass(child, f"{path}[{index}]")
+
+
+def _cad_ir_error_category(error: Exception) -> str:
+    text = str(error).lower()
+    if "forbidden bypass field" in text or "python_code" in text or "cadquery_code" in text or "shell_command" in text:
+        return "adapter_bypass_rejected"
+    if "unsupported_part_type" in text:
+        return "unsupported_part_type"
+    if "unsupported_feature" in text:
+        return "unsupported_feature"
+    return "cad_ir_validation_failed"
+
+
 def _write_reviewed_part_single_create_report_md(output_path: Path, report: dict[str, Any]) -> None:
     lines = [
         "# Reviewed Part Single Create Report",
@@ -3397,7 +3606,8 @@ def _write_reviewed_part_single_create_report_md(output_path: Path, report: dict
         f"**Status:** {report.get('status')}",
         f"**Part ID:** `{report.get('part_id')}`",
         "",
-        "This bridge executes exactly one reviewed single-part handoff through the normalized provider create pipeline.",
+        "This bridge executes exactly one reviewed single-part handoff through agent-driven CAD IR synthesis.",
+        "The generated CAD IR must pass local validation before Part Modeling starts.",
         "It does not generate an assembly, generate all parts, solve assembly constraints, or export a STEP assembly.",
         "",
         "## Diagnostics",

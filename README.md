@@ -83,6 +83,17 @@ artifacts and shown to the user. For L2/L3/L4 workflows, missing engineering
 critical fields such as material, loads, tolerances, fit, safety constraints, or
 certification requirements must block or require focused confirmation.
 
+Requirement clarification is now artifact-backed for the local Web Console:
+focused `follow_up_questions` can be answered as structured form fields, saved
+to `requirement_clarification.json`, and applied to produce `requirement_v2.json`
+before Planning continues. This is intentionally not a chat UI or cloud state.
+
+Desktop 2DOF Robot Arm smoke coverage is documented in
+[`docs/smoke-tests/desktop-robot-arm.md`](docs/smoke-tests/desktop-robot-arm.md).
+That path validates Requirement clarification and assembly candidate planning
+through one reviewed part request; it does not mean CadFlow generates a complete
+robot arm assembly.
+
 装配阶段也按闭环推进：
 
 ```text
@@ -115,18 +126,22 @@ multi-part prompt
   -> part_create_request.json
   -> part_request_review.json
   -> reviewed_part_handoff.json
-  -> one child single-part run
+  -> CadIrAgent / AgentAdapter.create_part_ir
+  -> validated child input_ir.json
+  -> one child STEP-first single-part run
   -> model.step / model.stl
   -> part_result_review.json
 ```
 
 This checkpoint supports planning a multi-part prompt, selecting one reviewed
-candidate part, generating only that child single-part STEP/STL through the
-existing single-part path, and reviewing the child result locally. It does not
-generate a full assembly, generate all parts, solve assembly constraints, export
-a STEP assembly, or geometrically validate fit between parts yet. The current
-checkpoint is validated through CLI/manual smoke runs; the Web Workflow Console
-is the intended future review surface for this staged artifact workflow.
+candidate part, asking the active agent adapter to synthesize CAD IR for that
+reviewed handoff, validating the IR locally, generating only that child
+single-part STEP/STL through the CAD Agent Loop, and reviewing the child result
+locally. It does not generate a full assembly, generate all parts, solve
+assembly constraints, export a STEP assembly, or geometrically validate fit
+between parts yet. The normalized/extract-compile create pipeline remains a
+conservative fallback and provider evaluation path; it is not the default Web
+reviewed-part CAD entry.
 
 NiceGUI Work Dashboard MVP:
 
@@ -186,8 +201,11 @@ CadFlow is an AI-assisted natural-language CAD workflow system, a workflow-first
 
 ## Current Limitations
 
-- The natural-language parser is template-backed and deterministic in the MVP.
-- Unknown or underspecified requests may fall back to built-in part templates.
+- Local/mock workflows include deterministic parser/template fallbacks for CI,
+  offline development, and guardrails; these are not the primary product
+  architecture for reviewed-part CAD IR synthesis.
+- Unknown or underspecified requests may block at Requirement, Planning, or CAD
+  IR validation rather than silently falling back to an unrelated template.
 - Revision workflow, model intake, and external CAD-file editing are documented
   product directions; full revision execution is not implemented yet.
 - Current generated models are suitable for exploration and review, not production release.
@@ -467,19 +485,25 @@ The backend and first static console now exist under
 - show path-free gate decision history in the workflow timeline
 - edit only `requirement.json`, `planning_artifact.json`, and `input_ir.json`
 - record approve/reject/return/override gate decisions in `logs/runtime.json`
+- apply structured Requirement clarification answers into `requirement_v2.json`
 
-Future Web Console stages should add iterative workflow support: show
-assumptions and risky missing fields, ask focused clarification questions,
-select a previous run, submit a revision prompt, display the revision plan and
-patch diff, compare old/new outputs, show lineage, and download parent/child
-artifacts. It is also the intended future review surface for reviewed-part and
-staged approval workflows such as the Reviewed Part Single-Part E2E MVP.
+Future Web Console stages should add iterative workflow support: select a
+previous run, submit a revision prompt, display the revision plan and patch diff,
+compare old/new outputs, show lineage, and download parent/child artifacts. It
+is also the intended future review surface for reviewed-part and staged approval
+workflows such as the Reviewed Part Single-Part E2E MVP.
 
 For the Reviewed Part Single-Part E2E MVP, the console can inspect and operate
 the existing artifact chain from `assembly_plan.json` through
 `part_result_review.json`, including candidate parts, reference-only parts, child
 run summaries, and STEP/STL download links when present. Each backend action is
 one stage only; there is no single "run everything" reviewed-part action.
+The reviewed single-part create action now enters CAD through
+`AgentAdapter.create_part_ir(...)`: `reviewed_part_handoff.json` is converted to
+an agent-generated CAD IR draft, validated by `validate_input_ir_draft(...)` and
+`validate_ir(...)`, and only then passed to `run_ir_pipeline(...)`. If the IR is
+unsupported, the workflow blocks at `cad_ir_validation`; it must not fall back
+to `mounting_plate` or fabricate a complete assembly.
 
 Boundaries are explicit: the Web Workflow Console does not add full assembly
 generation, automatic all-part generation, assembly constraint solving, STEP

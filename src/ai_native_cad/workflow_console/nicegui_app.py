@@ -17,6 +17,7 @@ from ai_native_cad.workflow_console.actions import WorkflowConsoleActions
 from ai_native_cad.workflow_console.actions import STAGE_REVIEW_STATUSES, STAGE_REVIEW_STAGES, STAGE_REWORK_TARGETS
 from ai_native_cad.workflow_console.artifact_display import filter_artifacts_for_display
 from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, WorkflowConsoleBackend
+from ai_native_cad.workflow_console.review_surface import REVIEW_SURFACE_ARTIFACTS, build_workflow_review_surface
 from ai_native_cad.workflow_console.routes import dispatch_route
 from ai_native_cad.workflow_console.server import resolve_downloadable
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
@@ -44,11 +45,13 @@ ARTIFACT_PAGE_ARTIFACTS = (
     "part_request_review.json",
     "reviewed_part_handoff.json",
     "part_execution_request.json",
+    "cad_ir_draft.json",
     "part_result_review.json",
     "stage_review.json",
     "rework_decision.json",
     "lineage.json",
     "agent_trace.json",
+    "logs/runtime.json",
 )
 
 REVIEWED_PART_ACTIONS = (
@@ -146,7 +149,7 @@ def build_console_page_data(
         selected = selected_run_id or (runs[0]["run_id"] if runs else selected)
     run_data = (
         build_selected_run_data(backend, selected, root=root)
-        if selected and (active_page in {"review", "products", "runs"} or selected_run_id is not None or load_runs)
+        if selected and (active_page in {"workflow", "review", "products", "runs"} or selected_run_id is not None or load_runs)
         else empty_selected_run_data()
     )
     provider = build_provider_config_data(backend) if active_page == "config" else {"provider_config": None, "provider_check": None}
@@ -279,6 +282,7 @@ def build_selected_run_data(
         "workflow_review": build_workflow_review_data(run),
         "stage_review": build_stage_review_data(run),
         "part_workflow": build_part_workflow_data(run),
+        "workflow_review_surface": build_workflow_review_surface(backend, run_id, run, root=root),
         "artifacts_page": build_artifacts_page_data(run),
         "artifact_names": sorted(artifacts),
         "error": None,
@@ -297,6 +301,10 @@ def empty_selected_run_data() -> dict[str, Any]:
             "assumptions": [],
             "missing_information": [],
             "clarification_questions": [],
+            "clarification_requests": [],
+            "clarification_applied": False,
+            "requirement_v2_present": False,
+            "can_run_planning": False,
             "blocked_reason": None,
             "diagnostics": [],
             "notes_enabled": True,
@@ -314,6 +322,7 @@ def empty_selected_run_data() -> dict[str, Any]:
             "parts": [],
         },
         "part_workflow": {"actions": []},
+        "workflow_review_surface": build_workflow_review_surface(WorkflowConsoleBackend(), None, {}),
         "workflow_review": build_workflow_review_data({}),
         "stage_review": build_stage_review_data({}),
         "artifacts_page": {"artifacts": [], "downloadables": [], "model_files": []},
@@ -335,7 +344,9 @@ def build_requirement_review_data(
     planning = report_summary.get("planning_summary") if isinstance(report_summary.get("planning_summary"), dict) else {}
     negotiation = report_summary.get("negotiation") if isinstance(report_summary.get("negotiation"), dict) else {}
     requirement_artifact = _read_public_artifact_content(backend, run_id, "requirement.json", root=root)
+    requirement_v2 = _read_public_artifact_content(backend, run_id, "requirement_v2.json", root=root)
     prompt = _read_public_artifact_content(backend, run_id, "prompt.txt", root=root)
+    active_requirement = requirement_v2 if isinstance(requirement_v2, dict) else requirement_artifact
 
     return {
         "original_prompt": prompt if isinstance(prompt, str) else None,
@@ -355,6 +366,10 @@ def build_requirement_review_data(
         "assumptions": _as_list(negotiation.get("assumptions")),
         "missing_information": _as_list(negotiation.get("missing_information")),
         "clarification_questions": _as_list(negotiation.get("clarification_questions")),
+        "clarification_requests": _clarification_requests(active_requirement),
+        "clarification_applied": isinstance(requirement_v2, dict) and requirement_v2.get("clarification_applied") is True,
+        "requirement_v2_present": isinstance(requirement_v2, dict),
+        "can_run_planning": _can_run_planning(active_requirement),
         "blocked_reason": negotiation.get("blocked_reason"),
         "diagnostics": _collect_diagnostics(run, requirement, report_summary),
         "notes_enabled": True,
@@ -466,7 +481,7 @@ def build_artifacts_page_data(
         for item in _as_list(run.get("artifacts"))
         if isinstance(item, dict)
         and item.get("name") in READABLE_ARTIFACTS
-        and (item.get("name") in ARTIFACT_PAGE_ARTIFACTS or item.get("name") in {"planning_artifact.json", "input_ir.json"})
+        and (item.get("name") in ARTIFACT_PAGE_ARTIFACTS or item.get("name") in set(REVIEW_SURFACE_ARTIFACTS))
     ]
     artifacts = filter_artifacts_for_display(artifact_candidates, show_debug=show_debug, show_internal=show_internal)
     downloadables = [
@@ -496,7 +511,7 @@ def read_artifact_page_content(
     root: str | None = None,
 ) -> dict[str, Any]:
     """Read one allowlisted artifact through the existing public route sanitizer."""
-    if artifact not in READABLE_ARTIFACTS or artifact not in set(ARTIFACT_PAGE_ARTIFACTS) | {"planning_artifact.json", "input_ir.json"}:
+    if artifact not in READABLE_ARTIFACTS or artifact not in set(ARTIFACT_PAGE_ARTIFACTS) | set(REVIEW_SURFACE_ARTIFACTS):
         raise ValueError(f"artifact is not readable by the NiceGUI console: {artifact}")
     response = dispatch_route(
         backend,
@@ -712,6 +727,7 @@ def _render_active_page(
     elif page == "overview":
         _render_work_overview(ui, data, state, refresh)
     elif page == "workflow":
+        _render_workflow_stage_review_surface(ui, data, actions, state, refresh)
         _render_workflow_nodes(ui, data, on_select_node=on_select_node, on_select_page=on_select_page)
     elif page == "node":
         _render_node_detail(ui, data, actions, state, refresh, on_back_to_workflow=lambda: on_select_page("workflow"))
@@ -929,6 +945,172 @@ def _render_work_table(
     table.on("rowClick", lambda event: on_select(event.args[1]["work_id"]))
 
 
+def _render_workflow_stage_review_surface(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    surface = data.get("workflow_review_surface") if isinstance(data.get("workflow_review_surface"), dict) else {}
+    _label_with_help(ui, "Workflow Stage Review", "按真实 workflow stage 展示输入、输出、gate、诊断、review 和下一步动作。", "text-xl font-semibold")
+    if state.get("surface_action_result") is not None:
+        ui.markdown(f"```json\n{json.dumps(state['surface_action_result'], indent=2, sort_keys=True)}\n```").classes("w-full")
+    for card in surface.get("stages") or []:
+        _render_stage_review_card(ui, card, data, actions, state, refresh)
+    viewer = surface.get("artifact_viewer") if isinstance(surface.get("artifact_viewer"), dict) else {}
+    with ui.expansion("Raw Artifact Viewer", icon="data_object").classes("w-full"):
+        ui.label("Allowlisted artifacts only. No arbitrary filesystem browsing.").classes("text-sm text-gray-500")
+        for artifact in viewer.get("artifacts") or []:
+            with ui.expansion(artifact.get("name") or "artifact").classes("w-full"):
+                _key_values(ui, {
+                    "Relative path": artifact.get("relative_path") or artifact.get("name"),
+                    "Source": artifact.get("source") or "original",
+                    "Override": artifact.get("override_present"),
+                    "Last edited": artifact.get("last_edited_at") or "Empty",
+                    "Validation": artifact.get("validation_status") or "original",
+                    "Downstream affected": ", ".join(artifact.get("downstream_stages_affected") or []) or "None",
+                    "Summary": artifact.get("summary") or "available",
+                    "Copy name": artifact.get("copyable") or artifact.get("name"),
+                })
+                if artifact.get("raw_json_available"):
+                    content = read_artifact_page_content(actions.backend, data.get("selected_run_id"), artifact["name"])
+                    ui.markdown(f"```json\n{json.dumps(content.get('content'), indent=2, sort_keys=True)}\n```").classes("w-full mono")
+                    _render_artifact_override_editor(ui, data, actions, state, refresh, artifact, content.get("content"))
+                elif not artifact.get("editable"):
+                    ui.label(artifact.get("edit_disabled_reason") or "Not editable").classes("text-sm text-gray-500")
+
+
+def _render_stage_review_card(
+    ui: Any,
+    card: dict[str, Any],
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    with ui.card().classes("w-full shadow-none border border-gray-200"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label(card.get("stage_name") or card.get("key")).classes("text-lg font-medium")
+            ui.badge(card.get("status") or "unknown").classes(_badge_class(card.get("status")))
+        _key_values(ui, {
+            "Gate decision": _compact_display(card.get("gate_decision")),
+            "Agent / adapter": _compact_display(card.get("agent_identity")),
+            "Diagnostics": ", ".join(card.get("diagnostic_codes") or []) or "Empty",
+            "Blocked reasons": _compact_display(card.get("blocked_reasons")) or "Empty",
+        })
+        _artifact_chip_row(ui, "Inputs", card.get("input_artifacts"))
+        _artifact_chip_row(ui, "Outputs", card.get("output_artifacts"))
+        summary = card.get("report_summary")
+        if summary:
+            with ui.expansion("Readable summary").classes("w-full"):
+                ui.markdown(f"```json\n{json.dumps(summary, indent=2, sort_keys=True)}\n```").classes("w-full mono")
+        with ui.row().classes("w-full gap-2"):
+            for action in card.get("available_actions") or []:
+                button = ui.button(
+                    action.get("label") or action.get("key"),
+                    on_click=lambda a=action: _run_surface_action(actions, data.get("selected_run_id"), a, state, refresh),
+                ).props("outline dense")
+                button.tooltip(action.get("disabled_reason") or action.get("backend_action") or action.get("backend_route") or "Available")
+                if not action.get("enabled"):
+                    button.disable()
+        if card.get("raw_artifacts"):
+            with ui.row().classes("w-full gap-2"):
+                for artifact in card.get("raw_artifacts") or []:
+                    ui.badge(artifact.get("name")).classes("bg-gray-100 text-gray-700")
+
+
+def _render_artifact_override_editor(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    artifact: dict[str, Any],
+    content: Any,
+) -> None:
+    if not artifact.get("editable"):
+        ui.label(artifact.get("edit_disabled_reason") or "Not editable").classes("text-sm text-gray-500")
+        return
+    with ui.expansion("Edit Artifact Override", icon="edit").classes("w-full"):
+        ui.label("Saved edits are validated and versioned under edits/. The original artifact is preserved.").classes("text-sm text-gray-500")
+        reason = ui.input("Edit reason").props("outlined").classes("w-full")
+        editor = ui.textarea(
+            "JSON override",
+            value=json.dumps(content if isinstance(content, dict) else {}, indent=2, sort_keys=True),
+        ).props("outlined autogrow").classes("w-full mono")
+        result_key = f"artifact_override_result_{artifact.get('canonical_name') or artifact.get('name')}"
+        if state.get(result_key) is not None:
+            ui.markdown(f"```json\n{json.dumps(state[result_key], indent=2, sort_keys=True)}\n```").classes("w-full")
+        with ui.row().classes("gap-2"):
+            ui.button(
+                "Validate / Save as override",
+                icon="save",
+                on_click=lambda: _save_artifact_override_ui(
+                    actions,
+                    data.get("selected_run_id"),
+                    artifact.get("canonical_name") or artifact.get("name"),
+                    editor.value,
+                    reason.value,
+                    state,
+                    result_key,
+                    refresh,
+                ),
+            ).tooltip("Parse JSON, validate schema/security rules, then save as active user override.")
+            disabled = ui.button("Revert to original", icon="undo").props("outline")
+            disabled.disable()
+            disabled.tooltip("Revert/deactivate is not implemented in this MVP; edit artifacts remain auditable.")
+
+
+def _artifact_chip_row(ui: Any, title: str, artifacts: Any) -> None:
+    ui.label(title).classes("text-sm font-medium text-gray-600")
+    with ui.row().classes("w-full gap-2"):
+        for artifact in artifacts or []:
+            name = artifact.get("name")
+            present = artifact.get("present")
+            ui.badge(f"{name}: {'present' if present else 'missing'}").classes(_badge_class("completed" if present else "not_started"))
+
+
+def _run_surface_action(
+    actions: WorkflowConsoleActions,
+    run_id: str | None,
+    action: dict[str, Any],
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    if not run_id:
+        state["surface_action_result"] = {"ok": False, "error": "Select a run first."}
+        refresh()
+        return
+    backend_action = action.get("backend_action")
+    try:
+        if backend_action == "save_stage_review":
+            state["surface_action_result"] = actions.save_stage_review(
+                run_id,
+                stage=action.get("stage") or "workflow_review",
+                review_status=action.get("review_status") or "approved",
+            )
+        elif backend_action == "part_request":
+            state["surface_action_result"] = actions.create_part_request(run_id)
+        elif backend_action == "part_review":
+            state["surface_action_result"] = actions.review_part_request(run_id)
+        elif backend_action == "reviewed_handoff":
+            state["surface_action_result"] = actions.create_reviewed_handoff(run_id)
+        elif backend_action == "reviewed_part_create":
+            state["surface_action_result"] = actions.create_reviewed_part(run_id)
+        elif backend_action == "part_result_review":
+            state["surface_action_result"] = actions.review_part_result(run_id)
+        elif backend_action == "create_workflow_review":
+            state["surface_action_result"] = actions.create_workflow_review(run_id)
+        elif backend_action == "run_rework":
+            state["surface_action_result"] = actions.run_rework(run_id)
+        else:
+            state["surface_action_result"] = {"ok": False, "error": f"Unsupported surface action: {action.get('key')}"}
+    except Exception as exc:
+        state["surface_action_result"] = {"ok": False, "error": str(exc)}
+    refresh()
+
+
 def _render_workflow_nodes(
     ui: Any,
     data: dict[str, Any],
@@ -938,7 +1120,7 @@ def _render_workflow_nodes(
     work = data.get("selected_work") or {}
     current = work.get("current_state") if isinstance(work.get("current_state"), dict) else {}
     graph = work.get("workflow_graph") if isinstance(work.get("workflow_graph"), dict) else {}
-    _label_with_help(ui, "Workflow", "按阶段和 part 展示当前 Work 的节点、状态、输入输出文件和可执行动作。", "text-xl font-semibold")
+    _label_with_help(ui, "Debug / Raw Workflow Graph", "保留原始节点图用于调试。主流程审阅请看上方 Workflow Stage Review。", "text-xl font-semibold")
     _key_values(ui, {
         "Current state": current.get("current_run_id") or "Empty",
         "Root run": current.get("root_run_id") or "Empty",
@@ -946,7 +1128,7 @@ def _render_workflow_nodes(
         "History": current.get("immutability_note") or "Runs are immutable.",
     })
     _render_workflow_graph(ui, graph, on_select_node, on_select_page)
-    _label_with_help(ui, "Node Details", "紧凑节点清单。流程图用于理解结构，这里保留 artifact/action 细节。", "text-lg font-medium")
+    _label_with_help(ui, "Debug Node Details", "紧凑节点清单。这里保留 artifact/action 细节，但不作为用户主概念。", "text-lg font-medium")
     for node in work.get("nodes") or []:
         with ui.card().classes("w-full shadow-none border border-gray-200"):
             with ui.row().classes("w-full items-center justify-between"):
@@ -1658,6 +1840,8 @@ def _badge_class(status: Any) -> str:
         return "bg-green-600"
     if status in {"needs_review", "partial_success"}:
         return "bg-yellow-600"
+    if status == "user_modified":
+        return "bg-purple-600"
     if status == "blocked":
         return "bg-red-600"
     if status in {"ready", "running"}:
@@ -1860,7 +2044,45 @@ def _render_requirement_review(
     _list_block(ui, "Missing information", review_data.get("missing_information"))
     _list_block(ui, "Clarification questions", review_data.get("clarification_questions"))
     _list_block(ui, "Diagnostics", review_data.get("diagnostics"))
+    _render_requirement_clarification_form(ui, data, actions, state, refresh, review_data)
     _render_stage_review_form(ui, data, actions, state, refresh, stage="requirement")
+
+
+def _render_requirement_clarification_form(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    review_data: dict[str, Any],
+) -> None:
+    run_id = data.get("selected_run_id")
+    requests = review_data.get("clarification_requests") or []
+    with ui.card().classes("w-full"):
+        _label_with_help(ui, "Requirement Clarification", "结构化回答 Requirement 阶段提出的问题；保存后由后端生成 requirement_v2.json。", "text-lg font-medium")
+        _key_values(ui, {
+            "requirement_v2.json": "generated" if review_data.get("requirement_v2_present") else "not generated",
+            "Clarification applied": review_data.get("clarification_applied"),
+            "Planning allowed": review_data.get("can_run_planning"),
+        })
+        if not requests:
+            ui.label("No open clarification questions.").classes("text-sm text-gray-500")
+        inputs = []
+        for request in requests:
+            field = request.get("field") or "unknown"
+            question = request.get("question") or field
+            answer = ui.input(question).props("outlined").classes("w-full")
+            inputs.append((request, answer))
+        notes = ui.textarea("Notes").props("outlined autogrow").classes("w-full")
+        if state.get("requirement_clarification_result") is not None:
+            ui.markdown(f"```json\n{json.dumps(state['requirement_clarification_result'], indent=2, sort_keys=True)}\n```").classes("w-full")
+        button = ui.button(
+            "Apply clarification",
+            icon="save",
+            on_click=lambda: _apply_requirement_clarification_ui(actions, run_id, inputs, notes.value, state, refresh),
+        )
+        if not run_id or not inputs:
+            button.disable()
 
 
 def _render_assembly_plan(
@@ -2125,6 +2347,89 @@ def _save_stage_review_ui(
     refresh()
 
 
+def _save_artifact_override_ui(
+    actions: WorkflowConsoleActions,
+    run_id: str | None,
+    artifact: str | None,
+    raw_json: str | None,
+    edit_reason: str | None,
+    state: dict[str, Any],
+    result_key: str,
+    refresh: Callable[[], None],
+) -> None:
+    if run_id is None or not artifact:
+        state[result_key] = {"ok": False, "error": "Select a run and artifact first."}
+        refresh()
+        return
+    try:
+        content = json.loads(raw_json or "{}")
+    except json.JSONDecodeError as exc:
+        state[result_key] = {
+            "ok": False,
+            "error": "invalid JSON",
+            "diagnostic_code": "artifact_override.invalid_json",
+            "detail": str(exc),
+        }
+        refresh()
+        return
+    if not isinstance(content, dict):
+        state[result_key] = {
+            "ok": False,
+            "error": "override JSON must be an object",
+            "diagnostic_code": "artifact_override.not_object",
+        }
+        refresh()
+        return
+    try:
+        state[result_key] = actions.backend.write_artifact_by_id(
+            run_id,
+            artifact,
+            content,
+            edit_reason=edit_reason,
+        )
+    except Exception as exc:
+        state[result_key] = {
+            "ok": False,
+            "error": str(exc),
+            "diagnostic_code": "artifact_override.validation_failed",
+        }
+    refresh()
+
+
+def _apply_requirement_clarification_ui(
+    actions: WorkflowConsoleActions,
+    run_id: str | None,
+    inputs: list[tuple[dict[str, Any], Any]],
+    notes: str | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    if run_id is None:
+        state["requirement_clarification_result"] = {"ok": False, "error": "Select a run first."}
+        refresh()
+        return
+    answers = []
+    for index, (request, widget) in enumerate(inputs, start=1):
+        answer = str(getattr(widget, "value", "") or "").strip()
+        if not answer:
+            continue
+        answers.append({
+            "question_id": request.get("question_id") or f"q{index}",
+            "field": request.get("field"),
+            "question": request.get("question"),
+            "answer": answer,
+        })
+    try:
+        state["requirement_clarification_result"] = actions.apply_requirement_clarification(
+            run_id,
+            answers=answers,
+            notes=notes,
+        )
+    except Exception as exc:
+        state["requirement_clarification_result"] = {"ok": False, "error": str(exc)}
+    refresh()
+
+
 def _run_rework_ui(
     actions: WorkflowConsoleActions,
     run_id: str | None,
@@ -2255,6 +2560,14 @@ def _key_values(ui: Any, values: dict[str, Any]) -> None:
             ui.label(str(value)).classes("text-sm")
 
 
+def _compact_display(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return "Empty"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True)[:220]
+    return str(value)
+
+
 def _list_block(ui: Any, title: str, items: Any) -> None:
     ui.label(title).classes("font-medium")
     values = _as_list(items)
@@ -2316,6 +2629,35 @@ def _drop_path_like_keys(value: Any) -> Any:
 
 def _dict_get(value: Any, key: str) -> Any:
     return value.get(key) if isinstance(value, dict) else None
+
+
+def _clarification_requests(requirement: Any) -> list[dict[str, Any]]:
+    if not isinstance(requirement, dict):
+        return []
+    requests = requirement.get("follow_up_requests")
+    if not isinstance(requests, list) or not requests:
+        requests = [
+            item
+            for item in requirement.get("missing_information", [])
+            if isinstance(item, dict) and item.get("ask_user")
+        ]
+    result = []
+    for index, item in enumerate(requests, start=1):
+        if not isinstance(item, dict):
+            continue
+        result.append({
+            "question_id": item.get("question_id") or f"q{index}",
+            "field": item.get("field"),
+            "question": item.get("question") or item.get("message") or item.get("field"),
+        })
+    return result
+
+
+def _can_run_planning(requirement: Any) -> bool:
+    if not isinstance(requirement, dict):
+        return False
+    action = _dict_get(_dict_get(requirement.get("requirement_status"), "flow_decision"), "action")
+    return action not in {"ask_user", "return", "return_to_requirement"}
 
 
 def _part_by_id(work: dict[str, Any], part_id: str) -> dict[str, Any]:

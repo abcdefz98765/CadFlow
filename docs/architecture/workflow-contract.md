@@ -190,7 +190,51 @@ For runs that stop before `report.json` exists, the backend may derive the lates
 
 User gate decisions for future staged UI workflows are recorded in the same runtime artifact under `workflow_console.gate_decisions`. This keeps approve/reject/return/override history file-backed without expanding the public artifact whitelist.
 
-Future UI edits are limited to structured workflow handoff artifacts: `requirement.json`, `planning_artifact.json`, and `input_ir.json`. The backend validates these JSON objects before writing and records edit history in `logs/runtime.json`; generated reports, traces, downloads, and prompts are not editable through this boundary.
+Future UI edits are limited to structured workflow handoff artifacts and must be
+saved as validated overrides rather than direct in-place overwrites. Generated
+reports, traces, downloads, prompts, and runtime logs are not editable through
+this boundary.
+
+Current Web Console override semantics are stricter and versioned. The editable
+override allowlist is:
+
+```text
+requirement_v2.json
+planning_artifact.json
+assembly_plan.json
+02_part_request/part_create_request.json
+03_review/part_request_review.json
+04_handoff/reviewed_part_handoff.json
+05_single_create/cad_ir_draft.json
+input_ir.json
+stage_review.json
+```
+
+Equivalent display names without the staged folder are accepted for staged
+reviewed-part artifacts. Non-allowlisted artifacts such as `prompt.txt`,
+`model.py`, `model.step`, `model.stl`, reports, traces, runtime logs,
+workflow-review Markdown, provider payloads, transcripts, and secrets are not
+editable.
+
+Overrides do not overwrite original agent artifacts. A valid edit writes:
+
+```text
+<run>/edits/<artifact>.edit_NNN.json
+<run>/edits/active/<artifact>.json
+```
+
+The versioned edit file is an audit envelope containing source artifact,
+created timestamp, creator, edit reason, base artifact digest, validation
+status, and edited content. The active file is pure JSON for downstream
+workflow consumption. `logs/runtime.json` records
+`workflow_console.artifact_edits`, and downstream stage execution may record
+`workflow_console.override_usage` when it consumes a user override.
+
+Validation happens before an edit becomes active. Requirement, Planning, and
+CAD IR artifacts use existing validators; reviewed-part handoff/request/review
+artifacts use controlled structural checks. Edits containing secret-like
+fields, provider raw payloads, chat transcripts, Python/CadQuery code, or shell
+commands are rejected.
 
 The Web Console may cache or index metadata, but it should not become the authoritative workflow state store in v0.4.
 

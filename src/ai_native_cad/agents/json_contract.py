@@ -195,6 +195,17 @@ class JsonContractAgentAdapter(AgentAdapter):
             validate_planning_draft(planning_artifact)
         return planning_artifact
 
+    def create_part_ir(
+        self,
+        reviewed_part_handoff: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        request = self._with_provider_options(_part_ir_contract_request(reviewed_part_handoff, context or {}))
+        raw_response = _call_json_client(self.client, request, "create_part_ir")
+        input_ir = _extract_json_object(raw_response)
+        validate_adapter_result("create_part_ir", input_ir)
+        return input_ir
+
     def parse_revision_request(
         self,
         prompt: str,
@@ -288,6 +299,27 @@ def _planning_contract_request(requirement: dict[str, Any], context: dict[str, A
         ),
         "context": sanitized_context,
         "payload_shape": _payload_shape_for("requirement_payload", sanitized_requirement),
+    }
+
+
+def _part_ir_contract_request(reviewed_part_handoff: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    sanitized_context = _contract_context(context)
+    sanitized_handoff = sanitize_provider_payload(reviewed_part_handoff)
+    sanitized_execution_request = sanitize_provider_payload(context.get("part_execution_request", {}))
+    return {
+        "operation": "create_part_ir",
+        "response_format": {"type": "json_object"},
+        "messages": provider_messages_for(
+            operation="create_part_ir",
+            contract_instruction=contract_guide_for("create_part_ir"),
+            user_payload={
+                "reviewed_part_handoff": sanitized_handoff,
+                "part_execution_request": sanitized_execution_request,
+            },
+            context=sanitized_context,
+        ),
+        "context": sanitized_context,
+        "payload_shape": {"kind": "reviewed_part_handoff_payload", "top_level_keys": ["part_execution_request", "reviewed_part_handoff"]},
     }
 
 

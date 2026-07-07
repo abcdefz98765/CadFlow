@@ -16,12 +16,15 @@ from ai_native_cad.agents.validation import (
 )
 from ai_native_cad.cad_ir.parser import ir_from_planning_artifact
 from ai_native_cad.pipeline.runner import PROJECT_ROOT, run_ir_pipeline, run_text_pipeline
-from ai_native_cad.workflow_control import is_proceed_action, review_to_outputs_decision
+from ai_native_cad.planning import assembly_plan_from_planning_artifact
+from ai_native_cad.workflow_control import ASK_USER, RETURN, RETURN_TO_REQUIREMENT, is_proceed_action, review_to_outputs_decision
 
 READABLE_ARTIFACTS = {
     "prompt.txt",
     "revision_prompt.txt",
     "requirement.json",
+    "requirement_clarification.json",
+    "requirement_v2.json",
     "design_brief.json",
     "planning_artifact.json",
     "input_ir.json",
@@ -34,6 +37,7 @@ READABLE_ARTIFACTS = {
     "part_request_review.json",
     "reviewed_part_handoff.json",
     "part_execution_request.json",
+    "cad_ir_draft.json",
     "part_result_review.json",
     "stage_review.json",
     "rework_decision.json",
@@ -144,7 +148,18 @@ class StageRunner:
             return self.run_requirement(stage_prompt, context=context)
 
         if stage == "planning":
-            requirement = context.get("requirement") or _read_json_required(output_dir / "requirement.json")
+            requirement = context.get("requirement") or _read_json_if_present(output_dir / "requirement_v2.json") or _read_json_required(output_dir / "requirement.json")
+            blocked = _requirement_blocks_planning(requirement)
+            if blocked:
+                result = {
+                    "status": STATUS_BLOCKED,
+                    "stage_status": STATUS_BLOCKED,
+                    "stage": "planning",
+                    "output_dir": str(output_dir),
+                    "flow_decision": blocked,
+                }
+                self._write_stage_runtime(output_dir, stage="planning", status=STATUS_BLOCKED, result=result)
+                return result
             return self.run_planning(requirement, context=context)
 
         if stage == "review":
@@ -193,6 +208,9 @@ class StageRunner:
         planning_artifact = self.agent_adapter.create_plan(requirement, context=context)
         validate_planning_draft(planning_artifact)
         _write_json(output_dir / "planning_artifact.json", planning_artifact)
+        assembly_plan = assembly_plan_from_planning_artifact(planning_artifact)
+        if assembly_plan is not None:
+            _write_json(output_dir / "assembly_plan.json", assembly_plan)
         decision = planning_artifact.get("flow_gate_status", {}).get("rework_decision", {})
         stage_status = _stage_status_from_decision(decision)
         result = {
@@ -201,6 +219,7 @@ class StageRunner:
             "stage": "planning",
             "output_dir": str(output_dir),
             "planning_artifact": planning_artifact,
+            "assembly_plan": assembly_plan,
             "flow_decision": decision,
             "adapter_activity": self._adapter_activity("create_plan"),
         }
@@ -396,6 +415,22 @@ def _read_json_if_present(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _requirement_blocks_planning(requirement: dict[str, Any]) -> dict[str, Any] | None:
+    if requirement.get("clarification_applied") is True:
+        return None
+    decision = requirement.get("requirement_status", {}).get("flow_decision", {})
+    action = decision.get("action")
+    if action not in {ASK_USER, RETURN, RETURN_TO_REQUIREMENT}:
+        return None
+    return {
+        "action": "blocked",
+        "from_stage": "planning",
+        "to_stage": "requirement",
+        "owner_stage": "requirement",
+        "reasons": decision.get("reasons") or [{"code": "requirement_needs_clarification"}],
+    }
 
 
 def _sanitize_adapter_identity(identity: dict[str, Any]) -> dict[str, Any]:

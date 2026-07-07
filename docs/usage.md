@@ -30,6 +30,14 @@ Requirement 或 Planning gate 返回 `return` 时，流程停止在该 gate：�
 `requirement.json` / `planning_artifact.json`、`report.json` / `report.md` 和
 `agent_trace.json` 供复核。
 
+Requirement gate 返回 `ask_user` 或 `return_to_requirement` 时，Planning 会先
+阻塞，直到用户通过 Web Console 的结构化 Requirement Clarification 表单提交
+回答。后端会写入 `requirement_clarification.json`，再生成
+`requirement_v2.json`；Planning 优先读取 `requirement_v2.json`。canonical 问题
+字段是 `follow_up_questions`，`clarification_questions` 仅作为兼容别名展示。
+这个流程不是聊天 UI，也不会把浏览器状态、provider raw response、API key 或
+chat transcript 写入公开 artifact。
+
 CAD Agent Loop 本身仍是 IR-first：
 
 ```text
@@ -151,6 +159,58 @@ outputs/prompt_pipeline/<case_id>/
 
 Benchmarks remain IR-first and continue to consume benchmark `input_ir.json`
 cases directly.
+
+## Run the Web Workflow Console
+
+For the NiceGUI cockpit:
+
+```powershell
+.\scripts\start_nicegui_console.ps1
+```
+
+The console is a workflow cockpit, not just an artifact browser. The Workflow
+page shows `Workflow Stage Review` cards for Requirement, Clarification,
+Planning, Assembly Plan, reviewed-part handoff, CAD IR draft, part result
+review, workflow review, and rework. Each card reads existing artifacts through
+the backend and shows inputs, outputs, gate/review state, diagnostics, blocked
+reasons, raw allowlisted artifacts, and enabled or disabled actions with
+prerequisite reasons.
+
+Artifacts remain the source of truth. The UI does not create a database, cloud
+state, account system, free chat transcript, or browser-owned workflow state.
+
+The raw artifact viewer includes a controlled override editor for selected JSON
+intermediate artifacts only. A user can edit `requirement_v2.json`,
+`planning_artifact.json`, `assembly_plan.json`, reviewed-part request/review
+handoff artifacts, `cad_ir_draft.json`, `input_ir.json`, and
+`stage_review.json`. The editor validates JSON and schema/safety rules before
+saving. It writes versioned files under `edits/` and an active pure-JSON
+override under `edits/active/`; it does not overwrite the original artifact.
+Reports, traces, prompts, runtime logs, generated code, STEP/STL files,
+provider raw payloads, transcripts, secrets, Python/CadQuery code, and shell
+commands are rejected.
+
+Downstream stages resolve overrides explicitly: Planning prefers a valid
+`requirement_v2.json` override; Part Request creation prefers an
+`assembly_plan.json` override; Reviewed Part Create prefers a
+`reviewed_part_handoff.json` override and can use a validated
+`cad_ir_draft.json` override as explicit user CAD IR. Runtime logs record when
+an override is saved or consumed.
+
+Reviewed-part actions still follow the existing backend path:
+
+```text
+reviewed_part_handoff.json
+  -> part_execution_request.json
+  -> AgentAdapter.create_part_ir(...)
+  -> cad_ir_draft.json
+  -> validate_input_ir_draft / validate_ir
+  -> run_ir_pipeline or blocked_cad_ir_validation
+```
+
+Current CAD limitations are unchanged: no full robot-arm assembly generation,
+no automatic all-part generation, no batch queue, no new `upper_link` template,
+and no automatic fallback to `mounting_plate`.
 
 ## Run the Legacy Workflow
 

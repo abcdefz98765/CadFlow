@@ -4,6 +4,13 @@ The Web Workflow Console is the future user-facing cockpit for running and revie
 
 It is not a browser CAD editor.
 
+The current MVP treats the console as a workflow cockpit rather than just an
+artifact browser. The primary user-facing surface is Workflow / Stage / Review:
+each stage should expose what it consumed, what it produced, what gate decision
+or diagnostic blocked it, what review state exists, and what backend action can
+be taken next. Raw artifacts remain available, but they are secondary to
+stage-level review cards.
+
 The long-term UI should support iterative natural-language CAD workflow: create
 a first model from a prompt, show assumptions or missing risky fields, ask
 focused questions, revise a previous run, display patch diffs, compare old/new
@@ -241,8 +248,12 @@ operations:
   root and writes `03_review/part_request_review.json`.
 - `reviewed-handoff`: reads the part request and review artifacts and writes
   `04_handoff/reviewed_part_handoff.json`.
-- `reviewed-part-create`: reads one reviewed handoff and calls the existing
-  reviewed single-part create bridge once, writing under `05_single_create/`.
+- `reviewed-part-create`: reads one reviewed handoff, writes
+  `part_execution_request.json`, calls `AgentAdapter.create_part_ir(...)`,
+  writes `cad_ir_draft.json` for review, validates the returned CAD IR with
+  `validate_input_ir_draft(...)` and `validate_ir(...)`, and then either calls
+  `run_ir_pipeline(...)` for exactly one child part under `05_single_create/`
+  or writes a `blocked_cad_ir_validation` report/trace.
 - `part-result-review`: reads one reviewed handoff plus one child run identified
   by `05_single_create/lineage.json` or an explicit safe child run id, then
   writes `06_part_result_review/part_result_review.json`.
@@ -258,9 +269,11 @@ operations:
 
 These actions wrap existing pipeline functions only. They do not add assembly
 generation, automatic all-part generation, batch generation, new CAD templates,
-assembly constraint solving, provider-generated CAD IR/code, automatic rework
-loops, overnight queue execution, or free-form Web chat. Public action results
-are sanitized summaries: no absolute paths, no API
+assembly constraint solving, provider-generated code, automatic rework loops,
+overnight queue execution, or free-form Web chat. The reviewed-part create path
+does accept agent-generated CAD IR only through `create_part_ir(...)`, and that
+IR is blocked unless local validation passes. Public action results are
+sanitized summaries: no absolute paths, no API
 keys, no environment values, no provider raw payloads, and no transcripts.
 
 `stage_review.json` is the Stage Review / Rework Artifact MVP and the first
@@ -312,22 +325,31 @@ hidden unless internal artifacts are explicitly enabled. This classification is
 a presentation policy only; artifact reads still go through the existing
 allowlist and sanitization path.
 
-Editable artifacts are narrower than readable artifacts. The backend can write only `requirement.json`, `planning_artifact.json`, and `input_ir.json`; writes must be JSON objects, pass artifact-specific validation, and are recorded in `logs/runtime.json` under `workflow_console.artifact_edits`.
+Editable artifacts are narrower than readable artifacts and are saved as
+validated overrides, not in-place edits. The backend accepts only the controlled
+JSON override allowlist documented in the Workflow Review Surface section;
+writes must be JSON objects, pass artifact-specific validation, and are recorded
+in `logs/runtime.json` under `workflow_console.artifact_edits`.
 
 The backend exposes shared status constants for the current local status vocabulary: `created`, `completed`, `blocked`, `success`, `failed`, `running_or_incomplete`, and `unknown`.
 
-Gate decisions are also file-backed. The backend can record `approve`, `reject`, `return`, and `override` decisions for supported workflow stages by appending to `logs/runtime.json` under `workflow_console.gate_decisions`; no separate decision store or new readable artifact has been added. Public run metadata exposes only a gate summary (`stage`, `action`, `reason`, and `timestamp`), not arbitrary decision payloads.
+Gate decisions are also file-backed. The backend can record `approve`, `reject`, `return`, `override`, `proceed_with_assumptions`, `ask_user`, `return_to_requirement`, `return_to_planning`, and `revise_existing_model` decisions for supported workflow stages by appending to `logs/runtime.json` under `workflow_console.gate_decisions`. Public run metadata exposes only a gate summary (`stage`, `action`, `reason`, and `timestamp`), not arbitrary decision payloads.
 
-Future gate actions should expand to include `proceed_with_assumptions`,
-`ask_user`, `return_to_requirement`, `return_to_planning`, and
-`revise_existing_model` once the backend supports the richer workflow decision
-contract.
+Requirement clarification has a separate minimal artifact contract. The
+canonical question field in requirement artifacts is `follow_up_questions`;
+`clarification_questions` is kept as a compatibility alias for UI summaries and
+older artifacts. When a user answers focused questions, the backend writes
+`requirement_clarification.json` and applies it with
+`apply_requirement_clarification` to produce `requirement_v2.json`. The original
+`requirement.json` remains unchanged. The runtime log records
+`workflow_console.clarification_applied` entries with answer count, target
+artifact, and the updated requirement flow decision.
 
 The local backend should expose only workflow operations:
 
 - Run management: create, open, list, and inspect local run directories.
 - Stage operations: run/status/artifacts for Requirement, Planning, Part Modeling, Review, and Outputs.
-- Artifact operations: read structured JSON, read Markdown reports, and write confirmed user edits.
+- Artifact operations: read structured JSON, read Markdown reports, write confirmed user edits, and apply structured Requirement clarification answers.
 - Gate operations: record approve, override, reject, or return-to-upstream decisions as artifacts.
 - File serving: serve `model.step`, `model.stl`, `report.md`, `report.json`, and `agent_trace.json`.
 
@@ -408,6 +430,100 @@ shell:
   mode. API keys stay in environment variables and are never shown or saved by
   the UI.
 
+### Workflow Review Surface MVP
+
+The NiceGUI Workflow page now builds a `Workflow Stage Review` view model from
+the selected run. The view model is presentation-only: it reads allowlisted
+artifacts through the backend route contract and reports action availability;
+it does not write files or make the browser authoritative.
+
+The MVP stage cards are Requirement, Clarification, Planning, Assembly Plan,
+Part Request, Part Review, Reviewed Handoff, CAD IR Draft, Part Modeling /
+Reviewed Part Create, Part Result Review, Workflow Review, and Rework. Each
+card exposes stage name, status, input artifacts, output artifacts, sanitized
+agent/adapter identity when present, gate decision, diagnostic codes, blocked
+reasons, readable summary, available actions, and raw artifact links.
+
+The Requirement card shows the original prompt, active requirement source
+(`requirement_v2.json` over `requirement.json`), recognized `part_type`,
+`part_family`, intent scope, object goal, assumptions, missing information,
+follow-up questions, requirement flow decision, diagnostics, adapter identity,
+and the raw requirement artifact.
+
+The Planning / Assembly Plan cards show whether Planning used v1 or v2
+requirement input, route and flow gate status, assembly-plan summary, candidate
+parts, reference components, selected/primary candidate when known, supported
+candidate state, blocked reasons, diagnostics, and raw planning/assembly
+artifacts.
+
+The Reviewed Part / CAD IR cards show staged reviewed-part artifacts:
+`part_create_request.json`, `part_request_review.json`,
+`reviewed_part_handoff.json`, `part_execution_request.json`,
+`cad_ir_draft.json`, lineage, child `input_ir.json` status, STEP/STL status,
+and `blocked_cad_ir_validation` details when the agent-generated CAD IR is
+invalid or unsupported. This is an inspection surface only; it does not add
+fallback templates or new CAD families.
+
+The raw artifact viewer remains allowlisted and does not browse arbitrary
+directories. It prioritizes prompt, requirement, clarification, planning,
+assembly, reviewed-part handoff, CAD IR draft, report, trace, stage review, and
+workflow review artifacts. `logs/runtime.json` is summarized by stage/action
+counts rather than treated as a primary user artifact.
+
+The console also supports a controlled artifact override MVP. This is not an
+arbitrary file editor. Only selected JSON workflow artifacts can be edited:
+`requirement_v2.json`, `planning_artifact.json`, `assembly_plan.json`,
+`part_create_request.json`, `part_request_review.json`,
+`reviewed_part_handoff.json`, `cad_ir_draft.json`, `input_ir.json`, and
+`stage_review.json`. Staged aliases such as
+`02_part_request/part_create_request.json`,
+`03_review/part_request_review.json`,
+`04_handoff/reviewed_part_handoff.json`, and
+`05_single_create/cad_ir_draft.json` resolve to the same controlled artifacts.
+
+Original agent artifacts are preserved. A valid edit writes a versioned audit
+envelope under `edits/<artifact>.edit_NNN.json` with source artifact,
+timestamp, user identity, edit reason, base digest, validation status, and
+edited content. The current active override is also materialized as pure JSON
+under `edits/active/<artifact>.json` so downstream workflow code can consume a
+normal artifact without understanding the edit envelope. Runtime history records
+the edit in `logs/runtime.json` under `workflow_console.artifact_edits`.
+
+Every override is validated before it becomes active. Requirement and Planning
+edits use the existing adapter draft validators; CAD IR edits use
+`validate_input_ir_draft(...)` and `validate_ir(...)`; reviewed-part handoff and
+request/review edits receive minimal structure checks. Edits containing secret
+markers, provider raw payloads, transcripts, Python/CadQuery code, or shell
+commands are rejected. Invalid edits are not saved as active overrides.
+
+Downstream resolution is intentionally small in this MVP:
+
+- Planning uses active `requirement_v2.json` override before
+  `requirement_v2.json` or `requirement.json`.
+- Part Request creation uses active `assembly_plan.json` override before the
+  original assembly plan.
+- Reviewed Part Create uses active `reviewed_part_handoff.json` override before
+  the original handoff.
+- If a valid active `cad_ir_draft.json` override exists, Reviewed Part Create
+  revalidates it and can run the existing IR pipeline from that explicit user
+  IR. Invalid CAD IR edits are rejected before Part Modeling.
+
+The Workflow page marks stages with active overrides as `user_modified` and
+shows which downstream stages are stale or affected. Revert/deactivate and
+diff views remain future work.
+
+Available buttons are backed by existing actions where possible:
+`save_stage_review`, `create_workflow_review`, `run_rework`, `part_request`,
+`part_review`, `reviewed_handoff`, `reviewed_part_create`, and
+`part_result_review`. Disabled buttons include a prerequisite reason. The
+`needs_revision` shortcut is intentionally disabled because it requires the
+compact Stage Review form to collect a target rework stage and requested
+changes.
+
+OpenNode and raw node-graph concepts are no longer the primary user-facing
+workflow language. The original graph is retained below the cards as
+`Debug / Raw Workflow Graph`.
+
 The stdlib HTML console remains available as the fallback/debug view. NiceGUI is
 the preferred UI for large local output trees because it avoids loading every
 run artifact on initial page load, which matters before loop queue and overnight
@@ -434,6 +550,8 @@ The current UI supports the first usable local workflow loop:
   scope checks, lineage checks, and interface metadata checks;
 - edit only the allowed JSON handoff artifacts;
 - record approve/reject/return/override gate decisions;
+- answer Requirement `follow_up_questions` through a structured form that writes
+  `requirement_clarification.json` and `requirement_v2.json`;
 - save a structured `stage_review.json` rework intent without rerunning stages;
 - create or refresh deterministic `workflow_review.json` and
   `workflow_review.md` report artifacts without provider or CAD execution;
@@ -442,17 +560,39 @@ The current UI supports the first usable local workflow loop:
 
 Review and Outputs are executable local check stages. Review reads the existing `report.json` flow decision and records the review gate status. Outputs checks publishable artifacts, including primary `model.step`, without regenerating CAD. STEP remains the primary CAD artifact; the embedded viewer loads `model.stl` only as a secondary inspection aid.
 
-Reviewed-part awareness is read-only in this slice. The console can inspect
-manual-smoke artifacts and discover generated STEP/STL files, but it does not
-add batch generation, assembly CAD generation, assembly constraint solving, STEP
-assembly export, geometric fit validation, new CAD templates, or automatic
-all-part generation.
+Reviewed-part awareness includes explicit one-stage actions. The single-part
+create action is agent-IR-first: it must reach `create_part_ir(...)` for a ready
+handoff, then either produce a validated child `input_ir.json` and run the CAD
+Agent Loop, or block at `cad_ir_validation` with diagnostics. It must not
+silently fall back to `mounting_plate` or fabricate a full assembly. The console
+still does not add batch generation, assembly CAD generation, assembly
+constraint solving, STEP assembly export, geometric fit validation, new CAD
+templates as the primary strategy, or automatic all-part generation.
+
+The default reviewed-part CAD path is:
+
+```text
+reviewed_part_handoff.json
+  -> part_execution_request.json
+  -> AgentAdapter.create_part_ir(...)
+  -> cad_ir_draft.json
+  -> validate_input_ir_draft(...) / validate_ir(...)
+  -> run_ir_pipeline(...) or blocked_cad_ir_validation
+```
+
+The normalized/extract-compile create path remains a conservative fallback and
+evaluation path, not the Web reviewed-part default. Templates, primitives, and
+deterministic parser/compiler paths remain guardrails, bootstrap/local mock
+implementations, and offline test supports; they should stabilize agent CAD IR
+synthesis rather than replace it.
 
 Both UIs expose reviewed-part actions only when their upstream artifact is
-present, and each button calls exactly one backend action. There is still no
-chat UI, no editable clarification pipeline, no provider calls for free-form
-chat, no automatic rework execution, no loop queue, no automatic all-part
-generation, no batch generation, and no assembly generation.
+present, and each button calls exactly one backend action. Requirement
+clarification is structured form input, not chat: the browser never becomes the
+source of truth and does not directly edit `requirement.json`. There is still no
+chat UI, no provider calls for free-form chat, no automatic rework execution, no
+loop queue, no automatic all-part generation, no batch generation, and no
+assembly generation.
 
 ## Security Notes
 

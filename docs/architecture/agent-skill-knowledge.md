@@ -16,8 +16,8 @@ Workflow stage
 The provider is replaceable. CadFlow owns context assembly, privacy filtering,
 local validation, artifact persistence, gates, and deterministic execution.
 
-For provider-backed create, the recommended product path is the explicit
-normalized workflow:
+For provider-backed whole-prompt create, the conservative fallback path is the
+explicit normalized workflow:
 
 ```text
 prompt
@@ -28,9 +28,25 @@ prompt
 ```
 
 This is exposed as `run_provider_normalized_create_pipeline(...)` and maps to
-`extract_then_compile` mode internally. Strict provider contract mode remains
-available for compliance testing, where provider outputs must directly satisfy
-CadFlow contracts and no silent fallback is allowed.
+`extract_then_compile` mode internally. It is useful for stable fallback,
+offline tests, and provider extraction evaluation, but it is not the primary
+architecture for Web reviewed-part CAD generation. Strict provider contract
+mode remains available for compliance testing, where provider outputs must
+directly satisfy CadFlow contracts and no silent fallback is allowed.
+
+For reviewed-part create, the primary CAD entry is:
+
+```text
+reviewed_part_handoff.json
+  -> CadIrAgent / AgentAdapter.create_part_ir
+  -> CAD IR draft
+  -> validate_input_ir_draft + validate_ir
+  -> run_ir_pipeline
+```
+
+Templates, deterministic parsers, and primitive compilers stabilize and test the
+system; they must not block agent CAD IR synthesis by default or silently
+replace unsupported reviewed parts with unrelated templates.
 
 ## Concepts
 
@@ -44,8 +60,10 @@ Initial stage agents:
 
 - `RequirementAgent`: user prompt to `requirement.json`.
 - `PlanningAgent`: `requirement.json` to `planning_artifact.json`.
-- `CadIrAgent`: planning handoff to `input_ir.json`; currently mostly
-  deterministic.
+- `CadIrAgent`: planning or reviewed-part handoff to `input_ir.json` through
+  agent-generated CAD IR synthesis plus local validation. Deterministic
+  primitive/template conversion is a local/mock fallback and guardrail, not the
+  product's primary architecture.
 - `PartModelingAgent`: validated CAD IR to generated artifacts through the CAD
   Agent Loop.
 - `RepairAgent`: validation or execution failures to constrained repair
@@ -214,7 +232,7 @@ Skill behavior:
 
 Input:
 
-- Validated planning artifact.
+- Validated planning artifact or reviewed-part handoff.
 
 Output:
 
@@ -222,9 +240,13 @@ Output:
 
 Skill behavior:
 
-- Prefer deterministic conversion where possible.
+- Synthesize backend-neutral CAD IR for the selected part or reviewed handoff.
 - Keep CAD IR normalized and backend-neutral.
 - Do not allow provider text to bypass local CAD IR validation.
+- Do not generate CadQuery/Python code, shell commands, raw provider payloads,
+  transcripts, secrets, or local paths.
+- Unsupported agent-generated IR should block at CAD IR validation with clear
+  diagnostics rather than falling back to an unrelated supported template.
 
 ### Part Modeling
 

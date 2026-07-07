@@ -127,6 +127,7 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         "write_artifact_by_id",
         "list_downloadables_by_id",
         "record_gate_decision_by_id",
+        "apply_requirement_clarification_by_id",
         "WorkflowConsoleActions.create_part_request",
         "WorkflowConsoleActions.review_part_request",
         "WorkflowConsoleActions.create_reviewed_handoff",
@@ -396,6 +397,8 @@ def test_workflow_console_route_contract_includes_edit_and_gate_routes():
     assert ROUTE_SPECS_BY_NAME["action_save_stage_review"].path == "/api/actions/stage-review"
     assert ROUTE_SPECS_BY_NAME["action_create_workflow_review"].path == "/api/actions/workflow-review"
     assert ROUTE_SPECS_BY_NAME["action_run_rework"].path == "/api/actions/rework"
+    assert ROUTE_SPECS_BY_NAME["apply_requirement_clarification"].method == "POST"
+    assert ROUTE_SPECS_BY_NAME["apply_requirement_clarification"].path == "/api/actions/requirement-clarification"
 
 
 def test_workflow_console_internal_error_shape_does_not_leak_local_paths():
@@ -837,6 +840,29 @@ def test_workflow_console_rework_unsupported_target_writes_blocked_decision(tmp_
     assert metadata["rework_decision_summary"]["requested_changes_preview"] == ["Treat lid as a flat cover candidate"]
 
 
+def test_workflow_console_blocked_stage_review_preserves_rework_intent(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    dispatch_route(backend, "create_run", path_params={"run_id": "blocked_intent"}, body={"prompt": "Make an enclosure."})
+
+    response = dispatch_route(
+        backend,
+        "action_save_stage_review",
+        body={
+            "run_id": "blocked_intent",
+            "stage": "assembly_plan",
+            "review_status": "blocked",
+            "target_rework_stage": "workflow_review",
+            "user_notes": "Planning is blocked but review intent should be retained.",
+        },
+    )
+    artifact = json.loads((tmp_path / "outputs" / "blocked_intent" / "stage_review.json").read_text(encoding="utf-8"))
+
+    assert response["ok"] is True
+    assert response["data"]["summary"]["review_status"] == "blocked"
+    assert response["data"]["summary"]["target_rework_stage"] == "workflow_review"
+    assert artifact["target_rework_stage"] == "workflow_review"
+
+
 def test_workflow_console_rework_workflow_review_creates_child_without_overwriting_parent(tmp_path):
     run_dir = tmp_path / "outputs" / "workflow_review_rework"
     _write_reviewed_part_run(run_dir)
@@ -1135,11 +1161,15 @@ def test_workflow_console_dispatch_writes_artifact_and_records_gate_decision(tmp
         "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
         "features": {},
     }
+    (tmp_path / "outputs" / "dispatch_edit" / "requirement_v2.json").write_text(
+        json.dumps(requirement) + "\n",
+        encoding="utf-8",
+    )
 
     written = dispatch_route(
         backend,
         "write_artifact",
-        path_params={"run_id": "dispatch_edit", "artifact": "requirement.json"},
+        path_params={"run_id": "dispatch_edit", "artifact": "requirement_v2.json"},
         body={"content": requirement},
     )
     decision = dispatch_route(
@@ -1792,12 +1822,16 @@ def test_workflow_console_dispatch_preserves_artifact_content_path_keys(tmp_path
         "dimensions": {"outer_diameter": 12, "inner_diameter": 6.5, "thickness": 20},
         "features": {"path": "not a filesystem path"},
     }
-    backend.write_artifact_by_id("content_path", "requirement.json", requirement)
+    (tmp_path / "outputs" / "content_path" / "requirement_v2.json").write_text(
+        json.dumps(requirement) + "\n",
+        encoding="utf-8",
+    )
+    backend.write_artifact_by_id("content_path", "requirement_v2.json", requirement)
 
     response = dispatch_route(
         backend,
         "read_artifact",
-        path_params={"run_id": "content_path", "artifact": "requirement.json"},
+        path_params={"run_id": "content_path", "artifact": "requirement_v2.json"},
     )
 
     assert "path" not in response["data"]
@@ -2099,6 +2133,100 @@ def test_backend_records_future_workflow_gate_actions(tmp_path):
     assert "proceed_with_assumptions" in GATE_DECISION_ACTIONS
 
 
+def test_requirement_clarification_blocks_then_allows_planning(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    prompt = "Design a desktop 2 DOF robotic arm with a gripper, servo-ready joints, and 3D printable parts."
+    backend.create_run_by_id("arm_clarification", prompt)
+    requirement_result = backend.run_stage_by_id("arm_clarification", "requirement")
+
+    blocked = backend.run_stage_by_id("arm_clarification", "planning")
+
+    assert requirement_result["result"]["flow_decision"]["action"] == "ask_user"
+    assert blocked["result"]["stage_status"] == "blocked"
+    assert blocked["result"]["flow_decision"]["to_stage"] == "requirement"
+
+    applied = backend.apply_requirement_clarification_by_id(
+        "arm_clarification",
+        answers=[
+            {"question_id": "q1", "field": "arm_reach_mm", "question": "Reach?", "answer": "220 mm"},
+            {"question_id": "q2", "field": "payload_target_g", "question": "Payload?", "answer": "80 g"},
+            {"question_id": "q3", "field": "servo_reference_size_mm", "question": "Servo?", "answer": "40 x 20 x 40"},
+            {"question_id": "q4", "field": "gripper_opening_mm", "question": "Opening?", "answer": "35 mm"},
+        ],
+        notes="Desktop demo only.",
+    )
+    planning = backend.run_stage_by_id("arm_clarification", "planning")
+    part_request = dispatch_route(
+        backend,
+        "action_part_request",
+        body={"run_id": "arm_clarification", "part_id": "upper_link"},
+    )
+    runtime = backend.read_artifact_by_id("arm_clarification", "logs/runtime.json")["content"]["workflow_console"]
+    clarification = backend.read_artifact_by_id("arm_clarification", "requirement_clarification.json")["content"]
+    requirement_v2 = backend.read_artifact_by_id("arm_clarification", "requirement_v2.json")["content"]
+    assembly_plan = backend.read_artifact_by_id("arm_clarification", "assembly_plan.json")["content"]
+
+    assert applied["requirement"]["clarification_applied"] is True
+    assert clarification["answers"][0]["field"] == "arm_reach_mm"
+    assert requirement_v2["dimensions"]["arm_reach_mm"] == 220.0
+    assert requirement_v2["features"]["payload_mass_g"] == 80.0
+    assert requirement_v2["features"]["servo_envelope"] == "40 x 20 x 40"
+    assert requirement_v2["dimensions"]["gripper_opening_mm"] == 35.0
+    assert requirement_v2["missing_information"] == []
+    assert requirement_v2["lineage"]["created_by"] == "apply_requirement_clarification"
+    assert runtime["clarification_applied_count"] == 1
+    assert planning["result"]["stage_status"] == "blocked"
+    assert planning["result"]["planning_artifact"]["route"]["selected"] == "assembly_loop"
+    assert planning["result"]["planning_artifact"]["source"]["requirement_part_type"] == "robotic_arm"
+    assert planning["result"]["planning_artifact"]["assembly_planning"]["primary_candidate_part"] == "upper_link"
+    assert {part["part_id"] for part in assembly_plan["parts"]} >= {
+        "base",
+        "lower_link",
+        "upper_link",
+        "shoulder_servo_bracket",
+        "elbow_servo_bracket",
+        "gripper_mount",
+        "reference_servo",
+        "reference_gripper",
+    }
+    assert assembly_plan["selected_part_id"] == "upper_link"
+    assert assembly_plan["status"] == "blocked_before_part_generation"
+    assert part_request["ok"] is True
+    assert part_request["data"]["summary"]["status"] == "ready_for_review"
+    assert "part_create_request.json" in {item["name"] for item in part_request["data"]["run"]["artifacts"]}
+
+
+def test_requirement_clarification_route_sanitizes_public_response(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("safe_clarification", "Design a desktop 2 DOF robotic arm with a gripper and servo.")
+    dispatch_route(backend, "run_stage", path_params={"run_id": "safe_clarification", "stage": "requirement"})
+
+    rejected = dispatch_route(
+        backend,
+        "apply_requirement_clarification",
+        body={
+            "run_id": "safe_clarification",
+            "answers": [{"field": "arm_reach_mm", "question": "Reach?", "answer": "220 mm", "api_key": "secret-token"}],
+        },
+    )
+    response = dispatch_route(
+        backend,
+        "apply_requirement_clarification",
+        body={
+            "run_id": "safe_clarification",
+            "answers": [{"field": "arm_reach_mm", "question": "Reach?", "answer": "220 mm"}],
+            "notes": "Use a compact desktop footprint.",
+        },
+    )
+
+    assert rejected["ok"] is False
+    assert "secrets" in rejected["error"]["message"]
+    assert response["ok"] is True
+    assert _does_not_contain_keys(response["data"], {"path", "run_dir", "root", "output_dir", "payload"})
+    assert _does_not_contain_absolute_paths(response["data"])
+    assert "secret-token" not in json.dumps(response["data"])
+
+
 def test_backend_records_gate_decision_payload_without_new_readable_artifact(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_run_by_id("decision_run", "Make a spacer.")
@@ -2167,7 +2295,7 @@ def test_backend_rejects_invalid_gate_decision_inputs(tmp_path):
         backend.record_gate_decision_by_id("decision_run", stage="requirement", action="override", payload="bad")
 
 
-def test_backend_writes_editable_requirement_artifact_by_id(tmp_path):
+def test_backend_writes_editable_requirement_override_by_id(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_run_by_id("edit_run", "Make a spacer.")
     requirement = {
@@ -2177,16 +2305,23 @@ def test_backend_writes_editable_requirement_artifact_by_id(tmp_path):
         "features": {},
         "requirement_status": {"complete_for_generation": True},
     }
+    run_dir = tmp_path / "outputs" / "edit_run"
+    (run_dir / "requirement_v2.json").write_text(json.dumps(requirement) + "\n", encoding="utf-8")
 
-    written = backend.write_artifact_by_id("edit_run", "requirement.json", requirement)
+    edited = {**requirement, "part_family": "washer"}
+    written = backend.write_artifact_by_id("edit_run", "requirement_v2.json", edited, edit_reason="User selected washer family.")
     runtime = backend.read_artifact_by_id("edit_run", "logs/runtime.json")["content"]["workflow_console"]
 
-    assert written["artifact"]["content"]["part_type"] == "spacer"
-    assert written["edit"]["artifact"] == "requirement.json"
-    assert written["run"]["status"]["artifact_edit"]["artifact"] == "requirement.json"
+    assert json.loads((run_dir / "requirement_v2.json").read_text(encoding="utf-8")).get("part_family") is None
+    assert written["artifact"]["content"]["part_family"] == "washer"
+    assert written["edit"]["artifact"] == "requirement_v2.json"
+    assert written["edit"]["source"] == "user_override"
+    assert (run_dir / "edits" / "requirement_v2.edit_001.json").exists()
+    assert (run_dir / "edits" / "active" / "requirement_v2.json").exists()
+    assert written["run"]["status"]["artifact_edit"]["artifact"] == "requirement_v2.json"
     assert runtime["latest_artifact_edit"] == written["edit"]
     assert runtime["artifact_edit_count"] == 1
-    assert "requirement.json" in EDITABLE_ARTIFACTS
+    assert "requirement_v2.json" in EDITABLE_ARTIFACTS
 
 
 def test_backend_writes_valid_input_ir_by_id(tmp_path):
@@ -2201,6 +2336,7 @@ def test_backend_writes_valid_input_ir_by_id(tmp_path):
         "outputs": ["step", "stl"],
         "check_level": "L0",
     }
+    (tmp_path / "outputs" / "edit_run" / "input_ir.json").write_text(json.dumps(input_ir) + "\n", encoding="utf-8")
 
     written = backend.write_artifact_by_id("edit_run", "input_ir.json", input_ir)
 
@@ -2243,8 +2379,8 @@ def test_backend_rejects_artifact_write_traversal(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_run_by_id("edit_run", "Make a spacer.")
 
-    with pytest.raises(ValueError, match="artifact is not editable"):
-        backend.write_artifact_by_id("edit_run", "../requirement.json", {"part_type": "spacer"})
+    with pytest.raises(ValueError, match="invalid artifact path|artifact is not editable"):
+        backend.write_artifact_by_id("edit_run", "../requirement_v2.json", {"part_type": "spacer"})
 
 
 def test_backend_rejects_non_object_artifact_write(tmp_path):
@@ -2252,7 +2388,7 @@ def test_backend_rejects_non_object_artifact_write(tmp_path):
     backend.create_run_by_id("edit_run", "Make a spacer.")
 
     with pytest.raises(ValueError, match="must be a JSON object"):
-        backend.write_artifact_by_id("edit_run", "requirement.json", ["bad"])
+        backend.write_artifact_by_id("edit_run", "requirement_v2.json", ["bad"])
 
 
 def test_backend_rejects_invalid_input_ir_write(tmp_path):
@@ -2265,6 +2401,7 @@ def test_backend_rejects_invalid_input_ir_write(tmp_path):
         "features": {},
         "outputs": ["step"],
     }
+    (tmp_path / "outputs" / "edit_run" / "input_ir.json").write_text(json.dumps({**invalid_ir, "dimensions": {"outer_diameter": 12, "inner_diameter": 6, "thickness": 2}, "part_name": "valid", "check_level": "L0"}) + "\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="failed CAD IR validation"):
         backend.write_artifact_by_id("edit_run", "input_ir.json", invalid_ir)
@@ -2273,6 +2410,10 @@ def test_backend_rejects_invalid_input_ir_write(tmp_path):
 def test_backend_rejects_invalid_planning_artifact_write(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_run_by_id("edit_run", "Make a spacer.")
+    (tmp_path / "outputs" / "edit_run" / "planning_artifact.json").write_text(
+        json.dumps({"artifact_type": "planning", "route": {}, "selected_parts": [], "flow_gate_status": {}}) + "\n",
+        encoding="utf-8",
+    )
 
     with pytest.raises(ValueError, match="artifact_type must be 'planning'"):
         backend.write_artifact_by_id(
@@ -2285,6 +2426,133 @@ def test_backend_rejects_invalid_planning_artifact_write(tmp_path):
                 "flow_gate_status": {},
             },
         )
+
+
+def test_backend_artifact_override_whitelist_rejects_generated_and_debug_artifacts(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("edit_run", "Make a spacer.")
+    editable = {
+        "requirement_v2.json",
+        "planning_artifact.json",
+        "assembly_plan.json",
+        "part_create_request.json",
+        "02_part_request/part_create_request.json",
+        "part_request_review.json",
+        "03_review/part_request_review.json",
+        "reviewed_part_handoff.json",
+        "04_handoff/reviewed_part_handoff.json",
+        "cad_ir_draft.json",
+        "05_single_create/cad_ir_draft.json",
+        "input_ir.json",
+        "stage_review.json",
+    }
+
+    assert editable <= EDITABLE_ARTIFACTS
+    for artifact in ("prompt.txt", "model.py", "model.step", "report.json", "agent_trace.json", "logs/runtime.json"):
+        with pytest.raises(ValueError, match="artifact is not editable"):
+            backend.write_artifact_by_id("edit_run", artifact, {"status": "bad"})
+
+
+def test_backend_rejects_secret_and_executable_artifact_overrides(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("edit_run", "Make a spacer.")
+    source = {
+        "part_type": "spacer",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6, "thickness": 2},
+    }
+    (tmp_path / "outputs" / "edit_run" / "requirement_v2.json").write_text(json.dumps(source) + "\n", encoding="utf-8")
+
+    for payload in (
+        {**source, "api_key": "SECRET"},
+        {**source, "python_code": "print('no')"},
+        {**source, "cadquery_code": "import cadquery"},
+        {**source, "shell_command": "del *"},
+        {**source, "provider_response": {"raw": "payload"}},
+        {**source, "notes": "bearer token should not be here"},
+    ):
+        with pytest.raises(ValueError, match="forbidden field|must not contain secrets"):
+            backend.write_artifact_by_id("edit_run", "requirement_v2.json", payload)
+
+    assert not (tmp_path / "outputs" / "edit_run" / "edits").exists()
+
+
+def test_backend_planning_uses_requirement_override_before_requirement_v2(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("override_plan", "Make a mounting plate.")
+    run_dir = tmp_path / "outputs" / "override_plan"
+    original = {
+        "part_type": "mounting_plate",
+        "dimensions": {"length": 80, "width": 40, "thickness": 5},
+        "features": {},
+        "requirement_status": {"flow_decision": {"action": "proceed"}},
+    }
+    override = {
+        "part_type": "spacer",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6, "thickness": 3},
+        "features": {},
+        "requirement_status": {"flow_decision": {"action": "proceed"}},
+    }
+    (run_dir / "requirement.json").write_text(json.dumps(original) + "\n", encoding="utf-8")
+    (run_dir / "requirement_v2.json").write_text(json.dumps(original) + "\n", encoding="utf-8")
+    backend.write_artifact_by_id("override_plan", "requirement_v2.json", override)
+
+    result = backend.run_stage_by_id("override_plan", "planning")
+    runtime = backend.read_artifact_by_id("override_plan", "logs/runtime.json")["content"]["workflow_console"]
+
+    selected = result["result"]["planning_artifact"]["selected_parts"][0]
+    assert selected["resolved_decisions"]["part_type"] == "spacer"
+    assert result["result"]["planning_artifact"]["route"]["selected"] == "single_part"
+    assert runtime["latest_override_usage"]["artifact"] == "requirement_v2.json"
+    assert runtime["latest_override_usage"]["stage"] == "planning"
+
+
+def test_actions_create_part_request_uses_assembly_plan_override(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("override_assembly", "Make an assembly.")
+    run_dir = tmp_path / "outputs" / "override_assembly"
+    original = {
+        "artifact_type": "assembly_plan",
+        "parts": [{"part_id": "base", "supported_candidate": True, "part_status": "candidate_for_single_part_generation"}],
+    }
+    override = {
+        "artifact_type": "assembly_plan",
+        "parts": [{"part_id": "lid", "supported_candidate": True, "part_status": "candidate_for_single_part_generation"}],
+    }
+    (run_dir / "assembly_plan.json").write_text(json.dumps(original) + "\n", encoding="utf-8")
+    backend.write_artifact_by_id("override_assembly", "assembly_plan.json", override)
+
+    result = WorkflowConsoleActions(backend).create_part_request("override_assembly")
+    request = json.loads((run_dir / "02_part_request" / "part_create_request.json").read_text(encoding="utf-8"))
+
+    assert result["summary"]["status"] == "ready_for_review"
+    assert request["part_id"] == "lid"
+
+
+def test_invalid_cad_ir_draft_override_is_rejected_before_part_modeling(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("bad_cad_ir", "Make one part.")
+    run_dir = tmp_path / "outputs" / "bad_cad_ir"
+    handoff = {"part_id": "upper_link", "status": "ready_for_single_part_planning"}
+    valid_ir = {
+        "part_type": "spacer",
+        "part_name": "spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6, "thickness": 3},
+        "features": {},
+        "outputs": ["step"],
+        "check_level": "L0",
+    }
+    invalid_ir = {**valid_ir, "dimensions": {"outer_diameter": 12}}
+    (run_dir / "04_handoff").mkdir()
+    (run_dir / "04_handoff" / "reviewed_part_handoff.json").write_text(json.dumps(handoff) + "\n", encoding="utf-8")
+    (run_dir / "05_single_create").mkdir()
+    (run_dir / "05_single_create" / "cad_ir_draft.json").write_text(json.dumps(valid_ir) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="failed CAD IR validation"):
+        backend.write_artifact_by_id("bad_cad_ir", "cad_ir_draft.json", invalid_ir)
+
+    assert backend.active_override_path(run_dir, "cad_ir_draft.json") is None
+    assert not (run_dir / "edits").exists()
 
 
 def test_backend_runs_stages_from_existing_run_artifacts(tmp_path):

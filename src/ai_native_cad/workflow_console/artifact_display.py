@@ -15,6 +15,8 @@ HUMAN_FACING_ARTIFACTS = {
     "workflow_review.md",
     "workflow_review.json",
     "stage_review.json",
+    "requirement_clarification.json",
+    "requirement_v2.json",
     "rework_decision.json",
     "assembly_plan.json",
     "part_result_review.json",

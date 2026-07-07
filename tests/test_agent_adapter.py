@@ -26,6 +26,7 @@ from ai_native_cad.pipeline import (
     run_assembly_part_request_pipeline,
     run_part_request_review_pipeline,
     run_part_result_review_pipeline,
+    run_reviewed_part_agent_ir_create_pipeline,
     run_reviewed_part_handoff_pipeline,
     run_reviewed_part_single_create_pipeline,
     run_provider_create_pipeline,
@@ -396,6 +397,39 @@ def test_json_contract_agent_adapter_accepts_valid_fake_planning_output():
     assert fake_client.requests[0]["response_format"] == {"type": "json_object"}
     assert fake_client.requests[0]["messages"][0]["role"] == "system"
     assert "planning_artifact.json" in _request_system_text(fake_client.requests[0])
+
+
+def test_json_contract_agent_adapter_accepts_valid_fake_part_ir_output():
+    fake_client = FakeJsonContractClient(json.dumps({
+        "part_type": "spacer",
+        "part_name": "single_part_spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 5, "thickness": 8},
+        "features": {},
+        "outputs": ["step", "stl"],
+    }))
+    adapter = JsonContractAgentAdapter(fake_client)
+
+    ir = adapter.create_part_ir(
+        {"artifact_type": "reviewed_part_handoff", "part_id": "spacer", "status": "ready_for_single_part_planning"},
+        context={"part_execution_request": {"child_run_id": "single_part_spacer", "prompt": "Create spacer."}},
+    )
+
+    assert ir["part_type"] == "spacer"
+    assert fake_client.requests[0]["operation"] == "create_part_ir"
+    assert "Stage skill: cad_ir" in _request_system_text(fake_client.requests[0])
+    assert "input_ir.json" in _request_system_text(fake_client.requests[0])
+
+
+def test_json_contract_agent_adapter_rejects_part_ir_bypass_fields():
+    adapter = JsonContractAgentAdapter(FakeJsonContractClient({
+        "part_type": "spacer",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 5, "thickness": 8},
+        "python_code": "print('bypass')",
+    }))
+
+    with pytest.raises(ValueError, match="python_code"):
+        adapter.create_part_ir({"part_id": "spacer"})
 
 
 def test_json_contract_agent_adapter_accepts_revision_contract_outputs():
@@ -3387,21 +3421,17 @@ def _valid_reviewed_part_handoff():
     return pipeline_runner.create_reviewed_part_handoff(request, review_part_create_request(request))
 
 
-def test_reviewed_part_single_create_ready_handoff_invokes_normalized_single_part_create(tmp_path, monkeypatch):
+def test_reviewed_part_single_create_ready_handoff_invokes_agent_part_ir(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
     fake_client = OperationFakeJsonContractClient({
-        "parse_requirement": {
-            "part_type": "mounting_plate",
+        "create_part_ir": {
+            "part_type": "enclosure_base",
+            "part_name": "single_part_base",
             "unit": "mm",
-            "dimensions": {"length": 80, "width": 40, "thickness": 5},
-            "features": {"holes": {"count": 4, "diameter": 4.5, "positions": "corner_4"}},
-        },
-        "create_plan": {
-            "artifact_type": "plan",
-            "route": {},
-            "selected_parts": [],
-            "flow_gate_status": {},
+            "dimensions": {"outer_length": 80, "outer_width": 50, "outer_height": 18, "wall_thickness": 2},
+            "features": {},
+            "outputs": ["step", "stl"],
         },
     })
     adapter = JsonContractAgentAdapter(fake_client)
@@ -3416,9 +3446,10 @@ def test_reviewed_part_single_create_ready_handoff_invokes_normalized_single_par
     child_dir = output_dir / "single_part_base"
     assert result["status"] == "success"
     assert result["success"] is True
-    assert [request["operation"] for request in fake_client.requests] == ["parse_requirement", "create_plan"]
+    assert [request["operation"] for request in fake_client.requests] == ["create_part_ir"]
     assert (output_dir / "reviewed_part_handoff.json").exists()
     assert (output_dir / "part_execution_request.json").exists()
+    assert (output_dir / "cad_ir_draft.json").exists()
     assert (output_dir / "lineage.json").exists()
     assert (output_dir / "report.json").exists()
     assert (output_dir / "agent_trace.json").exists()
@@ -3444,7 +3475,9 @@ def test_reviewed_part_single_create_ready_handoff_invokes_normalized_single_par
     assert "batch generate" not in prompt.lower()
     assert "step assembly" not in prompt.lower()
     assert "assembly" not in prompt.lower()
-    assert _request_user_message(fake_client.requests[0])["content"] == prompt
+    request_payload = _request_user_payload(fake_client.requests[0])
+    assert request_payload["part_execution_request"]["prompt"] == prompt
+    assert request_payload["reviewed_part_handoff"]["part_id"] == "base"
 
     lineage = json.loads((output_dir / "lineage.json").read_text(encoding="utf-8"))
     assert lineage["relationship"] == "reviewed_part_single_create_child"
@@ -3459,21 +3492,17 @@ def test_reviewed_part_single_create_ready_handoff_invokes_normalized_single_par
         "load_reviewed_part_handoff",
         "validate_review_gate",
         "compile_single_part_execution_request",
-        "run_provider_normalized_create_pipeline",
+        "create_part_ir",
+        "validate_agent_generated_cad_ir",
+        "run_ir_pipeline",
         "record_lineage",
     ]
+    assert report["reviewed_part_single_create"]["workflow_mode"] == "agent_ir_synthesis"
     assert trace["reviewed_part_single_create"]["part_id"] == "base"
 
 
 def test_reviewed_part_single_create_non_ready_handoff_does_not_execute(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
-    called = {"normalized_create": False}
-
-    def fake_normalized_create(*args, **kwargs):
-        called["normalized_create"] = True
-        raise AssertionError("non-ready handoff must not execute")
-
-    monkeypatch.setattr(pipeline_runner, "run_provider_normalized_create_pipeline", fake_normalized_create)
     handoff = _valid_reviewed_part_handoff()
     handoff["status"] = "blocked_review_not_approved"
     adapter = JsonContractAgentAdapter(OperationFakeJsonContractClient({}))
@@ -3482,7 +3511,7 @@ def test_reviewed_part_single_create_non_ready_handoff_does_not_execute(tmp_path
     result = run_reviewed_part_single_create_pipeline(handoff, adapter, output_dir=output_dir)
 
     assert result["status"] == "blocked_handoff_not_ready"
-    assert called["normalized_create"] is False
+    assert adapter.last_provider_request_trace is None
     assert (output_dir / "reviewed_part_handoff.json").exists()
     assert (output_dir / "report.json").exists()
     assert (output_dir / "agent_trace.json").exists()
@@ -3525,13 +3554,6 @@ def test_reviewed_part_single_create_rejects_reference_blocked_and_incomplete_ha
     expected_code,
 ):
     monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
-    called = {"normalized_create": False}
-
-    def fake_normalized_create(*args, **kwargs):
-        called["normalized_create"] = True
-        raise AssertionError("unsafe handoff must not execute")
-
-    monkeypatch.setattr(pipeline_runner, "run_provider_normalized_create_pipeline", fake_normalized_create)
     handoff = {**_valid_reviewed_part_handoff(), **handoff_update}
     adapter = JsonContractAgentAdapter(OperationFakeJsonContractClient({}))
 
@@ -3542,7 +3564,7 @@ def test_reviewed_part_single_create_rejects_reference_blocked_and_incomplete_ha
     )
 
     assert result["status"] == expected_status
-    assert called["normalized_create"] is False
+    assert adapter.last_provider_request_trace is None
     assert expected_code in result["diagnostic_codes"]
     assert not (Path(result["output_dir"]) / "part_execution_request.json").exists()
     assert not (Path(result["output_dir"]) / "input_ir.json").exists()
@@ -3565,13 +3587,6 @@ def test_reviewed_part_single_create_rejects_provider_fields_and_assembly_reques
     expected_code,
 ):
     monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
-    called = {"normalized_create": False}
-
-    def fake_normalized_create(*args, **kwargs):
-        called["normalized_create"] = True
-        raise AssertionError("unsafe handoff must not execute")
-
-    monkeypatch.setattr(pipeline_runner, "run_provider_normalized_create_pipeline", fake_normalized_create)
     handoff = {**_valid_reviewed_part_handoff(), **extra}
     adapter = JsonContractAgentAdapter(OperationFakeJsonContractClient({}))
     output_dir = tmp_path / "outputs" / expected_status
@@ -3584,7 +3599,7 @@ def test_reviewed_part_single_create_rejects_provider_fields_and_assembly_reques
         "trace": json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8")),
     }, sort_keys=True)
     assert result["status"] == expected_status
-    assert called["normalized_create"] is False
+    assert adapter.last_provider_request_trace is None
     assert expected_code in result["diagnostic_codes"]
     assert "secret provider payload" not in serialized_outputs
     assert "python_code" not in serialized_outputs
@@ -3596,17 +3611,13 @@ def test_reviewed_part_single_create_outputs_do_not_leak_paths_secrets_or_provid
     monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
     fake_client = OperationFakeJsonContractClient({
-        "parse_requirement": {
-            "part_type": "mounting_plate",
+        "create_part_ir": {
+            "part_type": "enclosure_base",
+            "part_name": "single_part_base",
             "unit": "mm",
-            "dimensions": {"length": 80, "width": 40, "thickness": 5},
-            "features": {"holes": {"count": 4, "diameter": 4.5, "positions": "corner_4"}},
-        },
-        "create_plan": {
-            "artifact_type": "plan",
-            "route": {},
-            "selected_parts": [],
-            "flow_gate_status": {},
+            "dimensions": {"outer_length": 80, "outer_width": 50, "outer_height": 18, "wall_thickness": 2},
+            "features": {},
+            "outputs": ["step", "stl"],
         },
     }, provider_identity={"provider": "fake/json", "api_key": "secret"})
     adapter = JsonContractAgentAdapter(fake_client)
@@ -3626,6 +3637,72 @@ def test_reviewed_part_single_create_outputs_do_not_leak_paths_secrets_or_provid
     assert "secret" not in serialized_outputs
     assert "messages" not in serialized_outputs
     assert "raw_response" not in serialized_outputs
+
+
+def test_reviewed_part_agent_ir_invalid_upper_link_blocks_without_mounting_plate_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    handoff = {
+        **_valid_reviewed_part_handoff(),
+        "part_id": "upper_link",
+        "part_brief": "Second printable robotic arm link; recommended single-part smoke target.",
+        "interface_constraints": [{"kind": "pin_joint", "related_part_id": "lower_link"}],
+        "preserved_assembly_context": {"related_parts": ["lower_link", "gripper_mount"], "arm_reach_mm": 220},
+    }
+    output_dir = tmp_path / "outputs" / "upper_link_agent_ir"
+
+    result = run_reviewed_part_agent_ir_create_pipeline(
+        handoff,
+        DeterministicAgentAdapter(),
+        output_dir=output_dir,
+    )
+
+    assert result["status"] == "blocked_cad_ir_validation"
+    assert result["blocked_stage"] == "cad_ir_validation"
+    draft = json.loads((output_dir / "cad_ir_draft.json").read_text(encoding="utf-8"))
+    report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
+    trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
+    assert draft["part_type"] == "upper_link"
+    assert "mounting_plate" not in json.dumps({"draft": draft, "report": report, "trace": trace})
+    assert not (output_dir / "single_part_upper_link" / "input_ir.json").exists()
+    assert not (output_dir / "single_part_upper_link" / "model.step").exists()
+    assert trace["reviewed_part_single_create"]["stages"] == [
+        "load_reviewed_part_handoff",
+        "validate_review_gate",
+        "compile_single_part_execution_request",
+        "create_part_ir",
+        "validate_agent_generated_cad_ir",
+        "record_lineage",
+    ]
+
+
+def test_reviewed_part_agent_ir_bypass_output_blocks_without_writing_draft(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+
+    class BypassPartIrAdapter(DeterministicAgentAdapter):
+        def create_part_ir(self, reviewed_part_handoff, context=None):
+            return {
+                "part_type": "spacer",
+                "dimensions": {"outer_diameter": 12, "inner_diameter": 5, "thickness": 8},
+                "python_code": "print('bypass')",
+            }
+
+    output_dir = tmp_path / "outputs" / "bypass_part_ir"
+    result = run_reviewed_part_single_create_pipeline(
+        _valid_reviewed_part_handoff(),
+        BypassPartIrAdapter(),
+        output_dir=output_dir,
+    )
+
+    serialized = json.dumps({
+        "result": result,
+        "report": json.loads((output_dir / "report.json").read_text(encoding="utf-8")),
+        "trace": json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8")),
+    }, sort_keys=True)
+    assert result["status"] == "blocked_cad_ir_validation"
+    assert result["error_category"] == "adapter_bypass_rejected"
+    assert not (output_dir / "cad_ir_draft.json").exists()
+    assert "python_code" not in serialized
+    assert "print('bypass')" not in serialized
 
 
 def _write_part_result_child_run(
@@ -3862,11 +3939,13 @@ def test_reviewed_part_handoff_exports_are_available():
     assert pipeline.review_part_result is review_part_result
     assert pipeline.run_reviewed_part_handoff_pipeline is run_reviewed_part_handoff_pipeline
     assert pipeline.run_reviewed_part_single_create_pipeline is run_reviewed_part_single_create_pipeline
+    assert pipeline.run_reviewed_part_agent_ir_create_pipeline is run_reviewed_part_agent_ir_create_pipeline
     assert pipeline.run_part_result_review_pipeline is run_part_result_review_pipeline
     assert "create_reviewed_part_handoff" in pipeline.__all__
     assert "review_part_result" in pipeline.__all__
     assert "run_reviewed_part_handoff_pipeline" in pipeline.__all__
     assert "run_reviewed_part_single_create_pipeline" in pipeline.__all__
+    assert "run_reviewed_part_agent_ir_create_pipeline" in pipeline.__all__
     assert "run_part_result_review_pipeline" in pipeline.__all__
 
 
@@ -4492,6 +4571,14 @@ def test_json_contract_agent_adapter_supports_all_contract_operations_with_fake_
     fake_client = OperationFakeJsonContractClient({
         "parse_requirement": _valid_requirement_json(),
         "create_plan": _valid_planning_json(),
+        "create_part_ir": {
+            "part_type": "spacer",
+            "part_name": "single_part_spacer",
+            "unit": "mm",
+            "dimensions": {"outer_diameter": 12, "inner_diameter": 6, "thickness": 4},
+            "features": {},
+            "outputs": ["step", "stl"],
+        },
         "parse_revision_request": _valid_revision_intent(),
         "create_revision_plan": _valid_revision_plan(),
         "suggest_repair": _valid_repair_json(),
@@ -4501,18 +4588,21 @@ def test_json_contract_agent_adapter_supports_all_contract_operations_with_fake_
 
     requirement = adapter.parse_requirement("Make a spacer washer.")
     planning = adapter.create_plan(requirement)
+    part_ir = adapter.create_part_ir({"part_id": "spacer", "status": "ready_for_single_part_planning"})
     change_intent = adapter.parse_revision_request("Increase the thickness to 8 mm.", {"current_ir": _valid_ir()})
     revision_plan = adapter.create_revision_plan(change_intent, {"current_ir": _valid_ir()})
     repair = adapter.suggest_repair({"affected_feature": "holes"}, _valid_ir())
     review = adapter.explain_review({"status": "success"}, {"total_attempts": 1})
 
     assert planning["artifact_type"] == "planning"
+    assert part_ir["part_type"] == "spacer"
     assert revision_plan["artifact_type"] == "revision_plan"
     assert repair["repair"]["strategy"] == "increase_spacing"
     assert review["status"] == "success"
     assert [request["operation"] for request in fake_client.requests] == [
         "parse_requirement",
         "create_plan",
+        "create_part_ir",
         "parse_revision_request",
         "create_revision_plan",
         "suggest_repair",
@@ -4583,6 +4673,7 @@ def test_agent_adapter_exposes_llm_shaped_planning_without_direct_execution_surf
     assert "propose_design_brief" in public_methods
     assert "generate_candidate_plans" in public_methods
     assert "convert_plan_to_ir" in public_methods
+    assert "create_part_ir" in public_methods
     assert "parse_revision_request" in public_methods
     assert "create_revision_plan" in public_methods
 
@@ -4621,9 +4712,18 @@ def test_adapter_validation_dispatch_accepts_all_deterministic_operations():
         },
     )
     review = adapter.explain_review({"status": "success", "success": True, "part_name": "spacer"}, {"total_attempts": 1})
+    part_ir = {
+        "part_type": "spacer",
+        "part_name": "single_part_spacer",
+        "unit": "mm",
+        "dimensions": {"outer_diameter": 12, "inner_diameter": 6, "thickness": 4},
+        "features": {},
+        "outputs": ["step", "stl"],
+    }
 
     validate_adapter_result("parse_requirement", requirement)
     validate_adapter_result("create_plan", planning)
+    validate_adapter_result("create_part_ir", part_ir)
     validate_adapter_result("suggest_repair", repair)
     validate_adapter_result("explain_review", review)
 

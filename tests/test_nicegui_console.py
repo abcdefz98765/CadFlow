@@ -15,14 +15,19 @@ from ai_native_cad.workflow_console.nicegui_app import (
     build_console_page_data,
     build_part_workflow_data,
     build_requirement_review_data,
+    build_workflow_review_surface,
     build_stage_review_data,
     build_workflow_review_data,
     build_artifacts_page_data,
     read_artifact_page_content,
     WORK_USER_PAGES,
     _part_viewer_url,
+    _save_artifact_override_ui,
 )
 from ai_native_cad.workflow_console.routes import dispatch_route
+from ai_native_cad.workflow_console.review_surface import REVIEW_SURFACE_ARTIFACTS
+from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
+from ai_native_cad.workflow_console.actions import WorkflowConsoleActions
 
 
 def _write_json(path: Path, value):
@@ -65,7 +70,38 @@ def _sample_run(tmp_path):
             "dimensions": {},
             "assumptions": ["Use millimeters."],
             "missing_information": [{"field": "mounting", "message": "Mounting style not specified."}],
-            "clarification_questions": ["Should the lid snap on?"],
+            "follow_up_questions": ["Should the lid snap on?"],
+            "requirement_status": {
+                "flow_decision": {"action": "ask_user", "to_stage": "requirement"},
+            },
+            "diagnostic_codes": ["requirement.needs_mounting"],
+        },
+    )
+    _write_json(
+        run_dir / "requirement_v2.json",
+        {
+            "part_type": "enclosure",
+            "part_family": "housing",
+            "intent": {"scope": "multi_part", "object_goal": "desktop enclosure"},
+            "assumptions": ["Use millimeters."],
+            "missing_information": [],
+            "follow_up_questions": [],
+            "requirement_status": {
+                "flow_decision": {"action": "proceed_with_assumptions", "to_stage": "planning"},
+            },
+            "clarification_applied": True,
+        },
+    )
+    _write_json(
+        run_dir / "planning_artifact.json",
+        {
+            "artifact_type": "planning",
+            "route": {"selected": "assembly_split"},
+            "flow_gate_status": {
+                "status": "ready_for_review",
+                "blocking_reasons": [{"code": "assembly_requires_review"}],
+                "rework_decision": {"action": "return_to_requirement"},
+            },
         },
     )
     _write_json(
@@ -104,6 +140,13 @@ def _sample_run(tmp_path):
     )
     _write_json(run_dir / "02_part_request" / "part_create_request.json", {"part_id": "base", "status": "ready_for_review"})
     _write_json(run_dir / "03_review" / "part_request_review.json", {"status": "approved"})
+    _write_json(run_dir / "04_handoff" / "reviewed_part_handoff.json", {"part_id": "base", "status": "ready_for_single_part_planning"})
+    _write_json(run_dir / "05_single_create" / "part_execution_request.json", {"part_id": "base", "status": "ready"})
+    _write_json(run_dir / "05_single_create" / "cad_ir_draft.json", {"part_type": "upper_link", "diagnostic_codes": ["cad_ir.unsupported_part_type"]})
+    _write_json(
+        run_dir / "05_single_create" / "report.json",
+        {"status": "blocked_cad_ir_validation", "blocked_stage": "cad_ir_validation", "errors": [{"code": "unsupported_part_type"}]},
+    )
     _write_json(run_dir / "agent_trace.json", {"raw_provider_response": "SECRET_TOKEN", "safe": "ok", "path": str(tmp_path)})
     (run_dir / "model.step").write_text("STEP\n", encoding="utf-8")
     return run_dir
@@ -568,6 +611,34 @@ def test_nicegui_requirement_review_handles_missing_fields_gracefully(tmp_path):
     assert review["blocked_reason"] is None
 
 
+def test_nicegui_requirement_review_exposes_clarification_state(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_run_by_id("arm_ui", "Design a desktop 2 DOF robotic arm with a gripper and servo.")
+    backend.run_stage_by_id("arm_ui", "requirement")
+
+    before = build_console_page_data(backend, "arm_ui")["requirement_review"]
+
+    assert before["requirement_v2_present"] is False
+    assert before["can_run_planning"] is False
+    assert {item["field"] for item in before["clarification_requests"]} >= {"arm_reach_mm", "payload_mass_g"}
+
+    backend.apply_requirement_clarification_by_id(
+        "arm_ui",
+        answers=[
+            {"field": "arm_reach_mm", "question": "Reach?", "answer": "220 mm"},
+            {"field": "payload_mass_g", "question": "Payload?", "answer": "80 g"},
+            {"field": "servo_envelope", "question": "Servo?", "answer": "SG90"},
+            {"field": "gripper_opening_mm", "question": "Opening?", "answer": "35 mm"},
+        ],
+    )
+    after = build_console_page_data(backend, "arm_ui")["requirement_review"]
+
+    assert after["requirement_v2_present"] is True
+    assert after["clarification_applied"] is True
+    assert after["can_run_planning"] is True
+    assert after["clarification_requests"] == []
+
+
 def test_nicegui_stage_review_view_model_handles_empty_and_saved_states(tmp_path):
     _sample_run(tmp_path)
     backend = WorkflowConsoleBackend(project_root=tmp_path)
@@ -710,6 +781,110 @@ def test_nicegui_part_workflow_actions_are_gated_by_upstream_artifacts(tmp_path)
     assert workflow["actions"][1]["missing_upstream_artifacts"] == ["part_create_request.json"]
 
 
+def test_nicegui_workflow_review_surface_summarizes_requirement_planning_and_reviewed_part(tmp_path):
+    _sample_run(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    data = build_console_page_data(backend, "nicegui_run", active_page="workflow")
+
+    surface = data["workflow_review_surface"]
+    stages = {stage["key"]: stage for stage in surface["stages"]}
+    requirement = stages["requirement"]["report_summary"]
+    planning = stages["planning"]["report_summary"]
+    part_modeling = stages["part_modeling"]["report_summary"]
+
+    assert surface["primary_concept"] == "Workflow / Stage / Review"
+    assert surface["debug_graph_label"] == "Debug / Raw Workflow Graph"
+    assert "OpenNode" not in json.dumps(surface)
+    assert requirement["requirement_source"] == "requirement_v2.json"
+    assert requirement["part_type"] == "enclosure"
+    assert requirement["part_family"] == "housing"
+    assert requirement["intent_scope"] == "multi_part"
+    assert requirement["object_goal"] == "desktop enclosure"
+    assert requirement["assumptions"] == ["Use millimeters."]
+    assert requirement["missing_information"] == []
+    assert requirement["flow_decision"]["action"] == "proceed_with_assumptions"
+    assert planning["requirement_source"] == "requirement_v2.json"
+    assert planning["route"] == "assembly_split"
+    assert planning["candidate_parts"] == ["base"]
+    assert planning["reference_components"] == ["screws"]
+    assert planning["supported_candidate"] is True
+    assert part_modeling["blocked_cad_ir_validation"]["blocked_stage"] == "cad_ir_validation"
+    assert part_modeling["child_input_ir_status"] == "absent"
+    assert part_modeling["model_step_status"] == "absent"
+    assert part_modeling["model_stl_status"] == "absent"
+
+
+def test_nicegui_workflow_review_surface_actions_and_artifacts_are_allowlisted(tmp_path):
+    _sample_run(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    data = build_console_page_data(backend, "nicegui_run", active_page="workflow")
+
+    surface = build_workflow_review_surface(backend, "nicegui_run", data["selected_run"])
+    stages = {stage["key"]: stage for stage in surface["stages"]}
+    planning_actions = {action["key"]: action for action in stages["planning"]["available_actions"]}
+    requirement_actions = {action["key"]: action for action in stages["requirement"]["available_actions"]}
+    artifacts = {artifact["name"] for artifact in surface["artifact_viewer"]["artifacts"]}
+
+    assert planning_actions["create_part_request"]["enabled"] is True
+    assert requirement_actions["mark_needs_revision"]["enabled"] is False
+    assert "target rework stage" in requirement_actions["mark_needs_revision"]["disabled_reason"]
+    assert "cad_ir_draft.json" in artifacts
+    assert "logs/runtime.json" not in artifacts
+    assert surface["artifact_viewer"]["arbitrary_browsing"] is False
+    assert set(surface["artifact_viewer"]["allowlist"]) <= READABLE_ARTIFACTS
+
+
+def test_nicegui_workflow_review_surface_shows_artifact_edit_availability_and_override(tmp_path):
+    _sample_run(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    run_dir = tmp_path / "outputs" / "nicegui_run"
+    assembly_override = {
+        "artifact_type": "assembly_plan",
+        "scope": "multi_part",
+        "parts": [{"part_id": "override_base", "supported_candidate": True}],
+    }
+    backend.write_artifact_by_id("nicegui_run", "assembly_plan.json", assembly_override)
+
+    data = build_console_page_data(backend, "nicegui_run", active_page="workflow")
+    artifacts = {item["name"]: item for item in data["workflow_review_surface"]["artifact_viewer"]["artifacts"]}
+    stages = {stage["key"]: stage for stage in data["workflow_review_surface"]["stages"]}
+
+    assert (run_dir / "01_design" / "assembly_plan.json").exists()
+    assert (run_dir / "edits" / "assembly_plan.edit_001.json").exists()
+    assert artifacts["assembly_plan.json"]["editable"] is True
+    assert artifacts["assembly_plan.json"]["source"] == "user_override"
+    assert artifacts["assembly_plan.json"]["override_present"] is True
+    assert artifacts["assembly_plan.json"]["validation_status"] == "valid"
+    assert "part_request" in artifacts["assembly_plan.json"]["downstream_stages_affected"]
+    assert artifacts["report.json"]["editable"] is False
+    assert "report" in artifacts["report.json"]["edit_disabled_reason"].lower()
+    assert stages["assembly_plan"]["status"] == "user_modified"
+
+
+def test_nicegui_artifact_override_editor_rejects_invalid_json_before_backend(tmp_path):
+    _sample_run(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    actions = WorkflowConsoleActions(backend)
+    state = {}
+    calls = []
+
+    _save_artifact_override_ui(
+        actions,
+        "nicegui_run",
+        "assembly_plan.json",
+        "{not-json",
+        "bad edit",
+        state,
+        "result",
+        lambda: calls.append("refresh"),
+    )
+
+    assert state["result"]["ok"] is False
+    assert state["result"]["diagnostic_code"] == "artifact_override.invalid_json"
+    assert calls == ["refresh"]
+    assert not (tmp_path / "outputs" / "nicegui_run" / "edits").exists()
+
+
 def test_nicegui_exposes_no_batch_all_part_or_assembly_action():
     action_text = json.dumps(REVIEWED_PART_ACTIONS, sort_keys=True)
 
@@ -734,7 +909,7 @@ def test_nicegui_artifact_page_uses_existing_allowlist_and_sanitization(tmp_path
     debug_names = {item["name"] for item in build_artifacts_page_data(data["selected_run"], show_debug=True)["artifacts"]}
     content = read_artifact_page_content(backend, "nicegui_run", "agent_trace.json")
 
-    assert artifact_names <= set(ARTIFACT_PAGE_ARTIFACTS) | {"planning_artifact.json", "input_ir.json"}
+    assert artifact_names <= set(ARTIFACT_PAGE_ARTIFACTS) | set(REVIEW_SURFACE_ARTIFACTS)
     assert "agent_trace.json" not in artifact_names
     assert "agent_trace.json" in debug_names
     assert content["content"] == {"safe": "ok"}

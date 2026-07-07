@@ -257,6 +257,10 @@
 
 后续任务：
 
+- Add first robotic-arm candidate single-part CAD template, preferably
+  `upper_link` or `servo_bracket`; this is the next capability after the
+  Desktop 2DOF Robot Arm smoke repair and must not imply full robot arm
+  assembly generation.
 - 增加 requirement-only contract/golden cases，验证规范 `requirement.json` 的字段完整性、缺失信息和追问请求。
 - 扩展确定性抽取覆盖更多尺寸表达、孔位表达、厚度表达、单位和输出格式组合。
 - 扩展 CAD Brief 对复杂输入的覆盖：记录建模意图、坐标约定、假设、冲突和验证目标，并持续保持 CAD IR 为生成 source of truth。

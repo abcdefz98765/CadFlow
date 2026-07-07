@@ -39,6 +39,13 @@ class AgentAdapter(Protocol):
     def convert_plan_to_ir(self, selected_plan: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return CAD IR for the selected plan."""
 
+    def create_part_ir(
+        self,
+        reviewed_part_handoff: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return CAD IR for one reviewed part handoff."""
+
     def parse_revision_request(
         self,
         prompt: str,

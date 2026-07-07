@@ -63,8 +63,8 @@ without inventing a separate state store.
 
 ### Provider Normalized Create Pipeline
 
-`run_provider_normalized_create_pipeline(...)` is the recommended
-provider-backed create workflow option.
+`run_provider_normalized_create_pipeline(...)` is the conservative
+provider-backed extraction/compile fallback and evaluation workflow option.
 
 ```text
 prompt
@@ -74,6 +74,10 @@ prompt
   -> run_ir_pipeline(...)
   -> report.json/report.md/agent_trace.json
 ```
+
+It is not the primary Web reviewed-part CAD entry. Reviewed-part create uses
+`AgentAdapter.create_part_ir(...)` to synthesize CAD IR from
+`reviewed_part_handoff.json`, then validates that IR before Part Modeling.
 
 This path is explicit `extract_then_compile` mode. The provider extracts
 structured intent, fields, and constraints; CadFlow compiles and validates
@@ -194,14 +198,17 @@ is still planning-only and does not call `run_ir_pipeline(...)`, write
 bridge from a reviewed assembly-derived part handoff into CAD generation. It
 accepts exactly one `reviewed_part_handoff.json`, requires status
 `ready_for_single_part_planning`, compiles a local `part_execution_request.json`,
-then calls the existing `run_provider_normalized_create_pipeline(...)` for one
-child single-part run directory. The bridge writes `lineage.json`,
-`report.json`, `report.md`, and `agent_trace.json` that link back to
+then calls `AgentAdapter.create_part_ir(...)`, validates the returned CAD IR with
+`validate_input_ir_draft(...)` and `validate_ir(...)`, and only then calls
+`run_ir_pipeline(...)` for one child single-part run directory. The bridge
+writes `lineage.json`, `report.json`, `report.md`, and `agent_trace.json` that link back to
 `assembly_plan.json`, `part_create_request.json`, `part_request_review.json`,
 and `reviewed_part_handoff.json`. Non-ready, unsafe, reference-only, blocked,
 unsupported, multi-part, or assembly-shaped handoffs are blocked before provider
-or CAD execution. This bridge does not batch parts, generate assemblies, solve
-assembly constraints, or export STEP assemblies.
+or CAD execution. Agent-generated unsupported IR blocks at
+`cad_ir_validation`; the bridge must not silently fall back to an unrelated
+template such as `mounting_plate`. This bridge does not batch parts, generate
+assemblies, solve assembly constraints, or export STEP assemblies.
 
 `run_part_result_review_pipeline(...)` is a local deterministic review of that
 one child single-part run. It consumes `reviewed_part_handoff.json`, the child

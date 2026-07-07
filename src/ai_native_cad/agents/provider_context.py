@@ -37,6 +37,11 @@ _STAGE_SKILL_GUIDES = {
         "Stage skill: planning. Convert a validated requirement into a planning_artifact.json "
         "handoff with selected parts, resolved decisions, gate status, and no direct CAD execution."
     ),
+    "cad_ir": (
+        "Stage skill: cad_ir. Synthesize backend-neutral input_ir.json from reviewed planning "
+        "handoffs. Return CAD IR only; never return CadQuery code, Python code, shell commands, "
+        "provider payloads, transcripts, or local paths."
+    ),
     "revision": (
         "Stage skill: revision. Convert user revision intent and parent model context into "
         "field-level structured changes or a revision plan. Use explicit CAD field paths only "
@@ -55,6 +60,7 @@ _STAGE_SKILL_GUIDES = {
 _OPERATION_STAGE = {
     "parse_requirement": "requirement",
     "create_plan": "planning",
+    "create_part_ir": "cad_ir",
     "parse_revision_request": "revision",
     "create_revision_plan": "revision",
     "suggest_repair": "repair / part_modeling",
@@ -81,6 +87,13 @@ _CONTRACT_GUIDES = {
         "route, selected_parts, and flow_gate_status. Each selected part includes part_name, "
         "generation_order, resolved, and resolved_decisions with part_type, unit, dimensions, "
         "features, outputs, and check_level."
+    ),
+    "create_part_ir": (
+        "Operation contract: create_part_ir. Return input_ir.json CAD IR as a JSON object with "
+        "part_type, part_name, unit='mm', dimensions, features, outputs, and optional source. "
+        "The output must describe exactly one reviewed part from the handoff. It must not include "
+        "CadQuery code, Python code, shell commands, local paths, raw provider messages, or "
+        "multi-part/assembly generation instructions."
     ),
     "parse_revision_request": (
         "Operation contract: parse_revision_request. Return revision_intent JSON describing the "
@@ -124,6 +137,17 @@ _KNOWLEDGE = {
             "summary": (
                 "Planning MVP supports simple deterministic part families such as spacer, mounting_plate, "
                 "and simple_bracket, and hands off resolved dimensions/features through selected_parts."
+            ),
+        }
+    ],
+    "create_part_ir": [
+        {
+            "id": "cad_ir_reviewed_part_contract",
+            "source": "skills/part_modeling/knowledge/",
+            "summary": (
+                "Reviewed-part create enters CAD through agent-produced CAD IR. The IR is validated "
+                "locally before Part Modeling; unsupported part families should block at CAD IR "
+                "validation rather than falling back to an unrelated template."
             ),
         }
     ],

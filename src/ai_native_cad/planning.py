@@ -53,8 +53,9 @@ def create_planning_artifact(requirement: dict[str, Any]) -> dict[str, Any]:
         template_candidates=template_candidates,
         review_targets=review_targets,
     )
+    assembly_planning = _assembly_planning(requirement, route, blocking_reasons)
 
-    return {
+    artifact = {
         "artifact_type": "planning",
         "version": PLANNING_ARTIFACT_VERSION,
         "route": route,
@@ -72,6 +73,67 @@ def create_planning_artifact(requirement: dict[str, Any]) -> dict[str, Any]:
             "requirement_part_type": requirement.get("part_type"),
             "requirement_check_level": requirement.get("check_level", "L0"),
         },
+    }
+    if assembly_planning:
+        artifact["assembly_planning"] = assembly_planning
+    return artifact
+
+
+def assembly_plan_from_planning_artifact(planning_artifact: dict[str, Any]) -> dict[str, Any] | None:
+    """Build a minimal reviewed-part bridge assembly plan without entering CAD IR."""
+    assembly = planning_artifact.get("assembly_planning")
+    if not isinstance(assembly, dict) or not assembly.get("parts"):
+        return None
+    parts = deepcopy(assembly.get("parts", []))
+    reference_components = deepcopy(assembly.get("reference_components", []))
+    all_parts = parts + reference_components
+    interfaces = deepcopy(assembly.get("interfaces", []))
+    fasteners = deepcopy(assembly.get("fasteners", []))
+    quality = {
+        "assembly_plan_count": 1,
+        "part_count": len(all_parts),
+        "interface_count": len(interfaces),
+        "fastener_count": len(fasteners),
+        "risk_note_count": len(planning_artifact.get("risk_notes", []))
+        if isinstance(planning_artifact.get("risk_notes"), list)
+        else 0,
+        "part_candidate_count": sum(1 for part in all_parts if part.get("supported_candidate") is True),
+        "part_reference_only_count": sum(1 for part in all_parts if part.get("part_status") == "reference_only"),
+        "part_blocked_count": sum(1 for part in all_parts if part.get("part_status") == "blocked"),
+        "part_generation_strategy_counts": _count_values(all_parts, "generation_strategy"),
+        "part_status_counts": _count_values(all_parts, "part_status"),
+        "blocked_reason_codes": ["assembly_generation_not_supported_yet"],
+    }
+    return {
+        "artifact_type": "assembly_plan",
+        "schema_version": "0.1",
+        "scope": "assembly",
+        "status": "blocked_before_part_generation",
+        "source_artifact": "planning_artifact.json",
+        "selected_part_id": assembly.get("primary_candidate_part"),
+        "primary_candidate_part": assembly.get("primary_candidate_part"),
+        "parts": all_parts,
+        "interfaces": interfaces,
+        "fasteners": fasteners,
+        "risk_notes": deepcopy(planning_artifact.get("risk_notes", [])),
+        "blocked_reasons": [{
+            "code": "assembly_generation_not_supported_yet",
+            "message": "Full assembly CAD, constraint solving, fit validation, and motion simulation are outside the current MVP.",
+        }],
+        "unsupported": [
+            "full_assembly_cad",
+            "constraint_solve",
+            "fit_validation",
+            "motion_simulation",
+            "automatic_all_part_generation",
+        ],
+        "diagnostic_codes": [
+            "assembly.plan_created",
+            "assembly.parts_detected",
+            "assembly.generation_not_supported_yet",
+            "assembly.reviewed_part_bridge_available",
+        ],
+        "quality": quality,
     }
 
 
@@ -222,6 +284,109 @@ def _review_targets(requirement: dict[str, Any]) -> list[dict[str, Any]]:
     return deepcopy(requirement.get("cad_brief", {}).get("validation_targets", []))
 
 
+def _assembly_planning(
+    requirement: dict[str, Any],
+    route: dict[str, Any],
+    blocking_reasons: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not _is_robotic_arm_assembly(requirement):
+        return None
+    complete = requirement.get("requirement_status", {}).get("complete_for_generation") is True
+    if not complete:
+        return None
+    primary = _primary_robotic_arm_candidate(requirement)
+    parts = [
+        _robot_arm_candidate("base", "desktop base and first joint support"),
+        _robot_arm_candidate("lower_link", "first printable arm link"),
+        _robot_arm_candidate("upper_link", "second printable arm link; recommended single-part smoke target"),
+        _robot_arm_candidate("shoulder_servo_bracket", "servo-ready shoulder joint bracket"),
+        _robot_arm_candidate("elbow_servo_bracket", "servo-ready elbow joint bracket"),
+        _robot_arm_candidate("gripper_mount", "simple end-effector mounting plate"),
+    ]
+    return {
+        "scope": "assembly",
+        "status": "candidate_parts_planned" if route.get("selected") == "assembly_loop" else "confirmation_needed",
+        "primary_candidate_part": primary,
+        "parts": parts,
+        "interfaces": _robot_arm_interfaces(),
+        "fasteners": [],
+        "reference_components": [
+            _robot_arm_reference("reference_servo", "reference hobby servo envelope only"),
+            _robot_arm_reference("reference_gripper", "reference gripper or target object envelope only"),
+        ],
+        "unsupported": [
+            "full_assembly_cad",
+            "constraint_solve",
+            "fit_validation",
+            "motion_simulation",
+            "automatic_all_part_generation",
+        ],
+        "notes": [
+            "Planning decomposes robot arm product intent for reviewed single-part follow-up.",
+            "Full assembly CAD and all-part generation remain unsupported in this MVP.",
+        ],
+        "blocking_reason_codes": [reason.get("code") for reason in blocking_reasons if reason.get("code")],
+    }
+
+
+def _robot_arm_interfaces() -> list[dict[str, str]]:
+    return [
+        {
+            "from": "lower_link",
+            "to": "upper_link",
+            "kind": "pinned_joint",
+            "notes": "Preserve elbow pin or servo horn alignment features for reviewed single-part planning.",
+        },
+        {
+            "from": "upper_link",
+            "to": "gripper_mount",
+            "kind": "pinned_joint",
+            "notes": "Preserve wrist or gripper-mount pin alignment features for reviewed single-part planning.",
+        },
+    ]
+
+
+def _is_robotic_arm_assembly(requirement: dict[str, Any]) -> bool:
+    return (
+        requirement.get("part_type") == "robotic_arm"
+        and requirement.get("part_family") == "assembly"
+        and requirement.get("intent", {}).get("scope") == "assembly"
+    )
+
+
+def _primary_robotic_arm_candidate(requirement: dict[str, Any]) -> str:
+    requested = requirement.get("features", {}).get("primary_generated_part")
+    if requested == "upper_arm_link":
+        return "upper_link"
+    if requested == "upper_link":
+        return str(requested)
+    return "upper_link"
+
+
+def _robot_arm_candidate(part_id: str, role: str) -> dict[str, Any]:
+    return {
+        "part_id": part_id,
+        "role": role,
+        "generation_strategy": "future_part_pipeline",
+        "part_status": "candidate_for_single_part_generation",
+        "supported_candidate": True,
+        "part_brief": role,
+        "blocked_reasons": [],
+    }
+
+
+def _robot_arm_reference(part_id: str, role: str) -> dict[str, Any]:
+    return {
+        "part_id": part_id,
+        "role": role,
+        "generation_strategy": "reference_only",
+        "part_status": "reference_only",
+        "supported_candidate": False,
+        "part_brief": role,
+        "blocked_reasons": [],
+    }
+
+
 def _modeling_order(selected_parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
@@ -335,3 +500,12 @@ def _flow_gate_status(gate_status: str, blocking_reasons: list[dict[str, Any]]) 
             blocking_reasons=blocking_reasons,
         ),
     }
+
+
+def _count_values(items: list[dict[str, Any]], field: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        value = item.get(field)
+        if isinstance(value, str):
+            counts[value] = counts.get(value, 0) + 1
+    return counts

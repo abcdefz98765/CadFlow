@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Any
 
 from ai_native_cad.agents import DeterministicAgentAdapter, JsonContractProviderError
 from ai_native_cad.agents import make_json_contract_adapter_from_env
+from ai_native_cad.agents.validation import (
+    validate_input_ir_draft,
+    validate_planning_draft,
+    validate_requirement_draft,
+)
 from ai_native_cad.cad_ir.validator import validate_ir
 from ai_native_cad.pipeline.runner import PROJECT_ROOT, run_agent_revision_pipeline
+from ai_native_cad.requirements import apply_requirement_clarification
 from ai_native_cad.workflow_console.stage_runner import (
     READABLE_ARTIFACTS,
     STATUS_BLOCKED,
@@ -38,14 +45,32 @@ WORKSPACE_CONFIG_NAME = "config.json"
 WORKSPACE_SCHEMA_VERSION = 1
 WORKSPACE_ADVANCEMENT_MODES = {"manual_confirm", "auto_advance"}
 DEFAULT_WORKSPACE_ADVANCEMENT_MODE = "manual_confirm"
-EDITABLE_ARTIFACTS = {"requirement.json", "planning_artifact.json", "input_ir.json"}
+EDITABLE_ARTIFACTS = {
+    "requirement_v2.json",
+    "planning_artifact.json",
+    "assembly_plan.json",
+    "part_create_request.json",
+    "02_part_request/part_create_request.json",
+    "part_request_review.json",
+    "03_review/part_request_review.json",
+    "reviewed_part_handoff.json",
+    "04_handoff/reviewed_part_handoff.json",
+    "cad_ir_draft.json",
+    "05_single_create/cad_ir_draft.json",
+    "input_ir.json",
+    "stage_review.json",
+}
 STAGED_READABLE_ARTIFACTS = {
     "assembly_plan.json": ("01_design/assembly_plan.json",),
     "part_create_request.json": ("02_part_request/part_create_request.json",),
     "part_request_review.json": ("03_review/part_request_review.json",),
     "reviewed_part_handoff.json": ("04_handoff/reviewed_part_handoff.json",),
     "part_execution_request.json": ("05_single_create/part_execution_request.json",),
+    "cad_ir_draft.json": ("05_single_create/cad_ir_draft.json",),
     "lineage.json": ("05_single_create/lineage.json",),
+    "report.json": ("05_single_create/report.json",),
+    "report.md": ("05_single_create/report.md",),
+    "agent_trace.json": ("05_single_create/agent_trace.json",),
     "part_result_review.json": ("06_part_result_review/part_result_review.json",),
 }
 STAGED_ARTIFACT_DIRS = {
@@ -625,7 +650,16 @@ class WorkflowConsoleBackend:
         if stage not in SUPPORTED_STAGES:
             raise ValueError(f"unsupported workflow console stage: {stage}")
         run_path = self._require_console_path(Path(run_dir))
+        context = dict(context or {})
+        override_used = None
+        if stage == "planning":
+            requirement_override = self.read_active_artifact_content(run_path, "requirement_v2.json")
+            if requirement_override is not None:
+                context["requirement"] = requirement_override
+                override_used = "requirement_v2.json"
         result = self.stage_runner.run_stage(stage, run_path, prompt=prompt, context=context)
+        if override_used is not None:
+            self._record_override_used(run_path, stage=stage, artifact=override_used)
         self.invalidate_work_index()
         return {"result": result, "run": self.read_run_metadata(run_path)}
 
@@ -735,6 +769,77 @@ class WorkflowConsoleBackend:
         self.invalidate_work_index()
         return {"decision": decision, "run": self.read_run_metadata(run_path)}
 
+    def apply_requirement_clarification_by_id(
+        self,
+        run_id: str,
+        answers: list[dict[str, Any]],
+        notes: str | None = None,
+        root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Write requirement_clarification.json and requirement_v2.json for a safe run id."""
+        run_path = self.resolve_run(run_id, root=root)
+        return self.apply_requirement_clarification(run_path, answers=answers, notes=notes)
+
+    def apply_requirement_clarification(
+        self,
+        run_dir: str | Path,
+        *,
+        answers: list[dict[str, Any]],
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply structured requirement answers without accepting free-form chat state."""
+        if not isinstance(answers, list):
+            raise ValueError("workflow console clarification answers must be a list")
+        _reject_secret_fields({"answers": answers, "notes": notes})
+        run_path = self._require_console_path(Path(run_dir))
+        requirement_path = self._require_child_path(run_path, "requirement.json")
+        requirement = _read_json_if_present(requirement_path)
+        if requirement is None:
+            raise FileNotFoundError("workflow console clarification requires requirement.json")
+        now = _now_timestamp()
+        safe_answers = [_safe_clarification_answer(item, index, now) for index, item in enumerate(answers, start=1)]
+        clarification = {
+            "schema_version": 1,
+            "source_requirement": "requirement.json",
+            "answers": safe_answers,
+            "notes": _safe_summary_text(notes) if notes is not None else None,
+            "created_at": now,
+        }
+        _write_json(self._require_child_path(run_path, "requirement_clarification.json"), clarification)
+        updated = apply_requirement_clarification(requirement, clarification)
+        _write_json(self._require_child_path(run_path, "requirement_v2.json"), updated)
+        self._record_clarification_applied(run_path, clarification, updated)
+        self.invalidate_work_index()
+        return {
+            "action": "apply_requirement_clarification",
+            "clarification": clarification,
+            "requirement": updated,
+            "run": self.read_run_metadata(run_path),
+        }
+
+    def _record_clarification_applied(
+        self,
+        run_path: Path,
+        clarification: dict[str, Any],
+        requirement: dict[str, Any],
+    ) -> None:
+        runtime_path = self._require_child_path(run_path, "logs/runtime.json")
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime = _read_json_if_present(runtime_path) or {}
+        console = runtime.setdefault("workflow_console", {})
+        history = console.setdefault("clarification_applied", [])
+        entry = {
+            "timestamp": _now_timestamp(),
+            "artifact": "requirement_clarification.json",
+            "updated_requirement": "requirement_v2.json",
+            "answer_count": len(clarification.get("answers", [])),
+            "flow_decision": requirement.get("requirement_status", {}).get("flow_decision"),
+        }
+        history.append(entry)
+        console["latest_clarification_applied"] = entry
+        console["clarification_applied_count"] = len(history)
+        _write_json(runtime_path, runtime)
+
     def resolve_run(self, run_id: str, root: str | Path | None = None) -> Path:
         """Resolve a run id under configured run roots without accepting paths."""
         self._require_safe_run_id(run_id)
@@ -798,6 +903,7 @@ class WorkflowConsoleBackend:
             "stage_review_summary": self.read_stage_review_summary(path),
             "rework_decision_summary": self.read_rework_decision_summary(path),
             "workflow_review_summary": self.read_workflow_review_summary(path),
+            "artifact_override_summary": self.read_artifact_override_summary(path),
             "child_runs": self.list_child_runs(path),
             "artifacts": self.list_artifacts(path),
             "downloadables": self.list_downloadables(path),
@@ -902,7 +1008,7 @@ class WorkflowConsoleBackend:
     def read_report_summary(self, run_dir: str | Path) -> dict[str, Any]:
         """Return a compact report/trace summary for the local console UI."""
         path = self._require_console_path(Path(run_dir))
-        requirement = _read_json_if_present(path / "requirement.json")
+        requirement = _read_json_if_present(path / "requirement_v2.json") or _read_json_if_present(path / "requirement.json")
         planning = _read_json_if_present(path / "planning_artifact.json")
         report = _read_json_if_present(path / "report.json")
         trace = _read_json_if_present(path / "agent_trace.json")
@@ -982,31 +1088,69 @@ class WorkflowConsoleBackend:
         artifact: str,
         content: dict[str, Any],
         root: str | Path | None = None,
+        edit_reason: str | None = None,
     ) -> dict[str, Any]:
         """Write an editable JSON artifact for a path-safe run id."""
-        return self.write_artifact(self.resolve_run(run_id, root=root), artifact, content)
+        return self.write_artifact(self.resolve_run(run_id, root=root), artifact, content, edit_reason=edit_reason)
 
     def write_artifact(
         self,
         run_dir: str | Path,
         artifact: str,
         content: dict[str, Any],
+        *,
+        edit_reason: str | None = None,
     ) -> dict[str, Any]:
-        """Validate and write an editable workflow JSON artifact."""
-        if artifact not in EDITABLE_ARTIFACTS:
+        """Validate and save an editable workflow JSON artifact as an override."""
+        canonical = _canonical_editable_artifact(artifact)
+        if canonical not in EDITABLE_ARTIFACTS:
             raise ValueError(f"artifact is not editable by the workflow console: {artifact}")
         if not isinstance(content, dict):
             raise ValueError(f"workflow console editable artifact must be a JSON object: {artifact}")
-        _validate_editable_artifact(artifact, content)
+        _validate_editable_artifact(canonical, content)
 
         run_path = self._require_console_path(Path(run_dir))
-        artifact_path = self._require_child_path(run_path, artifact)
-        _write_json(artifact_path, content)
-        edit = self._record_artifact_edit(run_path, artifact)
+        source_path = _first_existing_artifact_path(run_path, canonical)
+        if not source_path.exists():
+            raise FileNotFoundError(f"workflow console editable artifact source not found: {canonical}")
+        source_text = source_path.read_text(encoding="utf-8")
+        edit_index = self._next_artifact_edit_index(run_path, canonical)
+        edit_name = f"{_edit_artifact_token(canonical)}.edit_{edit_index:03d}.json"
+        edit_path = self._require_child_path(run_path, f"edits/{edit_name}")
+        active_path = self._active_override_path(run_path, canonical)
+        active_path.parent.mkdir(parents=True, exist_ok=True)
+        edit_path.parent.mkdir(parents=True, exist_ok=True)
+        now = _now_timestamp()
+        envelope = {
+            "schema_version": 1,
+            "artifact": canonical,
+            "source_artifact": canonical,
+            "created_at": now,
+            "created_by": "user",
+            "edit_reason": _safe_edit_reason(edit_reason),
+            "base_artifact_digest": _sha256_text(source_text),
+            "validation_status": "valid",
+            "active": True,
+            "content": content,
+        }
+        _write_json(edit_path, envelope)
+        _write_json(active_path, content)
+        edit = self._record_artifact_edit(
+            run_path,
+            canonical,
+            edit_artifact=f"edits/{edit_name}",
+            active_artifact=f"edits/active/{canonical}",
+            edit_reason=edit_reason,
+        )
         self.invalidate_work_index()
         return {
-            "artifact": self.read_artifact(run_path, artifact),
+            "artifact": {
+                "name": canonical,
+                "source": "user_override",
+                "content": _sanitize_public_artifact_content(content),
+            },
             "edit": edit,
+            "override": self.read_artifact_override_summary(run_path).get(canonical),
             "run": self.read_run_metadata(run_path),
         }
 
@@ -1015,16 +1159,88 @@ class WorkflowConsoleBackend:
         if artifact not in READABLE_ARTIFACTS:
             raise ValueError(f"artifact is not readable by the workflow console: {artifact}")
         run_path = self._require_console_path(Path(run_dir))
-        artifact_path = _first_existing_artifact_path(run_path, artifact)
+        canonical = _canonical_editable_artifact(artifact) if artifact in EDITABLE_ARTIFACTS else artifact
+        override_path = self.active_override_path(run_path, canonical) if canonical in EDITABLE_ARTIFACTS else None
+        artifact_path = override_path or _first_existing_artifact_path(run_path, artifact)
         if not artifact_path.exists():
             raise FileNotFoundError(str(artifact_path))
         text = artifact_path.read_text(encoding="utf-8")
         return {
             **_file_metadata(artifact, artifact_path),
+            "source": "user_override" if override_path is not None else "original",
             "content": json.loads(text) if artifact_path.suffix == ".json" else text,
         }
 
-    def _record_artifact_edit(self, run_path: Path, artifact: str) -> dict[str, Any]:
+    def _next_artifact_edit_index(self, run_path: Path, artifact: str) -> int:
+        token = _edit_artifact_token(artifact)
+        edits_dir = self._require_child_path(run_path, "edits")
+        if not edits_dir.exists():
+            return 1
+        highest = 0
+        for path in edits_dir.glob(f"{token}.edit_*.json"):
+            suffix = path.stem.rsplit("_", 1)[-1]
+            if suffix.isdigit():
+                highest = max(highest, int(suffix))
+        return highest + 1
+
+    def _active_override_path(self, run_path: Path, artifact: str) -> Path:
+        return self._require_child_path(run_path, f"edits/active/{artifact}")
+
+    def active_override_path(self, run_dir: str | Path, artifact: str) -> Path | None:
+        """Return the active override raw JSON path for an editable artifact."""
+        canonical = _canonical_editable_artifact(artifact)
+        run_path = self._require_console_path(Path(run_dir))
+        path = self._active_override_path(run_path, canonical)
+        return path if path.exists() else None
+
+    def read_active_artifact_content(self, run_dir: str | Path, artifact: str) -> dict[str, Any] | None:
+        """Read active override content for an editable artifact, if present."""
+        path = self.active_override_path(run_dir, artifact)
+        return _read_json_if_present(path) if path is not None else None
+
+    def read_artifact_override_summary(self, run_dir: str | Path) -> dict[str, Any]:
+        """Return path-free active override summaries keyed by canonical artifact."""
+        run_path = self._require_console_path(Path(run_dir))
+        active_root = self._require_child_path(run_path, "edits/active")
+        summaries: dict[str, Any] = {}
+        for canonical in sorted({_canonical_editable_artifact(item) for item in EDITABLE_ARTIFACTS}):
+            active_path = self._require_child_path(active_root, canonical)
+            if not active_path.exists():
+                continue
+            envelope = self._latest_edit_envelope(run_path, canonical)
+            summaries[canonical] = {
+                "present": True,
+                "artifact": canonical,
+                "source": "user_override",
+                "last_edited_at": envelope.get("created_at") if isinstance(envelope, dict) else None,
+                "validation_status": envelope.get("validation_status") if isinstance(envelope, dict) else "valid",
+                "edit_artifact": envelope.get("edit_artifact") if isinstance(envelope, dict) else None,
+                "downstream_stages_affected": _downstream_stages_for_override(canonical),
+            }
+        return summaries
+
+    def _latest_edit_envelope(self, run_path: Path, artifact: str) -> dict[str, Any] | None:
+        token = _edit_artifact_token(artifact)
+        edits_dir = self._require_child_path(run_path, "edits")
+        if not edits_dir.exists():
+            return None
+        candidates = sorted(edits_dir.glob(f"{token}.edit_*.json"))
+        if not candidates:
+            return None
+        envelope = _read_json_if_present(candidates[-1])
+        if isinstance(envelope, dict):
+            envelope["edit_artifact"] = f"edits/{candidates[-1].name}"
+        return envelope
+
+    def _record_artifact_edit(
+        self,
+        run_path: Path,
+        artifact: str,
+        *,
+        edit_artifact: str,
+        active_artifact: str,
+        edit_reason: str | None,
+    ) -> dict[str, Any]:
         runtime_path = self._require_child_path(run_path, "logs/runtime.json")
         runtime_path.parent.mkdir(parents=True, exist_ok=True)
         runtime = _read_json_if_present(runtime_path) or {}
@@ -1033,12 +1249,34 @@ class WorkflowConsoleBackend:
         edit = {
             "artifact": artifact,
             "timestamp": _now_timestamp(),
+            "source": "user_override",
+            "edit_artifact": edit_artifact,
+            "active_artifact": active_artifact,
+            "validation_status": "valid",
+            "edit_reason": _safe_edit_reason(edit_reason),
         }
         edits.append(edit)
         console["latest_artifact_edit"] = edit
         console["artifact_edit_count"] = len(edits)
         _write_json(runtime_path, runtime)
         return edit
+
+    def _record_override_used(self, run_path: Path, *, stage: str, artifact: str) -> None:
+        runtime_path = self._require_child_path(run_path, "logs/runtime.json")
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime = _read_json_if_present(runtime_path) or {}
+        console = runtime.setdefault("workflow_console", {})
+        usage = console.setdefault("override_usage", [])
+        entry = {
+            "stage": stage,
+            "artifact": artifact,
+            "source": "user_override",
+            "timestamp": _now_timestamp(),
+        }
+        usage.append(entry)
+        console["latest_override_usage"] = entry
+        console["override_usage_count"] = len(usage)
+        _write_json(runtime_path, runtime)
 
     def list_downloadables_by_id(self, run_id: str, root: str | Path | None = None) -> list[dict[str, Any]]:
         """List downloadable files for a path-safe run id."""
@@ -1056,7 +1294,7 @@ class WorkflowConsoleBackend:
     def read_run_status(self, run_dir: str | Path) -> dict[str, Any]:
         """Derive status from report.json and agent_trace.json when present."""
         path = self._require_console_path(Path(run_dir))
-        requirement = _read_json_if_present(path / "requirement.json")
+        requirement = _read_json_if_present(path / "requirement_v2.json") or _read_json_if_present(path / "requirement.json")
         planning = _read_json_if_present(path / "planning_artifact.json")
         report = _read_json_if_present(path / "report.json")
         trace = _read_json_if_present(path / "agent_trace.json")
@@ -1353,40 +1591,165 @@ def _read_first_json(root: Path, relative_paths: tuple[str, ...]) -> dict[str, A
 
 
 def _validate_editable_artifact(artifact: str, content: dict[str, Any]) -> None:
-    if artifact == "requirement.json":
-        _require_keys(content, artifact, ("part_type", "dimensions"))
-        if not isinstance(content.get("part_type"), str) or not content["part_type"]:
-            raise ValueError("requirement.json part_type must be a non-empty string")
-        if not isinstance(content.get("dimensions"), dict):
-            raise ValueError("requirement.json dimensions must be a dictionary")
-        if "features" in content and not isinstance(content["features"], dict):
-            raise ValueError("requirement.json features must be a dictionary")
-        if "requirement_status" in content and not isinstance(content["requirement_status"], dict):
-            raise ValueError("requirement.json requirement_status must be a dictionary")
+    _reject_unsafe_edit_content(content)
+    if artifact == "requirement_v2.json":
+        validate_requirement_draft(content)
         return
 
     if artifact == "planning_artifact.json":
-        _require_keys(content, artifact, ("artifact_type", "route", "selected_parts", "flow_gate_status"))
-        if content.get("artifact_type") != "planning":
-            raise ValueError("planning_artifact.json artifact_type must be 'planning'")
-        if not isinstance(content.get("route"), dict):
-            raise ValueError("planning_artifact.json route must be a dictionary")
-        if not isinstance(content.get("selected_parts"), list):
-            raise ValueError("planning_artifact.json selected_parts must be a list")
-        if not isinstance(content.get("flow_gate_status"), dict):
-            raise ValueError("planning_artifact.json flow_gate_status must be a dictionary")
+        validate_planning_draft(content)
         return
 
-    validation = validate_ir(content)
-    if not validation["valid"]:
-        codes = ", ".join(error.get("code", "unknown") for error in validation["errors"])
-        raise ValueError(f"input_ir.json failed CAD IR validation: {codes}")
+    if artifact == "assembly_plan.json":
+        if "parts" in content and not isinstance(content.get("parts"), list):
+            raise ValueError("assembly_plan.json parts must be a list")
+        if "interfaces" in content and not isinstance(content.get("interfaces"), list):
+            raise ValueError("assembly_plan.json interfaces must be a list")
+        return
+
+    if artifact == "part_create_request.json":
+        _require_keys(content, artifact, ("part_id", "status"))
+        if not isinstance(content.get("part_id"), str) or not content["part_id"]:
+            raise ValueError("part_create_request.json part_id must be a non-empty string")
+        return
+
+    if artifact == "part_request_review.json":
+        _require_keys(content, artifact, ("status",))
+        if "checks" in content and not isinstance(content.get("checks"), dict):
+            raise ValueError("part_request_review.json checks must be a dictionary")
+        return
+
+    if artifact == "reviewed_part_handoff.json":
+        _require_keys(content, artifact, ("part_id", "status"))
+        if not isinstance(content.get("part_id"), str) or not content["part_id"]:
+            raise ValueError("reviewed_part_handoff.json part_id must be a non-empty string")
+        return
+
+    if artifact in {"cad_ir_draft.json", "input_ir.json"}:
+        validate_input_ir_draft(content)
+        validation = validate_ir(content)
+        if not validation["valid"]:
+            codes = ", ".join(error.get("code", "unknown") for error in validation["errors"])
+            raise ValueError(f"{artifact} failed CAD IR validation: {codes}")
+        return
+
+    if artifact == "stage_review.json":
+        _require_keys(content, artifact, ("stage", "review_status"))
+        if content.get("review_status") not in {"approved", "needs_revision", "blocked"}:
+            raise ValueError("stage_review.json review_status is unsupported")
+        return
+
+    raise ValueError(f"artifact is not editable by the workflow console: {artifact}")
 
 
 def _require_keys(content: dict[str, Any], artifact: str, keys: tuple[str, ...]) -> None:
     missing = [key for key in keys if key not in content]
     if missing:
         raise ValueError(f"{artifact} is missing required fields: {', '.join(missing)}")
+
+
+def _canonical_editable_artifact(artifact: str) -> str:
+    if not isinstance(artifact, str) or not artifact:
+        raise ValueError("workflow console editable artifact name must be a non-empty string")
+    normalized = artifact.replace("\\", "/").strip("/")
+    if normalized.startswith("/") or ".." in Path(normalized).parts:
+        raise ValueError(f"invalid artifact path: {artifact}")
+    aliases = {
+        "02_part_request/part_create_request.json": "part_create_request.json",
+        "03_review/part_request_review.json": "part_request_review.json",
+        "04_handoff/reviewed_part_handoff.json": "reviewed_part_handoff.json",
+        "05_single_create/cad_ir_draft.json": "cad_ir_draft.json",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _edit_artifact_token(artifact: str) -> str:
+    return artifact.replace("/", "__").replace(".json", "")
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _safe_edit_reason(value: str | None) -> str | None:
+    if value is None:
+        return None
+    safe = _safe_summary_text(value)
+    return safe[:240] if safe is not None else None
+
+
+def _reject_unsafe_edit_content(value: Any) -> None:
+    blocked_keys = {
+        "api_key",
+        "apikey",
+        "password",
+        "secret",
+        "token",
+        "bearer",
+        "raw_payload",
+        "raw_response",
+        "raw_provider",
+        "provider_messages",
+        "provider_response",
+        "transcript",
+        "chat_transcript",
+        "request_payload",
+        "response_payload",
+        "python_code",
+        "cadquery_code",
+        "cad_code",
+        "model_code",
+        "shell_command",
+        "shell",
+        "script",
+        "command",
+    }
+    if isinstance(value, dict):
+        for key, item in value.items():
+            lowered = str(key).lower()
+            if any(marker in lowered for marker in blocked_keys):
+                raise ValueError(f"workflow console artifact override contains forbidden field: {key}")
+            _reject_unsafe_edit_content(item)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_unsafe_edit_content(item)
+    elif isinstance(value, str):
+        lowered = value.lower()
+        if any(marker in lowered for marker in ("api_key", "apikey", "password", "secret", "token", "bearer ")):
+            raise ValueError("workflow console artifact override must not contain secrets")
+
+
+def _sanitize_public_artifact_content(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_sanitize_public_artifact_content(item) for item in value]
+    if isinstance(value, str):
+        return _safe_summary_text(value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if not isinstance(value, dict):
+        return None
+    public = {}
+    for key, item in value.items():
+        lowered = str(key).lower()
+        if any(marker in lowered for marker in ("api_key", "apikey", "password", "secret", "token", "bearer", "raw_", "transcript")):
+            continue
+        public[str(key)] = _sanitize_public_artifact_content(item)
+    return public
+
+
+def _downstream_stages_for_override(artifact: str) -> list[str]:
+    mapping = {
+        "requirement_v2.json": ["planning"],
+        "planning_artifact.json": ["assembly_plan", "part_modeling"],
+        "assembly_plan.json": ["part_request"],
+        "part_create_request.json": ["part_review", "reviewed_handoff"],
+        "part_request_review.json": ["reviewed_handoff"],
+        "reviewed_part_handoff.json": ["reviewed_part_create"],
+        "cad_ir_draft.json": ["cad_ir_validation", "part_modeling"],
+        "input_ir.json": ["part_modeling"],
+        "stage_review.json": ["workflow_review", "rework"],
+    }
+    return mapping.get(artifact, [])
 
 
 def _compact_issue(item: Any) -> dict[str, Any]:
@@ -1803,6 +2166,23 @@ def _compact_gate_decision(decision: Any) -> dict[str, Any] | None:
     return item
 
 
+def _safe_clarification_answer(item: Any, index: int, timestamp: str) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise ValueError("workflow console clarification answer must be a dictionary")
+    field = _safe_summary_text(item.get("field"))
+    answer = _safe_summary_text(item.get("answer"))
+    if field is None or answer is None:
+        raise ValueError("workflow console clarification answer requires safe field and answer")
+    return {
+        "question_id": _safe_summary_text(item.get("question_id")) or f"q{index}",
+        "field": field,
+        "question": _safe_summary_text(item.get("question")) or "",
+        "answer": answer,
+        "source": "user",
+        "timestamp": timestamp,
+    }
+
+
 def _compact_adapter_activity(activity: Any) -> dict[str, Any] | None:
     if not isinstance(activity, dict):
         return None
@@ -1927,6 +2307,20 @@ def _validate_provider_config_inputs(
 def _contains_secret_marker(value: str) -> bool:
     lowered = value.lower()
     return any(marker in lowered for marker in ("password", "secret", "token", "api_key", "apikey", "bearer "))
+
+
+def _reject_secret_fields(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            lowered = str(key).lower()
+            if any(marker in lowered for marker in ("password", "secret", "token", "api_key", "apikey", "bearer")):
+                raise ValueError("workflow console clarification payload must not include secrets")
+            _reject_secret_fields(item)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_secret_fields(item)
+    elif isinstance(value, str) and _contains_secret_marker(value):
+        raise ValueError("workflow console clarification payload must not include secrets")
 
 
 def _compact_field_collection(items: list[dict[str, Any]]) -> dict[str, Any]:

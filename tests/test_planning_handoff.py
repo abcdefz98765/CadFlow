@@ -6,7 +6,7 @@ import pytest
 from ai_native_cad.cad_ir import ir_from_planning_artifact, validate_ir
 from ai_native_cad.cadquery.generator import generate_cadquery_code
 from ai_native_cad.pipeline import run_ir_pipeline, run_text_pipeline
-from ai_native_cad.planning import PlanningHandoffBlocked, create_planning_artifact
+from ai_native_cad.planning import PlanningHandoffBlocked, assembly_plan_from_planning_artifact, create_planning_artifact
 from ai_native_cad.requirements import RequirementAgent
 from ai_native_cad.workflow import run_workflow
 
@@ -205,6 +205,53 @@ def test_unresolved_interface_risk_blocks_cad_ir_even_when_route_is_selected():
         ir_from_planning_artifact(artifact)
 
     assert any(error["code"] == "unknown_mating_hole_pattern" for error in exc_info.value.reasons)
+
+
+def test_robotic_arm_planning_outputs_candidate_parts_and_bridge_plan():
+    requirement = RequirementAgent().parse(
+        "Design a desktop 2 DOF robotic arm with a gripper, servo-ready joints, and 3D printable parts."
+    )
+    from ai_native_cad.requirements import apply_requirement_clarification
+
+    requirement_v2 = apply_requirement_clarification(
+        requirement,
+        {
+            "schema_version": 1,
+            "source_requirement": "requirement.json",
+            "answers": [
+                {"field": "arm_reach_mm", "answer": "220"},
+                {"field": "payload_target_g", "answer": "100"},
+                {"field": "servo_reference_size_mm", "answer": "40 x 20 x 40"},
+                {"field": "gripper_opening_mm", "answer": "30"},
+                {"field": "primary_generated_part", "answer": "upper_arm_link"},
+            ],
+        },
+    )
+
+    artifact = create_planning_artifact(requirement_v2)
+    assembly_plan = assembly_plan_from_planning_artifact(artifact)
+
+    assert artifact["route"]["selected"] == "assembly_loop"
+    assert artifact["assembly_planning"]["primary_candidate_part"] == "upper_link"
+    assert {part["part_id"] for part in artifact["assembly_planning"]["parts"]} >= {
+        "base",
+        "lower_link",
+        "upper_link",
+        "shoulder_servo_bracket",
+        "elbow_servo_bracket",
+        "gripper_mount",
+    }
+    assert {part["part_id"] for part in artifact["assembly_planning"]["reference_components"]} == {
+        "reference_servo",
+        "reference_gripper",
+    }
+    assert assembly_plan is not None
+    assert assembly_plan["selected_part_id"] == "upper_link"
+    assert assembly_plan["scope"] == "assembly"
+    assert "motion_simulation" in assembly_plan["unsupported"]
+    assert any(part["part_status"] == "reference_only" for part in assembly_plan["parts"])
+    with pytest.raises(PlanningHandoffBlocked):
+        ir_from_planning_artifact(artifact)
 
 
 def test_part_modeling_uses_cad_ir_not_open_planning_notes(tmp_output_dir):

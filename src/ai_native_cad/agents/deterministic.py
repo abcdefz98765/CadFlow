@@ -73,6 +73,19 @@ class DeterministicAgentAdapter(AgentAdapter):
 
         return DesignPlannerFakeAgentAdapter(self.requirement_agent).convert_plan_to_ir(selected_plan, context=context)
 
+    def create_part_ir(
+        self,
+        reviewed_part_handoff: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create a local/mock CAD IR draft for one reviewed part handoff.
+
+        This is a conservative fallback and test adapter. It does not choose an
+        unrelated template when a reviewed part is unsupported.
+        """
+
+        return _part_ir_from_reviewed_handoff(reviewed_part_handoff, context or {})
+
     def parse_revision_request(
         self,
         prompt: str,
@@ -151,3 +164,100 @@ def _review_summary(report: dict[str, Any], trace: dict[str, Any]) -> str:
     if attempts is not None:
         return f"{part_name} did not pass validation after {attempts} attempt(s)."
     return f"{part_name} did not pass validation."
+
+
+def _part_ir_from_reviewed_handoff(reviewed_part_handoff: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    part_id = _safe_token(reviewed_part_handoff.get("part_id") or "reviewed_part")
+    brief = " ".join(
+        str(value)
+        for value in (
+            reviewed_part_handoff.get("part_brief"),
+            reviewed_part_handoff.get("single_part_prompt"),
+            context.get("prompt"),
+        )
+        if isinstance(value, str)
+    ).lower()
+    source = {
+        "agent_operation": "create_part_ir",
+        "adapter": "deterministic",
+        "mode": "local_mock_fallback",
+        "reviewed_part_handoff": {
+            "part_id": part_id,
+            "status": reviewed_part_handoff.get("status"),
+        },
+    }
+    if part_id in {"base", "enclosure_base"} or ("base" in part_id and "robot" not in brief):
+        return {
+            "part_type": "enclosure_base",
+            "part_name": f"single_part_{part_id}",
+            "unit": "mm",
+            "dimensions": {"outer_length": 80, "outer_width": 50, "outer_height": 18, "wall_thickness": 2},
+            "features": {},
+            "outputs": ["step", "stl"],
+            "check_level": "L0",
+            "source": source,
+        }
+    if part_id in {"spacer", "standoff"}:
+        return {
+            "part_type": "spacer",
+            "part_name": f"single_part_{part_id}",
+            "unit": "mm",
+            "dimensions": {"outer_diameter": 12, "inner_diameter": 5, "thickness": 10},
+            "features": {},
+            "outputs": ["step", "stl"],
+            "check_level": "L0",
+            "source": source,
+        }
+    if part_id in {"bracket", "servo_bracket", "shoulder_servo_bracket", "elbow_servo_bracket"}:
+        return {
+            "part_type": "simple_bracket",
+            "part_name": f"single_part_{part_id}",
+            "unit": "mm",
+            "dimensions": {"base_length": 45, "base_width": 28, "height": 35, "thickness": 4},
+            "features": {},
+            "outputs": ["step", "stl"],
+            "check_level": "L0",
+            "source": source,
+        }
+    return {
+        "part_type": part_id,
+        "part_name": f"single_part_{part_id}",
+        "unit": "mm",
+        "dimensions": _link_like_dimensions(reviewed_part_handoff, context),
+        "features": {},
+        "outputs": ["step", "stl"],
+        "check_level": "L0",
+        "source": source,
+    }
+
+
+def _link_like_dimensions(reviewed_part_handoff: dict[str, Any], context: dict[str, Any]) -> dict[str, float]:
+    assembly_context = reviewed_part_handoff.get("preserved_assembly_context")
+    if not isinstance(assembly_context, dict):
+        assembly_context = {}
+    reach = _number_or_none(assembly_context.get("arm_reach_mm")) or _number_or_none(context.get("arm_reach_mm")) or 220.0
+    return {
+        "length": round(float(reach) / 2.4, 3),
+        "width": 22.0,
+        "thickness": 6.0,
+    }
+
+
+def _safe_token(value: object) -> str:
+    text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    safe = "".join(char for char in text if char.isalnum() or char == "_").strip("_")
+    return safe or "reviewed_part"
+
+
+def _number_or_none(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip().split()[0] if value.strip() else ""
+        try:
+            return float(text)
+        except ValueError:
+            return None
+    return None

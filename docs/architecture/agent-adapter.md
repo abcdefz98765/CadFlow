@@ -26,6 +26,9 @@ class AgentAdapter:
     def convert_plan_to_ir(self, selected_plan: dict, context: dict) -> dict:
         ...
 
+    def create_part_ir(self, reviewed_part_handoff: dict, context: dict) -> dict:
+        ...
+
     def parse_revision_request(self, prompt: str, model_context: dict, context: dict) -> dict:
         ...
 
@@ -48,6 +51,29 @@ The shared validation entry point is `ai_native_cad.agents.validate_adapter_resu
 It validates adapter output by operation and rejects direct code/shell bypass
 fields such as `cadquery_code`, `python_code`, `model_code`, and
 `shell_command`.
+
+Reviewed-part CAD creation uses the dedicated `create_part_ir(...)` operation.
+Its only valid product is a CAD IR JSON object. It must not return CadQuery
+code, Python code, shell commands, raw provider payloads, transcripts, secrets,
+or local filesystem paths. Workflow code validates the returned CAD IR before
+`run_ir_pipeline(...)` can start; unsupported agent-generated IR blocks at
+`cad_ir_validation` instead of falling back to an unrelated template.
+
+Current Web reviewed-part create checkpoint:
+
+```text
+reviewed_part_handoff.json
+  -> part_execution_request.json
+  -> AgentAdapter.create_part_ir(...)
+  -> cad_ir_draft.json
+  -> validate_input_ir_draft(...) / validate_ir(...)
+  -> run_ir_pipeline(...) or blocked_cad_ir_validation
+```
+
+Templates, primitives, deterministic parsers, and deterministic compilers are
+guardrails, bootstrap paths, local/mock implementations, and offline-test
+helpers. They should not become the mechanism that prevents the CadIrAgent from
+synthesizing CAD IR for reviewed-part workflows.
 
 The current codebase may implement only the smaller deterministic subset. The
 expanded interface above documents the product direction for iterative CAD
@@ -84,7 +110,7 @@ provider SDK.
 
 For this scaffold it supports the current structured `AgentAdapter` operations:
 `parse_requirement(...)`, `create_plan(...)`, `parse_revision_request(...)`,
-`create_revision_plan(...)`, `suggest_repair(...)`, and
+`create_part_ir(...)`, `create_revision_plan(...)`, `suggest_repair(...)`, and
 `explain_review(...)`. Callers must explicitly inject a fake or
 provider-specific client at the boundary. The adapter builds a JSON-only
 contract request, parses the returned JSON object, and runs the matching local
@@ -158,11 +184,15 @@ Provider-backed create has two explicit runtime modes:
   compiles and validates internal requirement/planning contracts, converts those
   contracts deterministically to CAD IR, and then runs `run_ir_pipeline`.
 
-Use `run_provider_normalized_create_pipeline(...)` for the recommended
-provider-backed create workflow. It does not accept provider-generated CAD IR,
-provider-generated CadQuery/Python code, or arbitrary provider fields as
-generation authority. `run_provider_create_pipeline(...)` remains available in
-strict mode for provider contract compliance testing and must not silently
+Use `run_provider_normalized_create_pipeline(...)` for the conservative
+provider-backed extraction/compile create workflow. It does not accept
+provider-generated CAD IR, provider-generated CadQuery/Python code, or arbitrary
+provider fields as generation authority. This path remains useful as fallback,
+evaluation, and compatibility infrastructure, but it is not the primary Web
+reviewed-part CAD entry. Reviewed-part create should call
+`AgentAdapter.create_part_ir(...)`, then local CAD IR validation, then
+`run_ir_pipeline(...)`. `run_provider_create_pipeline(...)` remains available
+in strict mode for provider contract compliance testing and must not silently
 fallback.
 
 The current fixed provider eval result of 8/10 pipeline success + 2 expected

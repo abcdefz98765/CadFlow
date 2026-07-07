@@ -1,5 +1,5 @@
 from ai_native_cad.cad_ir import ir_from_text, validate_ir
-from ai_native_cad.requirements import RequirementAgent
+from ai_native_cad.requirements import RequirementAgent, apply_requirement_clarification
 
 
 def test_parser_extracts_mounting_plate_dimensions_and_four_corner_holes():
@@ -98,6 +98,83 @@ def test_parser_reports_missing_dimensions_without_blocking_l0_template_generati
         "dimensions.width",
     ]
     assert validate_ir(ir_from_text("Make a mounting plate."))["valid"]
+
+
+def test_parser_recognizes_desktop_robotic_arm_as_assembly_intent():
+    requirement = RequirementAgent().parse(
+        "帮我设计一个可以 3D 打印的桌面小机械臂，大概有两个关节，可以夹起小物体，结构简单一点，后续希望能装舵机。"
+    )
+
+    assert requirement["part_type"] == "robotic_arm"
+    assert requirement["intent"]["scope"] == "assembly"
+    assert requirement["intent"]["product_intent"]["dof"] == 2
+    assert requirement["intent"]["product_intent"]["servo_ready"] is True
+    assert requirement["intent"]["product_intent"]["gripper"] is True
+    assert requirement["intent"]["product_intent"]["desktop"] is True
+    assert requirement["intent"]["product_intent"]["manufacturing_process"] == "3d_printing"
+    assert {item["field"] for item in requirement["missing_information"]} >= {
+        "arm_reach_mm",
+        "payload_mass_g",
+        "servo_envelope",
+        "gripper_opening_mm",
+    }
+    assert requirement["follow_up_questions"]
+    assert requirement["clarification_questions"] == requirement["follow_up_questions"]
+    assert requirement["requirement_status"]["flow_decision"]["action"] == "ask_user"
+
+
+def test_robotic_arm_clarification_aliases_resolve_internal_fields():
+    requirement = RequirementAgent().parse(
+        "帮我设计一个可以 3D 打印的桌面小机械臂，大概有两个关节，可以夹起小物体，结构简单一点，后续希望能装舵机。"
+    )
+    clarified = apply_requirement_clarification(
+        requirement,
+        {
+            "schema_version": 1,
+            "source_requirement": "requirement.json",
+            "answers": [
+                {"field": "arm_reach_mm", "answer": "220"},
+                {"field": "payload_target_g", "answer": "100"},
+                {"field": "servo_reference_size_mm", "answer": "40 x 20 x 40"},
+                {"field": "gripper_opening_mm", "answer": "30"},
+            ],
+            "created_at": "2026-07-05T00:00:00+00:00",
+        },
+    )
+
+    assert clarified["dimensions"]["arm_reach_mm"] == 220.0
+    assert clarified["features"]["payload_mass_g"] == 100.0
+    assert clarified["features"]["servo_envelope"] == "40 x 20 x 40"
+    assert clarified["dimensions"]["gripper_opening_mm"] == 30.0
+    assert {item["field"] for item in clarified["missing_information"]} == set()
+    assert clarified["requirement_status"]["flow_decision"]["action"] == "proceed_with_assumptions"
+    assert clarified["lineage"]["source_requirement"] == "requirement.json"
+    assert clarified["lineage"]["source_clarification"] == "requirement_clarification.json"
+
+
+def test_robotic_arm_gripper_type_does_not_resolve_gripper_opening():
+    requirement = RequirementAgent().parse(
+        "Design a desktop 2 DOF robotic arm with a gripper, servo-ready joints, and 3D printable parts."
+    )
+    clarified = apply_requirement_clarification(
+        requirement,
+        {
+            "schema_version": 1,
+            "source_requirement": "requirement.json",
+            "answers": [
+                {"field": "arm_reach_mm", "answer": "220"},
+                {"field": "payload_g", "answer": "100"},
+                {"field": "servo_size_mm", "answer": "40 x 20 x 40"},
+                {"field": "gripper_type", "answer": "simple parallel gripper"},
+            ],
+        },
+    )
+
+    assert clarified["features"]["gripper_type"] == "simple parallel gripper"
+    assert "gripper_opening_mm" in {item["field"] for item in clarified["missing_information"]}
+    assert clarified["follow_up_questions"] == [
+        "What gripper opening or target object size should be supported, in millimeters?"
+    ]
 
 
 def test_parser_marks_missing_dimensions_blocking_for_l1():

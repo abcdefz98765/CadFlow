@@ -9,6 +9,7 @@ from ai_native_cad.pipeline import (
     run_provider_create_pipeline,
     run_provider_normalized_design_create_pipeline,
     run_provider_normalized_create_pipeline,
+    run_reviewed_part_agent_ir_create_pipeline,
     run_text_pipeline,
 )
 from ai_native_cad.planning import PlanningHandoffBlocked, create_planning_artifact
@@ -32,6 +33,7 @@ __all__ = [
     "run_provider_create_pipeline",
     "run_provider_normalized_design_create_pipeline",
     "run_provider_normalized_create_pipeline",
+    "run_reviewed_part_agent_ir_create_pipeline",
     "run_text_pipeline",
     "run_workflow",
     "write_assembly_plan",

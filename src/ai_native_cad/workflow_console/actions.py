@@ -8,12 +8,16 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ai_native_cad.pipeline.runner import (
+    create_part_request_from_assembly_plan,
+    run_ir_pipeline,
     run_assembly_part_request_pipeline,
     run_part_request_review_pipeline,
     run_part_result_review_pipeline,
     run_reviewed_part_handoff_pipeline,
     run_reviewed_part_single_create_pipeline,
 )
+from ai_native_cad.agents.validation import validate_input_ir_draft
+from ai_native_cad.cad_ir.validator import validate_ir
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
 from ai_native_cad.workflow_console.workflow_review import (
     build_workflow_review,
@@ -34,6 +38,7 @@ ACTION_ARTIFACTS = {
     "part_request": ("02_part_request/part_create_request.json", "part_create_request.json"),
     "part_review": ("03_review/part_request_review.json", "part_request_review.json"),
     "reviewed_handoff": ("04_handoff/reviewed_part_handoff.json", "reviewed_part_handoff.json"),
+    "cad_ir_draft": ("05_single_create/cad_ir_draft.json", "cad_ir_draft.json"),
     "single_create_lineage": ("05_single_create/lineage.json", "lineage.json"),
 }
 
@@ -44,6 +49,7 @@ ACTION_NAMES = {
     "reviewed_part_create",
     "part_result_review",
     "save_stage_review",
+    "apply_requirement_clarification",
     "run_rework",
     "create_workflow_review",
 }
@@ -57,6 +63,7 @@ STAGE_REVIEW_STAGES = {
     "part_review",
     "handoff",
     "single_part_result",
+    "workflow_review",
 }
 REWORK_EXECUTION_STATUSES = {
     "completed",
@@ -119,14 +126,19 @@ class WorkflowConsoleActions:
         """Create one part request from an existing assembly plan artifact."""
         run_path = self.backend.resolve_run(run_id, root=root)
         source = self._find_artifact(run_path, "assembly_plan")
-        return self._run_action(
-            run_path,
-            "part_request",
-            run_assembly_part_request_pipeline,
-            source,
-            output_dir=self._stage_dir(run_path, "part_request"),
-            part_id=part_id,
-        )
+        try:
+            return self._run_action(
+                run_path,
+                "part_request",
+                run_assembly_part_request_pipeline,
+                source,
+                output_dir=self._stage_dir(run_path, "part_request"),
+                part_id=part_id,
+            )
+        except ValueError as exc:
+            if "pipeline outputs must be written inside project root" not in str(exc):
+                raise
+            return self._create_part_request_in_action_boundary(run_path, source, part_id=part_id)
 
     def review_part_request(self, run_id: str, *, root: str | Path | None = None) -> dict[str, Any]:
         """Review exactly one existing part_create_request.json artifact."""
@@ -160,9 +172,12 @@ class WorkflowConsoleActions:
         *,
         root: str | Path | None = None,
     ) -> dict[str, Any]:
-        """Run the existing explicit reviewed single-part create bridge once."""
+        """Run one reviewed part through the agent-driven CAD IR create bridge."""
         run_path = self.backend.resolve_run(run_id, root=root)
         handoff = self._find_artifact(run_path, "reviewed_handoff")
+        cad_ir_override = self.backend.active_override_path(run_path, "cad_ir_draft.json")
+        if cad_ir_override is not None:
+            return self._create_reviewed_part_from_cad_ir_override(run_path, handoff, cad_ir_override)
         return self._run_action(
             run_path,
             "reviewed_part_create",
@@ -224,6 +239,22 @@ class WorkflowConsoleActions:
             "summary": summary,
             "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
         }
+
+    def apply_requirement_clarification(
+        self,
+        run_id: str,
+        *,
+        answers: list[dict[str, Any]],
+        notes: str | None = None,
+        root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Apply structured requirement clarification answers."""
+        return self.backend.apply_requirement_clarification_by_id(
+            run_id,
+            answers=answers,
+            notes=notes,
+            root=root,
+        )
 
     def create_workflow_review(
         self,
@@ -356,6 +387,10 @@ class WorkflowConsoleActions:
         }
 
     def _find_artifact(self, run_path: Path, artifact_key: str) -> Path:
+        canonical = Path(ACTION_ARTIFACTS[artifact_key][-1]).name
+        override = self.backend.active_override_path(run_path, canonical)
+        if override is not None:
+            return override
         for relative in ACTION_ARTIFACTS[artifact_key]:
             path = self.backend._require_child_path(run_path, relative)
             if path.exists():
@@ -397,6 +432,180 @@ class WorkflowConsoleActions:
         console["action_count"] = len(actions)
         runtime_path.write_text(json.dumps(runtime, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         self.backend.invalidate_work_index()
+
+    def _create_part_request_in_action_boundary(
+        self,
+        run_path: Path,
+        source: Path,
+        *,
+        part_id: str | None,
+    ) -> dict[str, Any]:
+        output_dir = self._stage_dir(run_path, "part_request")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        assembly_plan = _read_json_if_present(source)
+        if assembly_plan is None:
+            raise FileNotFoundError("workflow console action artifact not found: assembly_plan.json")
+        request = create_part_request_from_assembly_plan(assembly_plan, part_id=part_id, source_artifact=source.name)
+        _write_json(output_dir / "part_create_request.json", request)
+        status = request.get("status") if isinstance(request.get("status"), str) else "blocked_no_candidate_part"
+        success = status == "ready_for_review"
+        trace = {
+            "total_attempts": 0,
+            "steps": [{
+                "attempt": 0,
+                "status": "ready_for_review" if success else "blocked",
+                "stage": "assembly_part_request",
+                "diagnostic_codes": request.get("diagnostic_codes", []),
+            }],
+            "final_selected_candidate": request.get("part_id") if success else None,
+            "assembly_part_request": {
+                "workflow": "assembly_part_request",
+                "version": "part-create-request-v0.1",
+                "status": status,
+                "local_authority": ["assembly_plan.json", "part_create_request.json"],
+                "stages": ["load_assembly_plan", "select_candidate_part", "compile_part_create_request"],
+                "artifacts": {"source": source.name, "part_create_request": "part_create_request.json"},
+                "cad_ir_created": False,
+                "part_modeling_started": False,
+                "diagnostic_codes": request.get("diagnostic_codes", []),
+            },
+        }
+        _write_json(output_dir / "agent_trace.json", trace)
+        report = {
+            "success": success,
+            "status": status,
+            "blocked_stage": None if success else "assembly_part_request",
+            "diagnostic_codes": request.get("diagnostic_codes", []),
+            "source_artifact": request.get("source_artifact"),
+            "part_id": request.get("part_id"),
+            "part_request_status": status,
+            "interface_constraint_count": len(request.get("interface_constraints", [])),
+            "cad_ir_created": False,
+            "part_modeling_started": False,
+            "part_create_request": request,
+            "files": {
+                "part_create_request": "part_create_request.json",
+                "report_json": "report.json",
+                "report_md": "report.md",
+                "agent_trace": "agent_trace.json",
+            },
+        }
+        _write_json(output_dir / "report.json", report)
+        (output_dir / "report.md").write_text(
+            "\n".join([
+                "# Part Create Request",
+                "",
+                f"- Status: {status}",
+                f"- Part: {request.get('part_id') or 'none'}",
+                "- CAD IR created: no",
+                "- Part modeling started: no",
+            ]) + "\n",
+            encoding="utf-8",
+        )
+        result = {
+            "status": status,
+            "success": success,
+            "part_create_request": request,
+            "agent_trace": trace,
+            "files": report["files"],
+            "report_json": str(output_dir / "report.json"),
+            "report_md": str(output_dir / "report.md"),
+        }
+        summary = _sanitize_action_summary("part_request", result)
+        self._record_action(run_path, summary)
+        return {
+            "action": "part_request",
+            "stage_count": summary.get("stage_count", 1),
+            "summary": summary,
+            "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
+        }
+
+    def _create_reviewed_part_from_cad_ir_override(
+        self,
+        run_path: Path,
+        handoff_path: Path,
+        cad_ir_path: Path,
+    ) -> dict[str, Any]:
+        output_dir = self._stage_dir(run_path, "reviewed_part_create")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        handoff = _read_json_if_present(handoff_path)
+        input_ir = _read_json_if_present(cad_ir_path)
+        if handoff is None:
+            raise FileNotFoundError("workflow console action artifact not found: reviewed_part_handoff.json")
+        if input_ir is None:
+            raise FileNotFoundError("workflow console action artifact not found: cad_ir_draft.json")
+        try:
+            validate_input_ir_draft(input_ir)
+            ir_validation = validate_ir(input_ir)
+            if not ir_validation["valid"]:
+                raise ValueError("input_ir.json failed CAD IR validation")
+        except Exception as exc:
+            report = {
+                "success": False,
+                "status": "blocked_cad_ir_validation",
+                "blocked_stage": "cad_ir_validation",
+                "diagnostic_codes": ["cad_ir_override.validation_failed"],
+                "error": type(exc).__name__,
+                "cad_ir_override_used": True,
+                "files": {"report_json": "report.json", "report_md": "report.md"},
+            }
+            _write_json(output_dir / "report.json", report)
+            (output_dir / "report.md").write_text(
+                "# Reviewed Part Create\n\n"
+                "**Status:** blocked_cad_ir_validation\n\n"
+                "User CAD IR override failed validation before Part Modeling.\n",
+                encoding="utf-8",
+            )
+            summary = _sanitize_action_summary("reviewed_part_create", report)
+            self._record_action(run_path, summary)
+            return {
+                "action": "reviewed_part_create",
+                "stage_count": 0,
+                "summary": summary,
+                "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
+            }
+
+        part_id = handoff.get("part_id") if isinstance(handoff.get("part_id"), str) else input_ir.get("part_name") or "part"
+        child_run_id = f"single_part_{_safe_run_token(part_id)}"
+        child_dir = self.backend._require_child_path(output_dir, child_run_id)
+        child_result = run_ir_pipeline(input_ir, output_dir=child_dir)
+        lineage = {
+            "schema_version": 1,
+            "relationship": "reviewed_part_single_create_child",
+            "part_id": part_id,
+            "child_run_id": child_run_id,
+            "reviewed_part_handoff_artifact": Path(handoff_path).name,
+            "cad_ir_draft_override_artifact": "edits/active/cad_ir_draft.json",
+        }
+        _write_json(output_dir / "lineage.json", lineage)
+        report = {
+            "success": child_result.get("status") == "success",
+            "status": child_result.get("status", "unknown"),
+            "part_id": part_id,
+            "cad_ir_override_used": True,
+            "child_result": child_result,
+            "diagnostic_codes": ["cad_ir_override.used"],
+            "files": {
+                "lineage": "lineage.json",
+                "report_json": "report.json",
+                "report_md": "report.md",
+            },
+        }
+        _write_json(output_dir / "report.json", report)
+        (output_dir / "report.md").write_text(
+            "# Reviewed Part Create\n\n"
+            f"**Status:** {report['status']}\n\n"
+            "Used validated user CAD IR override.\n",
+            encoding="utf-8",
+        )
+        summary = _sanitize_action_summary("reviewed_part_create", report)
+        self._record_action(run_path, summary)
+        return {
+            "action": "reviewed_part_create",
+            "stage_count": 1,
+            "summary": summary,
+            "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
+        }
 
     def _write_rework_decision(self, run_path: Path, decision: dict[str, Any]) -> None:
         path = self.backend._require_child_path(run_path, "rework_decision.json")
@@ -474,7 +683,7 @@ def _build_stage_review_artifact(
         raise ValueError(f"unsupported workflow console rework target stage: {target_rework_stage}")
     if review_status == "needs_revision" and target_rework_stage is None:
         raise ValueError("workflow console stage review target_rework_stage is required for needs_revision")
-    if review_status != "needs_revision":
+    if review_status == "approved":
         target_rework_stage = None
 
     changes = _sanitize_requested_changes(requested_changes)
@@ -810,3 +1019,7 @@ def _read_json_if_present(path: Path) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         raise ValueError(f"workflow console action artifact must be a JSON object: {path.name}")
     return value
+
+
+def _write_json(path: Path, value: dict[str, Any]) -> None:
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")

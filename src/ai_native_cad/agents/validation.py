@@ -38,7 +38,7 @@ def validate_adapter_result(operation: str, content: dict[str, Any]) -> None:
     if operation == "propose_design_brief":
         validate_design_brief_draft(content)
         return
-    if operation == "convert_plan_to_ir":
+    if operation in {"convert_plan_to_ir", "create_part_ir"}:
         validate_input_ir_draft(content)
         return
     if operation in {"parse_revision_request", "create_revision_plan"}:

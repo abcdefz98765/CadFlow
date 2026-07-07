@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 
 from ai_native_cad.generator import get_part_spec, merge_params
-from ai_native_cad.workflow_control import requirement_to_planning_decision
+from ai_native_cad.workflow_control import ASK_USER, make_assumption_decision, requirement_to_planning_decision
 
 CHECK_LEVELS = {
     "L0": "Playground",
@@ -110,6 +111,8 @@ class RequirementAgent:
     def parse(self, text: str, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
         overrides = overrides or {}
         part_type = overrides.get("part_type") or self._detect_part_type(text)
+        if part_type == "robotic_arm":
+            return self._parse_robotic_arm(text, overrides)
         base = deepcopy(get_part_spec(part_type))
         extracted = self._extract_requirement_fields(text, part_type)
         requirement = merge_params(base, extracted)
@@ -148,6 +151,8 @@ class RequirementAgent:
 
     def _detect_part_type(self, text: str) -> str:
         lowered = text.lower()
+        if _has_robotic_arm_hint(text):
+            return "robotic_arm"
         if "button" in lowered or "pushbutton" in lowered or "按钮" in text or "按键" in text:
             return "circular_button"
         if "mounting" in lowered or "安装板" in text or "四角" in text:
@@ -161,6 +166,121 @@ class RequirementAgent:
         if "enclosure" in lowered or "外壳" in text:
             return "enclosure_base"
         return "mounting_plate"
+
+    def _parse_robotic_arm(self, text: str, overrides: dict[str, Any]) -> dict[str, Any]:
+        requirement = {
+            "part_type": "robotic_arm",
+            "product_family": "desktop robotic arm",
+            "part_family": "assembly",
+            "unit": "mm",
+            "dimensions": {},
+            "features": _robotic_arm_features(text),
+            "outputs": _detect_outputs(text, ["step", "stl"]),
+            "check_level": normalize_check_level(overrides.get("check_level", "L0")),
+            "source": {
+                "input_text": text,
+                "parser": {
+                    "version": "deterministic-requirements-v0.2",
+                    "extracted_dimensions": [],
+                    "extracted_features": sorted(_robotic_arm_features(text)),
+                    "diagnostics": [],
+                },
+            },
+            "intent": {
+                "object_goal": "desktop 2-DOF robotic arm",
+                "scope": "assembly",
+                "use_case": "desktop_demo",
+                "product_intent": {
+                    "kind": "robotic_arm",
+                    "dof": 2 if _has_two_dof_hint(text) else None,
+                    "desktop": _has_desktop_hint(text),
+                    "gripper": _has_gripper_hint(text),
+                    "servo_ready": _has_servo_hint(text),
+                    "manufacturing_process": "3d_printing" if _has_3d_print_hint(text) else None,
+                },
+                "candidate_parts": [
+                    {"part_id": "base", "role": "desktop base"},
+                    {"part_id": "lower_link", "role": "first arm link"},
+                    {"part_id": "upper_link", "role": "second arm link"},
+                    {"part_id": "joint_housings", "role": "servo-ready joint interfaces"},
+                    {"part_id": "gripper", "role": "simple end effector"},
+                ],
+            },
+        }
+        requirement = merge_params(requirement, overrides)
+        requirement["field_policy"] = {
+            "version": FIELD_POLICY_VERSION,
+            "check_level": requirement["check_level"],
+            **REQUIREMENT_FIELD_POLICY[requirement["check_level"]],
+        }
+        requirement["assumptions"] = [
+            "Robotic arm request is captured as assembly intent; full multi-part CAD generation is not yet automatic.",
+            "Desktop demo scale and loads require user confirmation before Planning.",
+        ]
+        requirement["missing_information"] = [
+            _question(
+                "arm_reach_mm",
+                "What approximate arm reach should be used, in millimeters?",
+                "critical",
+                True,
+                "Arm reach controls link lengths, workspace, and desktop footprint.",
+                category="assembly",
+                source="parser",
+                code="missing_arm_reach",
+            ),
+            _question(
+                "payload_mass_g",
+                "What approximate payload mass should the gripper lift, in grams?",
+                "critical",
+                True,
+                "Payload affects link thickness, joint sizing, and servo selection.",
+                category="loads",
+                source="parser",
+                code="missing_payload_mass",
+            ),
+            _question(
+                "servo_envelope",
+                "Which servo size or envelope should be reserved, such as SG90 or MG996R?",
+                "important",
+                True,
+                "Servo size changes joint housings and mounting interfaces.",
+                category="interface",
+                source="parser",
+                code="missing_servo_envelope",
+            ),
+            _question(
+                "gripper_opening_mm",
+                "What gripper opening or target object size should be supported, in millimeters?",
+                "important",
+                True,
+                "Gripper opening affects end-effector geometry and clearances.",
+                category="interface",
+                source="parser",
+                code="missing_gripper_opening",
+            ),
+        ]
+        requirement["clarification_questions"] = [
+            item["question"] for item in requirement["missing_information"] if item.get("ask_user")
+        ]
+        requirement["follow_up_questions"] = list(requirement["clarification_questions"])
+        requirement["follow_up_requests"] = [
+            _follow_up_request(item) for item in requirement["missing_information"] if item.get("ask_user")
+        ]
+        requirement["requirement_status"] = self._status(requirement)
+        requirement["requirement_status"]["complete_for_generation"] = False
+        requirement["requirement_status"]["flow_decision"] = {
+            "action": ASK_USER,
+            "from_stage": "requirement",
+            "to_stage": "requirement",
+            "owner_stage": "requirement",
+            "reasons": [
+                {"code": item["code"], "field": item["field"], "message": item["question"]}
+                for item in requirement["missing_information"]
+                if item.get("ask_user")
+            ],
+        }
+        requirement["cad_brief"] = _cad_brief(requirement)
+        return requirement
 
     def _extract_requirement_fields(self, text: str, part_type: str) -> dict[str, Any]:
         dimensions = _extract_dimensions(text, part_type)
@@ -345,6 +465,50 @@ def _detect_outputs(text: str, default: list[str]) -> list[str]:
     if "stl" in lowered or ".stl" in lowered:
         outputs.append("stl")
     return outputs or list(default)
+
+
+def _has_robotic_arm_hint(text: str) -> bool:
+    lowered = text.lower()
+    return any(token in lowered or token in text for token in ("robotic arm", "robot arm", "机械臂"))
+
+
+def _has_two_dof_hint(text: str) -> bool:
+    lowered = text.lower()
+    return any(token in lowered or token in text for token in ("2 dof", "2-dof", "two joints", "两个关节", "两自由度", "2 自由度"))
+
+
+def _has_servo_hint(text: str) -> bool:
+    lowered = text.lower()
+    return "servo" in lowered or "舵机" in text
+
+
+def _has_gripper_hint(text: str) -> bool:
+    lowered = text.lower()
+    return any(token in lowered or token in text for token in ("gripper", "夹爪", "夹起", "夹持"))
+
+
+def _has_desktop_hint(text: str) -> bool:
+    lowered = text.lower()
+    return "desktop" in lowered or "桌面" in text
+
+
+def _has_3d_print_hint(text: str) -> bool:
+    lowered = text.lower()
+    return any(token in lowered or token in text for token in ("3d print", "3d-print", "3d printable", "3D 打印", "打印"))
+
+
+def _robotic_arm_features(text: str) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in {
+            "degrees_of_freedom": 2 if _has_two_dof_hint(text) else None,
+            "servo_ready": _has_servo_hint(text),
+            "gripper": _has_gripper_hint(text),
+            "desktop": _has_desktop_hint(text),
+            "manufacturing_process": "3d_printing" if _has_3d_print_hint(text) else None,
+        }.items()
+        if value not in (None, False)
+    }
 
 
 def _parser_diagnostics(text: str, part_type: str, extracted: dict[str, Any]) -> list[dict[str, Any]]:
@@ -708,6 +872,135 @@ def _cad_brief(requirement: dict[str, Any]) -> dict[str, Any]:
         "assumption_policy": _brief_assumption_policy(requirement),
         "clarification_summary": _brief_clarification_summary(requirement),
     }
+
+
+def apply_requirement_clarification(
+    requirement: dict[str, Any],
+    clarification: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge structured user clarification answers into a requirement draft."""
+
+    updated = deepcopy(requirement)
+    answers = [item for item in clarification.get("answers", []) if isinstance(item, dict)]
+    now = datetime.now(timezone.utc).isoformat()
+    applied_answers = []
+    resolved_answers: dict[str, dict[str, str]] = {}
+    structured = updated.setdefault("clarifications", {})
+    history = structured.setdefault("history", [])
+    for item in answers:
+        raw_field = str(item.get("field") or "").strip()
+        answer = str(item.get("answer") or "").strip()
+        if not raw_field or not answer:
+            continue
+        field = _clarification_field_alias(raw_field)
+        applied = {
+            "question_id": str(item.get("question_id") or raw_field),
+            "field": field,
+            "original_field": raw_field,
+            "question": str(item.get("question") or ""),
+            "answer": answer,
+            "source": "user",
+            "timestamp": str(item.get("timestamp") or now),
+        }
+        if raw_field == field:
+            applied.pop("original_field")
+        applied_answers.append(applied)
+        resolved_answers[field] = applied
+        _apply_answer_to_structured_fields(updated, field, answer)
+    history.append({
+        "schema_version": clarification.get("schema_version", 1),
+        "source_requirement": clarification.get("source_requirement", "requirement.json"),
+        "answers": applied_answers,
+        "notes": clarification.get("notes"),
+        "created_at": clarification.get("created_at") or now,
+        "applied_at": now,
+    })
+    updated["clarification_applied"] = True
+    updated["source_requirement"] = clarification.get("source_requirement", "requirement.json")
+    updated["applied_clarification_artifact"] = "requirement_clarification.json"
+    updated["lineage"] = {
+        "schema_version": 1,
+        "source_requirement": clarification.get("source_requirement", "requirement.json"),
+        "source_clarification": "requirement_clarification.json",
+        "created_by": "apply_requirement_clarification",
+        "created_at": now,
+    }
+
+    for item in updated.get("missing_information", []):
+        if isinstance(item, dict) and item.get("field") in resolved_answers:
+            item["resolved"] = True
+            item["ask_user"] = False
+            item["answer"] = resolved_answers[item["field"]]["answer"]
+
+    updated["missing_information"] = [
+        item
+        for item in updated.get("missing_information", [])
+        if not (isinstance(item, dict) and item.get("resolved"))
+    ]
+    updated["clarification_questions"] = [
+        item["question"] for item in updated["missing_information"] if isinstance(item, dict) and item.get("ask_user")
+    ]
+    updated["follow_up_questions"] = list(updated["clarification_questions"])
+    updated["follow_up_requests"] = [
+        _follow_up_request(item) for item in updated["missing_information"] if isinstance(item, dict) and item.get("ask_user")
+    ]
+    updated["requirement_status"] = RequirementAgent()._status(updated)
+    if updated["requirement_status"]["needs_user_input"]:
+        updated["requirement_status"]["complete_for_generation"] = False
+        updated["requirement_status"]["flow_decision"] = {
+            "action": ASK_USER,
+            "from_stage": "requirement",
+            "to_stage": "requirement",
+            "owner_stage": "requirement",
+            "reasons": [
+                {"code": item.get("code", "missing_information"), "field": item.get("field"), "message": item.get("question")}
+                for item in updated["missing_information"]
+                if isinstance(item, dict) and item.get("ask_user")
+            ],
+        }
+    elif updated.get("intent", {}).get("scope") == "assembly":
+        updated["requirement_status"]["complete_for_generation"] = True
+        updated["requirement_status"]["flow_decision"] = make_assumption_decision(
+            from_stage="requirement",
+            proceed_to="planning",
+            assumptions=list(updated.get("assumptions", [])),
+            reasons=[{"code": "clarification_applied", "message": "User clarification was applied to requirement_v2.json."}],
+        )
+    else:
+        updated["requirement_status"]["flow_decision"] = requirement_to_planning_decision(updated["requirement_status"])
+    updated["cad_brief"] = _cad_brief(updated)
+    return updated
+
+
+def _apply_answer_to_structured_fields(requirement: dict[str, Any], field: str, answer: str) -> None:
+    value = _extract_first_number(answer)
+    if field.endswith("_mm") and value is not None:
+        requirement.setdefault("dimensions", {})[field] = value
+        return
+    if field.endswith("_g") and value is not None:
+        requirement.setdefault("features", {})[field] = value
+        return
+    requirement.setdefault("features", {})[field] = answer
+
+
+def _clarification_field_alias(field: str) -> str:
+    aliases = {
+        "payload_target_g": "payload_mass_g",
+        "payload_g": "payload_mass_g",
+        "servo_reference_size_mm": "servo_envelope",
+        "servo_size_mm": "servo_envelope",
+        "arm_reach_mm": "arm_reach_mm",
+        "degrees_of_freedom": "degrees_of_freedom",
+        "manufacturing_method": "manufacturing_method",
+        "material": "material",
+        "gripper_opening_mm": "gripper_opening_mm",
+    }
+    return aliases.get(field, field)
+
+
+def _extract_first_number(text: str) -> float | None:
+    match = re.search(r"(\d+(?:\.\d+)?)", text)
+    return float(match.group(1)) if match else None
 
 
 def _coordinate_convention(requirement: dict[str, Any]) -> dict[str, Any]:
