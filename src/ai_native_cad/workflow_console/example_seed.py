@@ -19,7 +19,6 @@ def seed_example_works(backend: Any) -> dict[str, Any]:
         raise ValueError("workflow console example template has no examples")
 
     works_root = backend._resolve_workspace_path("works")
-    runs_root = backend._resolve_workspace_path("runs")
     planned = [_validate_example(example) for example in examples]
     conflicts = [
         work["work_id"]
@@ -34,6 +33,8 @@ def seed_example_works(backend: Any) -> dict[str, Any]:
         work_dir = backend._require_child_path(works_root, manifest["work_id"])
         work_dir.mkdir(parents=True, exist_ok=False)
         _write_json(backend._require_child_path(work_dir, "work_manifest.json"), manifest)
+        runs_root = backend._require_child_path(work_dir, "runs")
+        runs_root.mkdir(parents=True, exist_ok=False)
         for run in runs:
             run_dir = backend._require_child_path(runs_root, run["run_id"])
             run_dir.mkdir(parents=True, exist_ok=False)

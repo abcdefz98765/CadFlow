@@ -30,7 +30,6 @@ WORK_USER_PAGES = (
     ("overview", "dashboard", "Overview"),
     ("workflow", "account_tree", "Workflow"),
     ("parts", "view_list", "Parts"),
-    ("runs", "history", "Runs"),
 )
 
 ARTIFACT_PAGE_ARTIFACTS = (
@@ -105,6 +104,8 @@ def build_console_page_data(
     selected_work_id: str | None = None,
     active_page: str = "workspace",
     selected_node_id: str | None = None,
+    selected_stage_id: str | None = None,
+    language: str = "en",
     show_debug_works: bool = False,
     show_unclassified_runs: bool = False,
     show_low_level_details: bool = False,
@@ -130,25 +131,12 @@ def build_console_page_data(
     pagination = _empty_pagination(limit, offset)
     run_filters: dict[str, Any] = {}
     selected = selected_run_id or _dict_get(work_detail.get("summary"), "latest_run_id")
-    load_runs = (
-        (active_page == "runs" and show_unclassified_runs)
-        or selected_run_id is not None
-        or search is not None
-        or offset != 0
-        or limit != DEFAULT_RUN_PAGE_SIZE
-    )
-    if load_runs:
-        runs_response = dispatch_route(backend, "list_runs", query=_query(root, limit=limit, offset=offset, search=search))
-        runs_page = runs_response["data"] if runs_response["ok"] and isinstance(runs_response["data"], dict) else {}
-        runs = runs_page.get("runs") if isinstance(runs_page.get("runs"), list) else []
-        pagination = runs_page.get("pagination") if isinstance(runs_page.get("pagination"), dict) else _empty_pagination(limit, offset)
-        run_filters = runs_page.get("filters") if isinstance(runs_page.get("filters"), dict) else {}
-        selected = selected_run_id or (runs[0]["run_id"] if runs else selected)
-    elif active_page == "runs":
+    load_runs = selected_run_id is not None
+    if active_page == "runs":
         runs = [_run_history_row_as_run(row) for row in work_detail.get("run_history", []) if isinstance(row, dict)]
         selected = selected_run_id or (runs[0]["run_id"] if runs else selected)
     run_data = (
-        build_selected_run_data(backend, selected, root=root)
+        build_selected_run_data(backend, selected, root=root, selected_stage_id=selected_stage_id, language=language)
         if selected and (active_page in {"workflow", "review", "products", "runs"} or selected_run_id is not None or load_runs)
         else empty_selected_run_data()
     )
@@ -165,6 +153,8 @@ def build_console_page_data(
         "show_unclassified_runs": show_unclassified_runs,
         "show_low_level_details": show_low_level_details,
         "selected_node_id": selected_node_id,
+        "selected_stage_id": selected_stage_id,
+        "language": language,
         "selected_node": _selected_node(work_detail, selected_node_id),
         "runs": runs,
         "pagination": pagination,
@@ -265,6 +255,8 @@ def build_selected_run_data(
     run_id: str,
     *,
     root: str | None = None,
+    selected_stage_id: str | None = None,
+    language: str = "en",
 ) -> dict[str, Any]:
     """Build all tab view-models for one selected run id."""
     response = dispatch_route(backend, "read_run_metadata", path_params={"run_id": run_id}, query=_query(root))
@@ -282,7 +274,7 @@ def build_selected_run_data(
         "workflow_review": build_workflow_review_data(run),
         "stage_review": build_stage_review_data(run),
         "part_workflow": build_part_workflow_data(run),
-        "workflow_review_surface": build_workflow_review_surface(backend, run_id, run, root=root),
+        "workflow_review_surface": build_workflow_review_surface(backend, run_id, run, root=root, selected_stage_id=selected_stage_id, language=language),
         "artifacts_page": build_artifacts_page_data(run),
         "artifact_names": sorted(artifacts),
         "error": None,
@@ -548,6 +540,8 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
         "selected_work_id": None,
         "selected_run_id": None,
         "selected_node_id": None,
+        "selected_stage_id": None,
+        "language": "en",
         "active_page": "workspace",
         "last_action_result": None,
     }
@@ -565,14 +559,26 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
             ".work-page-btn{font-size:12px;min-height:30px;justify-content:flex-start;width:100%}"
             ".workflow-graph{background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;padding:18px}"
             ".workflow-step{align-items:center;gap:8px;cursor:pointer;min-width:92px}"
+            ".workflow-part-candidate{border:1px solid #dbe3ea;border-radius:6px;padding:8px;min-width:136px}"
+            ".workflow-step-selected{background:#f8fafc;border:1px solid #bfdbfe;border-radius:8px;padding:8px}"
             ".workflow-dot{width:18px;height:18px;border-radius:999px;border:2px solid #fff;box-shadow:0 0 0 2px #cbd5e1}"
-            ".workflow-dot.accepted,.workflow-dot.completed,.workflow-dot.available{background:#16a34a;box-shadow:0 0 0 2px #86efac}"
+            ".workflow-dot.accepted,.workflow-dot.completed,.workflow-dot.completed_with_assumptions,.workflow-dot.available,.workflow-dot.generated{background:#16a34a;box-shadow:0 0 0 2px #86efac}"
+            ".workflow-dot.selected{background:#2563eb;box-shadow:0 0 0 2px #93c5fd}"
             ".workflow-dot.ready,.workflow-dot.running{background:#2563eb;box-shadow:0 0 0 2px #93c5fd}"
-            ".workflow-dot.needs_review,.workflow-dot.partial_success{background:#ca8a04;box-shadow:0 0 0 2px #fde68a}"
-            ".workflow-dot.blocked{background:#dc2626;box-shadow:0 0 0 2px #fecaca}"
+            ".workflow-dot.needs_review,.workflow-dot.partial_success,.workflow-dot.user_modified,.workflow-dot.stale{background:#ca8a04;box-shadow:0 0 0 2px #fde68a}"
+            ".workflow-dot.blocked,.workflow-dot.failed{background:#dc2626;box-shadow:0 0 0 2px #fecaca}"
             ".workflow-dot.reference_only{background:#64748b;box-shadow:0 0 0 2px #cbd5e1}"
-            ".workflow-dot.not_started,.workflow-dot.unknown,.workflow-dot.incomplete{background:#e5e7eb;box-shadow:0 0 0 2px #cbd5e1}"
+            ".workflow-dot.not_started,.workflow-dot.unknown,.workflow-dot.incomplete,.workflow-dot.candidate{background:#e5e7eb;box-shadow:0 0 0 2px #cbd5e1}"
             ".workflow-arrow{color:#94a3b8;font-size:22px;line-height:1;text-align:center}"
+            ".stage-status-banner{border:1px solid #cbd5e1;border-left:5px solid #2563eb;background:#f8fafc;border-radius:6px;padding:16px}"
+            ".stage-status-banner.blocked{border-left-color:#dc2626;background:#fff7f7}.stage-status-banner.needs_review{border-left-color:#ca8a04;background:#fffbeb}"
+            ".stage-status-banner.user_modified{border-left-color:#7c3aed;background:#faf5ff}.stage-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}"
+            ".stage-detail-card{border:1px solid #e2e8f0;border-radius:6px;padding:12px;min-height:112px}.stage-detail-card h3{margin:0 0 8px;font-size:14px;font-weight:600;color:#475569}"
+            ".stage-status-explanation{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;border-top:1px solid #dbe3ea;padding-top:10px}"
+            ".workflow-context{border:1px solid #e2e8f0;border-radius:6px;background:#fff;padding:16px}.workflow-context-grid{display:grid;grid-template-columns:minmax(280px,.85fr) minmax(0,1.15fr);gap:24px;align-items:start}"
+            ".workflow-prompt{border-left:4px solid #2563eb;background:#f8fafc;padding:12px;white-space:pre-wrap;line-height:1.55}.workflow-record-list{border-top:1px solid #e2e8f0}.workflow-record{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;border-bottom:1px solid #e2e8f0;padding:10px 0}.workflow-record-copy{min-width:0}.workflow-record-copy p{margin:2px 0 0}.artifact-status-table{border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}.artifact-status-head,.artifact-status-row{display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(150px,1.3fr) minmax(88px,.7fr) minmax(88px,.65fr) minmax(70px,.4fr);gap:8px;align-items:center;padding:11px 14px}.artifact-status-head{background:#f8fafc;color:#64748b;font-size:12px;font-weight:600}.artifact-status-row{border-top:1px solid #e2e8f0}.artifact-status-row:hover{background:#f8fafc}"
+            ".artifact-audit-card{border:1px solid #e2e8f0;border-radius:6px;padding:12px;background:#fff}.artifact-summary{border-left:3px solid #94a3b8;padding-left:10px}"
+            "@media(max-width:760px){.stage-detail-grid,.stage-status-explanation,.workflow-context-grid{grid-template-columns:1fr}.artifact-status-head{display:none}.artifact-status-row{grid-template-columns:1fr 1fr}.artifact-status-row>div:nth-child(2){grid-column:1/-1}}"
             ".part-preview{border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#f8fafc;min-height:240px}"
             ".part-preview iframe{width:100%;height:260px;border:0;pointer-events:none}"
             "</style>"
@@ -590,6 +596,8 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
                     selected_work_id=state.get("selected_work_id"),
                     active_page=state.get("active_page", "workspace"),
                     selected_node_id=state.get("selected_node_id"),
+                    selected_stage_id=state.get("selected_stage_id"),
+                    language=state.get("language", "en"),
                     show_unclassified_runs=bool(state.get("show_unclassified_runs")),
                     show_low_level_details=bool(state.get("show_low_level_details")),
                     limit=state.get("limit", DEFAULT_RUN_PAGE_SIZE),
@@ -603,12 +611,13 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
                 with content:
                     if state.get("active_page") in {"overview", "workflow", "node", "parts", "review", "products", "runs"}:
                         _render_work_header(ui, data)
-                    _render_active_page(ui, data, actions, state, refresh, select_node, lambda run_id: select_run(run_id), select_work, select_page)
+                    _render_active_page(ui, data, actions, state, refresh, select_node, select_stage, lambda run_id: select_run(run_id), select_work, select_page)
 
             def select_work(work_id: str) -> None:
                 state["selected_work_id"] = work_id
                 state["selected_run_id"] = None
                 state["selected_node_id"] = None
+                state["selected_stage_id"] = None
                 state["active_page"] = "overview"
                 refresh()
 
@@ -616,11 +625,18 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
                 state["active_page"] = page
                 if page != "node":
                     state["selected_node_id"] = None
+                if page != "workflow":
+                    state["selected_stage_id"] = None
                 refresh()
 
             def select_node(node_id: str) -> None:
                 state["active_page"] = "node"
                 state["selected_node_id"] = node_id
+                refresh()
+
+            def select_stage(stage_id: str) -> None:
+                state["active_page"] = "workflow"
+                state["selected_stage_id"] = stage_id
                 refresh()
 
             def select_run(run_id: str) -> None:
@@ -643,6 +659,13 @@ def _render_sidebar(
     workspace = data.get("workspace") if isinstance(data.get("workspace"), dict) else {}
     ui.label("CadFlow").classes("text-2xl font-semibold")
     ui.label("Work Console").classes("text-sm text-gray-500")
+    language = ui.select(
+        {"en": "English", "zh": "中文"},
+        value=state.get("language", "en"),
+        label="Language / 语言",
+        on_change=lambda event: _set_console_language(state, event.value, refresh),
+    ).props("dense outlined").classes("w-full")
+    language.tooltip("Changes display language only; workflow artifacts and actions are unchanged.")
     ui.button("Refresh", icon="refresh", on_click=refresh).props("outline dense").classes("w-full").tooltip("重新读取当前 workspace、work 和页面数据。")
     for page, icon, text in (
         ("workspace", "folder", "Workspace"),
@@ -658,6 +681,11 @@ def _render_sidebar(
     ui.label("Works").classes("text-sm font-medium text-gray-500")
     for work in data.get("works") or []:
         _render_sidebar_work_item(ui, work, data, state, on_select_work, on_select_page)
+
+
+def _set_console_language(state: dict[str, Any], value: Any, refresh: Callable[[], None]) -> None:
+    state["language"] = "zh" if value == "zh" else "en"
+    refresh()
 
 
 def _render_sidebar_work_item(
@@ -715,6 +743,7 @@ def _render_active_page(
     state: dict[str, Any],
     refresh: Callable[[], None],
     on_select_node: Callable[[str], None],
+    on_select_stage: Callable[[str], None],
     on_select_run: Callable[[str], None],
     on_select_work: Callable[[str], None],
     on_select_page: Callable[[str], None],
@@ -727,8 +756,7 @@ def _render_active_page(
     elif page == "overview":
         _render_work_overview(ui, data, state, refresh)
     elif page == "workflow":
-        _render_workflow_stage_review_surface(ui, data, actions, state, refresh)
-        _render_workflow_nodes(ui, data, on_select_node=on_select_node, on_select_page=on_select_page)
+        _render_workflow_stage_review_surface(ui, data, actions, state, refresh, on_select_stage)
     elif page == "node":
         _render_node_detail(ui, data, actions, state, refresh, on_back_to_workflow=lambda: on_select_page("workflow"))
     elif page == "parts":
@@ -780,6 +808,27 @@ def _render_workspace_page(
         ui.markdown(f"```json\n{json.dumps(state['workspace_result'], indent=2, sort_keys=True)}\n```").classes("w-full mono")
     _label_with_help(ui, "Works", "当前 workspace 中的 Work/Project 列表，点击一行可进入对应 Work。", "text-lg font-medium")
     _render_work_table(ui, data.get("works") or [], data.get("selected_work_id"), on_select_work)
+    selected_work = data.get("selected_work") if isinstance(data.get("selected_work"), dict) else {}
+    directory_map = selected_work.get("directory_map") if isinstance(selected_work.get("directory_map"), dict) else {}
+    if directory_map:
+        _render_work_directory_map(ui, directory_map)
+
+
+def _render_work_directory_map(ui: Any, directory_map: dict[str, Any]) -> None:
+    _label_with_help(ui, "Work structure", "按 Work 组织输入、规划、零件、交付物和历史；调试文件不会出现在此处。", "text-lg font-medium")
+    with ui.element("div").classes("stage-detail-grid w-full"):
+        for key in ("inputs", "planning", "parts", "deliverables", "history"):
+            group = directory_map.get(key) if isinstance(directory_map.get(key), dict) else {}
+            with ui.element("section").classes("stage-detail-card"):
+                ui.html(f"<h3>{group.get('title') or key.title()}</h3>")
+                items = group.get("items") if isinstance(group.get("items"), list) else []
+                if not items:
+                    ui.label("Not available yet.").classes("text-sm text-gray-500")
+                for item in items[:6]:
+                    if isinstance(item, dict):
+                        with ui.row().classes("w-full items-center justify-between gap-2"):
+                            ui.label(item.get("label") or "").classes("text-sm text-gray-700")
+                            ui.badge(item.get("status") or "not_started").classes(_badge_class(item.get("status")))
 
 
 def _workspace_dialog_button(
@@ -951,34 +1000,525 @@ def _render_workflow_stage_review_surface(
     actions: WorkflowConsoleActions,
     state: dict[str, Any],
     refresh: Callable[[], None],
+    on_select_stage: Callable[[str], None],
 ) -> None:
     surface = data.get("workflow_review_surface") if isinstance(data.get("workflow_review_surface"), dict) else {}
-    _label_with_help(ui, "Workflow Stage Review", "按真实 workflow stage 展示输入、输出、gate、诊断、review 和下一步动作。", "text-xl font-semibold")
+    _label_with_help(ui, "Workflow Graph", "按真实 workflow stage 导航；点击节点查看该阶段详情。", "text-xl font-semibold")
     if state.get("surface_action_result") is not None:
         ui.markdown(f"```json\n{json.dumps(state['surface_action_result'], indent=2, sort_keys=True)}\n```").classes("w-full")
-    for card in surface.get("stages") or []:
-        _render_stage_review_card(ui, card, data, actions, state, refresh)
-    viewer = surface.get("artifact_viewer") if isinstance(surface.get("artifact_viewer"), dict) else {}
-    with ui.expansion("Raw Artifact Viewer", icon="data_object").classes("w-full"):
-        ui.label("Allowlisted artifacts only. No arbitrary filesystem browsing.").classes("text-sm text-gray-500")
-        for artifact in viewer.get("artifacts") or []:
-            with ui.expansion(artifact.get("name") or "artifact").classes("w-full"):
-                _key_values(ui, {
-                    "Relative path": artifact.get("relative_path") or artifact.get("name"),
-                    "Source": artifact.get("source") or "original",
-                    "Override": artifact.get("override_present"),
-                    "Last edited": artifact.get("last_edited_at") or "Empty",
-                    "Validation": artifact.get("validation_status") or "original",
-                    "Downstream affected": ", ".join(artifact.get("downstream_stages_affected") or []) or "None",
-                    "Summary": artifact.get("summary") or "available",
-                    "Copy name": artifact.get("copyable") or artifact.get("name"),
-                })
-                if artifact.get("raw_json_available"):
-                    content = read_artifact_page_content(actions.backend, data.get("selected_run_id"), artifact["name"])
-                    ui.markdown(f"```json\n{json.dumps(content.get('content'), indent=2, sort_keys=True)}\n```").classes("w-full mono")
-                    _render_artifact_override_editor(ui, data, actions, state, refresh, artifact, content.get("content"))
-                elif not artifact.get("editable"):
-                    ui.label(artifact.get("edit_disabled_reason") or "Not editable").classes("text-sm text-gray-500")
+    _render_workflow_stage_graph(ui, surface, on_select_stage)
+    selected_stage = surface.get("selected_stage") if isinstance(surface.get("selected_stage"), dict) else None
+    _render_workflow_context(ui, surface.get("workflow_context"), data, actions)
+    _render_selected_stage_detail(ui, selected_stage, data, actions, state, refresh)
+
+
+def _render_workflow_context(ui: Any, context: Any, data: dict[str, Any], actions: WorkflowConsoleActions) -> None:
+    if not isinstance(context, dict):
+        return
+    language = data.get("language", "en")
+    run_id = data.get("selected_run_id")
+    with ui.element("section").classes("workflow-context w-full"):
+        ui.label(context.get("title") or _artifact_copy(language, "title")).classes("text-lg font-semibold")
+        with ui.element("div").classes("workflow-context-grid w-full"):
+            with ui.column().classes("w-full gap-2"):
+                ui.label("用户输入" if language == "zh" else "User input").classes("text-sm font-medium text-gray-600")
+                prompt = context.get("prompt") if isinstance(context.get("prompt"), dict) else None
+                if prompt and prompt.get("present"):
+                    ui.label("Prompt").classes("text-sm font-semibold")
+                    try:
+                        content = read_artifact_page_content(actions.backend, run_id, "prompt.txt")
+                        ui.label(str(content.get("content") or "")).classes("workflow-prompt text-sm w-full")
+                    except Exception as exc:
+                        ui.label(f"Unable to read prompt: {exc}").classes("text-sm text-red-700")
+                else:
+                    ui.label("尚未提供 Prompt。" if language == "zh" else "No prompt is available yet.").classes("text-sm text-gray-500")
+                requirements = context.get("requirements") if isinstance(context.get("requirements"), list) else []
+                if requirements:
+                    ui.label("需求资料" if language == "zh" else "Requirement records").classes("text-sm font-medium text-gray-600")
+                    with ui.element("div").classes("workflow-record-list w-full"):
+                        for artifact in requirements:
+                            _render_context_record(ui, artifact, actions, language)
+            with ui.column().classes("w-full gap-2"):
+                stage_label = context.get("selected_stage_label") or ("所选阶段" if language == "zh" else "Selected stage")
+                ui.label(("当前阶段资料: " if language == "zh" else "Current stage artifacts: ") + str(stage_label)).classes("text-sm font-medium text-gray-600")
+                artifacts = context.get("stage_artifacts") if isinstance(context.get("stage_artifacts"), list) else []
+                if artifacts:
+                    _render_artifact_status_table(ui, artifacts, run_id, actions, context.get("table_columns") or [], language)
+                else:
+                    ui.label(context.get("empty_message") or "").classes("text-sm text-gray-500")
+
+
+def _render_context_record(ui: Any, artifact: dict[str, Any], actions: WorkflowConsoleActions, language: str) -> None:
+    with ui.element("div").classes("workflow-record w-full"):
+        with ui.element("div").classes("workflow-record-copy"):
+            ui.label(artifact.get("display_name") or "").classes("text-sm font-medium")
+            ui.label(artifact.get("purpose") or "").classes("text-xs text-gray-500")
+        if artifact.get("preview"):
+            button = ui.button("查看摘要" if language == "zh" else "View summary", icon="visibility", on_click=lambda a=artifact: _show_artifact_summary_dialog(ui, a, language)).props("outline dense")
+            button.tooltip("查看用户可读摘要" if language == "zh" else "View user-readable summary")
+
+
+def _render_artifact_status_table(
+    ui: Any,
+    artifacts: list[dict[str, Any]],
+    run_id: str | None,
+    actions: WorkflowConsoleActions,
+    columns: list[str],
+    language: str,
+) -> None:
+    with ui.element("div").classes("artifact-status-table w-full"):
+        with ui.element("div").classes("artifact-status-head"):
+            for label in columns:
+                ui.label(label)
+        for artifact in artifacts:
+            with ui.element("div").classes("artifact-status-row"):
+                ui.label(artifact.get("display_name") or artifact.get("name") or "").classes("text-sm font-medium")
+                ui.label(artifact.get("purpose") or "").classes("text-sm text-gray-600")
+                ui.badge(artifact.get("direction_label") or "").classes("bg-slate-100 text-slate-700")
+                status = ui.badge(artifact.get("status_label") or "").classes(_badge_class(artifact.get("status")))
+                status.tooltip(artifact.get("status_help") or "")
+                with ui.row().classes("gap-1"):
+                    _render_artifact_access(ui, artifact, run_id, actions, language, compact=True)
+
+
+def _render_artifact_access(
+    ui: Any,
+    artifact: dict[str, Any],
+    run_id: str | None,
+    actions: WorkflowConsoleActions,
+    language: str,
+    *,
+    compact: bool = False,
+) -> None:
+    name = str(artifact.get("name") or "")
+    if artifact.get("preview"):
+        if compact:
+            preview = ui.button(icon="visibility", on_click=lambda a=artifact: _show_artifact_summary_dialog(ui, a, language)).props("flat round dense")
+        else:
+            preview = ui.button(artifact.get("display_name") or name, icon="visibility", on_click=lambda a=artifact: _show_artifact_summary_dialog(ui, a, language)).props("outline dense")
+        preview.tooltip("查看摘要" if language == "zh" else "View summary")
+    if artifact.get("stl_previewable") and run_id:
+        file_url = quote(f"/api/downloads/{quote(run_id, safe='')}/model.stl", safe="")
+        viewer = ui.link("STL", target=f"/web-viewer/index.html?file={file_url}").classes("text-sm")
+        viewer.tooltip("查看 STL" if language == "zh" else "View STL")
+    if artifact.get("downloadable") and run_id:
+        download = ui.link("下载" if language == "zh" else "Download", target=f"/api/downloads/{quote(run_id, safe='')}/{quote(name, safe='')}").classes("text-sm")
+        download.tooltip("下载" if language == "zh" else "Download")
+    if not compact and artifact.get("previewable"):
+        ui.label(artifact.get("purpose") or "").classes("text-xs text-gray-500")
+
+
+def _show_artifact_summary_dialog(ui: Any, artifact: dict[str, Any], language: str) -> None:
+    preview = artifact.get("preview") if isinstance(artifact.get("preview"), dict) else {}
+    with ui.dialog() as dialog, ui.card().classes("w-[560px] max-w-full"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label(preview.get("title") or artifact.get("display_name") or "").classes("text-lg font-semibold")
+            ui.button(icon="close", on_click=dialog.close).props("flat round dense")
+        ui.label(preview.get("summary") or artifact.get("purpose") or "").classes("text-sm text-gray-600")
+        for item in preview.get("items") or []:
+            if isinstance(item, dict):
+                with ui.row().classes("w-full items-start justify-between gap-4"):
+                    ui.label(item.get("label") or "").classes("text-sm text-gray-500")
+                    ui.label(item.get("value") or "").classes("text-sm text-gray-800 text-right")
+    dialog.open()
+
+
+def _render_artifact_audit_entry(
+    ui: Any,
+    artifact: dict[str, Any],
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    name = artifact.get("name") or "artifact"
+    with ui.expansion(name, icon="description", value=name == "prompt.txt").classes("artifact-audit-card w-full"):
+        with ui.row().classes("w-full items-center gap-2 flex-wrap"):
+            ui.badge(_artifact_source_label(language, artifact)).classes("bg-slate-100 text-slate-700")
+            ui.badge(_artifact_edit_label(language, artifact)).classes("bg-blue-50 text-blue-700" if artifact.get("editable") else "bg-gray-100 text-gray-600")
+            if artifact.get("override_present"):
+                ui.badge(_artifact_copy(language, "override_active")).classes("bg-purple-50 text-purple-700")
+            validation = artifact.get("validation_status")
+            if validation:
+                ui.badge(f"{_artifact_copy(language, 'validation')}: {validation}").classes("bg-green-50 text-green-700")
+        ui.label(artifact.get("summary") or _artifact_copy(language, "available")).classes("artifact-summary text-sm text-gray-700")
+        downstream = artifact.get("downstream_stages_affected") or []
+        if downstream:
+            ui.label(f"{_artifact_copy(language, 'affects')}: {', '.join(downstream)}").classes("text-xs text-gray-500")
+        if artifact.get("raw_json_available"):
+            ui.label("用户可读摘要可从当前阶段的输入与输出区域查看。" if language == "zh" else "A user-readable summary is available from the current stage inputs and outputs area.").classes("text-xs text-gray-500")
+        elif artifact.get("name") == "prompt.txt":
+            with ui.expansion(_artifact_copy(language, "content"), icon="text_snippet").classes("w-full"):
+                content = read_artifact_page_content(actions.backend, data.get("selected_run_id"), artifact["name"])
+                ui.label(str(content.get("content") or "")).classes("text-sm whitespace-pre-wrap")
+        elif not artifact.get("editable"):
+            ui.label(artifact.get("edit_disabled_reason") or _artifact_copy(language, "read_only")).classes("text-xs text-gray-500")
+
+
+def _artifact_copy(language: str, key: str) -> str:
+    english = {
+        "title": "Workflow inputs & artifacts",
+        "intro": "Review the requirement, prompts, plans, and generated records used by this workflow. Original files are preserved.",
+        "source": "Original artifact",
+        "override_source": "Validated override",
+        "editable": "Editable override",
+        "read_only": "Read-only record",
+        "override_active": "Override active",
+        "validation": "Validation",
+        "affects": "Affects downstream stages",
+        "content": "View content",
+        "available": "Available",
+    }
+    chinese = {
+        "title": "工作流输入与资料",
+        "intro": "查看此工作流使用的需求、提示词、计划和生成记录。原始文件会被保留。",
+        "source": "原始资料",
+        "override_source": "已验证的覆盖版本",
+        "editable": "可编辑覆盖版本",
+        "read_only": "只读记录",
+        "override_active": "覆盖版本生效中",
+        "validation": "验证状态",
+        "affects": "影响下游阶段",
+        "content": "查看内容",
+        "available": "可用",
+    }
+    return (chinese if language == "zh" else english)[key]
+
+
+def _artifact_source_label(language: str, artifact: dict[str, Any]) -> str:
+    return _artifact_copy(language, "override_source" if artifact.get("source") == "user_override" else "source")
+
+
+def _artifact_edit_label(language: str, artifact: dict[str, Any]) -> str:
+    return _artifact_copy(language, "editable" if artifact.get("editable") else "read_only")
+
+
+def _render_workflow_stage_graph(
+    ui: Any,
+    surface: dict[str, Any],
+    on_select_stage: Callable[[str], None],
+) -> None:
+    graph = surface.get("workflow_graph") if isinstance(surface.get("workflow_graph"), dict) else {}
+    selected = surface.get("selected_stage_id")
+    if not graph:
+        _render_graph_stage_row(ui, surface.get("graph_nodes") or [], selected, on_select_stage)
+        return
+    with ui.column().classes("workflow-graph w-full gap-4"):
+        ui.label("Assembly workflow").classes("text-sm font-medium text-gray-600")
+        _render_graph_stage_row(ui, graph.get("stage_spine") or [], selected, on_select_stage)
+        with ui.row().classes("w-full items-center gap-2"):
+            ui.label("|").classes("workflow-arrow")
+            ui.label("Assembly Plan separates the work into parts").classes("text-xs text-gray-500")
+        candidates = graph.get("part_candidates") if isinstance(graph.get("part_candidates"), list) else []
+        with ui.column().classes("w-full gap-2"):
+            ui.label("Candidate Parts").classes("text-sm font-medium text-gray-600")
+            if candidates:
+                with ui.row().classes("w-full items-stretch gap-3 flex-wrap"):
+                    for candidate in candidates:
+                        _render_part_candidate_node(ui, candidate, on_select_stage)
+            else:
+                ui.label("No generated part candidates have been identified yet.").classes("text-sm text-gray-500")
+        references = graph.get("reference_lane") if isinstance(graph.get("reference_lane"), list) else []
+        if references:
+            with ui.column().classes("w-full gap-2"):
+                ui.label("Reference Lane").classes("text-sm font-medium text-gray-600")
+                with ui.row().classes("w-full items-stretch gap-3 flex-wrap"):
+                    for candidate in references:
+                        _render_part_candidate_node(ui, candidate, on_select_stage)
+        with ui.row().classes("w-full items-center gap-2"):
+            ui.label("v").classes("workflow-arrow")
+            selected_part = graph.get("selected_part_id") or "a selected candidate"
+            ui.label(f"Selected Part Pipeline: {selected_part}").classes("text-sm font-medium text-gray-600")
+        _render_graph_stage_row(ui, graph.get("selected_part_pipeline") or [], selected, on_select_stage)
+        tail = graph.get("review_tail") if isinstance(graph.get("review_tail"), list) else []
+        if tail:
+            with ui.row().classes("w-full items-center gap-2"):
+                ui.label("v").classes("workflow-arrow")
+                ui.label("Work Review").classes("text-sm font-medium text-gray-600")
+            _render_graph_stage_row(ui, tail, selected, on_select_stage)
+
+
+def _render_graph_stage_row(ui: Any, nodes: list[dict[str, Any]], selected: Any, on_select_stage: Callable[[str], None]) -> None:
+    with ui.row().classes("w-full items-start gap-3 flex-wrap"):
+        for index, node in enumerate(nodes):
+            stage_id = str(node.get("stage_id") or "")
+            status = node.get("status") or "unknown"
+            step_classes = "workflow-step"
+            if stage_id == selected:
+                step_classes += " workflow-step-selected"
+            step = ui.column().classes(step_classes)
+            step.tooltip(_workflow_node_tooltip(node))
+            step.on("click", lambda _event, s=stage_id: on_select_stage(s))
+            with step:
+                ui.element("div").classes(f"workflow-dot {_dot_status(status)}")
+                ui.label(node.get("label") or stage_id).classes("text-sm font-semibold text-center")
+                ui.label(str(status).replace("_", " ")).classes("text-xs text-gray-500 text-center")
+                if node.get("has_override"):
+                    ui.badge("override").classes("bg-blue-50 text-blue-700")
+            if index < len(nodes) - 1:
+                ui.label("->").classes("workflow-arrow self-center")
+
+
+def _render_part_candidate_node(ui: Any, candidate: dict[str, Any], on_select_stage: Callable[[str], None]) -> None:
+    status = str(candidate.get("status") or "candidate")
+    classes = "workflow-step workflow-part-candidate"
+    if candidate.get("selected"):
+        classes += " workflow-step-selected"
+    node = ui.column().classes(classes)
+    node.tooltip(candidate.get("short_summary") or "Assembly part")
+    if not candidate.get("reference_only"):
+        node.on("click", lambda _event: on_select_stage("part_request"))
+    with node:
+        ui.element("div").classes(f"workflow-dot {_dot_status(status)}")
+        ui.label(candidate.get("part_id") or "part").classes("text-sm font-semibold text-center")
+        ui.label(candidate.get("role") or "assembly component").classes("text-xs text-gray-500 text-center")
+        ui.badge(status.replace("_", " ")).classes(_badge_class(status))
+        if candidate.get("supported_candidate"):
+            ui.label("supported candidate").classes("text-xs text-green-700 text-center")
+
+
+def _workflow_node_tooltip(node: dict[str, Any]) -> str:
+    hover = node.get("hover") if isinstance(node.get("hover"), dict) else {}
+    if not hover:
+        return str(node.get("short_summary") or node.get("primary_action") or "Select stage")
+    lines = [value for value in (
+        hover.get("title"),
+        hover.get("summary"),
+        hover.get("reason"),
+        hover.get("consequence"),
+        hover.get("recommended_action"),
+    ) if value]
+    return "\n".join(str(value) for value in lines)
+
+
+def _render_selected_stage_detail(
+    ui: Any,
+    stage: dict[str, Any] | None,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    if stage is None:
+        ui.label("Select a workflow stage.").classes("text-gray-600")
+        return
+    with ui.card().classes("w-full shadow-none border border-gray-200"):
+        _render_status_hero_banner(ui, stage.get("status_banner"), stage)
+        _render_status_explanation(ui, stage.get("status_explanation"), stage.get("display_language"), bool(stage.get("current_block")))
+        action_groups = stage.get("action_groups") if isinstance(stage.get("action_groups"), dict) else {}
+        language = stage.get("display_language")
+        _render_action_group(ui, _detail_label("Primary actions", language), action_groups.get("primary"), data, actions, state, refresh, primary=True)
+        cards = stage.get("detail_cards") if isinstance(stage.get("detail_cards"), list) else []
+        with ui.element("div").classes("stage-detail-grid w-full"):
+            for card in cards:
+                if card.get("title") not in {"What happened", "Why it stopped", "Why it matters", "发生了什么", "为什么停止", "为什么重要"}:
+                    _render_stage_detail_card(ui, card)
+        other_actions = [
+            *[action for action in action_groups.get("secondary", []) if isinstance(action, dict)],
+            *[action for action in action_groups.get("advanced", []) if isinstance(action, dict)],
+            *[action for action in action_groups.get("disabled", []) if isinstance(action, dict)],
+        ]
+        _render_action_group(ui, _detail_label("Other actions", language), other_actions, data, actions, state, refresh)
+        with ui.expansion("高级详情" if language == "zh" else "Advanced details", icon="info").classes("w-full"):
+            debug = stage.get("debug") if isinstance(stage.get("debug"), dict) else {}
+            codes = debug.get("diagnostic_codes") if isinstance(debug.get("diagnostic_codes"), list) else []
+            if codes:
+                _list_block(ui, "诊断标记" if language == "zh" else "Diagnostic markers", codes)
+            else:
+                ui.label("没有需要额外处理的诊断信息。" if language == "zh" else "No additional diagnostic markers are available.").classes("text-sm text-gray-500")
+
+
+def _detail_label(text: str, language: Any) -> str:
+    if language != "zh":
+        return text
+    return {
+        "Primary actions": "主要操作",
+        "Other actions": "其他操作",
+    }.get(text, text)
+
+
+def _render_status_hero_banner(ui: Any, banner: Any, stage: dict[str, Any]) -> None:
+    value = banner if isinstance(banner, dict) else {}
+    status = str(value.get("status") or stage.get("status") or "unknown")
+    with ui.column().classes(f"stage-status-banner {status} w-full gap-2"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label(value.get("title") or stage.get("stage_name") or stage.get("key")).classes("text-xl font-semibold")
+            ui.badge(status.replace("_", " ")).classes(_badge_class(status))
+        ui.label(value.get("summary") or stage.get("human_summary") or "").classes("text-sm text-gray-700")
+        if value.get("consequence"):
+            ui.label(value["consequence"]).classes("text-sm font-medium text-gray-800")
+        with ui.row().classes("w-full gap-2 flex-wrap"):
+            for badge in value.get("badges") or []:
+                if isinstance(badge, dict):
+                    ui.badge(f"{badge.get('label')}: {badge.get('value')}").classes(_badge_class(badge.get("status")))
+
+
+def _render_status_explanation(ui: Any, explanation: Any, language: Any, blocked: bool) -> None:
+    if not isinstance(explanation, dict):
+        return
+    what_happened = explanation.get("what_happened") if isinstance(explanation.get("what_happened"), list) else []
+    why = explanation.get("why")
+    if not what_happened and not why:
+        return
+    labels = ("发生了什么", "为什么停止" if blocked else "为什么重要") if language == "zh" else ("What happened", "Why it stopped" if blocked else "Why it matters")
+    with ui.element("div").classes("stage-status-explanation w-full"):
+        if what_happened:
+            with ui.column().classes("gap-1"):
+                ui.label(labels[0]).classes("text-sm font-medium text-gray-600")
+                for item in what_happened[:2]:
+                    ui.label(str(item)).classes("text-sm text-gray-700")
+        if why:
+            with ui.column().classes("gap-1"):
+                ui.label(labels[1]).classes("text-sm font-medium text-gray-600")
+                ui.label(str(why)).classes("text-sm text-gray-700")
+
+
+def _render_stage_detail_card(ui: Any, card: Any) -> None:
+    if not isinstance(card, dict):
+        return
+    with ui.element("section").classes("stage-detail-card"):
+        ui.html(f"<h3>{card.get('title') or 'Details'}</h3>")
+        items = card.get("items") if isinstance(card.get("items"), list) else []
+        if card.get("kind") == "chips":
+            with ui.row().classes("w-full gap-2 flex-wrap"):
+                for item in items:
+                    if isinstance(item, dict):
+                        ui.badge(item.get("label") or "").classes(_badge_class(item.get("status")))
+        else:
+            with ui.column().classes("w-full gap-1"):
+                for item in items[:5]:
+                    if isinstance(item, dict):
+                        with ui.row().classes("w-full items-center justify-between gap-2"):
+                            ui.label(item.get("label") or "").classes("text-sm text-gray-700")
+                            ui.badge(item.get("value") or "").classes(_badge_class(item.get("status")))
+                    else:
+                        with ui.row().classes("items-start gap-2"):
+                            ui.label("•").classes("text-sm text-gray-500")
+                            ui.label(str(item)).classes("text-sm text-gray-700")
+
+
+def _render_action_group(
+    ui: Any,
+    title: str,
+    group: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    *,
+    primary: bool = False,
+) -> None:
+    action_list = group if isinstance(group, list) else []
+    if not action_list:
+        return
+    if title:
+        ui.label(title).classes("text-sm font-medium text-gray-600")
+    with ui.row().classes("w-full gap-2 flex-wrap"):
+        for action in action_list:
+            if not isinstance(action, dict):
+                continue
+            button = ui.button(
+                action.get("label") or action.get("key"),
+                on_click=lambda a=action: _run_detail_action(ui, actions, data.get("selected_run_id"), a, state, refresh),
+            ).props("dense" if primary else "outline dense")
+            button.tooltip(action.get("disabled_reason") or action.get("backend_action") or "Available")
+            if not action.get("enabled"):
+                button.disable()
+
+
+def _run_detail_action(
+    ui: Any,
+    actions: WorkflowConsoleActions,
+    run_id: str | None,
+    action: dict[str, Any],
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    if action.get("presentation_action") == "view_cad_ir_draft" and run_id:
+        _show_stage_artifact_dialog(ui, actions.backend, run_id, str(action.get("artifact_name") or "cad_ir_draft.json"), language=str(state.get("language") or "en"))
+        return
+    if action.get("presentation_action") == "edit_assembly_plan" and run_id:
+        _show_stage_artifact_dialog(
+            ui,
+            actions.backend,
+            run_id,
+            str(action.get("artifact_name") or "assembly_plan.json"),
+            editor_context=(data, actions, state, refresh),
+            language=str(state.get("language") or "en"),
+        )
+        return
+    if action.get("presentation_action") == "view_diagnostics":
+        ui.notify("Open Debug / Diagnostics below to inspect the raw diagnostic details.")
+        return
+    _run_surface_action(actions, run_id, action, state, refresh)
+
+
+def _show_stage_artifact_dialog(
+    ui: Any,
+    backend: WorkflowConsoleBackend,
+    run_id: str,
+    artifact_name: str,
+    *,
+    editor_context: tuple[dict[str, Any], WorkflowConsoleActions, dict[str, Any], Callable[[], None]] | None = None,
+    language: str = "en",
+) -> None:
+    with ui.dialog() as dialog, ui.card().classes("w-[720px] max-w-full"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label(artifact_name).classes("text-lg font-semibold")
+            ui.button(icon="close", on_click=dialog.close).props("flat round dense")
+        try:
+            content = read_artifact_page_content(backend, run_id, artifact_name)
+            value = content.get("content")
+            if isinstance(value, str):
+                ui.label(value).classes("text-sm whitespace-pre-wrap w-full")
+            else:
+                _render_artifact_content_summary(ui, artifact_name, value, language)
+            if editor_context and artifact_name == "assembly_plan.json":
+                ui.separator()
+                page_data, console_actions, state, refresh = editor_context
+                _render_artifact_override_editor(
+                    ui,
+                    page_data,
+                    console_actions,
+                    state,
+                    refresh,
+                    {"name": artifact_name, "editable": True, "canonical_name": "assembly_plan.json"},
+                    content.get("content"),
+                )
+        except Exception as exc:
+            ui.label(f"Unable to open this artifact: {exc}").classes("text-sm text-red-700")
+    dialog.open()
+
+
+def _render_artifact_content_summary(ui: Any, artifact_name: str, value: Any, language: str) -> None:
+    data = value if isinstance(value, dict) else {}
+    is_zh = language == "zh"
+    fields = {
+        "requirement.json": (("object_goal", "目标" if is_zh else "Goal"), ("part_type", "类型" if is_zh else "Type"), ("scope", "范围" if is_zh else "Scope")),
+        "requirement_v2.json": (("object_goal", "目标" if is_zh else "Goal"), ("part_type", "类型" if is_zh else "Type"), ("requirement_status", "状态" if is_zh else "Status")),
+        "assembly_plan.json": (("selected_candidate", "选定零件" if is_zh else "Selected part"), ("part_count", "零件数" if is_zh else "Part count")),
+        "part_create_request.json": (("part_id", "零件" if is_zh else "Part"), ("role", "职责" if is_zh else "Role"), ("brief", "说明" if is_zh else "Brief")),
+        "cad_ir_draft.json": (("part_id", "零件" if is_zh else "Part"), ("part_type", "零件类型" if is_zh else "Part type"), ("status", "状态" if is_zh else "Status")),
+    }.get(artifact_name, (("status", "状态" if is_zh else "Status"), ("artifact_type", "记录类型" if is_zh else "Record type"), ("part_id", "零件" if is_zh else "Part")))
+    shown = False
+    for key, label in fields:
+        field_value = data.get(key)
+        if field_value not in (None, "", [], {}):
+            shown = True
+            with ui.row().classes("w-full items-start justify-between gap-4"):
+                ui.label(label).classes("text-sm text-gray-500")
+                ui.label(_compact_display(field_value)).classes("text-sm text-gray-800 text-right")
+    if artifact_name == "assembly_plan.json":
+        parts = [str(item.get("part_id")) for item in data.get("parts", []) if isinstance(item, dict) and item.get("part_id")]
+        if parts:
+            shown = True
+            ui.label("候选零件" if is_zh else "Candidate parts").classes("text-sm text-gray-500")
+            with ui.row().classes("w-full gap-2 flex-wrap"):
+                for part in parts[:8]:
+                    ui.badge(part).classes("bg-slate-100 text-slate-700")
+    if not shown:
+        ui.label("该记录可用，但没有可展示的用户摘要字段。" if is_zh else "This record is available, but it has no user-facing summary fields.").classes("text-sm text-gray-500")
 
 
 def _render_stage_review_card(
@@ -1629,7 +2169,7 @@ def _dot_status(status: Any) -> str:
     value = str(status or "unknown")
     if value in {"accepted_for_preview", "success"}:
         return "accepted"
-    if value in {"completed", "accepted", "available", "ready", "running", "needs_review", "partial_success", "blocked", "reference_only", "not_started", "incomplete"}:
+    if value in {"completed", "accepted", "available", "ready", "running", "needs_review", "partial_success", "blocked", "reference_only", "not_started", "incomplete", "candidate", "selected", "generated", "failed"}:
         return value
     if "blocked" in value:
         return "blocked"
@@ -1836,13 +2376,13 @@ def _sidebar_part_count_label(counts: dict[str, Any]) -> str:
 
 
 def _badge_class(status: Any) -> str:
-    if status in {"accepted", "completed"}:
+    if status in {"accepted", "completed", "generated", "selected"}:
         return "bg-green-600"
     if status in {"needs_review", "partial_success"}:
         return "bg-yellow-600"
     if status == "user_modified":
         return "bg-purple-600"
-    if status == "blocked":
+    if status in {"blocked", "failed"}:
         return "bg-red-600"
     if status in {"ready", "running"}:
         return "bg-blue-600"

@@ -27,13 +27,8 @@ def list_works(
     index: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return paginated inferred Works without provider or CAD execution."""
-    show_debug = bool((filters or {}).get("show_debug"))
-    index = index or build_work_index(backend, include_debug=show_debug)
-    works = [
-        work["summary"]
-        for work in index["works"]
-        if show_debug or work["summary"].get("overall_status") != "debug_only"
-    ]
+    index = index or build_work_index(backend)
+    works = [work["summary"] for work in index["works"]]
     works = sorted(works, key=lambda item: (item.get("updated_at") or "", item.get("work_id") or ""), reverse=True)
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
@@ -48,7 +43,7 @@ def list_works(
             "has_previous": offset > 0,
             "has_next": offset + len(page) < len(works),
         },
-        "filters": {"show_debug": show_debug},
+        "filters": {},
     }
 
 
@@ -64,7 +59,7 @@ def get_work_summary_from_index(index: dict[str, Any], work_id: str) -> dict[str
 
 def get_work_detail(backend: Any, work_id: str, *, index: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return detail for one inferred Work with current state separated from history."""
-    work = _find_work(index or build_work_index(backend, include_debug=work_id == DEBUG_WORK_ID), work_id)
+    work = _find_work(index or build_work_index(backend), work_id)
     summary = work["summary"]
     current_run_id = summary.get("latest_run_id") or summary.get("root_run_id")
     current_run = work["runs_by_id"].get(current_run_id) or {}
@@ -89,6 +84,7 @@ def get_work_detail(backend: Any, work_id: str, *, index: dict[str, Any] | None 
         "nodes": nodes,
         "run_history": run_history,
         "products": products,
+        "directory_map": _build_directory_map(summary, current_run, parts, products, run_history),
         "available_actions": _available_actions(current_run),
         "history_semantics": {
             "runs_are_immutable": True,
@@ -99,62 +95,16 @@ def get_work_detail(backend: Any, work_id: str, *, index: dict[str, Any] | None 
 
 
 def build_work_index(backend: Any, *, include_debug: bool = False) -> dict[str, Any]:
-    """Infer Works from existing runs and lineage artifacts under configured roots."""
-    runs = _load_work_relevant_runs(backend)
+    """Load only manifest-backed Works and their Work-contained runs."""
     manifests = _load_work_manifests(backend)
-    for manifest in manifests.values():
-        for run_id in _manifest_run_ids(manifest):
-            if run_id in runs:
-                continue
-            path = _find_run_path_by_name(backend, run_id)
-            if path is not None:
-                runs[run_id] = _read_metadata(backend, path)
-    root_ids = [run_id for run_id, run in runs.items() if _is_root_candidate(run)]
-    member_to_root: dict[str, str] = {}
-    for root_id in root_ids:
-        for child_id in _referenced_child_run_ids(runs[root_id]):
-            if child_id in runs:
-                member_to_root[child_id] = root_id
-        for run_id, run in runs.items():
-            if run_id == root_id:
-                continue
-            if _lineage_child_id(run) == root_id:
-                member_to_root[run_id] = root_id
-
     works = []
-    assigned = set()
     for work_id, manifest in sorted(manifests.items()):
-        member_ids = [
-            run_id
-            for run_id in _manifest_run_ids(manifest)
-            if run_id in runs
-        ]
-        root_run_id = manifest.get("root_run_id")
-        if isinstance(root_run_id, str) and root_run_id in runs and root_run_id not in member_ids:
-            member_ids.insert(0, root_run_id)
-        current_run_id = manifest.get("current_run_id")
-        if isinstance(current_run_id, str) and current_run_id in runs and current_run_id not in member_ids:
-            member_ids.append(current_run_id)
-        assigned.update(member_ids)
+        runs = _load_work_runs(backend, work_id)
+        member_ids = [run_id for run_id in _manifest_run_ids(manifest) if run_id in runs]
+        for run_id in runs:
+            if run_id not in member_ids:
+                member_ids.append(run_id)
         works.append(_build_work(work_id, member_ids, runs, debug_only=False, manifest=manifest))
-
-    for root_id in sorted(root_ids):
-        if root_id in member_to_root:
-            continue
-        if root_id in assigned:
-            continue
-        if root_id in manifests:
-            continue
-        member_ids = sorted({root_id, *[run_id for run_id, owner in member_to_root.items() if owner == root_id]})
-        assigned.update(member_ids)
-        works.append(_build_work(root_id, member_ids, runs, debug_only=False))
-
-    if include_debug:
-        debug_runs = _load_debug_runs(backend, assigned | set(runs))
-        debug_ids = sorted(debug_runs)
-        if debug_ids:
-            runs.update(debug_runs)
-            works.append(_build_work(DEBUG_WORK_ID, debug_ids, runs, debug_only=True))
     return {"works": works}
 
 
@@ -188,6 +138,7 @@ def create_work_manifest(
     if manifest_path.exists():
         raise FileExistsError(f"workflow console work already exists: {work_id}")
     work_dir.mkdir(parents=True, exist_ok=False)
+    backend._require_child_path(work_dir, "runs").mkdir(parents=True, exist_ok=False)
     now = _now_timestamp()
     manifest = {
         "schema_version": WORK_MANIFEST_SCHEMA_VERSION,
@@ -209,20 +160,15 @@ def create_work_manifest(
     return {"work": _public_manifest(manifest)}
 
 
-def _load_work_relevant_runs(backend: Any) -> dict[str, dict[str, Any]]:
-    paths = _find_root_candidate_paths(backend)
-    runs = {path.name: _read_metadata(backend, path) for path in sorted(paths, key=lambda item: str(item))}
-
-    referenced = set()
-    for run in runs.values():
-        referenced.update(_referenced_child_run_ids(run))
-    for run_id in sorted(referenced):
-        if run_id in runs:
-            continue
-        path = _find_run_path_by_name(backend, run_id)
-        if path is not None:
-            runs[run_id] = _read_metadata(backend, path)
-    return runs
+def _load_work_runs(backend: Any, work_id: str) -> dict[str, dict[str, Any]]:
+    root = backend._work_runs_root(work_id)
+    if not root.exists():
+        return {}
+    return {
+        path.name: _read_metadata(backend, path)
+        for path in sorted(root.iterdir(), key=lambda item: item.name)
+        if path.is_dir() and _has_artifact(path)
+    }
 
 
 def _load_debug_runs(backend: Any, excluded_run_ids: set[str]) -> dict[str, dict[str, Any]]:
@@ -348,12 +294,7 @@ def _works_root(backend: Any) -> Path:
 
 
 def _work_manifest_roots(backend: Any) -> list[Path]:
-    roots = [_works_root(backend)]
-    for root in backend._resolved_run_roots():
-        legacy = root / LEGACY_WORKS_DIR_NAME
-        if legacy not in roots:
-            roots.append(legacy)
-    return roots
+    return [_works_root(backend)]
 
 
 def _work_storage_dir_in_parts(parts: tuple[str, ...]) -> bool:
@@ -767,12 +708,48 @@ def _build_products(work: dict[str, Any]) -> dict[str, Any]:
             if isinstance(item, dict) and isinstance(item.get("name"), str):
                 artifact_by_name[item["name"]] = {"name": item["name"], "collapsed": True, "read_on_demand": True}
         for item in run.get("downloadables", []):
-            if isinstance(item, dict) and item.get("name") in DOWNLOADABLE_FILES:
+            if isinstance(item, dict) and item.get("name") in {"model.step", "model.stl", "preview.png"}:
                 download_by_name[item["name"]] = {"name": item["name"], "available": True}
     return {
         "human_facing": filter_artifacts_for_display(list(artifact_by_name.values())),
         "downloadables": list(download_by_name.values()),
         "artifacts_secondary_by_default": True,
+    }
+
+
+def _build_directory_map(
+    summary: dict[str, Any],
+    current_run: dict[str, Any],
+    parts: list[dict[str, Any]],
+    products: dict[str, Any],
+    history: list[dict[str, Any]],
+) -> dict[str, Any]:
+    artifacts = _artifact_names(current_run)
+    return {
+        "inputs": {
+            "title": "Inputs",
+            "items": [
+                {"label": "Original request", "status": "completed" if "prompt.txt" in artifacts else "not_started"},
+                {"label": "Reviewed requirement", "status": "completed" if "requirement_v2.json" in artifacts else "not_started"},
+            ],
+        },
+        "planning": {
+            "title": "Planning",
+            "items": [{"label": "Assembly plan", "status": "completed" if "assembly_plan.json" in artifacts else "not_started"}],
+        },
+        "parts": {
+            "title": "Parts",
+            "items": [{"label": str(part.get("part_id") or "Part"), "status": part.get("status") or "incomplete"} for part in parts],
+        },
+        "deliverables": {
+            "title": "Deliverables",
+            "items": [{"label": name, "status": "completed"} for name in (item.get("name") for item in products.get("downloadables", [])) if name],
+        },
+        "history": {
+            "title": "History",
+            "items": [{"label": str(item.get("run_id") or "Run"), "status": item.get("status") or "incomplete"} for item in history],
+        },
+        "work_id": summary.get("work_id"),
     }
 
 

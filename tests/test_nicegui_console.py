@@ -172,9 +172,27 @@ def _add_workflow_review(run_dir: Path):
 
 
 def _sample_work(tmp_path):
-    root = tmp_path / "outputs" / "enclosure_work"
+    work_dir = tmp_path / "workspace" / "works" / "enclosure_work"
+    root = work_dir / "runs" / "enclosure_work_root"
     child = root / "05_single_create" / "single_part_base"
     child.mkdir(parents=True)
+    _write_json(
+        work_dir / "work_manifest.json",
+        {
+            "schema_version": 1,
+            "work_id": "enclosure_work",
+            "title": "Enclosure Work",
+            "description": "Two-part enclosure fixture.",
+            "status": "active",
+            "root_run_id": "enclosure_work_root",
+            "current_run_id": "enclosure_work_root",
+            "run_ids": ["enclosure_work_root", "rework_workflow_review_1"],
+            "part_jobs": [],
+            "requirement": {"status": "confirmed", "root_run_id": "enclosure_work_root"},
+            "advancement_mode": "manual_confirm",
+            "metadata": {},
+        },
+    )
     (root / "prompt.txt").write_text("Two-part electronics enclosure with base, lid, and screws.\n", encoding="utf-8")
     _write_json(root / "requirement.json", {"product_family": "electronics enclosure", "scope": "multi_part"})
     _write_json(
@@ -224,7 +242,7 @@ def _sample_work(tmp_path):
     (root / "workflow_review.md").write_text("# Workflow Review\n", encoding="utf-8")
     _write_json(root / "stage_review.json", {"stage": "assembly_plan", "review_status": "needs_revision", "target_rework_stage": "workflow_review"})
     _write_json(root / "rework_decision.json", {"execution_status": "completed", "target_rework_stage": "workflow_review", "child_run_id": "rework_workflow_review_1"})
-    rework = tmp_path / "outputs" / "rework_workflow_review_1"
+    rework = work_dir / "runs" / "rework_workflow_review_1"
     rework.mkdir(parents=True)
     _write_json(rework / "workflow_review.json", {"overall_status": "needs_revision", "risk_level": "medium"})
     (child / "model.step").write_text("STEP\n", encoding="utf-8")
@@ -243,7 +261,7 @@ def test_nicegui_console_builds_page_data_from_fake_run_summaries(tmp_path):
     data = build_console_page_data(backend, "nicegui_run")
 
     assert data["selected_run_id"] == "nicegui_run"
-    assert [run["run_id"] for run in data["runs"]] == ["nicegui_run"]
+    assert data["runs"] == []
     assert data["requirement_review"]["original_prompt"].startswith("Make a desktop enclosure")
     assert data["assembly_plan"]["candidate_part_ids"] == ["base"]
     assert data["assembly_plan"]["interface_count"] == 1
@@ -260,7 +278,7 @@ def test_nicegui_defaults_to_workspace_page_without_selecting_first_work(tmp_pat
     assert data["selected_work_id"] is None
     assert data["selected_work"]["summary"] is None
     assert data["workspace"]["display_path"] == str((tmp_path / "workspace").resolve())
-    assert data["workspace"]["work_count"] == 0
+    assert data["workspace"]["work_count"] == 1
 
 
 def test_nicegui_work_dashboard_infers_work_and_hides_debug_by_default(tmp_path):
@@ -282,9 +300,9 @@ def test_nicegui_work_dashboard_infers_work_and_hides_debug_by_default(tmp_path)
         "incomplete": 0,
     }
     assert works[0]["readiness_score"] == 68
-    assert detail["current_state"]["current_run_id"] in {"enclosure_work", "rework_workflow_review_1"}
+    assert detail["current_state"]["current_run_id"] in {"enclosure_work_root", "rework_workflow_review_1"}
     assert detail["history_semantics"]["runs_are_immutable"] is True
-    assert {row["run_id"] for row in detail["run_history"]} == {"enclosure_work", "single_part_base", "rework_workflow_review_1"}
+    assert {row["run_id"] for row in detail["run_history"]} == {"enclosure_work_root", "rework_workflow_review_1"}
 
 
 def test_nicegui_work_detail_separates_current_state_parts_nodes_and_products(tmp_path):
@@ -304,6 +322,11 @@ def test_nicegui_work_detail_separates_current_state_parts_nodes_and_products(tm
     assert node_status["part:base"] == "accepted"
     assert node_status["part:lid"] == "blocked"
     assert "workflow_review.md" in {item["name"] for item in products["human_facing"]}
+    assert {item["name"] for item in products["downloadables"]} <= {"model.step", "model.stl", "preview.png"}
+    directory_map = detail["directory_map"]
+    assert [item["label"] for item in directory_map["inputs"]["items"]] == ["Original request", "Reviewed requirement"]
+    assert {item["label"] for item in directory_map["parts"]["items"]} == {"base", "lid", "screws"}
+    assert {item["label"] for item in directory_map["history"]["items"]} == {"enclosure_work_root", "rework_workflow_review_1"}
     assert products["artifacts_secondary_by_default"] is True
     assert _does_not_contain_absolute_paths(detail, tmp_path)
 
@@ -448,10 +471,10 @@ def test_nicegui_user_pages_hide_review_and_products_from_work_nav_contract():
 
     assert "review" not in user_pages
     assert "products" not in user_pages
-    assert user_pages == ["overview", "workflow", "parts", "runs"]
+    assert user_pages == ["overview", "workflow", "parts"]
 
 
-def test_nicegui_legacy_work_manifest_under_outputs_is_still_loaded(tmp_path):
+def test_nicegui_legacy_work_manifest_under_outputs_is_not_indexed(tmp_path):
     legacy_manifest = tmp_path / "outputs" / "_works" / "legacy_work" / "work_manifest.json"
     _write_json(
         legacy_manifest,
@@ -469,8 +492,8 @@ def test_nicegui_legacy_work_manifest_under_outputs_is_still_loaded(tmp_path):
 
     data = build_console_page_data(backend, selected_work_id="legacy_work")
 
-    assert data["selected_work"]["entity_state"]["present"] is True
-    assert data["selected_work"]["summary"]["title"] == "Legacy Work"
+    assert data["works"] == []
+    assert data["selected_work"]["error"]["type"] == "not_found"
 
 
 def test_nicegui_workspace_work_manifest_wins_over_legacy_manifest(tmp_path):
@@ -548,7 +571,7 @@ def test_nicegui_workflow_node_detail_points_to_selected_work_node(tmp_path):
     assert data["selected_node"]["status"] == "blocked"
 
 
-def test_nicegui_console_uses_paginated_run_list_and_lazy_detail(tmp_path, monkeypatch):
+def test_nicegui_console_does_not_index_project_level_runs(tmp_path, monkeypatch):
     for index in range(DEFAULT_RUN_PAGE_SIZE + 3):
         run_dir = tmp_path / "outputs" / f"page_run_{index:02d}"
         run_dir.mkdir(parents=True)
@@ -565,14 +588,11 @@ def test_nicegui_console_uses_paginated_run_list_and_lazy_detail(tmp_path, monke
 
     data = build_console_page_data(backend, active_page="runs", show_unclassified_runs=True, limit=25, offset=0)
 
-    assert len(data["runs"]) == 25
-    assert data["pagination"]["limit"] == 25
-    assert data["pagination"]["total"] == DEFAULT_RUN_PAGE_SIZE + 3
-    assert data["pagination"]["has_next"] is True
-    assert loaded_details == [data["selected_run_id"]]
+    assert data["runs"] == []
+    assert loaded_details == []
 
 
-def test_nicegui_console_search_filters_run_names(tmp_path):
+def test_nicegui_console_search_does_not_expose_project_level_runs(tmp_path):
     for name in ("alpha_console", "beta_console"):
         run_dir = tmp_path / "outputs" / name
         run_dir.mkdir(parents=True)
@@ -581,8 +601,8 @@ def test_nicegui_console_search_filters_run_names(tmp_path):
 
     data = build_console_page_data(backend, active_page="runs", show_unclassified_runs=True, search="alpha")
 
-    assert [run["run_id"] for run in data["runs"]] == ["alpha_console"]
-    assert data["run_filters"] == {"search": "alpha"}
+    assert data["runs"] == []
+    assert data["run_filters"] == {}
 
 
 def test_nicegui_run_selection_data_excludes_absolute_paths(tmp_path):
@@ -788,13 +808,83 @@ def test_nicegui_workflow_review_surface_summarizes_requirement_planning_and_rev
 
     surface = data["workflow_review_surface"]
     stages = {stage["key"]: stage for stage in surface["stages"]}
+    graph_nodes = {node["stage_id"]: node for node in surface["graph_nodes"]}
     requirement = stages["requirement"]["report_summary"]
     planning = stages["planning"]["report_summary"]
     part_modeling = stages["part_modeling"]["report_summary"]
 
     assert surface["primary_concept"] == "Workflow / Stage / Review"
+    assert surface["layout"] == "workflow_graph_v2_selected_stage_detail"
+    assert surface["selected_stage"]["key"] == "part_modeling"
     assert surface["debug_graph_label"] == "Debug / Raw Workflow Graph"
     assert "OpenNode" not in json.dumps(surface)
+    assert graph_nodes["requirement"]["label"] == "Requirement"
+    assert graph_nodes["part_modeling"]["status"] == "blocked"
+    assert graph_nodes["part_modeling"]["has_debug"] is True
+    assert graph_nodes["part_modeling"]["hover"] == {
+        "title": "Blocked at CAD IR validation",
+        "summary": graph_nodes["part_modeling"]["short_summary"],
+        "reason": "The draft uses a part type the backend cannot execute yet. This is a capability limit, not a corrupted run.",
+        "consequence": "No child input_ir.json, STEP, or STL was created.",
+        "recommended_action": "Review the part definition and record the required revision; the current backend cannot continue with this draft.",
+    }
+    assert "CAD IR validation" in surface["selected_stage"]["human_summary"]
+    assert surface["selected_stage"]["debug"]["diagnostic_codes"]
+    banner = surface["selected_stage"]["status_banner"]
+    assert banner["title"] == "Blocked at CAD IR validation"
+    assert "not supported" in banner["summary"]
+    assert banner["consequence"] == "No child input_ir.json, STEP, or STL was created."
+    badge_values = {badge["label"]: badge["value"] for badge in banner["badges"]}
+    assert badge_values["Part"] == "base"
+    assert badge_values["Draft"] == "present"
+    assert badge_values["CAD output"] == "none"
+    assert badge_values["Fallback"] == "none"
+    detail_cards = {card["title"]: card for card in surface["selected_stage"]["detail_cards"]}
+    assert {"What happened", "Why it stopped", "Recommended next step", "Artifact status", "Review state"} <= set(detail_cards)
+    assert detail_cards["Artifact status"]["items"] == [
+        {"label": "cad_ir_draft.json", "value": "present", "status": "completed"},
+        {"label": "child input_ir.json", "value": "not created", "status": "not_started"},
+        {"label": "model.step", "value": "not created", "status": "not_started"},
+        {"label": "model.stl", "value": "not created", "status": "not_started"},
+    ]
+    action_groups = surface["selected_stage"]["action_groups"]
+    assert [action["key"] for action in action_groups["primary"]] == ["view_cad_ir_draft", "save_stage_review"]
+    assert {action["key"] for action in action_groups["secondary"]} >= {"mark_blocked", "create_workflow_review"}
+    disabled_actions = {action["key"]: action for action in action_groups["disabled"]}
+    assert disabled_actions["approve_stage"]["disabled_reason"] == "No STEP/STL was generated, so there is no part result to approve."
+    assert disabled_actions["reviewed_part_create"]["disabled_reason"] == "This reviewed-part create already ran and blocked at CAD IR validation."
+    prompt = surface["workflow_context"]["prompt"]
+    assert prompt["display_name"] == "Original request"
+    assert prompt["purpose"] == "Original user request"
+    assert prompt["status_label"] == "available"
+    assert prompt["preview"]["title"] == "Original request"
+    stage_artifacts = {item["name"]: item for item in surface["workflow_context"]["stage_artifacts"]}
+    assert stage_artifacts["cad_ir_draft.json"]["direction"] == "output"
+    assert stage_artifacts["cad_ir_draft.json"]["previewable"] is True
+    assert stage_artifacts["model.step"]["status_label"] == "not created"
+    assert stage_artifacts["model.step"]["downloadable"] is False
+    graph = surface["workflow_graph"]
+    assert [node["stage_id"] for node in graph["stage_spine"]] == ["requirement", "clarification", "planning", "assembly_plan"]
+    assert graph["selected_part_id"] == "base"
+    candidates = {candidate["part_id"]: candidate for candidate in graph["part_candidates"]}
+    assert candidates["base"] == {
+        "part_id": "base",
+        "role": "main housing",
+        "brief": "main housing",
+        "status": "selected",
+        "supported_candidate": True,
+        "selected": True,
+        "current": True,
+        "reference_only": False,
+        "short_summary": "Selected for the reviewed-part pipeline as main housing.",
+    }
+    assert candidates["lid"]["status"] == "blocked"
+    assert candidates["lid"]["supported_candidate"] is False
+    assert graph["reference_lane"][0]["part_id"] == "screws"
+    assert graph["reference_lane"][0]["status"] == "reference_only"
+    assert [node["stage_id"] for node in graph["selected_part_pipeline"]] == [
+        "part_request", "part_review", "reviewed_handoff", "cad_ir_draft", "part_modeling", "part_result_review",
+    ]
     assert requirement["requirement_source"] == "requirement_v2.json"
     assert requirement["part_type"] == "enclosure"
     assert requirement["part_family"] == "housing"
@@ -812,6 +902,67 @@ def test_nicegui_workflow_review_surface_summarizes_requirement_planning_and_rev
     assert part_modeling["child_input_ir_status"] == "absent"
     assert part_modeling["model_step_status"] == "absent"
     assert part_modeling["model_stl_status"] == "absent"
+
+
+def test_nicegui_workflow_review_surface_selects_one_stage_detail(tmp_path):
+    _sample_run(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    data = build_console_page_data(
+        backend,
+        "nicegui_run",
+        active_page="workflow",
+        selected_stage_id="planning",
+    )
+
+    surface = data["workflow_review_surface"]
+    selected = surface["selected_stage"]
+
+    assert surface["selected_stage_id"] == "planning"
+    assert selected["key"] == "planning"
+    assert selected["stage_name"] == "Planning"
+    assert "broken into 1 part candidate" in selected["human_summary"]
+    assert selected["why_it_matters"]
+    assert selected["current_block"] is None
+    assert selected["next_recommended_action"].startswith("Review base")
+    assert any("Route: assembly decomposition" in item for item in selected["key_decisions_human"])
+    assert selected["progress_summary"]
+    assert selected["limitations_summary"]
+    assert selected["safety_summary"] == []
+    banner = selected["status_banner"]
+    assert banner["title"] == "Assembly plan completed"
+    assert banner["consequence"].startswith("Full assembly CAD is not supported")
+    assert {badge["label"]: badge["value"] for badge in banner["badges"]}["Selected"] == "base"
+    detail_cards = {card["title"]: card for card in selected["detail_cards"]}
+    assert detail_cards["Candidate parts"]["kind"] == "chips"
+    assert detail_cards["Candidate parts"]["items"] == [{"label": "base", "status": "selected"}]
+    assert detail_cards["Reference lane"]["items"] == [{"label": "screws", "status": "reference_only"}]
+    assert selected["advanced"]["summary_data"] == selected["report_summary"]
+    assert selected["debug"]["blocked_reasons"] == selected["blocked_reasons"]
+
+
+def test_nicegui_workflow_selected_stage_detail_supports_chinese_display_copy(tmp_path):
+    _sample_run(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    data = build_console_page_data(backend, "nicegui_run", active_page="workflow", language="zh")
+    selected = data["workflow_review_surface"]["selected_stage"]
+
+    assert selected["display_language"] == "zh"
+    assert selected["stage_name"] == "零件建模 / 已评审零件创建"
+    assert selected["status_banner"]["title"] == "CAD IR 验证已阻断"
+    assert "当前 CAD 后端尚不支持" in selected["status_banner"]["summary"]
+    cards = {card["title"]: card for card in selected["detail_cards"]}
+    assert cards["为什么停止"]["items"] == ["草稿使用了当前后端尚不能执行的零件类型。", "这是能力限制，不是运行损坏。"]
+    assert cards["产物状态"]["items"][1]["value"] == "未创建"
+    groups = selected["action_groups"]
+    assert [action["label"] for action in groups["primary"]] == ["查看 CAD IR 草稿", "保存阶段评审"]
+    disabled = {action["key"]: action for action in groups["disabled"]}
+    assert disabled["approve_stage"]["disabled_reason"] == "未生成 STEP/STL，因此没有可批准的零件结果。"
+    context = data["workflow_review_surface"]["workflow_context"]
+    assert context["title"] == "工作流输入与输出"
+    assert context["table_columns"] == ["资料", "用途", "方向", "状态", "操作"]
+    assert context["prompt"]["purpose"] == "原始用户需求"
 
 
 def test_nicegui_workflow_review_surface_actions_and_artifacts_are_allowlisted(tmp_path):

@@ -162,6 +162,25 @@ cases directly.
 
 ## Run the Web Workflow Console
 
+The Console stores user-visible work in a Work-contained layout. Each Work owns
+its root and part runs; project-level `outputs/` is for local development and
+is not indexed by the Console.
+
+```text
+workspace/
+  workspace.json
+  config.json
+  works/
+    <work_id>/
+      work_manifest.json
+      runs/
+        <run_id>/
+```
+
+The Console presents workflow summaries and final STEP, STL, and preview
+deliverables. Raw JSON, agent traces, runtime logs, and generated scripts stay
+in the local run directory for developer inspection.
+
 For the NiceGUI cockpit:
 
 ```powershell
@@ -169,12 +188,12 @@ For the NiceGUI cockpit:
 ```
 
 The console is a workflow cockpit, not just an artifact browser. The Workflow
-page shows `Workflow Stage Review` cards for Requirement, Clarification,
-Planning, Assembly Plan, reviewed-part handoff, CAD IR draft, part result
-review, workflow review, and rework. Each card reads existing artifacts through
-the backend and shows inputs, outputs, gate/review state, diagnostics, blocked
-reasons, raw allowlisted artifacts, and enabled or disabled actions with
-prerequisite reasons.
+page leads with a Workflow Graph for Requirement, Clarification, Planning,
+Assembly Plan, reviewed-part handoff, CAD IR draft, part result review,
+workflow review, and rework. Selecting a graph node opens that stage's detail:
+human summary, current status, key decisions, user actions, important artifacts,
+and collapsed Advanced / Debug sections. The full stage list, raw workflow
+graph, raw diagnostics, and raw allowlisted artifacts are secondary surfaces.
 
 Artifacts remain the source of truth. The UI does not create a database, cloud
 state, account system, free chat transcript, or browser-owned workflow state.

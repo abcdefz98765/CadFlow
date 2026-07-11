@@ -111,8 +111,7 @@ class WorkflowConsoleBackend:
         if not workspace_path.is_absolute():
             workspace_path = self.project_root / workspace_path
         self.workspace_root = workspace_path.resolve()
-        default_workspace_runs = self.workspace_root / "runs"
-        self.run_roots = tuple(Path(root) for root in (run_roots or (default_workspace_runs, "outputs", "runs")))
+        self.run_roots = tuple(Path(root) for root in (run_roots or ("outputs", "runs")))
         self.stage_runner = stage_runner or StageRunner(self.project_root)
         self.stage_runner.allowed_roots = (self.workspace_root,)
         self._provider_adapter_factory = provider_adapter_factory or make_json_contract_adapter_from_env
@@ -131,10 +130,10 @@ class WorkflowConsoleBackend:
             "is_external": not self._is_project_child(self.workspace_root),
             "present": manifest_path.exists(),
             "works_path": "works",
-            "runs_path": "runs",
+            "runs_path": "works/<work_id>/runs",
             "config_path": WORKSPACE_CONFIG_NAME,
             "work_count": self._workspace_child_dir_count("works"),
-            "run_count": self._workspace_child_dir_count("runs"),
+            "run_count": sum(self._workspace_child_dir_count(f"works/{work_id}/runs") for work_id in self._workspace_work_ids()),
             "advancement_mode": self.read_workspace_config()["advancement_mode"],
         }
 
@@ -151,7 +150,6 @@ class WorkflowConsoleBackend:
             self._set_workspace_root(workspace_path)
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         self._resolve_workspace_path("works").mkdir(parents=True, exist_ok=True)
-        self._resolve_workspace_path("runs").mkdir(parents=True, exist_ok=True)
         manifest_path = self._resolve_workspace_path(WORKSPACE_MANIFEST_NAME)
         existing = _read_json_if_present(manifest_path) or {}
         now = _now_timestamp()
@@ -366,14 +364,14 @@ class WorkflowConsoleBackend:
         prompt: str,
         run_id: str | None = None,
     ) -> dict[str, Any]:
-        """Create the root requirement run for a Work under workspace/runs."""
+        """Create the root requirement run inside the owning Work directory."""
         self._require_safe_run_id(work_id)
         prompt_text = _safe_prompt_text(prompt)
         manifest = self._read_work_manifest(work_id)
         if run_id is None:
-            run_id = self._next_workspace_run_id(f"{work_id}_root")
+            run_id = self._next_workspace_run_id(work_id, f"{work_id}_root")
         self._require_safe_run_id(run_id)
-        created = self.create_run_by_id(run_id, prompt_text, root=self._workspace_runs_root_name())
+        created = self.create_run_by_id(run_id, prompt_text, root=self._work_runs_root(work_id))
         config = self.read_workspace_config()
         manifest["root_run_id"] = run_id
         manifest["current_run_id"] = run_id
@@ -391,7 +389,7 @@ class WorkflowConsoleBackend:
         if config["advancement_mode"] == "auto_advance":
             for stage in ("requirement", "planning"):
                 try:
-                    stage_result = self.run_stage_by_id(run_id, stage, root=self._workspace_runs_root_name())
+                    stage_result = self.run_stage_by_id(run_id, stage, root=self._work_runs_root(work_id))
                 except Exception as exc:
                     stages.append({"stage": stage, "status": "blocked", "error": type(exc).__name__})
                     break
@@ -418,7 +416,7 @@ class WorkflowConsoleBackend:
         root_run_id = manifest.get("root_run_id")
         if not isinstance(root_run_id, str) or not root_run_id:
             raise ValueError("workflow console Work must have a root run before creating part runs")
-        root_run = self.read_run_metadata_by_id(root_run_id, root=self._workspace_runs_root_name())
+        root_run = self.read_run_metadata_by_id(root_run_id, root=self._work_runs_root(work_id))
         planned_parts = self._planned_parts_from_run(root_run)
         if not planned_parts:
             raise ValueError("workflow console Work has no planned parts to create runs for")
@@ -433,9 +431,9 @@ class WorkflowConsoleBackend:
             job = existing_by_part.get(part_id)
             if job and job.get("run_id"):
                 continue
-            run_id = self._next_workspace_run_id(f"{work_id}_{part_id}")
+            run_id = self._next_workspace_run_id(work_id, f"{work_id}_{part_id}")
             prompt = f"Create part '{part_id}' for Work '{work_id}'."
-            created = self.create_run_by_id(run_id, prompt, root=self._workspace_runs_root_name())
+            created = self.create_run_by_id(run_id, prompt, root=self._work_runs_root(work_id))
             created_runs.append(created["run"])
             existing_by_part[part_id] = {
                 "part_id": part_id,
@@ -488,12 +486,14 @@ class WorkflowConsoleBackend:
         work_dir = self._require_child_path(self._resolve_workspace_path("works"), work_id)
         return self._require_child_path(work_dir, "work_manifest.json")
 
-    def _workspace_runs_root_name(self) -> str:
-        return str(self._resolve_workspace_path("runs"))
+    def _work_runs_root(self, work_id: str) -> Path:
+        self._require_safe_run_id(work_id)
+        work_dir = self._require_child_path(self._resolve_workspace_path("works"), work_id)
+        return self._require_child_path(work_dir, "runs")
 
-    def _next_workspace_run_id(self, base: str) -> str:
+    def _next_workspace_run_id(self, work_id: str, base: str) -> str:
         candidate_base = _safe_run_name(base) or "work_run"
-        runs_root = self._resolve_workspace_path("runs")
+        runs_root = self._work_runs_root(work_id)
         for index in range(1, 10_000):
             candidate = candidate_base if index == 1 else f"{candidate_base}_{index}"
             self._require_safe_run_id(candidate)
@@ -594,11 +594,11 @@ class WorkflowConsoleBackend:
         overrides: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run the existing Text -> CAD workflow and return run metadata."""
-        context: dict[str, Any] = {"overrides": overrides or {}}
+        context: dict[str, Any] = {"overrides": overrides or {}, "output_root": self._resolve_developer_run_root()}
         if output_root is not None:
             context["output_root"] = output_root
         if run_name is not None:
-            root = Path(output_root) if output_root is not None else self.project_root / "outputs"
+            root = Path(output_root) if output_root is not None else self._resolve_developer_run_root()
             if not root.is_absolute():
                 root = self.project_root / root
             context["output_dir"] = root / _safe_run_name(run_name)
@@ -614,7 +614,7 @@ class WorkflowConsoleBackend:
         output_root: str | Path | None = None,
     ) -> dict[str, Any]:
         """Create a local run directory without executing workflow stages."""
-        context: dict[str, Any] = {}
+        context: dict[str, Any] = {"output_root": self._resolve_developer_run_root()}
         if run_name is not None:
             context["run_name"] = run_name
         if output_root is not None:
@@ -627,11 +627,11 @@ class WorkflowConsoleBackend:
         self,
         run_id: str,
         prompt: str,
-        root: str | Path = "outputs",
+        root: str | Path | None = None,
     ) -> dict[str, Any]:
         """Create a local run from a path-safe id under a configured run root."""
         self._require_safe_run_id(run_id)
-        run_root = self._resolve_run_root(root)
+        run_root = self._resolve_developer_run_root() if root is None else self._resolve_run_root(root)
         output_dir = self._require_child_path(run_root, run_id)
         if output_dir.exists():
             raise FileExistsError(f"workflow console run already exists: {run_id}")
@@ -679,14 +679,14 @@ class WorkflowConsoleBackend:
         parent_run_id: str,
         child_run_id: str | None,
         revision_prompt: str,
-        root: str | Path = "outputs",
+        root: str | Path | None = None,
         child_root: str | Path | None = None,
     ) -> dict[str, Any]:
         """Run a deterministic CadFlow-native revision from safe parent/child run ids."""
         if not isinstance(revision_prompt, str) or not revision_prompt.strip():
             raise ValueError("workflow console revision prompt must be a non-empty string")
         parent_path = self.resolve_run(parent_run_id, root=root)
-        output_root = self._resolve_run_root(child_root if child_root is not None else root)
+        output_root = self._resolve_developer_run_root() if child_root is None and root is None else self._resolve_run_root(child_root if child_root is not None else root)
         if child_run_id is None:
             child_run_id = self._next_revision_child_run_id(parent_path.name, output_root)
         self._require_safe_run_id(child_run_id)
@@ -1353,11 +1353,12 @@ class WorkflowConsoleBackend:
         return None
 
     def _resolved_run_roots(self) -> list[Path]:
-        roots = []
+        roots = [self._work_runs_root(work_id) for work_id in self._workspace_work_ids()]
+        roots.append(self._resolve_developer_run_root())
         for root in self.run_roots:
             path = root if root.is_absolute() else self.project_root / root
             roots.append(self._require_console_path(path))
-        return roots
+        return list(dict.fromkeys(roots))
 
     def _resolve_run_root(self, root: str | Path) -> Path:
         candidate = Path(root)
@@ -1380,9 +1381,21 @@ class WorkflowConsoleBackend:
         if not path.is_absolute() and any(part in {"outputs", "runs", ".git"} for part in path.parts):
             raise ValueError("workflow console workspace path must not be outputs, runs, or .git")
         self.workspace_root = (path if path.is_absolute() else self.project_root / path).resolve()
-        self.run_roots = (self.workspace_root / "runs", Path("outputs"), Path("runs"))
+        self.run_roots = (Path("outputs"), Path("runs"))
         self.stage_runner.allowed_roots = (self.workspace_root,)
         self.invalidate_work_index()
+
+    def _workspace_work_ids(self) -> list[str]:
+        works_root = self._resolve_workspace_path("works")
+        if not works_root.exists():
+            return []
+        return [path.name for path in sorted(works_root.iterdir(), key=lambda item: item.name) if path.is_dir() and (path / "work_manifest.json").exists()]
+
+    def _resolve_developer_run_root(self) -> Path:
+        """Keep low-level developer runs outside user-visible Work storage."""
+        root = self._resolve_workspace_path(".internal/runs")
+        root.mkdir(parents=True, exist_ok=True)
+        return root
 
     def _resolve_workspace_path(self, relative_path: str | Path = ".") -> Path:
         relative = Path(relative_path)

@@ -242,9 +242,9 @@ def test_workspace_can_seed_static_example_works_under_external_root(tmp_path, m
     ]
     assert created["data"]["workspace"]["work_count"] == 3
     assert (external / "works" / "single_part_mounting_plate" / "work_manifest.json").exists()
-    assert (external / "runs" / "multi_part_enclosure_planning_root" / "01_design" / "assembly_plan.json").exists()
-    assert (external / "runs" / "single_part_enclosure_base_result" / "model.step").exists()
-    assert "facet normal" in (external / "runs" / "single_part_enclosure_base_result" / "model.stl").read_text(encoding="utf-8")
+    assert (external / "works" / "multi_part_enclosure_planning" / "runs" / "multi_part_enclosure_planning_root" / "01_design" / "assembly_plan.json").exists()
+    assert (external / "works" / "reviewed_one_part_enclosure_base" / "runs" / "single_part_enclosure_base_result" / "model.step").exists()
+    assert "facet normal" in (external / "works" / "reviewed_one_part_enclosure_base" / "runs" / "single_part_enclosure_base_result" / "model.stl").read_text(encoding="utf-8")
     assert {work["work_id"] for work in works["data"]["works"]} == {
         "single_part_mounting_plate",
         "multi_part_enclosure_planning",
@@ -285,7 +285,7 @@ def test_external_workspace_work_and_runs_are_written_outside_repo(tmp_path):
 
     assert response["ok"] is True
     assert (external / "works" / "fixture" / "work_manifest.json").exists()
-    assert (external / "runs" / "fixture_root" / "prompt.txt").exists()
+    assert (external / "works" / "fixture" / "runs" / "fixture_root" / "prompt.txt").exists()
     assert not (repo / "workspace" / "works" / "fixture").exists()
 
 
@@ -305,7 +305,7 @@ def test_work_requirement_run_is_created_under_workspace_and_bound_to_work(tmp_p
 
     assert response["ok"] is True
     assert response["data"]["run"]["run_id"] == "enclosure_root"
-    assert (tmp_path / "workspace" / "runs" / "enclosure_root" / "prompt.txt").exists()
+    assert (tmp_path / "workspace" / "works" / "enclosure" / "runs" / "enclosure_root" / "prompt.txt").exists()
     assert manifest["root_run_id"] == "enclosure_root"
     assert manifest["requirement"]["confirmation_required"] is True
     assert "enclosure_root" in {row["run_id"] for row in detail["data"]["run_history"]}
@@ -324,7 +324,7 @@ def test_work_part_runs_are_created_after_manual_split_confirmation(tmp_path):
     )
     _write_json = lambda path, value: (path.parent.mkdir(parents=True, exist_ok=True), path.write_text(json.dumps(value) + "\n", encoding="utf-8"))
     _write_json(
-        tmp_path / "workspace" / "runs" / "enclosure_root" / "01_design" / "assembly_plan.json",
+            tmp_path / "workspace" / "works" / "enclosure" / "runs" / "enclosure_root" / "01_design" / "assembly_plan.json",
         {
             "parts": [
                 {"part_id": "base", "role": "housing", "supported_candidate": True, "part_status": "candidate_for_single_part_generation"},
@@ -339,7 +339,7 @@ def test_work_part_runs_are_created_after_manual_split_confirmation(tmp_path):
 
     assert response["ok"] is True
     assert {run["run_id"] for run in response["data"]["created_runs"]} == {"enclosure_base", "enclosure_lid"}
-    assert (tmp_path / "workspace" / "runs" / "enclosure_base" / "prompt.txt").exists()
+    assert (tmp_path / "workspace" / "works" / "enclosure" / "runs" / "enclosure_base" / "prompt.txt").exists()
     assert {part["part_id"] for part in detail["data"]["parts"]} >= {"base", "lid", "screws"}
 
 
@@ -1414,9 +1414,9 @@ def test_workflow_console_dispatch_runs_successful_revision_by_safe_child_id():
 def test_backend_uses_next_default_revision_child_id():
     backend = WorkflowConsoleBackend()
     parent_id = f"pytest_default_revision_parent_{uuid4().hex}"
-    parent_dir = Path.cwd() / "outputs" / parent_id
+    parent_dir = Path.cwd() / "workspace" / ".internal" / "runs" / parent_id
     parent_dir.mkdir(parents=True)
-    (Path.cwd() / "outputs" / f"{parent_id}_revision_1").mkdir()
+    (Path.cwd() / "workspace" / ".internal" / "runs" / f"{parent_id}_revision_1").mkdir()
     (parent_dir / "input_ir.json").write_text(
         json.dumps({
             "part_type": "mounting_plate",
@@ -1433,7 +1433,7 @@ def test_backend_uses_next_default_revision_child_id():
 
     assert result["run"]["run_id"] == f"{parent_id}_revision_2"
     assert result["result"]["status"] == "blocked"
-    assert (Path.cwd() / "outputs" / f"{parent_id}_revision_2" / "revision_request.json").exists()
+    assert (Path.cwd() / "workspace" / ".internal" / "runs" / f"{parent_id}_revision_2" / "revision_request.json").exists()
 
 
 def test_workflow_console_dispatch_exposes_path_free_gate_history_summary(tmp_path):
@@ -2305,7 +2305,7 @@ def test_backend_writes_editable_requirement_override_by_id(tmp_path):
         "features": {},
         "requirement_status": {"complete_for_generation": True},
     }
-    run_dir = tmp_path / "outputs" / "edit_run"
+    run_dir = tmp_path / "workspace" / ".internal" / "runs" / "edit_run"
     (run_dir / "requirement_v2.json").write_text(json.dumps(requirement) + "\n", encoding="utf-8")
 
     edited = {**requirement, "part_family": "washer"}
@@ -2336,7 +2336,7 @@ def test_backend_writes_valid_input_ir_by_id(tmp_path):
         "outputs": ["step", "stl"],
         "check_level": "L0",
     }
-    (tmp_path / "outputs" / "edit_run" / "input_ir.json").write_text(json.dumps(input_ir) + "\n", encoding="utf-8")
+    (tmp_path / "workspace" / ".internal" / "runs" / "edit_run" / "input_ir.json").write_text(json.dumps(input_ir) + "\n", encoding="utf-8")
 
     written = backend.write_artifact_by_id("edit_run", "input_ir.json", input_ir)
 
@@ -2401,7 +2401,7 @@ def test_backend_rejects_invalid_input_ir_write(tmp_path):
         "features": {},
         "outputs": ["step"],
     }
-    (tmp_path / "outputs" / "edit_run" / "input_ir.json").write_text(json.dumps({**invalid_ir, "dimensions": {"outer_diameter": 12, "inner_diameter": 6, "thickness": 2}, "part_name": "valid", "check_level": "L0"}) + "\n", encoding="utf-8")
+    (tmp_path / "workspace" / ".internal" / "runs" / "edit_run" / "input_ir.json").write_text(json.dumps({**invalid_ir, "dimensions": {"outer_diameter": 12, "inner_diameter": 6, "thickness": 2}, "part_name": "valid", "check_level": "L0"}) + "\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="failed CAD IR validation"):
         backend.write_artifact_by_id("edit_run", "input_ir.json", invalid_ir)
@@ -2410,7 +2410,7 @@ def test_backend_rejects_invalid_input_ir_write(tmp_path):
 def test_backend_rejects_invalid_planning_artifact_write(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_run_by_id("edit_run", "Make a spacer.")
-    (tmp_path / "outputs" / "edit_run" / "planning_artifact.json").write_text(
+    (tmp_path / "workspace" / ".internal" / "runs" / "edit_run" / "planning_artifact.json").write_text(
         json.dumps({"artifact_type": "planning", "route": {}, "selected_parts": [], "flow_gate_status": {}}) + "\n",
         encoding="utf-8",
     )
@@ -2460,7 +2460,7 @@ def test_backend_rejects_secret_and_executable_artifact_overrides(tmp_path):
         "part_type": "spacer",
         "dimensions": {"outer_diameter": 12, "inner_diameter": 6, "thickness": 2},
     }
-    (tmp_path / "outputs" / "edit_run" / "requirement_v2.json").write_text(json.dumps(source) + "\n", encoding="utf-8")
+    (tmp_path / "workspace" / ".internal" / "runs" / "edit_run" / "requirement_v2.json").write_text(json.dumps(source) + "\n", encoding="utf-8")
 
     for payload in (
         {**source, "api_key": "SECRET"},
@@ -2473,13 +2473,13 @@ def test_backend_rejects_secret_and_executable_artifact_overrides(tmp_path):
         with pytest.raises(ValueError, match="forbidden field|must not contain secrets"):
             backend.write_artifact_by_id("edit_run", "requirement_v2.json", payload)
 
-    assert not (tmp_path / "outputs" / "edit_run" / "edits").exists()
+    assert not (tmp_path / "workspace" / ".internal" / "runs" / "edit_run" / "edits").exists()
 
 
 def test_backend_planning_uses_requirement_override_before_requirement_v2(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_run_by_id("override_plan", "Make a mounting plate.")
-    run_dir = tmp_path / "outputs" / "override_plan"
+    run_dir = tmp_path / "workspace" / ".internal" / "runs" / "override_plan"
     original = {
         "part_type": "mounting_plate",
         "dimensions": {"length": 80, "width": 40, "thickness": 5},
@@ -2509,7 +2509,7 @@ def test_backend_planning_uses_requirement_override_before_requirement_v2(tmp_pa
 def test_actions_create_part_request_uses_assembly_plan_override(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_run_by_id("override_assembly", "Make an assembly.")
-    run_dir = tmp_path / "outputs" / "override_assembly"
+    run_dir = tmp_path / "workspace" / ".internal" / "runs" / "override_assembly"
     original = {
         "artifact_type": "assembly_plan",
         "parts": [{"part_id": "base", "supported_candidate": True, "part_status": "candidate_for_single_part_generation"}],
@@ -2531,7 +2531,7 @@ def test_actions_create_part_request_uses_assembly_plan_override(tmp_path):
 def test_invalid_cad_ir_draft_override_is_rejected_before_part_modeling(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_run_by_id("bad_cad_ir", "Make one part.")
-    run_dir = tmp_path / "outputs" / "bad_cad_ir"
+    run_dir = tmp_path / "workspace" / ".internal" / "runs" / "bad_cad_ir"
     handoff = {"part_id": "upper_link", "status": "ready_for_single_part_planning"}
     valid_ir = {
         "part_type": "spacer",

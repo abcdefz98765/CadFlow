@@ -38,7 +38,7 @@ The UI should not make users read raw JSON, diagnostic code lists, provider iden
    The Workflow page should lead with a graph or graph-like stage flow. Users navigate by selecting stages, not by scrolling through every expanded card.
 
 3. **Selected stage detail second.**
-   A selected node opens a stage detail panel. The detail panel shows human summary, key decisions, actions, artifacts, and collapsed advanced/debug sections.
+   A selected node opens a stage detail panel. The detail panel shows human summary, key decisions, actions, and user-facing artifacts.
 
 4. **Human summary before raw data.**
    Gate decisions, blocked reasons, diagnostics, and adapter identity must be translated into short user-readable text before raw JSON is shown.
@@ -49,8 +49,8 @@ The UI should not make users read raw JSON, diagnostic code lists, provider iden
 6. **User edits are controlled overrides.**
    Users may edit allowlisted structured artifacts through validated override records. They must not overwrite original agent artifacts or edit generated code, reports, traces, binary exports, or arbitrary files.
 
-7. **Debug is always secondary.**
-   Raw JSON, raw workflow graph nodes, diagnostics, traces, adapter metadata, and runtime logs belong in Advanced or Debug sections collapsed by default.
+7. **Debug stays outside the user Console.**
+   Raw JSON, raw workflow graph nodes, diagnostics, traces, adapter metadata, and runtime logs are inspected from the local development environment, not downloaded or browsed from normal Console pages.
 
 8. **NiceGUI is presentation.**
    It should render view models and call backend/action routes. It should not become the source of workflow state or directly mutate business artifacts.
@@ -70,6 +70,7 @@ Primary content:
 - Current workspace summary.
 - Work list.
 - Create Work form.
+- Work structure map: inputs, planning, parts, deliverables, and immutable history.
 - Provider/config status, if relevant.
 
 Not primary:
@@ -112,15 +113,29 @@ Primary layout:
 [Work header + current status + next recommended action]
 
 [Workflow graph / stage flow]
-  Requirement -> Clarification -> Planning -> Assembly Plan
-       -> Part Request -> Part Review -> Reviewed Handoff
-       -> CAD IR Draft -> Part Modeling -> Part Result Review
-       -> Workflow Review -> Rework
+  Stage spine:
+    Requirement -> Clarification -> Planning -> Assembly Plan
+                                             |
+  Part branch:                               v
+    Candidate Parts: base / lower_link / upper_link / ...
+    Reference Lane: reference_servo / reference_gripper / ...
+                                             |
+                                             v
+  Selected Part Pipeline:
+    Part Request -> Part Review -> Reviewed Handoff
+      -> CAD IR Draft -> Part Modeling -> Part Result Review
+                                             |
+                                             v
+  Review tail:
+    Workflow Review -> Rework
 
 [Selected stage detail]
   Human Summary
+  Why it matters
   Current Status
-  Key Decisions
+  Current Block
+  Key Decisions (human-readable)
+  Progress / Limitations / Safety
   User Actions
   Important Artifacts
   Advanced / Raw JSON
@@ -128,6 +143,7 @@ Primary layout:
 ```
 
 The Workflow page must not default to a long list of fully expanded stage cards. Stage cards can be implementation units, but the user experience should be graph-first and selected-node-detail.
+For assembly workflows, the graph must make the part branch visible rather than presenting every stage as one linear sequence. Internal route names, gate actions, raw candidate lists, diagnostics, and artifact-state fields belong in collapsed Advanced or Debug sections.
 
 ### Parts Page
 
@@ -146,20 +162,19 @@ Not primary:
 
 - Full raw JSON for every stage.
 
-### Runs Page
+### Work History Page
 
 Purpose:
 
-- Audit history and debugging.
+- Show immutable Work attempts.
 
 Primary content:
 
 - Immutable run history.
-- Parent/child relationships.
-- Rework child runs.
-- Optional unclassified runs behind explicit visibility controls.
+- Run status, active part, and delivery availability.
+- Rework attempts belonging to the selected Work.
 
-Runs page is for audit and debugging. It should not replace the Work-level Workflow cockpit.
+Work history must never show unclassified, project-level, or debug runs.
 
 ## Workflow Graph Model
 
@@ -207,13 +222,23 @@ Every selected stage detail should follow the same shape:
   "status": "completed",
   "human_summary": "Planning completed and identified candidate generated parts plus reference components.",
   "current_block": null,
-  "key_decisions": [
-    {"label": "Requirement source", "value": "requirement_v2.json"},
-    {"label": "Selected candidate", "value": "upper_link"}
+  "status_banner": {
+    "status": "completed",
+    "title": "Assembly plan completed with downstream limitation",
+    "summary": "CadFlow decomposed the request into generated part candidates and reference components.",
+    "consequence": "The workflow continues with one selected part.",
+    "badges": []
+  },
+  "detail_cards": [
+    {"title": "What happened", "items": []},
+    {"title": "Artifact status", "items": []}
   ],
-  "next_recommended_action": "Create a Part Request for the selected candidate.",
-  "actions": [],
-  "artifacts": [],
+  "action_groups": {
+    "primary": [],
+    "secondary": [],
+    "disabled": [],
+    "advanced": []
+  },
   "advanced": {},
   "debug": {}
 }
@@ -235,9 +260,9 @@ Good:
 Requirement completed with assumptions. CadFlow recognized this as a desktop robotic-arm assembly task and kept low-risk assumptions visible for review.
 ```
 
-### Current Status
+### Status Banner
 
-Show the status in one line. For blocked stages, include a human-readable block summary.
+The top of the detail must make the current status, its one-sentence summary, and its consequence visible together. Use compact chips for selected part, artifact availability, and validation state.
 
 Bad:
 
@@ -251,23 +276,24 @@ Good:
 Blocked at CAD IR validation. The agent generated a draft for `upper_link`, but the current CAD backend cannot execute this part type yet.
 ```
 
-### Key Decisions
+### Detail Cards
 
-Show only user-relevant decisions:
+Use a responsive card grid rather than a linear report. Cards should contain two to five concise items and be grouped as:
 
-- Requirement source: original / v2 / user override.
-- Scope: part / multi-part / assembly.
-- Gate action: proceed / ask user / blocked / return.
-- Selected candidate part.
-- Used override or original artifact.
-- Child input IR present or absent.
-- STEP/STL present or absent.
+- What happened.
+- Why it stopped, or why it matters.
+- Recommended next step.
+- Artifact status.
+- Key decisions.
+- Review state and safety guardrails.
 
-Do not show raw provider identity, full diagnostic code lists, or raw blocked reason objects in this section.
+For assembly plans, candidate parts and reference components should be compact chips or rows, never one comma-separated raw field. Do not show raw provider identity, full diagnostic code lists, route names, gate actions, or raw blocked reason objects in these cards.
 
 ### User Actions
 
-Show enabled and disabled actions with prerequisite reasons.
+Group actions by primary, secondary, disabled, and advanced. For a CAD IR validation block, viewing the allowlisted draft and saving a stage review are primary; approval stays disabled until STEP/STL exists.
+
+The Web Console may switch between English and Chinese for selected-stage and artifact-audit presentation copy. This changes only labels and human summaries; artifact names, source artifacts, backend action contracts, and debug data remain unchanged.
 
 Action examples:
 
@@ -561,16 +587,16 @@ Prefer this layering:
 
 ```text
 Artifact Layer
-  Raw JSON/text files under workspace/run directories.
+  Raw JSON/text files under a Work-contained run directory.
 
 Backend Summary Layer
   Safe, path-free artifact summaries and action availability.
 
 Stage View Model Layer
-  User-facing workflow nodes, human summaries, key decisions, actions, artifacts, advanced, debug.
+  User-facing workflow nodes, human summaries, key decisions, actions, and delivery state.
 
 Presentation Layer
-  NiceGUI graph, selected stage detail, buttons, editors, collapsed raw/debug panels.
+  NiceGUI graph, selected stage detail, work directory map, and delivery actions.
 ```
 
 Do not let the Presentation Layer directly invent workflow state. It should render the Stage View Model and call backend/action routes.
@@ -582,8 +608,8 @@ Implement `Workflow Graph + Selected Stage Detail UX`:
 1. Keep the Work-level Workflow graph as the primary navigation surface.
 2. Selecting a graph node selects one stage.
 3. Render only the selected stage's detail by default.
-4. Move the full stage list and raw graph under Debug / Advanced.
+4. Keep raw graph and debug records outside the normal Console.
 5. Convert gate decisions, blocked reasons, diagnostics, and adapter identity into human-readable summaries.
-6. Keep raw JSON and raw diagnostics collapsed by default.
+6. Show only final STEP, STL, and preview files as user-downloadable products.
 
 No CAD generation capability should be added as part of this UX pass.
