@@ -18,6 +18,7 @@ from ai_native_cad.workflow_console.actions import STAGE_REVIEW_STATUSES, STAGE_
 from ai_native_cad.workflow_console.artifact_display import filter_artifacts_for_display
 from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, WorkflowConsoleBackend
 from ai_native_cad.workflow_console.review_surface import REVIEW_SURFACE_ARTIFACTS, build_workflow_review_surface
+from ai_native_cad.workflow_console.work_stage_projection import build_work_stage_projection, unavailable_work_stage_projection
 from ai_native_cad.workflow_console.routes import dispatch_route
 from ai_native_cad.workflow_console.server import resolve_downloadable
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
@@ -140,8 +141,16 @@ def build_console_page_data(
         if selected and (active_page in {"workflow", "review", "products", "runs"} or selected_run_id is not None or load_runs)
         else empty_selected_run_data()
     )
+    work_projection = None
+    if selected_work and active_page in {"workflow", "review"}:
+        try:
+            work_projection = build_work_stage_projection(backend, selected_work)
+        except (FileNotFoundError, ValueError) as exc:
+            # A missing/corrupt Work must degrade to explicit unavailable stage
+            # data; history remains independently inspectable.
+            work_projection = unavailable_work_stage_projection(selected_work, type(exc).__name__)
     provider = build_provider_config_data(backend) if active_page == "config" else {"provider_config": None, "provider_check": None}
-    return {
+    data = {
         "workspace": workspace_response["data"] if workspace_response["ok"] else {"present": False, "relative_path": "workspace"},
         "workspace_config": config_response["data"] if config_response["ok"] else {"advancement_mode": "manual_confirm"},
         "works": works,
@@ -163,6 +172,19 @@ def build_console_page_data(
         **provider,
         **run_data,
     }
+    if work_projection is not None:
+        selected_run = data.get("selected_run") if isinstance(data.get("selected_run"), dict) else {}
+        data["work_stage_projection"] = work_projection
+        data["workflow_review_surface"] = build_workflow_review_surface(
+            backend,
+            selected,
+            selected_run,
+            root=root,
+            selected_stage_id=selected_stage_id,
+            language=language,
+            projection=work_projection,
+        )
+    return data
 
 
 def build_selected_work_data(backend: WorkflowConsoleBackend, work_id: str) -> dict[str, Any]:

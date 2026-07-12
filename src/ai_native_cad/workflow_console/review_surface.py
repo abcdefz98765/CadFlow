@@ -133,12 +133,21 @@ def build_workflow_review_surface(
     root: str | None = None,
     selected_stage_id: str | None = None,
     language: str = "en",
+    projection: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a user-facing stage review surface for one selected run."""
+    """Build a user-facing surface for one run or an aggregated Work projection."""
     run = run if isinstance(run, dict) else {}
-    artifact_names = _artifact_names(run)
+    projection = projection if isinstance(projection, dict) else None
+    projected_contents = projection.get("artifact_contents") if projection and isinstance(projection.get("artifact_contents"), dict) else {}
+    projected_stages = projection.get("stages") if projection and isinstance(projection.get("stages"), dict) else {}
+    if projection:
+        root_run = projection.get("root_run")
+        run = root_run if isinstance(root_run, dict) else run
+    artifact_names = _artifact_names(run) | set(projected_contents)
     overrides = run.get("artifact_override_summary") if isinstance(run.get("artifact_override_summary"), dict) else {}
-    if run_id:
+    if projection:
+        artifact_contents = projected_contents
+    elif run_id:
         artifact_contents = {
             name: _read_artifact_content(backend, run_id, name, root=root)
             for name in REVIEW_SURFACE_ARTIFACTS
@@ -151,6 +160,8 @@ def build_workflow_review_surface(
         _stage_card(definition, run, artifact_names, artifact_contents, summary_context, overrides, bool(run_id), language)
         for definition in STAGE_DEFINITIONS
     ]
+    if projection:
+        stages = [_apply_projection_to_stage(stage, projected_stages.get(stage["key"]), language) for stage in stages]
     graph_nodes = [_graph_node(stage) for stage in stages]
     workflow_graph = _workflow_graph_v2(stages, summary_context)
     selected_stage = _select_stage(stages, selected_stage_id)
@@ -177,7 +188,70 @@ def build_workflow_review_surface(
         "copy_registry": decision_layer["copy_registry"],
         "artifact_viewer": _artifact_viewer(artifact_names, artifact_contents, overrides),
         "actions": _global_actions(artifact_names, bool(run_id)),
+        "work_projection": projection,
     }
+
+
+def _apply_projection_to_stage(stage: dict[str, Any], projected: Any, language: str) -> dict[str, Any]:
+    """Make graph and selected-stage detail consume the identical Work status."""
+    if not isinstance(projected, dict):
+        stage["status"] = "not_started"
+        stage["short_summary"] = "Stage data unavailable"
+        return stage
+    inputs = _projection_artifact_refs(projected.get("input_artifacts"))
+    outputs = _projection_artifact_refs(projected.get("output_artifacts"))
+    raw = [item for item in [*inputs, *outputs] if item.get("present")]
+    status = str(projected.get("status") or "not_started")
+    summary = str(projected.get("summary") or "Stage data unavailable")
+    stage.update({
+        "status": status,
+        "short_summary": summary,
+        "human_summary": summary,
+        "current_status": status.replace("_", " ").title(),
+        "current_block": None,
+        "input_artifacts": inputs,
+        "output_artifacts": outputs,
+        "important_artifacts": raw,
+        "raw_artifacts": raw,
+        "source_run_id": projected.get("source_run_id"),
+        "source_relative_path": projected.get("source_relative_path"),
+        "selected_part_id": projected.get("selected_part_id"),
+        "child_run_id": projected.get("child_run_id"),
+        "diagnostic_codes": projected.get("diagnostics") or [],
+        "blocked_reasons": projected.get("diagnostics") or [],
+        "execution_mode": projected.get("execution_mode"),
+        "execution_skipped": bool(projected.get("execution_skipped")),
+        "status_banner": {
+            "status": status,
+            "title": _stage_label(stage["key"]),
+            "summary": summary,
+            "consequence": "Stage data is aggregated from the Work lineage.",
+            "badges": [
+                _banner_badge("Artifacts", str(len(raw)), status),
+                *([_banner_badge("Selected", str(projected["selected_part_id"]), "selected")] if projected.get("selected_part_id") else []),
+            ],
+        },
+        "status_explanation": {"what_happened": [summary], "why": None},
+    })
+    stage["advanced"] = {**(stage.get("advanced") if isinstance(stage.get("advanced"), dict) else {}), "projection": projected, "raw_artifacts": raw}
+    return _localize_stage_display(stage, language)
+
+
+def _projection_artifact_refs(items: Any) -> list[dict[str, Any]]:
+    result = []
+    for item in _safe_list(items):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "artifact")
+        present = bool(item.get("present"))
+        result.append({
+            "name": name,
+            "present": present,
+            "summary": _artifact_summary(name, item.get("content")) if present else "missing",
+            "source_run_id": item.get("source_run_id"),
+            "source_relative_path": item.get("source_relative_path"),
+        })
+    return result
 
 
 def _decision_layer(
@@ -341,6 +415,8 @@ def _graph_node(stage: dict[str, Any]) -> dict[str, Any]:
         "label": stage.get("stage_name"),
         "status": stage.get("status") or "not_started",
         "short_summary": stage.get("short_summary") or "",
+        "source_artifact_count": len(raw_artifacts),
+        "selected_part_id": stage.get("selected_part_id"),
         "primary_artifact": primary_artifact,
         "primary_action": primary_action,
         "has_override": bool(stage.get("override_present")),

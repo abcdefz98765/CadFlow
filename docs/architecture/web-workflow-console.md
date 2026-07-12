@@ -433,9 +433,21 @@ shell:
 ### Workflow Review Surface MVP
 
 The NiceGUI Workflow page now builds a `Workflow Stage Review` view model from
-the selected run. The view model is presentation-only: it reads allowlisted
-artifacts through the backend route contract and reports action availability;
-it does not write files or make the browser authoritative.
+a Work-level stage projection, rather than from the selected/latest immutable
+run. The projection follows the Work lineage: the root requirement run, its
+nested staged artifact directories, reviewed-part child runs, part-result
+review, workflow review, and rework child runs. Every artifact remains at its
+original location and is represented by its source run id and source-relative
+path; the console never copies nested artifacts to a run root as a display
+workaround. The view model is presentation-only: it reads allowlisted artifacts
+and reports action availability; it does not write files or make the browser
+authoritative.
+
+Work and Run therefore have deliberately separate meanings. The Work Workflow
+page is the aggregated lineage source of truth for graph nodes and selected
+stage detail. Runs / History remains a per-run, immutable audit view. A Work's
+`latest_run_id` is only the default history/audit selection and must not decide
+whether upstream Workflow stages appear completed.
 
 The MVP stage cards are Requirement, Clarification, Planning, Assembly Plan,
 Part Request, Part Review, Reviewed Handoff, CAD IR Draft, Part Modeling /
