@@ -980,3 +980,11 @@ Tests plus required screenshots.
 ```
 
 This template is intentionally stricter than a request such as "make the graph clearer." It gives implementation a stable product target and prevents local patches from becoming the UI design process.
+
+## 19. Implemented Work / Run contract milestone
+
+The Workflow page now consumes one mode-safe page view model. **Work Workflow
+is an active-lineage aggregated view. Run Snapshot is immutable and read-only.
+Actions declare their scope and target Run.** Legacy Works retain a conservative
+root-run projection marked `lineage_inferred=true`; a newer attempt is never
+silently treated as accepted solely because it is newer.

@@ -33,6 +33,8 @@ def test_executable_golden_contract_creates_real_work_and_required_artifacts(tmp
     manifest = json.loads((workspace / "works" / module.WORK_ID / "work_manifest.json").read_text(encoding="utf-8"))
     assert manifest["title"] == "Golden Desktop Robot Arm"
     assert manifest["root_run_id"] == module.RUN_ID
+    assert manifest["active_lineage"]["active_root_run_id"] == module.RUN_ID
+    assert manifest["active_lineage"]["accepted_run_ids"] == [module.RUN_ID]
     for relative in (
         "requirement.json",
         "requirement_clarification.json",

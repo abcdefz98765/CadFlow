@@ -41,9 +41,17 @@ def build_work_stage_projection(backend: Any, work_id: str) -> dict[str, Any]:
     if work is None:
         raise FileNotFoundError(f"workflow console work not found: {work_id}")
 
-    root_run_id = work["summary"].get("root_run_id") or work["summary"].get("latest_run_id")
+    active_lineage = work["summary"].get("active_lineage") if isinstance(work["summary"].get("active_lineage"), dict) else {}
+    root_run_id = active_lineage.get("active_root_run_id") or work["summary"].get("root_run_id")
     runs = work.get("runs_by_id") if isinstance(work.get("runs_by_id"), dict) else {}
-    records = _discover_work_artifacts(backend, runs, root_run_id)
+    active_run_ids = {
+        run_id for run_id in (
+            active_lineage.get("active_root_run_id"),
+            active_lineage.get("active_leaf_run_id"),
+            *(active_lineage.get("accepted_run_ids") or []),
+        ) if isinstance(run_id, str) and run_id in runs
+    }
+    records = _discover_work_artifacts(backend, runs, root_run_id, active_run_ids or ({root_run_id} if root_run_id in runs else set()))
     execution = _execution_metadata(records)
     stages = {
         spec["key"]: _project_stage(spec, records, root_run_id, execution)
@@ -53,6 +61,7 @@ def build_work_stage_projection(backend: Any, work_id: str) -> dict[str, Any]:
     return {
         "work_id": work_id,
         "root_run_id": root_run_id,
+        "active_lineage": active_lineage,
         "stages": stages,
         # Presentation consumers use these sanitized, in-memory values to build
         # the same detail view as the graph. They are not artifact locations.
@@ -67,6 +76,7 @@ def unavailable_work_stage_projection(work_id: str, reason: str | None = None) -
     return {
         "work_id": work_id,
         "root_run_id": None,
+        "active_lineage": {"lineage_inferred": True},
         "stages": {},
         "artifact_contents": {},
         "root_run": {},
@@ -85,9 +95,14 @@ def _preferred_artifact_contents(records: dict[str, list[dict[str, Any]]]) -> di
     return result
 
 
-def _discover_work_artifacts(backend: Any, runs: dict[str, dict[str, Any]], root_run_id: str | None) -> dict[str, list[dict[str, Any]]]:
+def _discover_work_artifacts(
+    backend: Any,
+    runs: dict[str, dict[str, Any]],
+    root_run_id: str | None,
+    active_run_ids: set[str],
+) -> dict[str, list[dict[str, Any]]]:
     records: dict[str, list[dict[str, Any]]] = {name: [] for name in _KNOWN_NAMES}
-    for run_id in sorted(runs, key=lambda value: (value != root_run_id, value)):
+    for run_id in sorted(active_run_ids, key=lambda value: (value != root_run_id, value)):
         try:
             run_path = backend.resolve_run(run_id)
         except (FileNotFoundError, ValueError):

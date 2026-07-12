@@ -449,6 +449,19 @@ stage detail. Runs / History remains a per-run, immutable audit view. A Work's
 `latest_run_id` is only the default history/audit selection and must not decide
 whether upstream Workflow stages appear completed.
 
+### Work / Run semantics milestone
+
+The NiceGUI Workflow page has an explicit `current_work` or `run_snapshot`
+mode and consumes `workflow_page_view_model.py` rather than combining a Work
+projection, selected Run, and action target in the presentation layer. Current
+Work reads the Work manifest's `active_lineage` pointer; Run Snapshot reads only
+the selected immutable Run and disables ordinary mutations. The Work manifest
+stores `active_root_run_id`, `active_leaf_run_id`, accepted/superseded run ids,
+and `latest_attempt_run_id`. `latest_attempt_run_id` is audit information, not
+an active-lineage selector. **Work Workflow is an active-lineage aggregated
+view. Run Snapshot is immutable and read-only. Actions declare their scope and
+target Run.**
+
 The MVP stage cards are Requirement, Clarification, Planning, Assembly Plan,
 Part Request, Part Review, Reviewed Handoff, CAD IR Draft, Part Modeling /
 Reviewed Part Create, Part Result Review, Workflow Review, and Rework. Each

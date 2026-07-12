@@ -195,6 +195,14 @@ human summary, current status, key decisions, user actions, important artifacts,
 and collapsed Advanced / Debug sections. The full stage list, raw workflow
 graph, raw diagnostics, and raw allowlisted artifacts are secondary surfaces.
 
+Workflow has two explicit contexts. **Current Work** shows the Work manifest's
+active aggregated lineage and allows workflow actions against the action's
+displayed target Run. Clicking a Run in History opens a **Historical Run
+Snapshot**: it is immutable and read-only, does not claim to represent the
+complete current Work, and only permits returning to Current Work or creating a
+new rework attempt when available. A newer failed attempt never replaces the
+accepted active lineage merely because it has the latest timestamp.
+
 Artifacts remain the source of truth. The UI does not create a database, cloud
 state, account system, free chat transcript, or browser-owned workflow state.
 

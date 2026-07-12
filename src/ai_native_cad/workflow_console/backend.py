@@ -422,6 +422,13 @@ class WorkflowConsoleBackend:
         config = self.read_workspace_config()
         manifest["root_run_id"] = run_id
         manifest["current_run_id"] = run_id
+        manifest["active_lineage"] = {
+            "active_root_run_id": run_id,
+            "active_leaf_run_id": run_id,
+            "accepted_run_ids": [run_id],
+            "superseded_run_ids": [],
+            "latest_attempt_run_id": run_id,
+        }
         manifest["status"] = "active"
         manifest["advancement_mode"] = config["advancement_mode"]
         manifest["requirement"] = {
@@ -494,7 +501,12 @@ class WorkflowConsoleBackend:
             manifest.get("run_ids"),
             [root_run_id, *[item["run_id"] for item in manifest["part_jobs"] if item.get("run_id")]],
         )
-        manifest["current_run_id"] = created_runs[-1]["run_id"] if created_runs else manifest.get("current_run_id")
+        # Creating a part container is a new attempt, not acceptance of a new
+        # Work lineage. Keep the explicit active pointer unchanged.
+        if created_runs:
+            lineage = manifest.get("active_lineage") if isinstance(manifest.get("active_lineage"), dict) else {}
+            lineage["latest_attempt_run_id"] = created_runs[-1]["run_id"]
+            manifest["active_lineage"] = lineage
         manifest["updated_at"] = _now_timestamp()
         self._write_work_manifest(work_id, manifest)
         self.invalidate_work_index()
@@ -531,6 +543,38 @@ class WorkflowConsoleBackend:
         if not path.exists():
             raise FileNotFoundError(f"workflow console Work does not exist: {work_id}")
         _write_json(path, manifest)
+
+    def activate_work_lineage(
+        self,
+        work_id: str,
+        *,
+        parent_run_id: str,
+        child_run_id: str | None = None,
+        accepted_run_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Advance a Work pointer without mutating any immutable Run artifact."""
+        self._require_safe_run_id(work_id)
+        self._require_safe_run_id(parent_run_id)
+        if child_run_id:
+            self._require_safe_run_id(child_run_id)
+        manifest = self._read_work_manifest(work_id)
+        prior = manifest.get("active_lineage") if isinstance(manifest.get("active_lineage"), dict) else {}
+        prior_active = [item for item in prior.get("accepted_run_ids", []) if isinstance(item, str)]
+        accepted = accepted_run_ids or [parent_run_id]
+        accepted = list(dict.fromkeys([*accepted, *prior_active]))
+        superseded = [item for item in prior_active if item not in accepted and item != parent_run_id]
+        manifest["active_lineage"] = {
+            "active_root_run_id": parent_run_id,
+            "active_leaf_run_id": child_run_id or parent_run_id,
+            "accepted_run_ids": accepted,
+            "superseded_run_ids": list(dict.fromkeys([*prior.get("superseded_run_ids", []), *superseded])),
+            "latest_attempt_run_id": child_run_id or parent_run_id,
+        }
+        manifest["current_run_id"] = parent_run_id
+        manifest["updated_at"] = _now_timestamp()
+        self._write_work_manifest(work_id, manifest)
+        self.invalidate_work_index()
+        return manifest["active_lineage"]
 
     def _work_manifest_path(self, work_id: str) -> Path:
         work_dir = self._require_child_path(self._resolve_workspace_path("works"), work_id)

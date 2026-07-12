@@ -61,11 +61,12 @@ def get_work_detail(backend: Any, work_id: str, *, index: dict[str, Any] | None 
     """Return detail for one inferred Work with current state separated from history."""
     work = _find_work(index or build_work_index(backend), work_id)
     summary = work["summary"]
-    current_run_id = summary.get("latest_run_id") or summary.get("root_run_id")
+    active_lineage = summary.get("active_lineage") if isinstance(summary.get("active_lineage"), dict) else {}
+    current_run_id = active_lineage.get("active_root_run_id") or summary.get("root_run_id")
     current_run = work["runs_by_id"].get(current_run_id) or {}
     parts = _build_parts(work)
     nodes = _build_nodes(work, parts)
-    run_history = _build_run_history(work, current_run_id)
+    run_history = _build_run_history(work, active_lineage)
     products = _build_products(work)
     return {
         "work_id": summary["work_id"],
@@ -74,11 +75,12 @@ def get_work_detail(backend: Any, work_id: str, *, index: dict[str, Any] | None 
         "current_state": {
             "current_run_id": current_run_id,
             "root_run_id": summary.get("root_run_id"),
+            "active_lineage": active_lineage,
             "part_counts": summary.get("part_counts") or {},
             "review_status": summary.get("review_status"),
             "report_status": summary.get("report_status"),
             "next_action": summary.get("next_action"),
-            "immutability_note": "Current state points to latest relevant run artifacts; run history remains append-only.",
+            "immutability_note": "Current state points to the explicit active lineage; run history remains append-only.",
         },
         "parts": parts,
         "nodes": nodes,
@@ -150,6 +152,7 @@ def create_work_manifest(
         "updated_at": now,
         "current_run_id": None,
         "root_run_id": None,
+        "active_lineage": _empty_active_lineage(),
         "run_ids": [],
         "part_jobs": [],
         "requirement": {"status": "not_started", "root_run_id": None},
@@ -328,6 +331,7 @@ def _public_manifest(value: dict[str, Any] | None) -> dict[str, Any] | None:
         "updated_at": _safe_optional_text(value.get("updated_at"), limit=80),
         "current_run_id": _safe_optional_text(value.get("current_run_id"), limit=120),
         "root_run_id": _safe_optional_text(value.get("root_run_id"), limit=120),
+        "active_lineage": _safe_active_lineage(value.get("active_lineage")),
         "run_ids": [
             item
             for item in value.get("run_ids", [])
@@ -355,6 +359,7 @@ def _entity_state(work_id: str, manifest: dict[str, Any] | None) -> dict[str, An
         "updated_at": manifest.get("updated_at"),
         "current_run_id": manifest.get("current_run_id"),
         "root_run_id": manifest.get("root_run_id"),
+        "active_lineage": manifest.get("active_lineage") or _empty_active_lineage(),
         "run_ids": manifest.get("run_ids") or [],
         "part_jobs": manifest.get("part_jobs") or [],
         "requirement": manifest.get("requirement") or {},
@@ -375,6 +380,7 @@ def _empty_entity_state(work_id: str) -> dict[str, Any]:
         "updated_at": None,
         "current_run_id": None,
         "root_run_id": None,
+        "active_lineage": _empty_active_lineage(),
         "run_ids": [],
         "part_jobs": [],
         "requirement": {"status": "not_started", "root_run_id": None},
@@ -475,6 +481,29 @@ def _safe_run_ref(value: Any) -> str | None:
     return value[:120]
 
 
+def _empty_active_lineage() -> dict[str, Any]:
+    """Return the persisted Work pointer contract without inferring a Run."""
+    return {
+        "active_root_run_id": None,
+        "active_leaf_run_id": None,
+        "accepted_run_ids": [],
+        "superseded_run_ids": [],
+        "latest_attempt_run_id": None,
+    }
+
+
+def _safe_active_lineage(value: Any) -> dict[str, Any]:
+    """Keep the mutable Work lineage pointer path-safe and bounded."""
+    raw = value if isinstance(value, dict) else {}
+    result = _empty_active_lineage()
+    for key in ("active_root_run_id", "active_leaf_run_id", "latest_attempt_run_id"):
+        result[key] = _safe_run_ref(raw.get(key))
+    for key in ("accepted_run_ids", "superseded_run_ids"):
+        values = raw.get(key, []) if isinstance(raw.get(key), list) else []
+        result[key] = list(dict.fromkeys(item for item in values if _safe_run_ref(item)))[:200]
+    return result
+
+
 def _json_dumps(value: dict[str, Any]) -> str:
     return json.dumps(value, indent=2, sort_keys=True) + "\n"
 
@@ -518,6 +547,45 @@ def _is_root_candidate(run: dict[str, Any]) -> bool:
     )
 
 
+def _resolve_active_lineage(
+    manifest: dict[str, Any] | None,
+    runs: dict[str, dict[str, Any]],
+    root_run_id: str | None,
+    latest_attempt_run_id: str | None,
+) -> dict[str, Any]:
+    """Resolve an explicit Work pointer, or a conservative legacy projection.
+
+    A legacy Work must not promote a newer attempt to accepted/current merely
+    because it has a later timestamp. Its root remains the only safe active
+    evidence until a user-facing action writes an explicit lineage contract.
+    """
+    stored = (manifest or {}).get("active_lineage")
+    has_explicit = isinstance(stored, dict) and any(stored.get(key) for key in ("active_root_run_id", "accepted_run_ids"))
+    lineage = _safe_active_lineage(stored)
+    if has_explicit:
+        accepted = [run_id for run_id in lineage["accepted_run_ids"] if run_id in runs]
+        root = lineage["active_root_run_id"] if lineage["active_root_run_id"] in runs else (accepted[0] if accepted else root_run_id)
+        leaf = lineage["active_leaf_run_id"] or root
+        return {
+            **lineage,
+            "active_root_run_id": root,
+            "active_leaf_run_id": leaf,
+            "accepted_run_ids": accepted or ([root] if root else []),
+            "superseded_run_ids": [run_id for run_id in lineage["superseded_run_ids"] if run_id in runs],
+            "latest_attempt_run_id": lineage["latest_attempt_run_id"] or latest_attempt_run_id,
+            "lineage_inferred": False,
+        }
+    root = root_run_id if root_run_id in runs else None
+    return {
+        "active_root_run_id": root,
+        "active_leaf_run_id": root,
+        "accepted_run_ids": [root] if root else [],
+        "superseded_run_ids": [],
+        "latest_attempt_run_id": latest_attempt_run_id,
+        "lineage_inferred": True,
+    }
+
+
 def _build_work(
     root_id: str,
     member_ids: list[str],
@@ -537,7 +605,9 @@ def _build_work(
         if manifest and isinstance(manifest.get("root_run_id"), str) and manifest.get("root_run_id") in runs_by_id
         else (None if debug_only else (root_id if root_id in runs_by_id else latest_run_id))
     )
-    root_run = runs_by_id.get(root_run_id) or runs_by_id.get(root_id) or runs_by_id.get(latest_run_id) or {}
+    active_lineage = _resolve_active_lineage(manifest, runs_by_id, root_run_id, latest_run_id)
+    active_root_run_id = active_lineage.get("active_root_run_id") or root_run_id
+    root_run = runs_by_id.get(active_root_run_id) or runs_by_id.get(root_run_id) or runs_by_id.get(root_id) or {}
     parts = _build_parts({"summary": {"root_run_id": root_run_id or root_id}, "runs_by_id": runs_by_id})
     part_counts = _part_counts(parts)
     title = DEBUG_WORK_TITLE if debug_only else ((manifest or {}).get("title") or _work_title(root_run, root_id))
@@ -548,6 +618,7 @@ def _build_work(
         "overall_status": "debug_only" if debug_only else _overall_status(part_counts, root_run),
         "root_run_id": root_run_id,
         "latest_run_id": latest_run_id,
+        "active_lineage": active_lineage,
         "entity_status": status,
         "has_manifest": manifest is not None,
         "part_counts": part_counts,
@@ -684,20 +755,48 @@ def _build_nodes(work: dict[str, Any], parts: list[dict[str, Any]]) -> list[dict
     return nodes
 
 
-def _build_run_history(work: dict[str, Any], current_run_id: str | None) -> list[dict[str, Any]]:
+def _build_run_history(work: dict[str, Any], active_lineage: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
     for run_id, run in sorted(work["runs_by_id"].items(), key=lambda item: (item[1].get("updated_at") or "", item[0]), reverse=True):
         status = _dict(run.get("status"))
+        relation, parent_run_id = _run_lineage_relation(run)
+        if run_id == active_lineage.get("active_leaf_run_id") or run_id == active_lineage.get("active_root_run_id"):
+            lineage_state = "active"
+        elif run_id in active_lineage.get("accepted_run_ids", []):
+            lineage_state = "accepted"
+        elif run_id in active_lineage.get("superseded_run_ids", []):
+            lineage_state = "superseded"
+        elif status.get("status") in {"failed", "blocked", "error"}:
+            lineage_state = "failed_branch"
+        else:
+            lineage_state = "historical"
         rows.append({
             "run_id": run_id,
             "kind": _run_kind(run),
             "status": status.get("status"),
             "summary": _run_summary_line(run),
             "created_at": run.get("updated_at"),
-            "is_current": run_id == current_run_id,
+            "parent_run_id": parent_run_id,
+            "root_run_id": active_lineage.get("active_root_run_id"),
+            "relation": relation,
+            "lineage_state": lineage_state,
+            "is_current": lineage_state == "active",
             "immutable": True,
         })
     return rows
+
+
+def _run_lineage_relation(run: dict[str, Any]) -> tuple[str, str | None]:
+    """Expose safe run relationships from existing compact lineage summaries."""
+    rework = _dict(run.get("rework_decision_summary"))
+    parent = rework.get("parent_run_id")
+    if isinstance(parent, str) and parent:
+        return "explicit_rework_child", parent
+    revision = _dict(run.get("revision_summary"))
+    parent = revision.get("parent_run_id")
+    if isinstance(parent, str) and parent:
+        return str(revision.get("relationship") or "revision_child"), parent
+    return "root", None
 
 
 def _build_products(work: dict[str, Any]) -> dict[str, Any]:

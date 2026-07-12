@@ -107,6 +107,18 @@ Initial local UI slice complete; follow-up polish and review/output stage expans
 - Make the embedded STL viewer scroll-safe by default, with an explicit Interact/Release toggle for rotate and zoom.
 - Collapse report, gate, downloads, and activity into a right-side Inspector tab set so the STL preview and workflow controls stay in the first viewport.
 
+## M1.11a: Work / Run Semantics and Workflow Page Contract
+
+Done for the contract-first UI slice.
+
+- Persist explicit active-lineage pointers in new Work manifests.
+- Keep legacy Work lineage conservative and visibly inferred.
+- Render Current Work and immutable Run Snapshot from one mode-safe page view model.
+- Bind graph, selected-stage detail, and action target to the same projection.
+- Expose Run History navigation and a compact lineage strip.
+- Require nonblank graph-node contracts and separate status, selection, and attention.
+- Keep visual-system polish and screenshot acceptance as a later milestone.
+
 ## M1.12 / v0.5: LLM Agent Adapter Foundation
 
 Status: released in `v0.5.0` as a local deterministic foundation.

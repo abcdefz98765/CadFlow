@@ -19,6 +19,7 @@ from ai_native_cad.workflow_console.artifact_display import filter_artifacts_for
 from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, WorkflowConsoleBackend
 from ai_native_cad.workflow_console.review_surface import REVIEW_SURFACE_ARTIFACTS, build_workflow_review_surface
 from ai_native_cad.workflow_console.work_stage_projection import build_work_stage_projection, unavailable_work_stage_projection
+from ai_native_cad.workflow_console.workflow_page_view_model import build_workflow_page_view_model
 from ai_native_cad.workflow_console.routes import dispatch_route
 from ai_native_cad.workflow_console.server import resolve_downloadable
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
@@ -31,6 +32,7 @@ WORK_USER_PAGES = (
     ("overview", "dashboard", "Overview"),
     ("workflow", "account_tree", "Workflow"),
     ("parts", "view_list", "Parts"),
+    ("history", "history", "History"),
 )
 
 ARTIFACT_PAGE_ARTIFACTS = (
@@ -106,6 +108,7 @@ def build_console_page_data(
     active_page: str = "workspace",
     selected_node_id: str | None = None,
     selected_stage_id: str | None = None,
+    view_mode: str = "current_work",
     language: str = "en",
     show_debug_works: bool = False,
     show_unclassified_runs: bool = False,
@@ -133,12 +136,12 @@ def build_console_page_data(
     run_filters: dict[str, Any] = {}
     selected = selected_run_id or _dict_get(work_detail.get("summary"), "latest_run_id")
     load_runs = selected_run_id is not None
-    if active_page == "runs":
+    if active_page in {"runs", "history"}:
         runs = [_run_history_row_as_run(row) for row in work_detail.get("run_history", []) if isinstance(row, dict)]
         selected = selected_run_id or (runs[0]["run_id"] if runs else selected)
     run_data = (
         build_selected_run_data(backend, selected, root=root, selected_stage_id=selected_stage_id, language=language)
-        if selected and (active_page in {"workflow", "review", "products", "runs"} or selected_run_id is not None or load_runs)
+        if selected and (active_page in {"workflow", "review", "products", "runs", "history"} or selected_run_id is not None or load_runs)
         else empty_selected_run_data()
     )
     work_projection = None
@@ -184,6 +187,15 @@ def build_console_page_data(
             language=language,
             projection=work_projection,
         )
+        data["workflow_page"] = build_workflow_page_view_model(
+            backend,
+            selected_work,
+            view_mode="run_snapshot" if view_mode == "run_snapshot" else "current_work",
+            selected_run_id=selected_run_id if view_mode == "run_snapshot" else None,
+            selected_stage_id=selected_stage_id,
+            language=language,
+        )
+    data["view_mode"] = "run_snapshot" if view_mode == "run_snapshot" else "current_work"
     return data
 
 
@@ -563,6 +575,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
         "selected_run_id": None,
         "selected_node_id": None,
         "selected_stage_id": None,
+        "view_mode": "current_work",
         "language": "en",
         "active_page": "workspace",
         "last_action_result": None,
@@ -579,7 +592,9 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
             ".work-tree-item:hover{background:#f8fafc}.work-tree-item-active{background:#eef6ff;border-color:#bfdbfe}"
             ".work-page-tree{border-left:2px solid #dbeafe;margin-left:14px;padding-left:10px}"
             ".work-page-btn{font-size:12px;min-height:30px;justify-content:flex-start;width:100%}"
-            ".workflow-graph{background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;padding:18px}"
+             ".workflow-graph{background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;padding:18px}"
+             ".workflow-page-context,.workflow-current-result,.workflow-stage-detail-v2{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px}"
+             ".workflow-run-strip{overflow-x:auto;padding-bottom:4px}.workflow-run-item{min-width:150px;border:1px solid #dbe3ea;border-radius:6px;padding:8px;cursor:pointer}"
             ".workflow-step{align-items:center;gap:8px;cursor:pointer;min-width:92px}"
             ".workflow-part-candidate{border:1px solid #dbe3ea;border-radius:6px;padding:8px;min-width:136px}"
             ".workflow-step-selected{background:#f8fafc;border:1px solid #bfdbfe;border-radius:8px;padding:8px}"
@@ -600,7 +615,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
             ".workflow-context{border:1px solid #e2e8f0;border-radius:6px;background:#fff;padding:16px}.workflow-context-grid{display:grid;grid-template-columns:minmax(280px,.85fr) minmax(0,1.15fr);gap:24px;align-items:start}"
             ".workflow-prompt{border-left:4px solid #2563eb;background:#f8fafc;padding:12px;white-space:pre-wrap;line-height:1.55}.workflow-record-list{border-top:1px solid #e2e8f0}.workflow-record{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;border-bottom:1px solid #e2e8f0;padding:10px 0}.workflow-record-copy{min-width:0}.workflow-record-copy p{margin:2px 0 0}.artifact-status-table{border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}.artifact-status-head,.artifact-status-row{display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(150px,1.3fr) minmax(88px,.7fr) minmax(88px,.65fr) minmax(70px,.4fr);gap:8px;align-items:center;padding:11px 14px}.artifact-status-head{background:#f8fafc;color:#64748b;font-size:12px;font-weight:600}.artifact-status-row{border-top:1px solid #e2e8f0}.artifact-status-row:hover{background:#f8fafc}"
             ".artifact-audit-card{border:1px solid #e2e8f0;border-radius:6px;padding:12px;background:#fff}.artifact-summary{border-left:3px solid #94a3b8;padding-left:10px}"
-            "@media(max-width:760px){.stage-detail-grid,.stage-status-explanation,.workflow-context-grid{grid-template-columns:1fr}.artifact-status-head{display:none}.artifact-status-row{grid-template-columns:1fr 1fr}.artifact-status-row>div:nth-child(2){grid-column:1/-1}}"
+             "@media(max-width:760px){.sidebar{width:100%;min-height:auto;border-right:0;border-bottom:1px solid #e5e7eb}.content{min-width:0}.stage-detail-grid,.stage-status-explanation,.workflow-context-grid{grid-template-columns:1fr}.workflow-graph{overflow-x:auto}.workflow-graph>div{min-width:max-content}.artifact-status-head{display:none}.artifact-status-row{grid-template-columns:1fr 1fr}.artifact-status-row>div:nth-child(2){grid-column:1/-1}}"
             ".part-preview{border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#f8fafc;min-height:240px}"
             ".part-preview iframe{width:100%;height:260px;border:0;pointer-events:none}"
             "</style>"
@@ -619,6 +634,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
                     active_page=state.get("active_page", "workspace"),
                     selected_node_id=state.get("selected_node_id"),
                     selected_stage_id=state.get("selected_stage_id"),
+                    view_mode=state.get("view_mode", "current_work"),
                     language=state.get("language", "en"),
                     show_unclassified_runs=bool(state.get("show_unclassified_runs")),
                     show_low_level_details=bool(state.get("show_low_level_details")),
@@ -627,17 +643,19 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
                     search=state.get("search") or None,
                 )
                 state["selected_work_id"] = data.get("selected_work_id")
-                state["selected_run_id"] = data.get("selected_run_id")
+                if state.get("view_mode") == "run_snapshot":
+                    state["selected_run_id"] = data.get("selected_run_id")
                 with sidebar:
                     _render_sidebar(ui, data, state, select_work, select_page, refresh)
                 with content:
                     if state.get("active_page") in {"overview", "workflow", "node", "parts", "review", "products", "runs"}:
                         _render_work_header(ui, data)
-                    _render_active_page(ui, data, actions, state, refresh, select_node, select_stage, lambda run_id: select_run(run_id), select_work, select_page)
+                    _render_active_page(ui, data, actions, state, refresh, select_node, select_stage, lambda run_id: select_run(run_id), select_current_work, select_work, select_page)
 
             def select_work(work_id: str) -> None:
                 state["selected_work_id"] = work_id
                 state["selected_run_id"] = None
+                state["view_mode"] = "current_work"
                 state["selected_node_id"] = None
                 state["selected_stage_id"] = None
                 state["active_page"] = "overview"
@@ -663,6 +681,13 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
 
             def select_run(run_id: str) -> None:
                 state["selected_run_id"] = run_id
+                state["view_mode"] = "run_snapshot"
+                state["active_page"] = "workflow"
+                refresh()
+
+            def select_current_work() -> None:
+                state["view_mode"] = "current_work"
+                state["selected_run_id"] = None
                 refresh()
 
             refresh()
@@ -767,6 +792,7 @@ def _render_active_page(
     on_select_node: Callable[[str], None],
     on_select_stage: Callable[[str], None],
     on_select_run: Callable[[str], None],
+    on_select_current_work: Callable[[], None],
     on_select_work: Callable[[str], None],
     on_select_page: Callable[[str], None],
 ) -> None:
@@ -778,7 +804,7 @@ def _render_active_page(
     elif page == "overview":
         _render_work_overview(ui, data, state, refresh)
     elif page == "workflow":
-        _render_workflow_stage_review_surface(ui, data, actions, state, refresh, on_select_stage)
+        _render_workflow_page_v2(ui, data, actions, state, refresh, on_select_stage, on_select_run, on_select_current_work)
     elif page == "node":
         _render_node_detail(ui, data, actions, state, refresh, on_back_to_workflow=lambda: on_select_page("workflow"))
     elif page == "parts":
@@ -790,7 +816,7 @@ def _render_active_page(
     elif page == "products":
         _render_work_products(ui, data)
         _render_artifacts(ui, data, console_backend_from_actions(actions))
-    elif page == "runs":
+    elif page in {"runs", "history"}:
         _render_runs(ui, data, state, on_select_run, refresh)
     elif page == "config":
         _render_config(ui, data, actions.backend, state, refresh)
@@ -1051,6 +1077,139 @@ def _render_workflow_stage_review_surface(
     selected_stage = surface.get("selected_stage") if isinstance(surface.get("selected_stage"), dict) else None
     _render_workflow_context(ui, surface.get("workflow_context"), data, actions)
     _render_selected_stage_detail(ui, selected_stage, data, actions, state, refresh)
+
+
+def _render_workflow_page_v2(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    on_select_stage: Callable[[str], None],
+    on_select_run: Callable[[str], None],
+    on_select_current_work: Callable[[], None],
+) -> None:
+    """Render only the unified Workflow page contract, never a mixed surface."""
+    page = data.get("workflow_page") if isinstance(data.get("workflow_page"), dict) else {}
+    if not page:
+        ui.label("Workflow data is unavailable.").classes("text-negative")
+        return
+    snapshot = page.get("view_mode") == "run_snapshot"
+    work = page.get("work") if isinstance(page.get("work"), dict) else {}
+    lineage = page.get("active_lineage") if isinstance(page.get("active_lineage"), dict) else {}
+    with ui.element("section").classes("workflow-page-context w-full"):
+        with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
+            with ui.column().classes("gap-1"):
+                ui.label("Historical Run Snapshot" if snapshot else "Current Work").classes("text-xl font-semibold")
+                if snapshot:
+                    ui.label(f"Run: {page.get('viewed_run_id')} · immutable · read-only").classes("text-sm text-amber-800")
+                    ui.label("Does not represent the complete current Work.").classes("text-sm text-gray-600")
+                else:
+                    leaf = lineage.get("active_leaf_run_id") or lineage.get("active_root_run_id") or "unavailable"
+                    root = lineage.get("active_root_run_id")
+                    ui.label(f"Active lineage: {leaf}" + (f" based on {root}" if root and root != leaf else "")).classes("text-sm text-gray-600")
+                    if page.get("lineage_inferred"):
+                        ui.label("Active lineage inferred from legacy Work metadata.").classes("text-sm text-amber-800")
+            with ui.row().classes("gap-2"):
+                current = ui.button("Current Work", on_click=on_select_current_work).props("dense")
+                if not snapshot:
+                    current.props("color=primary")
+                if snapshot:
+                    ui.button("Return to Current Work", icon="undo", on_click=on_select_current_work).props("outline dense")
+        ui.separator()
+        _render_run_strip(ui, page.get("run_strip"), on_select_run)
+    conclusion = page.get("current_conclusion") if isinstance(page.get("current_conclusion"), dict) else {}
+    with ui.element("section").classes("workflow-current-result w-full"):
+        ui.label(conclusion.get("title") or "Current result").classes("text-lg font-semibold")
+        ui.label(conclusion.get("summary") or "Inspect the selected workflow stage.").classes("text-sm text-gray-700")
+        action = page.get("recommended_next_action") if isinstance(page.get("recommended_next_action"), dict) else None
+        if action and action.get("enabled"):
+            ui.button(action.get("label") or action.get("key"), on_click=lambda a=action: _run_workflow_page_action(ui, actions, a, state, refresh)).props("dense color=primary")
+    _render_workflow_stage_graph(ui, {"workflow_graph": page.get("workflow_graph"), "selected_stage_id": _dict_get(page.get("selected_stage"), "stage_id")}, on_select_stage)
+    _render_selected_stage_detail_v2(ui, page.get("selected_stage"), actions, state, refresh, snapshot)
+
+
+def _render_run_strip(ui: Any, runs: Any, on_select_run: Callable[[str], None]) -> None:
+    ui.label("Runs").classes("text-sm font-medium text-gray-600")
+    with ui.row().classes("workflow-run-strip w-full gap-2 no-wrap"):
+        for run in runs if isinstance(runs, list) else []:
+            if not isinstance(run, dict):
+                continue
+            item = ui.column().classes("workflow-run-item gap-1")
+            item.on("click", lambda _event, run_id=run.get("run_id"): on_select_run(str(run_id)))
+            with item:
+                ui.label(run.get("display_label") or run.get("run_id") or "Run").classes("text-sm font-medium")
+                ui.label(str(run.get("lineage_state") or "historical").replace("_", " ")).classes("text-xs text-gray-600")
+                ui.label(run.get("summary") or "Immutable workflow attempt.").classes("text-xs text-gray-500")
+
+
+def _render_selected_stage_detail_v2(
+    ui: Any,
+    stage: Any,
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    read_only: bool,
+) -> None:
+    if not isinstance(stage, dict):
+        ui.label("Select a workflow stage.").classes("text-gray-600")
+        return
+    conclusion = stage.get("conclusion") if isinstance(stage.get("conclusion"), dict) else {}
+    with ui.element("section").classes("workflow-stage-detail-v2 w-full"):
+        with ui.row().classes("w-full items-start justify-between gap-3"):
+            with ui.column().classes("gap-1"):
+                ui.label(conclusion.get("title") or stage.get("stage_name") or stage.get("stage_id")).classes("text-xl font-semibold")
+                ui.label(conclusion.get("summary") or stage.get("short_summary") or "Stage data unavailable.").classes("text-sm text-gray-700")
+            ui.badge(str(stage.get("status") or "unavailable").replace("_", " ")).classes(_badge_class(stage.get("status")))
+        action = stage.get("primary_action") if isinstance(stage.get("primary_action"), dict) else None
+        if action:
+            button = ui.button(action.get("label") or action.get("key"), on_click=lambda a=action: _run_workflow_page_action(ui, actions, a, state, refresh)).props("dense color=primary")
+            if not action.get("enabled"):
+                button.disable()
+                button.tooltip(action.get("disabled_reason") or "Unavailable")
+        with ui.element("div").classes("stage-detail-grid w-full"):
+            _render_stage_contract_block(ui, "USER INPUT", stage.get("user_input"), read_only)
+            _render_stage_contract_block(ui, "AGENT OUTPUT", stage.get("agent_output"), read_only)
+        _render_stage_contract_block(ui, "AGENT INTERPRETATION / DECISION", stage.get("agent_decision"), read_only)
+        secondary = stage.get("secondary_actions") if isinstance(stage.get("secondary_actions"), list) else []
+        if secondary:
+            ui.label("Secondary actions").classes("text-sm font-medium text-gray-600")
+            with ui.row().classes("gap-2 flex-wrap"):
+                for action in secondary:
+                    button = ui.button(action.get("label") or action.get("key"), on_click=lambda a=action: _run_workflow_page_action(ui, actions, a, state, refresh)).props("outline dense")
+                    if not action.get("enabled"):
+                        button.disable()
+                        button.tooltip(action.get("disabled_reason") or "Unavailable")
+        evidence = stage.get("evidence") if isinstance(stage.get("evidence"), list) else []
+        ui.label("EVIDENCE").classes("text-sm font-medium text-gray-600")
+        ui.label(", ".join(str(item.get("name")) for item in evidence if isinstance(item, dict) and item.get("name")) or "No additional evidence is available.").classes("text-sm text-gray-700")
+        with ui.expansion("Advanced", icon="info").classes("w-full"):
+            ui.label("Raw artifacts and diagnostics remain secondary to this stage summary.").classes("text-sm text-gray-500")
+
+
+def _render_stage_contract_block(ui: Any, title: str, value: Any, read_only: bool) -> None:
+    item = value if isinstance(value, dict) else {}
+    with ui.element("section").classes("stage-detail-card"):
+        ui.label(title).classes("text-sm font-medium text-gray-600")
+        ui.label(item.get("summary") or "No data is available for this stage section.").classes("text-sm text-gray-800")
+        source = item.get("source_run_id")
+        stage = item.get("source_stage_id")
+        if source or stage:
+            ui.label(f"Source: {source or 'Work lineage'}" + (f" · {stage}" if stage else "")).classes("text-xs text-gray-500")
+        if title == "USER INPUT":
+            ui.label("Read-only snapshot" if read_only else ("Active override" if item.get("source_type") == "active_override" else "Accepted input")).classes("text-xs text-gray-500")
+
+
+def _run_workflow_page_action(ui: Any, actions: WorkflowConsoleActions, action: dict[str, Any], state: dict[str, Any], refresh: Callable[[], None]) -> None:
+    if not action.get("enabled"):
+        return
+    target = action.get("target_run_id")
+    _run_surface_action(actions, target, action, state, refresh)
+    result = state.get("surface_action_result")
+    if isinstance(result, dict) and result.get("error"):
+        ui.notify("Workflow action could not be completed.", type="negative")
+    else:
+        ui.notify("Workflow updated. The next stage is selected when applicable.", type="positive")
 
 
 def _render_workflow_context(ui: Any, context: Any, data: dict[str, Any], actions: WorkflowConsoleActions) -> None:
@@ -1685,10 +1844,23 @@ def _run_surface_action(
             state["surface_action_result"] = actions.create_workflow_review(run_id)
         elif backend_action == "run_rework":
             state["surface_action_result"] = actions.run_rework(run_id)
+            result = state["surface_action_result"]
+            decision = result.get("decision") if isinstance(result, dict) and isinstance(result.get("decision"), dict) else {}
+            child_run_id = decision.get("child_run_id")
+            target_work_id = action.get("target_work_id")
+            if result.get("stage_count") and isinstance(target_work_id, str) and isinstance(child_run_id, str):
+                actions.backend.activate_work_lineage(
+                    target_work_id,
+                    parent_run_id=run_id,
+                    child_run_id=child_run_id,
+                )
         else:
             state["surface_action_result"] = {"ok": False, "error": f"Unsupported surface action: {action.get('key')}"}
     except Exception as exc:
         state["surface_action_result"] = {"ok": False, "error": str(exc)}
+    result = state.get("surface_action_result")
+    if isinstance(result, dict) and not result.get("error") and action.get("next_stage_on_success"):
+        state["selected_stage_id"] = action["next_stage_on_success"]
     refresh()
 
 
@@ -2000,8 +2172,9 @@ def _create_golden_example_ui(mode: str, state: dict[str, Any], refresh: Callabl
         state["golden_example_result"] = result
         state["golden_example_progress"] = result.get("progress") or []
         state["selected_work_id"] = result.get("work_id")
-        state["selected_run_id"] = result.get("run_id")
-        state["selected_stage_id"] = "workflow_review"
+        state["selected_run_id"] = None
+        state["view_mode"] = "current_work"
+        state["selected_stage_id"] = None
         state["active_page"] = "workflow"
     refresh()
 

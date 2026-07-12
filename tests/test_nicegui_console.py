@@ -471,7 +471,7 @@ def test_nicegui_user_pages_hide_review_and_products_from_work_nav_contract():
 
     assert "review" not in user_pages
     assert "products" not in user_pages
-    assert user_pages == ["overview", "workflow", "parts"]
+    assert user_pages == ["overview", "workflow", "parts", "history"]
 
 
 def test_nicegui_legacy_work_manifest_under_outputs_is_not_indexed(tmp_path):
