@@ -806,6 +806,22 @@ def _render_workspace_page(
     })
     if state.get("workspace_result"):
         ui.markdown(f"```json\n{json.dumps(state['workspace_result'], indent=2, sort_keys=True)}\n```").classes("w-full mono")
+    with ui.card().classes("w-full border border-amber-200 bg-amber-50 shadow-none"):
+        _label_with_help(ui, "Examples", "创建真实可运行的产品示例 Work；所有阶段都通过共享 backend service 执行。", "text-lg font-medium")
+        ui.label("Desktop 2DOF Robot Arm").classes("font-semibold text-gray-900")
+        ui.label("Contract validates CAD IR and creates input_ir without STEP/STL. Full runs CadQuery and generates STEP/STL.").classes("text-sm text-gray-700")
+        with ui.row().classes("gap-2"):
+            ui.button("Create Contract Example", icon="fact_check", on_click=lambda: _create_golden_example_ui("contract", state, refresh)).tooltip("Run through validated input_ir; CAD execution is intentionally skipped.")
+            ui.button("Create Full Example", icon="precision_manufacturing", on_click=lambda: _create_golden_example_ui("full", state, refresh)).tooltip("Run CadQuery and create STEP/STL for one generic concept part.")
+        progress = state.get("golden_example_progress") if isinstance(state.get("golden_example_progress"), list) else []
+        if progress:
+            with ui.expansion("Example progress", value=True).classes("w-full"):
+                for event in progress:
+                    if isinstance(event, dict):
+                        with ui.row().classes("w-full items-center gap-2"):
+                            ui.badge(event.get("status") or "unknown").classes(_badge_class(event.get("status")))
+                            ui.label(event.get("stage") or "stage").classes("font-medium")
+                            ui.label(event.get("message") or "").classes("text-sm text-gray-600")
     _label_with_help(ui, "Works", "当前 workspace 中的 Work/Project 列表，点击一行可进入对应 Work。", "text-lg font-medium")
     _render_work_table(ui, data.get("works") or [], data.get("selected_work_id"), on_select_work)
     selected_work = data.get("selected_work") if isinstance(data.get("selected_work"), dict) else {}
@@ -912,6 +928,9 @@ def _render_work_overview(ui: Any, data: dict[str, Any], state: dict[str, Any], 
         ui.label(current.get("next_action") or "Inspect workflow.").classes("text-base text-blue-950")
     if entity.get("description"):
         ui.label(entity["description"]).classes("text-sm text-gray-700")
+    golden = work.get("golden_example") if isinstance(work.get("golden_example"), dict) else None
+    if golden:
+        _render_golden_comparison(ui, golden)
     requirement = entity.get("requirement") if isinstance(entity.get("requirement"), dict) else {}
     with ui.card().classes("w-full"):
         _label_with_help(ui, "Requirement", "Work 的需求入口。这里会创建 root run，保存用户输入和后续结构化需求文件。", "text-lg font-medium")
@@ -1936,6 +1955,57 @@ def _create_work_ui(
         state["selected_work_id"] = response["data"]["work"]["work_id"]
         state["active_page"] = "overview"
     refresh()
+
+
+def _create_golden_example_ui(mode: str, state: dict[str, Any], refresh: Callable[[], None]) -> None:
+    backend = state.get("_backend")
+    if backend is None:
+        state["golden_example_result"] = {"ok": False, "error": "Backend is unavailable."}
+        refresh()
+        return
+    state["golden_example_progress"] = [{"stage": "workspace", "status": "running", "message": "Starting executable golden example"}]
+    refresh()
+
+    def on_progress(event: dict[str, Any]) -> None:
+        state.setdefault("golden_example_progress", []).append(event)
+
+    try:
+        result = backend.create_golden_example(mode, progress_callback=on_progress)
+    except Exception as exc:
+        state["golden_example_result"] = {"ok": False, "error": type(exc).__name__}
+        state["golden_example_progress"].append({"stage": "example", "status": "failed", "message": str(exc)})
+    else:
+        state["golden_example_result"] = result
+        state["golden_example_progress"] = result.get("progress") or []
+        state["selected_work_id"] = result.get("work_id")
+        state["selected_run_id"] = result.get("run_id")
+        state["selected_stage_id"] = "workflow_review"
+        state["active_page"] = "workflow"
+    refresh()
+
+
+def _render_golden_comparison(ui: Any, golden: dict[str, Any]) -> None:
+    execution = golden.get("execution") if isinstance(golden.get("execution"), dict) else {}
+    comparison = golden.get("comparison") if isinstance(golden.get("comparison"), dict) else {}
+    with ui.card().classes("w-full shadow-none border border-amber-200 bg-amber-50"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label("Golden comparison").classes("text-lg font-medium")
+            ui.badge("Passed" if comparison.get("passed") else "Failed").classes("bg-green-100 text-green-800" if comparison.get("passed") else "bg-red-100 text-red-800")
+        _key_values(ui, {
+            "Mode": golden.get("mode"),
+            "Execution": execution.get("status"),
+            "CAD IR validated": execution.get("cad_ir_validated"),
+            "CAD execution skipped": execution.get("execution_skipped"),
+            "Matched stages": f"{comparison.get('matched_stage_count', 0)} / {comparison.get('stage_count', 0)}",
+            "Mismatches": comparison.get("mismatch_count", 0),
+            "Missing artifacts": comparison.get("missing_artifact_count", 0),
+            "Unexpected claims": comparison.get("unexpected_claim_count", 0),
+        })
+        failed = [item for item in comparison.get("stages", []) if isinstance(item, dict) and not item.get("passed")]
+        if failed:
+            with ui.expansion("Stage mismatches").classes("w-full"):
+                for item in failed:
+                    ui.label(f"{item.get('stage')}: {len(item.get('mismatches', []))} mismatch(es), {len(item.get('missing_artifacts', []))} missing").classes("text-sm")
 
 
 def _create_workspace_ui(

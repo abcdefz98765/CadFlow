@@ -86,6 +86,13 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="Create a real local Work entity without executing workflow stages.",
     ),
     RouteSpec(
+        name="create_golden_example",
+        method="POST",
+        path="/api/examples/golden-desktop-robot-arm",
+        backend_operation="create_golden_example",
+        description="Create an append-only executable Golden Desktop Robot Arm Work.",
+    ),
+    RouteSpec(
         name="read_work",
         method="GET",
         path="/api/works/{work_id}",
@@ -441,6 +448,19 @@ def _create_work(
     )
 
 
+def _create_golden_example(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    mode = body.get("mode") or "contract"
+    if mode not in {"contract", "full"}:
+        raise ValueError("golden example mode must be contract or full")
+    return backend.create_golden_example(mode)
+
+
 def _read_work(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -735,6 +755,7 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "list_runs": _list_runs,
     "list_works": _list_works,
     "create_work": _create_work,
+    "create_golden_example": _create_golden_example,
     "read_work": _read_work,
     "create_work_requirement_run": _create_work_requirement_run,
     "create_work_part_runs": _create_work_part_runs,
@@ -768,6 +789,7 @@ def _success_status_code(route_name: str) -> int:
         "load_workspace",
         "write_workspace_config",
         "create_work",
+        "create_golden_example",
         "create_work_requirement_run",
         "create_work_part_runs",
         "run_revision",

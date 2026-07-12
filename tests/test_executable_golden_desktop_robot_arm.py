@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -7,6 +6,7 @@ import pytest
 
 from ai_native_cad.cadquery import executor as cadquery_executor
 from ai_native_cad.pipeline import runner as pipeline_runner
+from ai_native_cad.examples import golden_desktop_robot_arm as golden_service
 from ai_native_cad.workflow_console import WorkflowConsoleBackend
 
 
@@ -15,11 +15,7 @@ SCRIPT = PROJECT_ROOT / "scripts" / "run_golden_desktop_robot_arm.py"
 
 
 def _module():
-    spec = importlib.util.spec_from_file_location("golden_desktop_robot_arm_runner", SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return golden_service
 
 
 def _run_contract(tmp_path, monkeypatch):
@@ -84,12 +80,14 @@ def test_executable_golden_work_is_discoverable_by_web_backend(tmp_path, monkeyp
 
 
 def test_executable_runner_does_not_copy_expected_artifacts():
-    source = SCRIPT.read_text(encoding="utf-8").lower()
+    source = Path(golden_service.__file__).read_text(encoding="utf-8").lower()
+    cli = SCRIPT.read_text(encoding="utf-8")
 
     assert "copyfile" not in source
     assert "copytree" not in source
     assert "shutil" not in source
     assert source.index("actions.create_reviewed_part") < source.index("compare_actual_to_expected")
+    assert "from ai_native_cad.examples.golden_desktop_robot_arm import main" in cli
 
 
 @pytest.mark.skipif(os.environ.get("CADFLOW_RUN_SLOW_GOLDEN") != "1", reason="slow CadQuery golden smoke is opt-in")

@@ -53,6 +53,9 @@ READABLE_ARTIFACTS = {
     "workflow_review.json",
     "workflow_review.md",
     "agent_trace.json",
+    "golden_example.json",
+    "golden_comparison.json",
+    "golden_comparison.md",
     "logs/runtime.json",
 }
 

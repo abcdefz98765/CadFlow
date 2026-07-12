@@ -358,6 +358,53 @@ class WorkflowConsoleBackend:
         self.invalidate_work_index()
         return result
 
+    def create_golden_example(
+        self,
+        mode: str,
+        *,
+        progress_callback: Any | None = None,
+    ) -> dict[str, Any]:
+        """Create one append-only executable golden Work through the shared service."""
+        from ai_native_cad.examples import run_golden_desktop_robot_arm
+
+        result = run_golden_desktop_robot_arm(
+            self.workspace_root,
+            mode=mode,
+            project_root=self.project_root,
+            progress_callback=progress_callback,
+            backend=self,
+        )
+        self.invalidate_work_index()
+        return result
+
+    def get_golden_example_summary(self, work_id: str) -> dict[str, Any] | None:
+        """Return the path-free product view for an executable golden Work."""
+        manifest = self._read_work_manifest(work_id)
+        run_id = manifest.get("root_run_id")
+        if not isinstance(run_id, str) or not run_id:
+            return None
+        path = self._require_child_path(self._work_runs_root(work_id), f"{run_id}/golden_example.json")
+        value = _read_json_if_present(path)
+        if not isinstance(value, dict):
+            return None
+        comparison = value.get("comparison") if isinstance(value.get("comparison"), dict) else {}
+        stages = comparison.get("stages") if isinstance(comparison.get("stages"), list) else []
+        return {
+            "present": True,
+            "mode": value.get("mode"),
+            "execution": value.get("execution") if isinstance(value.get("execution"), dict) else {},
+            "progress": value.get("progress") if isinstance(value.get("progress"), list) else [],
+            "comparison": {
+                "passed": comparison.get("passed") is True,
+                "matched_stage_count": sum(1 for item in stages if isinstance(item, dict) and item.get("passed") is True),
+                "stage_count": len(stages),
+                "mismatch_count": sum(len(item.get("mismatches", [])) for item in stages if isinstance(item, dict)),
+                "missing_artifact_count": len(comparison.get("missing_required_artifacts", [])),
+                "unexpected_claim_count": sum(len(item.get("unexpected_claims", [])) for item in stages if isinstance(item, dict)),
+                "stages": stages,
+            },
+        }
+
     def create_work_requirement_run(
         self,
         work_id: str,
@@ -465,7 +512,10 @@ class WorkflowConsoleBackend:
         from ai_native_cad.workflow_console.work_index import get_work_detail
 
         self._require_safe_run_id(work_id)
-        return get_work_detail(self, work_id, index=self._get_work_index(show_debug=work_id == "__debug_runs__"))
+        detail = get_work_detail(self, work_id, index=self._get_work_index(show_debug=work_id == "__debug_runs__"))
+        if work_id != "__debug_runs__":
+            detail["golden_example"] = self.get_golden_example_summary(work_id)
+        return detail
 
     def _read_work_manifest(self, work_id: str) -> dict[str, Any]:
         self._require_safe_run_id(work_id)

@@ -179,14 +179,16 @@ class WorkflowConsoleActions:
         cad_ir_override = self.backend.active_override_path(run_path, "cad_ir_draft.json")
         if cad_ir_override is not None:
             return self._create_reviewed_part_from_cad_ir_override(run_path, handoff, cad_ir_override)
+        kwargs: dict[str, Any] = {"output_dir": self._stage_dir(run_path, "reviewed_part_create")}
+        if not execute_cad:
+            kwargs["execute_cad"] = False
         return self._run_action(
             run_path,
             "reviewed_part_create",
             run_reviewed_part_single_create_pipeline,
             handoff,
             self.backend.stage_runner.agent_adapter,
-            output_dir=self._stage_dir(run_path, "reviewed_part_create"),
-            execute_cad=execute_cad,
+            **kwargs,
         )
 
     def review_part_result(
