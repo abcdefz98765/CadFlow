@@ -1,0 +1,17 @@
+{
+  "stage": "reviewed_handoff",
+  "part_id": "upper_link",
+  "status": "ready_for_single_part_planning",
+  "source_part_request": "part_create_request.json",
+  "source_review": "part_request_review.json",
+  "preserved_assembly_context": {
+    "assembly_scope": "assembly",
+    "selected_candidate": "upper_link",
+    "related_parts": [
+      "lower_link",
+      "elbow_servo_bracket",
+      "gripper_mount"
+    ]
+  },
+  "next_operation": "AgentAdapter.create_part_ir"
+}

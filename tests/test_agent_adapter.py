@@ -3639,8 +3639,9 @@ def test_reviewed_part_single_create_outputs_do_not_leak_paths_secrets_or_provid
     assert "raw_response" not in serialized_outputs
 
 
-def test_reviewed_part_agent_ir_invalid_upper_link_blocks_without_mounting_plate_fallback(tmp_path, monkeypatch):
+def test_reviewed_part_agent_ir_normalizes_upper_link_to_generic_family_without_fallback(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cadquery_executor, "PROJECT_ROOT", tmp_path)
     handoff = {
         **_valid_reviewed_part_handoff(),
         "part_id": "upper_link",
@@ -3650,27 +3651,55 @@ def test_reviewed_part_agent_ir_invalid_upper_link_blocks_without_mounting_plate
     }
     output_dir = tmp_path / "outputs" / "upper_link_agent_ir"
 
+    class RecordingAdapter(DeterministicAgentAdapter):
+        calls = 0
+
+        def create_part_ir(self, reviewed_part_handoff, context=None):
+            self.calls += 1
+            return super().create_part_ir(reviewed_part_handoff, context=context)
+
+    adapter = RecordingAdapter()
     result = run_reviewed_part_agent_ir_create_pipeline(
         handoff,
-        DeterministicAgentAdapter(),
+        adapter,
         output_dir=output_dir,
     )
 
-    assert result["status"] == "blocked_cad_ir_validation"
-    assert result["blocked_stage"] == "cad_ir_validation"
+    assert adapter.calls == 1
+    assert result["status"] == "success"
     draft = json.loads((output_dir / "cad_ir_draft.json").read_text(encoding="utf-8"))
+    input_ir = json.loads((output_dir / "single_part_upper_link" / "input_ir.json").read_text(encoding="utf-8"))
     report = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
     trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
-    assert draft["part_type"] == "upper_link"
+    assert draft["source_part_id"] == "upper_link"
+    assert draft["source_intent"] == "upper_link"
+    assert draft["part_type"] == "link_like_part"
+    assert draft["geometry_family"] == "elongated_plate_with_end_holes"
+    assert input_ir["part_type"] == "link_like_part"
+    assert input_ir["geometry_family"] == "elongated_plate_with_end_holes"
+    assert draft["dimensions"]["hole_diameter"] < draft["dimensions"]["width"]
+    assert draft["dimensions"]["hole_center_distance"] < draft["dimensions"]["length"]
+    assert draft["source"]["normalization"]["reason"]
+    assert draft["validation_metadata"]["strength_validated"] is False
     assert "mounting_plate" not in json.dumps({"draft": draft, "report": report, "trace": trace})
-    assert not (output_dir / "single_part_upper_link" / "input_ir.json").exists()
-    assert not (output_dir / "single_part_upper_link" / "model.step").exists()
+    assert (output_dir / "single_part_upper_link" / "model.step").exists()
+    assert (output_dir / "single_part_upper_link" / "model.stl").exists()
+    assert report["concept_scope"] == "single_generic_concept_part"
+    assert report["assembly_generated"] is False
+    assert report["strength_validated"] is False
+    assert report["lineage"]["part_id"] == "upper_link"
+    assert report["lineage"]["assembly_plan_artifact"] == "assembly_plan.json"
+    lower_link_ir = DeterministicAgentAdapter().create_part_ir({**handoff, "part_id": "lower_link"})
+    assert lower_link_ir["part_type"] == draft["part_type"]
+    assert lower_link_ir["geometry_family"] == draft["geometry_family"]
+    assert lower_link_ir["source_part_id"] == "lower_link"
     assert trace["reviewed_part_single_create"]["stages"] == [
         "load_reviewed_part_handoff",
         "validate_review_gate",
         "compile_single_part_execution_request",
         "create_part_ir",
         "validate_agent_generated_cad_ir",
+        "run_ir_pipeline",
         "record_lineage",
     ]
 

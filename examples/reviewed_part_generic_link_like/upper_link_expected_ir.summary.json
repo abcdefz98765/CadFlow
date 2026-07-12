@@ -1,0 +1,35 @@
+{
+  "source_part_id": "upper_link",
+  "source_intent": "upper_link",
+  "part_type": "link_like_part",
+  "geometry_family": "elongated_plate_with_end_holes",
+  "normalization": {
+    "from": "upper_link",
+    "to": "link_like_part/elongated_plate_with_end_holes",
+    "reason": "The reviewed part has link-like intent and can be represented by the reusable elongated two-interface concept family."
+  },
+  "dimensions_summary": {
+    "required": [
+      "length",
+      "width",
+      "thickness",
+      "hole_center_distance",
+      "hole_diameter"
+    ],
+    "unit": "mm"
+  },
+  "manufacturing_context": {
+    "process": "FDM",
+    "purpose": "concept_part",
+    "printable": true
+  },
+  "validation_expectations": {
+    "cad_ir_valid": true,
+    "hole_diameter_less_than_width": true,
+    "hole_center_distance_less_than_length": true,
+    "minimum_hole_edge_margin": true,
+    "strength_validated": false
+  },
+  "report_scope": "single_generic_concept_part",
+  "not_assembly_result": true
+}

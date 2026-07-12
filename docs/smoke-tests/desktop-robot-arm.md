@@ -18,8 +18,9 @@ The validated goal is to confirm that CadFlow can:
 - create a reviewed part request for one candidate part
 - create a reviewed handoff
 - call `AgentAdapter.create_part_ir(...)` for the reviewed part
-- either validate a child `input_ir.json` and attempt STEP/STL, or safely block
-  at `cad_ir_validation` when the generated CAD IR is unsupported
+- normalize the selected `upper_link` intent to the generic `link_like_part`
+  CAD IR family
+- validate a child `input_ir.json` and generate one concept-part STEP/STL
 
 ## Tested workflow
 
@@ -39,7 +40,9 @@ Requirement
 -> 04_handoff/reviewed_part_handoff.json
 -> action_reviewed_part_create
 -> AgentAdapter.create_part_ir
--> cad_ir_validation blocked or child run attempted
+-> link_like_part / elongated_plate_with_end_holes normalization
+-> validated child input_ir.json
+-> single-part STEP/STL
 ```
 
 ## Test prompt
@@ -78,13 +81,13 @@ Expected to appear:
 - `05_single_create/agent_trace.json`
 - `05_single_create/report.json`
 
-Expected if local/mock or provider returns supported CAD IR:
+Expected for the current local/mock generic-family path:
 
 - `05_single_create/single_part_upper_link/input_ir.json`
 - `05_single_create/single_part_upper_link/model.step`
 - `05_single_create/single_part_upper_link/model.stl`
 
-Expected if the generated IR is unsupported:
+If a future unknown part cannot be normalized:
 
 - `05_single_create/cad_ir_draft.json`
 - `05_single_create/report.json` with `blocked_stage: cad_ir_validation`
@@ -101,29 +104,24 @@ Not expected in the current MVP:
 - automatic batch run
 - cloud collaboration state
 
-## Expected current block
+## Current generic-family result
 
-The current local/mock smoke path may block at `cad_ir_validation` for
-`upper_link`, because robotic-arm link geometry is not yet a supported Part
-Modeling backend family. This is expected MVP behavior when the trace clearly
-shows that the reviewed-part workflow reached `AgentAdapter.create_part_ir(...)`
-and the block is caused by invalid or unsupported agent-generated CAD IR.
+The current local/mock smoke path can generate the selected `upper_link` as one
+generic concept part:
 
-Current checkpoint result:
-
-- selected part: `upper_link`
-- handoff: `ready_for_single_part_planning`
-- reviewed create: `blocked_cad_ir_validation`
-- blocked reason: `unsupported_part_type`
-- `05_single_create/cad_ir_draft.json` exists
-- draft `part_type`: `upper_link`
-- child `input_ir.json` is not created
-- `model.step` / `model.stl` are not created
+- selected source intent: `upper_link`
+- normalized `part_type`: `link_like_part`
+- `geometry_family`: `elongated_plate_with_end_holes`
+- report scope: `single_generic_concept_part`
+- child `input_ir.json`, `model.step`, and `model.stl` are generated
+- lineage continues to identify `upper_link` as the selected assembly candidate
 - no fallback to `mounting_plate`
+- no `upper_link`-specific CAD template
 
-The smoke test should not be considered failed if CadFlow clearly blocks there,
-as long as it does not fabricate robot arm CAD, does not fall back to
-`mounting_plate`, and does not bypass workflow gates.
+This success applies only to the selected concept part. It does not mean a
+complete robot-arm assembly or the remaining candidate parts were generated.
+If another unknown intent cannot be normalized, the correct result remains
+`blocked_cad_ir_validation` with `cad_ir_draft.json` and failure trace retained.
 
 ## Expected Web Console Review Surface
 
@@ -148,11 +146,12 @@ Expected visible state for this smoke target:
 - Reviewed Handoff shows `04_handoff/reviewed_part_handoff.json`.
 - Reviewed Part Create / CAD IR Draft shows
   `05_single_create/part_execution_request.json`,
-  `05_single_create/cad_ir_draft.json`, and
-  `blocked_cad_ir_validation` when validation blocks.
-- Child `input_ir.json` is absent and explained when CAD IR validation blocks.
-- Child `model.step` and `model.stl` are absent and explained when no child run
-  is created.
+  `05_single_create/cad_ir_draft.json`, normalized family information, and a
+  completed Part Modeling state for the current supported link-like path.
+- The evidence chain includes child `input_ir.json`, `model.step`, and
+  `model.stl` when generation succeeds.
+- The decision panel describes one generic link-like concept part and does not
+  claim that a full robot-arm assembly exists.
 - Review buttons are visible with disabled prerequisite reasons when upstream
   artifacts are missing.
 - `Create / Refresh Workflow Review` can produce `workflow_review.json` and
@@ -187,27 +186,13 @@ Expected visible state for this smoke target:
 - no multi-turn agent conversation
 - no cloud/database/account system
 
-## Next recommended capability
+## Scope boundary
 
-Implement a generic link-like / elongated-plate CAD IR family through the
-CadIrAgent and Part Modeling backend. This should be a reusable part family for
-simple links, tabs, and elongated plates, not a robot-arm-specific `upper_link`
-template.
+The smoke now covers the reviewed `upper_link` through generic-family
+normalization and single-part generation. It still does not support:
 
-The next capability should move the workflow from:
-
-```text
-assembly_plan.json
--> part_create_request.json
-```
-
-to:
-
-```text
-reviewed_part_handoff.json
--> AgentAdapter.create_part_ir
--> validated input_ir.json
--> single part STEP/STL
-```
-
-It should not attempt full robot arm assembly generation.
+- complete robot-arm assembly generation
+- automatic generation of all robot-arm parts
+- servo envelope, clearance, or fit validation
+- motion or kinematic simulation
+- strength, fatigue, or stiffness validation

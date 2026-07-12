@@ -25,6 +25,7 @@ def generate_cadquery_candidates(ir: CADIR | dict[str, Any], max_candidates: int
         "circular_button": _circular_button_builder,
         "enclosure_base": _enclosure_base_builder,
         "enclosure_lid": _enclosure_lid_builder,
+        "link_like_part": _elongated_plate_with_end_holes_builder,
     }.get(cad_ir.part_type)
     if builder is None:
         raise ValueError(f"Unsupported part_type for CadQuery generation: {cad_ir.part_type}")
@@ -323,5 +324,27 @@ def _enclosure_lid_builder(strategy: str = "conservative") -> str:
         chamfer = chamfer.get('size', 0)
     if chamfer and not """ + repr(fallback) + """:
         model = model.edges('|Z').chamfer(float(chamfer))
+    return model
+"""
+
+
+def _elongated_plate_with_end_holes_builder(strategy: str = "conservative") -> str:
+    """A generic two-ended link; it deliberately carries no robot-specific meaning."""
+    return """def build_model(params: dict) -> cq.Workplane:
+    dims = params['dimensions']
+    features = params.get('features', {})
+    length = dims['length']
+    width = dims['width']
+    thickness = dims['thickness']
+    model = cq.Workplane('XY').box(length, width, thickness).translate((0, 0, thickness / 2))
+    diameter = dims['hole_diameter']
+    center_distance = dims['hole_center_distance']
+    points = [(-center_distance / 2, 0), (center_distance / 2, 0)]
+    model = model.faces('>Z').workplane().pushPoints(points).hole(diameter, thickness)
+    fillet = features.get('fillet', 0)
+    if isinstance(fillet, dict):
+        fillet = fillet.get('radius', 0)
+    if fillet:
+        model = model.edges('|Z').fillet(float(fillet))
     return model
 """

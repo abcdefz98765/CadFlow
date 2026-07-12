@@ -155,6 +155,7 @@ def build_workflow_review_surface(
     workflow_graph = _workflow_graph_v2(stages, summary_context)
     selected_stage = _select_stage(stages, selected_stage_id)
     workflow_context = _workflow_context(artifact_names, artifact_contents, selected_stage, language)
+    decision_layer = _decision_layer(stages, summary_context, selected_stage, artifact_names, language)
     return {
         "title": "Workflow Graph",
         "primary_concept": "Workflow / Stage / Review",
@@ -166,9 +167,90 @@ def build_workflow_review_surface(
         "selected_stage": selected_stage,
         "stages": stages,
         "workflow_context": workflow_context,
+        # Stable, presentation-ready contract for the Workflow Cockpit.  The
+        # existing stage cards remain the detailed source; this layer makes the
+        # current decision and its evidence directly consumable by any UI.
+        "decision_panel": decision_layer["decision_panel"],
+        "task_state": decision_layer["task_state"],
+        "evidence_chain": decision_layer["evidence_chain"],
+        "candidate_part_detail": decision_layer["candidate_part_detail"],
+        "copy_registry": decision_layer["copy_registry"],
         "artifact_viewer": _artifact_viewer(artifact_names, artifact_contents, overrides),
         "actions": _global_actions(artifact_names, bool(run_id)),
     }
+
+
+def _decision_layer(
+    stages: list[dict[str, Any]],
+    context: dict[str, Any],
+    selected_stage: dict[str, Any] | None,
+    artifact_names: set[str],
+    language: str,
+) -> dict[str, Any]:
+    """Create a compact decision/evidence view without changing workflow state."""
+    assembly = context.get("assembly") if isinstance(context.get("assembly"), dict) else {}
+    reviewed = context.get("reviewed") if isinstance(context.get("reviewed"), dict) else {}
+    selected_id = _first_present(
+        _nested(context.get("report_summary"), "final_selected_candidate"),
+        _nested(reviewed.get("part_request") if isinstance(reviewed.get("part_request"), dict) else {}, "part_id"),
+        assembly.get("selected_part_id"),
+    )
+    parts = [part for part in _safe_list(assembly.get("parts")) if isinstance(part, dict)]
+    selected_part = next((part for part in parts if part.get("part_id") == selected_id), {})
+    current = selected_stage or next((stage for stage in stages if stage.get("status") in {"blocked", "running", "needs_review"}), None) or (stages[-1] if stages else {})
+    status = str(current.get("status") or "not_started")
+    blocked = current.get("blocked_reasons") if isinstance(current.get("blocked_reasons"), list) else []
+    evidence = []
+    for stage in stages:
+        for artifact in stage.get("important_artifacts", []):
+            if isinstance(artifact, dict) and artifact.get("present"):
+                evidence.append({"stage": stage.get("key"), "artifact": artifact.get("name"), "role": "decision evidence"})
+    evidence = evidence[:8]
+    cad_ir = context.get("cad_ir_draft") if isinstance(context.get("cad_ir_draft"), dict) else {}
+    generic = _nested(cad_ir, "source", "normalization")
+    child_runs = context.get("child_runs") if isinstance(context.get("child_runs"), list) else []
+    child = child_runs[0] if child_runs and isinstance(child_runs[0], dict) else {}
+    generated_evidence = (
+        ("cad_ir_draft.json", "cad_ir_draft.json" in artifact_names),
+        ("input_ir.json", "input_ir.json" in child.get("artifacts", [])),
+        ("model.step", "model.step" in child.get("downloadables", [])),
+        ("model.stl", "model.stl" in child.get("downloadables", [])),
+    )
+    for name, present in generated_evidence:
+        if present and not any(item.get("artifact") == name for item in evidence):
+            evidence.append({"stage": "part_modeling", "artifact": name, "role": "generated single-part evidence"})
+    is_generic_link = cad_ir.get("part_type") == "link_like_part" and cad_ir.get("geometry_family") == "elongated_plate_with_end_holes"
+    return {
+        "task_state": {"status": status, "current_stage": current.get("key"), "selected_part_id": selected_id, "blocked_reasons": blocked},
+        "decision_panel": {
+            "decision": ("Review the generated generic link-like concept part." if is_generic_link else current.get("next_recommended_action") or current.get("current_status") or "Review the selected stage."),
+            "status": status,
+            "owner_stage": current.get("key"),
+            "selected_part_id": selected_id,
+            "rationale": current.get("current_block") or current.get("why_it_matters") or "",
+            "scope": "single_generic_concept_part" if is_generic_link else None,
+            "assembly_generated": False if is_generic_link else None,
+        },
+        "evidence_chain": evidence,
+        "candidate_part_detail": {
+            "part_id": selected_id,
+            "role": selected_part.get("role"),
+            "status": selected_part.get("part_status") or selected_part.get("status"),
+            "supported_candidate": selected_part.get("supported_candidate") is True,
+            "reference_only": selected_part.get("reference_only") is True,
+            "brief": selected_part.get("part_brief"),
+            "generic_family_normalization": generic,
+            "part_type": cad_ir.get("part_type"),
+            "geometry_family": cad_ir.get("geometry_family"),
+        },
+        "copy_registry": _cockpit_copy_registry(language),
+    }
+
+
+def _cockpit_copy_registry(language: str) -> dict[str, str]:
+    if language == "zh":
+        return {"decision": "当前决策", "task_state": "任务状态", "evidence_chain": "证据链", "candidate_part": "候选零件详情", "no_fallback": "未回退到 mounting_plate"}
+    return {"decision": "Current decision", "task_state": "Task state", "evidence_chain": "Evidence chain", "candidate_part": "Candidate part detail", "no_fallback": "No fallback to mounting_plate"}
 
 
 def _stage_card(
@@ -1028,6 +1110,7 @@ def _summary_context(run: dict[str, Any], contents: dict[str, Any]) -> dict[str,
         "requirement": contents.get("requirement_v2.json") if isinstance(contents.get("requirement_v2.json"), dict) else contents.get("requirement.json"),
         "requirement_source": "requirement_v2.json" if isinstance(contents.get("requirement_v2.json"), dict) else ("requirement.json" if isinstance(contents.get("requirement.json"), dict) else None),
         "planning": contents.get("planning_artifact.json"),
+        "cad_ir_draft": contents.get("cad_ir_draft.json"),
         "assembly": (
             reviewed.get("assembly_plan")
             if isinstance(reviewed.get("assembly_plan"), dict)

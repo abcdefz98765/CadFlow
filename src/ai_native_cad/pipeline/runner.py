@@ -2269,6 +2269,7 @@ def run_reviewed_part_single_create_pipeline(
     *,
     output_dir: str | Path | None = None,
     output_root: str | Path | None = None,
+    execute_cad: bool = True,
 ) -> dict[str, Any]:
     """Execute one reviewed part handoff through agent-driven CAD IR synthesis."""
 
@@ -2317,21 +2318,53 @@ def run_reviewed_part_single_create_pipeline(
             error=exc,
         )
 
-    child_result = run_ir_pipeline(input_ir, output_dir=child_output_dir)
+    if execute_cad:
+        child_result = run_ir_pipeline(input_ir, output_dir=child_output_dir)
+    else:
+        child_output_dir.mkdir(parents=True, exist_ok=True)
+        _write_json(child_output_dir / "input_ir.json", input_ir)
+        child_contract_report = {
+            "success": True,
+            "status": "validated_contract",
+            "part_type": input_ir.get("part_type"),
+            "part_name": input_ir.get("part_name"),
+            "source_part_id": input_ir.get("source_part_id"),
+            "geometry_family": input_ir.get("geometry_family"),
+            "concept_scope": "single_generic_concept_part" if input_ir.get("part_type") == "link_like_part" else "single_part",
+            "assembly_generated": False,
+            "cad_execution_started": False,
+            "diagnostic_codes": ["reviewed_part_single_create.contract_validated"],
+        }
+        _write_json(child_output_dir / "report.json", child_contract_report)
+        (child_output_dir / "report.md").write_text(
+            "# Validated CAD IR Contract\n\n"
+            "CAD IR validation passed. CAD execution was not requested in contract mode.\n",
+            encoding="utf-8",
+        )
+        child_result = {"status": "validated_contract", "success": True, "report": child_contract_report}
     lineage = _reviewed_part_single_create_lineage(
         output_path=output_path,
         child_output_dir=child_output_dir,
         handoff=sanitized_handoff,
         source_handoff=source_handoff,
     )
+    lineage["normalized_part_type"] = input_ir.get("part_type")
+    lineage["geometry_family"] = input_ir.get("geometry_family")
+    lineage["source_part_id"] = input_ir.get("source_part_id") or sanitized_handoff.get("part_id")
     _write_json(output_path / "lineage.json", lineage)
 
+    successful_statuses = {"success", "validated_contract"}
     metadata = {
         "workflow": "reviewed_part_single_create",
         "version": "reviewed-part-agent-ir-create-v0.2",
         "workflow_mode": "agent_ir_synthesis",
         "status": child_result.get("status", "unknown"),
         "part_id": sanitized_handoff.get("part_id"),
+        "normalized_part_type": input_ir.get("part_type"),
+        "geometry_family": input_ir.get("geometry_family"),
+        "concept_scope": "single_generic_concept_part" if input_ir.get("part_type") == "link_like_part" else "single_part",
+        "assembly_generated": False,
+        "strength_validated": False,
         "adapter": _safe_provider_identity(adapter),
         "local_authority": [
             "reviewed_part_handoff.json",
@@ -2359,8 +2392,9 @@ def run_reviewed_part_single_create_pipeline(
             "lineage": "lineage.json",
         },
         "cad_ir_created": (child_output_dir / "input_ir.json").exists(),
-        "part_modeling_started": child_result.get("status") == "success",
-        "diagnostic_codes": ["reviewed_part_single_create.started"],
+        "part_modeling_started": execute_cad and child_result.get("status") == "success",
+        "execution_mode": "full" if execute_cad else "contract",
+        "diagnostic_codes": ["reviewed_part_single_create.started" if execute_cad else "reviewed_part_single_create.contract_validated"],
     }
     trace = {
         "total_attempts": 1,
@@ -2377,11 +2411,16 @@ def run_reviewed_part_single_create_pipeline(
     }
     _write_json(output_path / "agent_trace.json", trace)
     report = {
-        "success": child_result.get("status") == "success",
+        "success": child_result.get("status") in successful_statuses,
         "status": child_result.get("status", "unknown"),
-        "blocked_stage": None if child_result.get("status") == "success" else "single_part_create",
+        "blocked_stage": None if child_result.get("status") in successful_statuses else "single_part_create",
         "diagnostic_codes": metadata["diagnostic_codes"],
         "part_id": sanitized_handoff.get("part_id"),
+        "normalized_part_type": input_ir.get("part_type"),
+        "geometry_family": input_ir.get("geometry_family"),
+        "concept_scope": metadata["concept_scope"],
+        "assembly_generated": False,
+        "strength_validated": False,
         "source_handoff": "reviewed_part_handoff.json",
         "child_run_dir": _repo_relative_string(child_output_dir),
         "cad_ir_created": metadata["cad_ir_created"],
@@ -2397,7 +2436,7 @@ def run_reviewed_part_single_create_pipeline(
     _write_json(output_path / "report.json", report)
     return {
         "status": child_result.get("status", "unknown"),
-        "success": child_result.get("status") == "success",
+        "success": child_result.get("status") in successful_statuses,
         "output_dir": str(output_path),
         "child_output_dir": str(child_output_dir),
         "reviewed_part_handoff": sanitized_handoff,
@@ -2418,6 +2457,7 @@ def run_reviewed_part_agent_ir_create_pipeline(
     *,
     output_dir: str | Path | None = None,
     output_root: str | Path | None = None,
+    execute_cad: bool = True,
 ) -> dict[str, Any]:
     """Named reviewed-part CAD IR synthesis entry point.
 
@@ -2431,6 +2471,7 @@ def run_reviewed_part_agent_ir_create_pipeline(
         adapter,
         output_dir=output_dir,
         output_root=output_root,
+        execute_cad=execute_cad,
     )
 
 

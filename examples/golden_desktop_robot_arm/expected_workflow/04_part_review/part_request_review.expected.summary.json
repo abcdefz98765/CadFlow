@@ -1,0 +1,12 @@
+{
+  "stage": "part_review",
+  "part_id": "upper_link",
+  "status": "approved",
+  "review_result": "approved_for_reviewed_handoff",
+  "checks": {
+    "single_part_scope": true,
+    "has_preserved_assembly_context": true,
+    "provider_code_absent": true,
+    "provider_cad_ir_absent": true
+  }
+}

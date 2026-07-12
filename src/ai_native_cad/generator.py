@@ -16,6 +16,7 @@ _PART_TYPES = (
     "spacer",
     "simple_bracket",
     "wall_bracket",
+    "link_like_part",
 )
 
 
@@ -227,6 +228,15 @@ def get_part_spec(part_type: str) -> dict:
                 "fillet": {"radius": 2.0},
             },
             "outputs": ["step", "stl"],
+        },
+        "link_like_part": {
+            "part_type": "link_like_part",
+            "geometry_family": "elongated_plate_with_end_holes",
+            "unit": "mm",
+            "dimensions": {"length": 90.0, "width": 22.0, "thickness": 6.0, "hole_center_distance": 66.0, "hole_diameter": 5.0},
+            "features": {},
+            "outputs": ["step", "stl"],
+            "check_level": "L0",
         },
     }
     if part_type not in specs:

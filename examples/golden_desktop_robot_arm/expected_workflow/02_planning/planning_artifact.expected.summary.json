@@ -1,0 +1,8 @@
+{
+  "stage": "planning",
+  "requirement_source": "requirement_v2.json",
+  "route": "assembly_decomposition",
+  "primary_candidate_part": "upper_link",
+  "full_assembly_cad_supported": false,
+  "next_scope": "single_selected_part_reviewed_workflow"
+}

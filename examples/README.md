@@ -2,6 +2,15 @@
 
 Examples are split by scope.
 
+The static reviewed-part summaries in
+`reviewed_part_generic_link_like/` document domain intent normalization to a
+generic CAD IR family without committing generated STEP/STL files. Negative
+architecture examples live in `negative_no_template_fallback/`.
+
+`golden_desktop_robot_arm/` expands that contract into a complete static golden
+workflow from prompt and requirement clarification through Workflow Review. It
+contains expected summaries only and does not ship generated CAD binaries.
+
 ```text
 examples/
   parts/

@@ -28,6 +28,7 @@ from ai_native_cad.workflow_console.artifact_display import (
     artifact_visible_by_default,
     filter_artifacts_for_display,
 )
+from ai_native_cad.workflow_console.review_surface import build_workflow_review_surface
 
 
 def _does_not_contain_keys(value, keys):
@@ -57,6 +58,51 @@ def _does_not_contain_text(value, blocked):
         lowered = value.lower()
         return all(item.lower() not in lowered for item in blocked)
     return True
+
+
+def test_workflow_cockpit_shows_successful_generic_upper_link_evidence(tmp_path):
+    run_dir = tmp_path / "outputs" / "upper_link_review"
+    child_dir = run_dir / "single_part_upper_link"
+    child_dir.mkdir(parents=True)
+    artifacts = {
+        "assembly_plan.json": {
+            "artifact_type": "assembly_plan",
+            "scope": "multi_part",
+            "selected_part_id": "upper_link",
+            "parts": [{"part_id": "upper_link", "role": "second arm link", "part_brief": "selected printable link", "part_status": "candidate_for_single_part_generation", "supported_candidate": True}],
+        },
+        "part_create_request.json": {"part_id": "upper_link", "status": "ready_for_review"},
+        "reviewed_part_handoff.json": {"part_id": "upper_link", "status": "ready_for_single_part_planning"},
+        "cad_ir_draft.json": {
+            "part_type": "link_like_part",
+            "geometry_family": "elongated_plate_with_end_holes",
+            "source_part_id": "upper_link",
+            "source": {"normalization": {"source_part_id": "upper_link", "part_type": "link_like_part", "geometry_family": "elongated_plate_with_end_holes", "reason": "generic family mapping"}},
+        },
+        "lineage.json": {"relationship": "reviewed_part_single_create_child", "part_id": "upper_link", "child_run_id": "single_part_upper_link", "assembly_plan_artifact": "assembly_plan.json"},
+        "report.json": {"status": "success", "success": True, "part_id": "upper_link", "concept_scope": "single_generic_concept_part", "assembly_generated": False},
+    }
+    for name, value in artifacts.items():
+        (run_dir / name).write_text(json.dumps(value) + "\n", encoding="utf-8")
+    (child_dir / "input_ir.json").write_text(json.dumps(artifacts["cad_ir_draft.json"]) + "\n", encoding="utf-8")
+    (child_dir / "report.json").write_text(json.dumps({"status": "success", "success": True}) + "\n", encoding="utf-8")
+    (child_dir / "model.step").write_text("STEP\n", encoding="utf-8")
+    (child_dir / "model.stl").write_text("STL\n", encoding="utf-8")
+
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    run = backend.read_run_metadata_by_id("upper_link_review", root=tmp_path / "outputs")
+    surface = build_workflow_review_surface(backend, "upper_link_review", run, root=str(tmp_path / "outputs"), selected_stage_id="part_modeling")
+
+    assert surface["task_state"]["status"] == "completed"
+    assert surface["task_state"]["selected_part_id"] == "upper_link"
+    assert surface["decision_panel"]["scope"] == "single_generic_concept_part"
+    assert surface["decision_panel"]["assembly_generated"] is False
+    assert "generic link-like concept part" in surface["decision_panel"]["decision"]
+    assert surface["candidate_part_detail"]["part_id"] == "upper_link"
+    assert surface["candidate_part_detail"]["part_type"] == "link_like_part"
+    assert surface["candidate_part_detail"]["geometry_family"] == "elongated_plate_with_end_holes"
+    evidence = {item["artifact"] for item in surface["evidence_chain"]}
+    assert {"cad_ir_draft.json", "input_ir.json", "model.step", "model.stl"} <= evidence
 
 
 class ProviderCheckAdapter(DeterministicAgentAdapter):

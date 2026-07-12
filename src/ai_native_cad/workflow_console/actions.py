@@ -171,6 +171,7 @@ class WorkflowConsoleActions:
         run_id: str,
         *,
         root: str | Path | None = None,
+        execute_cad: bool = True,
     ) -> dict[str, Any]:
         """Run one reviewed part through the agent-driven CAD IR create bridge."""
         run_path = self.backend.resolve_run(run_id, root=root)
@@ -185,6 +186,7 @@ class WorkflowConsoleActions:
             handoff,
             self.backend.stage_runner.agent_adapter,
             output_dir=self._stage_dir(run_path, "reviewed_part_create"),
+            execute_cad=execute_cad,
         )
 
     def review_part_result(

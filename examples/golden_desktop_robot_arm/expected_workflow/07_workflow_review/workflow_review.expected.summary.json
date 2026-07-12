@@ -1,0 +1,24 @@
+{
+  "stage": "workflow_review",
+  "status": "ready_for_review",
+  "result_summary": "Generated one selected generic concept part for upper_link.",
+  "selected_part_id": "upper_link",
+  "concept_scope": "single_generic_concept_part",
+  "generated_artifacts": [
+    "cad_ir_draft.json",
+    "input_ir.json",
+    "model.step",
+    "model.stl",
+    "report.json",
+    "agent_trace.json",
+    "lineage.json"
+  ],
+  "remaining_limitations": [
+    "no full assembly CAD",
+    "no all-part generation",
+    "no servo fit validation",
+    "no motion simulation",
+    "no strength validation"
+  ],
+  "assembly_generated": false
+}

@@ -14,6 +14,7 @@ SUPPORTED_PART_TYPES = {
     "circular_button",
     "enclosure_base",
     "enclosure_lid",
+    "link_like_part",
 }
 SUPPORTED_OUTPUTS = {"step", "stl"}
 
@@ -32,6 +33,7 @@ SUPPORTED_FEATURES_BY_PART_TYPE = {
     },
     "enclosure_base": {"bosses", "bottom_cutout", "fillet"},
     "enclosure_lid": {"holes", "chamfer"},
+    "link_like_part": set(),
 }
 
 UNVERIFIED_FEATURES_BY_PART_TYPE = {
@@ -56,6 +58,7 @@ REQUIRED_DIMENSIONS = {
     "circular_button": {"body_diameter", "body_height", "button_diameter", "button_height"},
     "enclosure_base": {"outer_length", "outer_width", "outer_height", "wall_thickness"},
     "enclosure_lid": {"length", "width", "thickness"},
+    "link_like_part": {"length", "width", "thickness", "hole_center_distance", "hole_diameter"},
 }
 
 
@@ -90,8 +93,37 @@ def validate_ir(ir: CADIR | dict[str, Any]) -> dict[str, Any]:
 
     _validate_supported_features(result, cad_ir)
 
+    if cad_ir.part_type == "link_like_part":
+        _validate_link_like_contract(result, cad_ir)
+
     result["valid"] = not result["errors"]
     return result
+
+
+def _validate_link_like_contract(result: dict[str, Any], cad_ir: CADIR) -> None:
+    dims = cad_ir.dimensions
+    family_ok = cad_ir.geometry_family == "elongated_plate_with_end_holes"
+    _check(result, "supported_geometry_family", family_ok, actual=cad_ir.geometry_family)
+    if not family_ok:
+        result["errors"].append({"code": "unsupported_geometry_family", "message": "link_like_part requires elongated_plate_with_end_holes geometry_family"})
+    if not all(name in dims for name in ("length", "width", "thickness", "hole_center_distance", "hole_diameter")):
+        return
+    diameter = dims["hole_diameter"]
+    distance = dims["hole_center_distance"]
+    length = dims["length"]
+    width = dims["width"]
+    edge_margin = (length - distance - diameter) / 2
+    minimum_margin = max(2.0, diameter * 0.5)
+    checks = {
+        "hole_diameter_less_than_width": diameter < width,
+        "hole_center_distance_less_than_length": distance < length,
+        "minimum_hole_edge_margin": edge_margin >= minimum_margin,
+        "fdm_concept_thickness": dims["thickness"] >= 3.0,
+    }
+    for name, passed in checks.items():
+        _check(result, name, passed)
+        if not passed:
+            result["errors"].append({"code": "invalid_link_like_geometry", "message": f"link_like_part failed {name}"})
 
 
 def _check(result: dict[str, Any], name: str, passed: bool, **extra: Any) -> None:

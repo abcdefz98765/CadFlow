@@ -1,0 +1,26 @@
+{
+  "stage": "cad_ir_draft",
+  "source_part_id": "upper_link",
+  "source_intent": "upper_link",
+  "part_type": "link_like_part",
+  "geometry_family": "elongated_plate_with_end_holes",
+  "normalization": {
+    "from": "upper_link",
+    "to": "link_like_part/elongated_plate_with_end_holes",
+    "reason": "The reviewed part has link-like intent and maps to the reusable elongated two-interface concept family."
+  },
+  "required_dimensions": [
+    "length",
+    "width",
+    "thickness",
+    "hole_center_distance",
+    "hole_diameter"
+  ],
+  "manufacturing_context": {
+    "process": "FDM",
+    "purpose": "concept_part",
+    "printable": true
+  },
+  "mounting_plate_fallback": false,
+  "part_specific_template": false
+}

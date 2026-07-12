@@ -1,0 +1,19 @@
+{
+  "stage": "assembly_plan",
+  "scope": "assembly",
+  "candidate_parts": [
+    "base",
+    "lower_link",
+    "upper_link",
+    "shoulder_servo_bracket",
+    "elbow_servo_bracket",
+    "gripper_mount"
+  ],
+  "reference_components": [
+    "reference_servo",
+    "reference_gripper"
+  ],
+  "selected_candidate": "upper_link",
+  "full_assembly_cad_supported": false,
+  "next_scope": "single_selected_part_reviewed_workflow"
+}

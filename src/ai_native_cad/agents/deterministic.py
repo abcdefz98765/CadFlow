@@ -219,15 +219,23 @@ def _part_ir_from_reviewed_handoff(reviewed_part_handoff: dict[str, Any], contex
             "check_level": "L0",
             "source": source,
         }
+    geometry_family = _generic_family_for_intent(part_id, brief)
+    dimensions = _link_like_dimensions(reviewed_part_handoff, context)
     return {
-        "part_type": part_id,
+        "part_type": "link_like_part" if geometry_family else part_id,
+        "geometry_family": geometry_family,
+        "source_part_id": part_id,
+        "source_intent": part_id,
         "part_name": f"single_part_{part_id}",
         "unit": "mm",
-        "dimensions": _link_like_dimensions(reviewed_part_handoff, context),
+        "dimensions": dimensions if not geometry_family else {**dimensions, "hole_center_distance": dimensions["length"] - 28.0, "hole_diameter": 5.0},
         "features": {},
         "outputs": ["step", "stl"],
         "check_level": "L0",
-        "source": source,
+        "manufacturing_context": {"process": "FDM", "purpose": "concept_part", "printable": True} if geometry_family else {},
+        "validation_metadata": {"scope": "geometry_and_manufacturability_sanity", "strength_validated": False} if geometry_family else {},
+        "source_context_summary": _source_context_summary(reviewed_part_handoff) if geometry_family else {},
+        "source": {**source, "normalization": {"source_part_id": part_id, "source_intent": part_id, "part_type": "link_like_part", "geometry_family": geometry_family, "reason": "link-like naming or reviewed brief indicates an elongated two-interface concept part"}} if geometry_family else source,
     }
 
 
@@ -240,6 +248,27 @@ def _link_like_dimensions(reviewed_part_handoff: dict[str, Any], context: dict[s
         "length": round(float(reach) / 2.4, 3),
         "width": 22.0,
         "thickness": 6.0,
+    }
+
+
+def _generic_family_for_intent(part_id: str, brief: str) -> str | None:
+    """Normalize only clear link-like intent; unknown parts remain unknown intent."""
+    id_tokens = set(part_id.split("_"))
+    brief_phrases = ("elongated link", "connecting link", "link between", "two-ended link")
+    if "link" in id_tokens or part_id in {"connecting_rod", "tie_bar"} or any(phrase in brief for phrase in brief_phrases):
+        return "elongated_plate_with_end_holes"
+    return None
+
+
+def _source_context_summary(reviewed_part_handoff: dict[str, Any]) -> dict[str, Any]:
+    context = reviewed_part_handoff.get("preserved_assembly_context")
+    if not isinstance(context, dict):
+        context = {}
+    return {
+        "source_artifact": "reviewed_part_handoff.json",
+        "assembly_scope": context.get("assembly_scope") or "multi_part",
+        "related_parts": list(context.get("related_parts", []))[:8] if isinstance(context.get("related_parts"), list) else [],
+        "selected_candidate": reviewed_part_handoff.get("part_id"),
     }
 
 

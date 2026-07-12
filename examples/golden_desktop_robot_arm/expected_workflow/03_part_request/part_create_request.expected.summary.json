@@ -1,0 +1,15 @@
+{
+  "stage": "part_request",
+  "part_id": "upper_link",
+  "status": "ready_for_review",
+  "generation_scope": "single_part",
+  "part_brief": "Second printable link selected from the desktop robot-arm assembly plan.",
+  "preserved_assembly_context": {
+    "assembly_scope": "assembly",
+    "related_parts": [
+      "lower_link",
+      "elbow_servo_bracket",
+      "gripper_mount"
+    ]
+  }
+}

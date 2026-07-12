@@ -1,0 +1,15 @@
+{
+  "stage": "input_ir",
+  "created": true,
+  "validated": true,
+  "source_part_id": "upper_link",
+  "source_intent": "upper_link",
+  "part_type": "link_like_part",
+  "geometry_family": "elongated_plate_with_end_holes",
+  "expected_outputs": [
+    "model.step",
+    "model.stl"
+  ],
+  "outputs_generated_when_cadquery_available": true,
+  "strength_validated": false
+}

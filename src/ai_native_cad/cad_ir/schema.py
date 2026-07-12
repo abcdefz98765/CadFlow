@@ -18,6 +18,12 @@ class CADIR:
     check_level: str = "L0"
     part_name: str | None = None
     source: dict[str, Any] = field(default_factory=dict)
+    geometry_family: str | None = None
+    source_part_id: str | None = None
+    source_intent: str | None = None
+    manufacturing_context: dict[str, Any] = field(default_factory=dict)
+    validation_metadata: dict[str, Any] = field(default_factory=dict)
+    source_context_summary: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CADIR":
@@ -30,10 +36,16 @@ class CADIR:
             check_level=str(data.get("check_level", "L0")),
             part_name=data.get("part_name") or data.get("instance_name") or data["part_type"],
             source=dict(data.get("source", {})),
+            geometry_family=data.get("geometry_family"),
+            source_part_id=data.get("source_part_id"),
+            source_intent=data.get("source_intent"),
+            manufacturing_context=dict(data.get("manufacturing_context", {})),
+            validation_metadata=dict(data.get("validation_metadata", {})),
+            source_context_summary=dict(data.get("source_context_summary", {})),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "part_type": self.part_type,
             "part_name": self.part_name or self.part_type,
             "unit": self.unit,
@@ -43,3 +55,13 @@ class CADIR:
             "check_level": self.check_level,
             "source": dict(self.source),
         }
+        optional = {
+            "geometry_family": self.geometry_family,
+            "source_part_id": self.source_part_id,
+            "source_intent": self.source_intent,
+            "manufacturing_context": dict(self.manufacturing_context),
+            "validation_metadata": dict(self.validation_metadata),
+            "source_context_summary": dict(self.source_context_summary),
+        }
+        result.update({key: value for key, value in optional.items() if value not in (None, {}, [])})
+        return result

@@ -1,0 +1,14 @@
+{
+  "stage": "lineage",
+  "relationship": "reviewed_part_single_create_child",
+  "part_id": "upper_link",
+  "source_part_id": "upper_link",
+  "normalized_part_type": "link_like_part",
+  "geometry_family": "elongated_plate_with_end_holes",
+  "assembly_plan_artifact": "assembly_plan.json",
+  "part_create_request_artifact": "part_create_request.json",
+  "part_request_review_artifact": "part_request_review.json",
+  "reviewed_part_handoff_artifact": "reviewed_part_handoff.json",
+  "execution_request_artifact": "part_execution_request.json",
+  "child_run_id": "single_part_upper_link"
+}

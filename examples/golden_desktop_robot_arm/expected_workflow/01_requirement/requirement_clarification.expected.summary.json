@@ -1,0 +1,18 @@
+{
+  "stage": "requirement_clarification",
+  "status": "answers_applied",
+  "answers": {
+    "arm_reach_mm": 220,
+    "degrees_of_freedom": 2,
+    "payload_target_g": 100,
+    "servo_reference_size_mm": "40x20x40",
+    "gripper_opening_mm": 30,
+    "actuator_type": "standard 20kg hobby servo",
+    "manufacturing_method": "FDM",
+    "material": "PLA or PETG",
+    "gripper_type": "simple parallel or gripper mounting plate",
+    "primary_generated_part": "upper_link",
+    "safety_note": "desktop demo only"
+  },
+  "notes": "Desktop demonstration only; not production or safety critical."
+}

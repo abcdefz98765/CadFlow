@@ -1,0 +1,21 @@
+{
+  "stage": "requirement",
+  "scope": "assembly",
+  "object_goal": "desktop 2DOF robotic arm",
+  "manufacturing": {
+    "method": "FDM",
+    "intent": "3D printing"
+  },
+  "assumptions": [
+    "Desktop demonstration scope only.",
+    "Dimensions use millimeters.",
+    "The request requires assembly decomposition before any selected-part CAD run."
+  ],
+  "missing_information": [
+    "arm_reach_mm",
+    "payload_target_g",
+    "servo_reference_size_mm",
+    "gripper_opening_mm"
+  ],
+  "flow_decision": "ask_user"
+}

@@ -161,6 +161,8 @@ def _expected_bbox_dimensions(cad_ir: CADIR) -> list[tuple[str, str, float]]:
         ]
     if cad_ir.part_type == "enclosure_lid":
         return [("length", "x", dims["length"]), ("width", "y", dims["width"]), ("thickness", "z", dims["thickness"])]
+    if cad_ir.part_type == "link_like_part":
+        return [("length", "x", dims["length"]), ("width", "y", dims["width"]), ("thickness", "z", dims["thickness"])]
     return []
 
 
