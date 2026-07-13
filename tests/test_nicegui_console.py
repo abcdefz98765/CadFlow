@@ -22,6 +22,7 @@ from ai_native_cad.workflow_console.nicegui_app import (
     read_artifact_page_content,
     WORK_USER_PAGES,
     _part_viewer_url,
+    _run_workflow_page_action,
     _save_artifact_override_ui,
 )
 from ai_native_cad.workflow_console.routes import dispatch_route
@@ -43,6 +44,36 @@ def _does_not_contain_absolute_paths(value, root: Path):
     if isinstance(value, str):
         return str(root.resolve()) not in value and not Path(value).is_absolute()
     return True
+
+
+def test_workflow_action_refreshes_without_touching_the_deleted_button_slot():
+    class NoNotifyUi:
+        def notify(self, *_args, **_kwargs):
+            raise AssertionError("workflow action must not notify after refresh")
+
+    class FakeActions:
+        def create_part_request(self, run_id):
+            assert run_id == "active_run"
+            return {"ok": True, "artifact": "part_create_request.json"}
+
+    state = {}
+    refreshes = []
+    _run_workflow_page_action(
+        NoNotifyUi(),
+        FakeActions(),
+        {
+            "enabled": True,
+            "target_run_id": "active_run",
+            "backend_action": "part_request",
+            "next_stage_on_success": "part_review",
+        },
+        state,
+        lambda: refreshes.append(True),
+    )
+
+    assert refreshes == [True]
+    assert state["selected_stage_id"] == "part_review"
+    assert state["workflow_notice"].startswith("Workflow updated")
 
 
 def _does_not_contain_text(value, blocked):

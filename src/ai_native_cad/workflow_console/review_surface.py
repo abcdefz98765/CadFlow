@@ -250,6 +250,11 @@ def _projection_artifact_refs(items: Any) -> list[dict[str, Any]]:
             "summary": _artifact_summary(name, item.get("content")) if present else "missing",
             "source_run_id": item.get("source_run_id"),
             "source_relative_path": item.get("source_relative_path"),
+            "modified_at": item.get("modified_at"),
+            # Kept in the in-memory presentation model only. This lets the
+            # artifact dialog open the exact lineage record instead of guessing
+            # from a repeated filename.
+            "content": item.get("content"),
         })
     return result
 
@@ -1539,6 +1544,7 @@ def _artifact_ref(name: str, artifact_names: set[str], contents: dict[str, Any])
         "name": name,
         "present": present,
         "summary": _artifact_summary(name, contents.get(name)) if present else "missing",
+        "content": contents.get(name) if present else None,
     }
 
 

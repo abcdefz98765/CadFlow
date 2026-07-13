@@ -803,7 +803,6 @@ def _render_active_page(
         _render_parts_matrix(ui, data)
     elif page == "review":
         _render_workflow_review(ui, data, actions, state, refresh)
-        _render_stage_review_form(ui, data, actions, state, refresh, stage="workflow_review")
         _render_part_workflow(ui, data, actions, state, refresh)
     elif page == "products":
         _render_work_products(ui, data)
@@ -1105,10 +1104,12 @@ def _render_workflow_page_v2(
                         ui.label("Active lineage inferred from legacy Work metadata.").classes("text-sm text-amber-800")
             with ui.row().classes("gap-2"):
                 current = ui.button("Current Work", on_click=on_select_current_work).props("dense")
+                current.tooltip("Show the actionable Current Work lineage. This does not modify any Run or artifact.")
                 if not snapshot:
                     current.props("color=primary")
                 if snapshot:
-                    ui.button("Return to Current Work", icon="undo", on_click=on_select_current_work).props("outline dense")
+                    ui.button("Return to Current Work", icon="undo", on_click=on_select_current_work).props("outline dense") \
+                        .tooltip("Leave this read-only historical Run and return to the actionable Current Work lineage.")
     if snapshot:
         with ui.element("section").classes("workflow-run-strip-panel w-full"):
             _render_run_strip(ui, page.get("run_strip"), on_select_run, on_select_current_work)
@@ -1121,7 +1122,8 @@ def _render_workflow_page_v2(
             ui.label(conclusion["rationale"]).classes("workflow-meta")
         action = page.get("recommended_next_action") if isinstance(page.get("recommended_next_action"), dict) else None
         if action and action.get("enabled"):
-            ui.button(action.get("label") or action.get("key"), on_click=lambda a=action: _run_workflow_page_action(ui, actions, a, state, refresh)).props("color=primary")
+            ui.button(action.get("label") or action.get("key"), on_click=lambda a=action: _run_workflow_page_action(ui, actions, a, state, refresh)).props("color=primary") \
+                .tooltip(action.get("tooltip") or "Run the recommended workflow action.")
     if not snapshot:
         with ui.element("section").classes("workflow-run-strip-panel w-full"):
             _render_run_strip(ui, page.get("run_strip"), on_select_run, on_select_current_work)
@@ -1169,6 +1171,9 @@ def _render_selected_stage_detail_v2(
         return
     conclusion = stage.get("conclusion") if isinstance(stage.get("conclusion"), dict) else {}
     with ui.element("section").classes("workflow-stage-detail-v2 w-full"):
+        notice = state.pop("workflow_notice", None)
+        if notice:
+            ui.label(str(notice)).classes("text-sm text-green-700")
         with ui.row().classes("stage-conclusion w-full items-start justify-between gap-3"):
             with ui.column().classes("gap-1"):
                 ui.label("SELECTED STAGE CONCLUSION").classes("workflow-eyebrow")
@@ -1182,9 +1187,10 @@ def _render_selected_stage_detail_v2(
             if not action.get("enabled"):
                 ui.label(action.get("disabled_reason") or "Unavailable").classes("workflow-disabled-reason")
         with ui.element("div").classes("stage-detail-grid w-full"):
-            _render_stage_contract_block(ui, "USER INPUT", stage.get("user_input"), read_only)
-            _render_stage_contract_block(ui, "AGENT INTERPRETATION / DECISION", stage.get("agent_decision"), read_only)
-            _render_stage_contract_block(ui, "AGENT OUTPUT", stage.get("agent_output"), read_only)
+            _render_stage_contract_block(ui, "USER INPUT", stage.get("user_input"), read_only, actions.backend, state)
+            _render_stage_contract_block(ui, "AGENT INTERPRETATION / DECISION", stage.get("agent_decision"), read_only, actions.backend, state)
+            _render_stage_contract_block(ui, "AGENT OUTPUT", stage.get("agent_output"), read_only, actions.backend, state)
+        _render_agent_review_panel(ui, stage, data, actions, state, refresh, read_only)
         if stage.get("stage_id") in {"requirement", "clarification"} and not read_only:
             _render_inline_requirement_clarification(ui, data, actions, state, refresh)
         secondary = stage.get("secondary_actions") if isinstance(stage.get("secondary_actions"), list) else []
@@ -1193,24 +1199,37 @@ def _render_selected_stage_detail_v2(
             with ui.row().classes("gap-2 flex-wrap"):
                 for action in secondary:
                     button = ui.button(action.get("label") or action.get("key"), on_click=lambda a=action: _run_workflow_page_action(ui, actions, a, state, refresh)).props("outline dense")
+                    button.tooltip(action.get("tooltip") or action.get("disabled_reason") or "Available")
                     if not action.get("enabled"):
                         button.disable()
-                        button.tooltip(action.get("disabled_reason") or "Unavailable")
         disabled_actions = stage.get("disabled_actions") if isinstance(stage.get("disabled_actions"), list) else []
         if disabled_actions:
             ui.label("Unavailable actions").classes("text-xs font-medium text-gray-500")
-            for action in disabled_actions:
-                if isinstance(action, dict):
-                    ui.label(f"{action.get('label') or action.get('key')}: {action.get('disabled_reason') or 'Unavailable'}").classes("workflow-disabled-reason")
+            with ui.row().classes("gap-2 flex-wrap"):
+                for action in disabled_actions:
+                    if isinstance(action, dict):
+                        button = ui.button(action.get("label") or action.get("key")).props("outline dense")
+                        button.disable()
+                        button.tooltip(action.get("tooltip") or action.get("disabled_reason") or "Unavailable")
         evidence = stage.get("evidence") if isinstance(stage.get("evidence"), list) else []
         with ui.element("section").classes("workflow-evidence w-full"):
             ui.label("EVIDENCE").classes("workflow-eyebrow")
-            ui.label(", ".join(str(item.get("name")) for item in evidence if isinstance(item, dict) and item.get("name")) or "No additional evidence is available.").classes("text-sm text-gray-700")
+            if evidence:
+                _render_stage_artifact_rows(ui, evidence, actions.backend, state, compact=True)
+            else:
+                ui.label("No additional evidence is available.").classes("text-sm text-gray-700")
         with ui.expansion("Advanced", icon="info").classes("w-full"):
             ui.label("Raw artifacts and diagnostics remain secondary to this stage summary.").classes("text-sm text-gray-500")
 
 
-def _render_stage_contract_block(ui: Any, title: str, value: Any, read_only: bool) -> None:
+def _render_stage_contract_block(
+    ui: Any,
+    title: str,
+    value: Any,
+    read_only: bool,
+    backend: WorkflowConsoleBackend | None = None,
+    state: dict[str, Any] | None = None,
+) -> None:
     item = value if isinstance(value, dict) else {}
     classes = "stage-detail-card decision" if "DECISION" in title else "stage-detail-card"
     with ui.element("section").classes(classes):
@@ -1230,19 +1249,149 @@ def _render_stage_contract_block(ui: Any, title: str, value: Any, read_only: boo
             values = item.get(key) if isinstance(item.get(key), list) else []
             if values:
                 ui.label(label).classes("text-xs font-medium text-gray-500 mt-2")
-                ui.label(" · ".join(str(entry.get("name") if isinstance(entry, dict) else entry) for entry in values[:4])).classes("text-xs text-gray-600")
+                if key == "artifacts" and backend is not None:
+                    _render_stage_artifact_rows(ui, _group_stage_artifacts(values), backend, state or {}, compact=True)
+                else:
+                    ui.label(" · ".join(str(entry.get("name") if isinstance(entry, dict) else entry) for entry in values[:4])).classes("text-xs text-gray-600")
+
+
+def _render_agent_review_panel(
+    ui: Any,
+    stage: dict[str, Any],
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    read_only: bool,
+) -> None:
+    """Keep assessment agent-owned; users inspect its evidence rather than score it."""
+    primary = stage.get("primary_action") if isinstance(stage.get("primary_action"), dict) else None
+    with ui.element("section").classes("workflow-evidence w-full"):
+        ui.label("AGENT REVIEW").classes("workflow-eyebrow")
+        ui.label("Ask CadFlow to assess the current lineage, artifact completeness, and design confidence. The assessment is saved as review artifacts; users inspect the result rather than assigning the score.").classes("text-sm text-gray-700")
+        if read_only:
+            ui.label("This historical Run is read-only; return to Current Work to refresh an agent review.").classes("workflow-disabled-reason")
+        elif primary:
+            button = ui.button(
+                primary.get("label") or "Request agent review",
+                icon="smart_toy",
+                on_click=lambda a=primary: _run_workflow_page_action(ui, actions, a, state, refresh),
+            ).props("color=primary")
+            button.tooltip(primary.get("tooltip") or "Generate a traceable agent review without changing the CAD model.")
+        else:
+            ui.label("Agent review is not available until this stage has an active Run.").classes("workflow-disabled-reason")
+
+
+def _render_stage_artifact_rows(
+    ui: Any,
+    artifacts: list[dict[str, Any]],
+    backend: WorkflowConsoleBackend,
+    state: dict[str, Any],
+    *,
+    compact: bool,
+) -> None:
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        with ui.row().classes("w-full items-center justify-between gap-2"):
+            with ui.column().classes("gap-0"):
+                ui.label(artifact.get("display_name") or artifact.get("name") or "Artifact").classes("text-sm font-medium")
+                ui.label(
+                    f"{artifact.get('kind', 'file').upper()} · {artifact.get('validation_status') or 'available'} · "
+                    f"Source: {artifact.get('source_run_id') or 'Work lineage'} · {artifact.get('source_stage_id') or 'stage'}"
+                ).classes("workflow-meta")
+                if artifact.get("summary") and not compact:
+                    ui.label(str(artifact["summary"])).classes("text-xs text-gray-600")
+            with ui.row().classes("gap-1"):
+                open_button = ui.button("Open", on_click=lambda a=artifact: _show_artifact_contract_dialog(ui, backend, a, state)).props("outline dense")
+                open_button.tooltip("Open the exact artifact shown here, including its source Run and stage. This does not change the workflow.")
+                copy_button = ui.button("Copy", on_click=lambda a=artifact: _copy_artifact_raw(ui, a)).props("flat dense")
+                copy_button.tooltip("Copy the raw artifact content to the clipboard. This does not change the workflow.")
+                if artifact.get("kind") == "stl" and artifact.get("source_run_id"):
+                    run = quote(str(artifact.get("source_run_id")), safe="")
+                    file_url = quote(f"/api/downloads/{run}/model.stl", safe="")
+                    viewer = ui.link("View STL", target=f"/web-viewer/index.html?file={file_url}").classes("text-sm")
+                    viewer.tooltip("Open this STL in the model viewer for its source Run.")
+                if artifact.get("downloadable") and artifact.get("source_run_id"):
+                    name = str(artifact.get("name"))
+                    run = quote(str(artifact.get("source_run_id")), safe="")
+                    download = ui.link("Download", target=f"/api/downloads/{run}/{quote(name, safe='')}").classes("text-sm")
+                    download.tooltip("Download this generated model from its source Run.")
+        related = artifact.get("related") if isinstance(artifact.get("related"), list) else []
+        if related:
+            with ui.expansion(f"Related {artifact.get('display_name') or artifact.get('name')} ({len(related)})").classes("w-full"):
+                _render_stage_artifact_rows(ui, related, backend, state, compact=True)
+
+
+def _group_stage_artifacts(artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Show one primary file per name and retain distinct lineage copies."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for artifact in artifacts:
+        if isinstance(artifact, dict):
+            grouped.setdefault(str(artifact.get("name") or "artifact"), []).append(artifact)
+    result = []
+    for items in grouped.values():
+        primary, *related = items
+        result.append({**primary, "related": related, "related_count": len(related)})
+    return result
+
+
+def _copy_artifact_raw(ui: Any, artifact: dict[str, Any]) -> None:
+    value = artifact.get("content")
+    raw = value if isinstance(value, str) else json.dumps(value if value is not None else {}, indent=2, sort_keys=True)
+    ui.run_javascript(f"navigator.clipboard.writeText({json.dumps(raw)})")
+    ui.notify("Artifact copied to clipboard.")
+
+
+def _show_artifact_contract_dialog(ui: Any, backend: WorkflowConsoleBackend, artifact: dict[str, Any], state: dict[str, Any]) -> None:
+    """Open one artifact using its explicit source contract, never just its name."""
+    value = artifact.get("content")
+    if value is None and artifact.get("source_run_id") and artifact.get("name"):
+        try:
+            value = read_artifact_page_content(backend, str(artifact["source_run_id"]), str(artifact["name"])).get("content")
+        except Exception as exc:
+            value = {"error": f"Unable to open artifact: {exc}"}
+    with ui.dialog() as dialog, ui.card().classes("w-[860px] max-w-full"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label(artifact.get("display_name") or artifact.get("name") or "Artifact").classes("text-lg font-semibold")
+            ui.button(icon="close", on_click=dialog.close).props("flat round dense").tooltip("Close the artifact viewer without changing the workflow.")
+        _key_values(ui, {
+            "Artifact name": artifact.get("name"),
+            "Source Run": artifact.get("source_run_id") or "Work lineage",
+            "Source Stage": artifact.get("source_stage_id") or "Unknown",
+            "Source": artifact.get("source_type") or "original",
+            "Validation": artifact.get("validation_status") or "available",
+            "Modified": artifact.get("modified_at") or "Not available",
+        })
+        tabs = ui.tabs().classes("w-full")
+        with tabs:
+            summary_tab = ui.tab("Summary")
+            rendered_tab = ui.tab("Rendered / Structured")
+            raw_tab = ui.tab("Raw")
+        with ui.tab_panels(tabs, value=summary_tab).classes("w-full"):
+            with ui.tab_panel(summary_tab):
+                ui.label(artifact.get("summary") or "No user-facing summary is available.").classes("text-sm text-gray-700")
+            with ui.tab_panel(rendered_tab):
+                if artifact.get("kind") == "markdown" and isinstance(value, str):
+                    ui.markdown(value).classes("w-full")
+                elif artifact.get("kind") in {"step", "stl"}:
+                    ui.label("This model artifact can be downloaded; STL can also be opened from the Parts page.").classes("text-sm text-gray-700")
+                else:
+                    ui.markdown(f"```json\n{json.dumps(value, indent=2, sort_keys=True) if not isinstance(value, str) else value}\n```").classes("w-full mono")
+            with ui.tab_panel(raw_tab):
+                raw = value if isinstance(value, str) else json.dumps(value, indent=2, sort_keys=True)
+                ui.markdown(f"```\n{raw}\n```").classes("w-full mono")
+    dialog.open()
 
 
 def _run_workflow_page_action(ui: Any, actions: WorkflowConsoleActions, action: dict[str, Any], state: dict[str, Any], refresh: Callable[[], None]) -> None:
     if not action.get("enabled"):
         return
+    if action.get("presentation_action") == "view_diagnostics":
+        ui.notify("Open Advanced to inspect the raw diagnostic details.")
+        return
     target = action.get("target_run_id")
     _run_surface_action(actions, target, action, state, refresh)
-    result = state.get("surface_action_result")
-    if isinstance(result, dict) and result.get("error"):
-        ui.notify("Workflow action could not be completed.", type="negative")
-    else:
-        ui.notify("Workflow updated. The next stage is selected when applicable.", type="positive")
 
 
 def _render_workflow_context(ui: Any, context: Any, data: dict[str, Any], actions: WorkflowConsoleActions) -> None:
@@ -1346,7 +1495,7 @@ def _show_artifact_summary_dialog(ui: Any, artifact: dict[str, Any], language: s
     with ui.dialog() as dialog, ui.card().classes("w-[560px] max-w-full"):
         with ui.row().classes("w-full items-center justify-between"):
             ui.label(preview.get("title") or artifact.get("display_name") or "").classes("text-lg font-semibold")
-            ui.button(icon="close", on_click=dialog.close).props("flat round dense")
+            ui.button(icon="close", on_click=dialog.close).props("flat round dense").tooltip("Close this summary without changing the workflow.")
         ui.label(preview.get("summary") or artifact.get("purpose") or "").classes("text-sm text-gray-600")
         for item in preview.get("items") or []:
             if isinstance(item, dict):
@@ -1696,7 +1845,7 @@ def _show_stage_artifact_dialog(
     with ui.dialog() as dialog, ui.card().classes("w-[720px] max-w-full"):
         with ui.row().classes("w-full items-center justify-between"):
             ui.label(artifact_name).classes("text-lg font-semibold")
-            ui.button(icon="close", on_click=dialog.close).props("flat round dense")
+            ui.button(icon="close", on_click=dialog.close).props("flat round dense").tooltip("Close this artifact viewer without changing the workflow.")
         try:
             content = read_artifact_page_content(backend, run_id, artifact_name)
             value = content.get("content")
@@ -1891,6 +2040,11 @@ def _run_surface_action(
     result = state.get("surface_action_result")
     if isinstance(result, dict) and not result.get("error") and action.get("next_stage_on_success"):
         state["selected_stage_id"] = action["next_stage_on_success"]
+    state["workflow_notice"] = (
+        "Workflow action could not be completed: " + str(result.get("error"))
+        if isinstance(result, dict) and result.get("error")
+        else "Workflow updated. The selected stage now reflects the latest agent output."
+    )
     refresh()
 
 
@@ -2018,8 +2172,6 @@ def _render_node_detail(
             ui.badge(f"Start: {_node_start_flag(node)}")
         if actions_list:
             ui.label("Available actions: " + ", ".join(actions_list)).classes("text-xs text-gray-500")
-    if "stage_review" in actions_list or node.get("kind") == "stage":
-        _render_stage_review_form(ui, data, actions, state, refresh, stage=_node_stage_for_review(node))
     if "run_rework" in actions_list:
         ui.label("Rework is available from this node context when a needs_revision stage review is saved.").classes("text-sm text-gray-600")
 
@@ -2815,7 +2967,7 @@ def _render_workflow_review(
     review = data.get("workflow_review") or {}
     last = state.get("workflow_review_result")
     with ui.card().classes("w-full"):
-        _label_with_help(ui, "Workflow Review", "汇总当前 run/workflow 的整体状态、风险、readiness 和下一步建议。", "text-xl font-semibold")
+        _label_with_help(ui, "Agent Workflow Review", "CadFlow 基于当前 lineage 的 artifacts 自评完整性、风险和设计可信度，并写入可追溯 review artifacts。", "text-xl font-semibold")
         if review.get("present"):
             _key_values(ui, {
                 "Overall status": review.get("overall_status") or "Empty",
@@ -2829,8 +2981,8 @@ def _render_workflow_review(
             ui.label("No workflow review has been generated for this run.").classes("text-sm text-gray-500")
         if last is not None:
             ui.markdown(f"```json\n{json.dumps(last, indent=2, sort_keys=True)}\n```").classes("w-full")
-        button = ui.button("Create / Refresh Workflow Review", icon="summarize", on_click=lambda: _create_workflow_review_ui(actions, run_id, state, refresh))
-        button.tooltip("基于当前选中 run 生成或刷新 workflow review。")
+        button = ui.button("Refresh agent workflow review", icon="smart_toy", on_click=lambda: _create_workflow_review_ui(actions, run_id, state, refresh))
+        button.tooltip("Ask CadFlow to reassess the current Run lineage. Target: selected Run. Result: workflow_review.json and workflow_review.md are updated; no CAD model is generated.")
         if not run_id:
             button.disable()
 
@@ -2855,7 +3007,6 @@ def _render_requirement_review(
     _list_block(ui, "Clarification questions", review_data.get("clarification_questions"))
     _list_block(ui, "Diagnostics", review_data.get("diagnostics"))
     _render_requirement_clarification_form(ui, data, actions, state, refresh, review_data)
-    _render_stage_review_form(ui, data, actions, state, refresh, stage="requirement")
 
 
 def _render_requirement_clarification_form(
@@ -2891,6 +3042,7 @@ def _render_requirement_clarification_form(
             icon="save",
             on_click=lambda: _apply_requirement_clarification_ui(actions, run_id, inputs, notes.value, state, refresh),
         )
+        button.tooltip("Save these answers as a validated requirement clarification. Target: selected Run. Result: preserves the original requirement and updates requirement_v2.json; no CAD is generated.")
         if not run_id or not inputs:
             button.disable()
 
@@ -2929,6 +3081,7 @@ def _render_inline_requirement_clarification(
             icon="save",
             on_click=lambda: _apply_requirement_clarification_ui(actions, data.get("selected_run_id"), inputs, notes.value, state, refresh),
         ).props("outline")
+        button.tooltip("Save these answers as a validated requirement clarification. Target: selected Run. Result: preserves the original requirement and updates requirement_v2.json; no CAD is generated.")
         if not data.get("selected_run_id") or not inputs:
             button.disable()
 
@@ -2943,7 +3096,6 @@ def _render_assembly_plan(
     assembly = data["assembly_plan"]
     if not assembly.get("present"):
         ui.label("No assembly_plan.json found for this run.").classes("text-gray-600")
-        _render_stage_review_form(ui, data, actions, state, refresh, stage="assembly_plan")
         return
     _key_values(ui, {
         "Scope": assembly.get("scope") or "Empty",
@@ -2967,113 +3119,6 @@ def _render_assembly_plan(
         )
     ]
     ui.table(columns=columns, rows=assembly.get("parts") or [], row_key="part_id").classes("w-full")
-    _render_stage_review_form(ui, data, actions, state, refresh, stage="assembly_plan")
-
-
-def _render_stage_review_form(
-    ui: Any,
-    data: dict[str, Any],
-    actions: WorkflowConsoleActions,
-    state: dict[str, Any],
-    refresh: Callable[[], None],
-    *,
-    stage: str,
-) -> None:
-    run_id = data.get("selected_run_id")
-    review_data = data.get("stage_review") or {}
-    saved = review_data.get("saved") if isinstance(review_data.get("saved"), dict) else None
-    with ui.card().classes("w-full"):
-        _label_with_help(ui, "Stage Review", "对当前阶段进行人工 review。approved 表示通过，needs_revision 会开启 rework 入口，blocked 表示阻塞。", "text-lg font-medium")
-        if saved is not None:
-            _key_values(ui, {
-                "Saved stage": saved.get("stage") or "Empty",
-                "Saved status": saved.get("review_status") or "Empty",
-                "Target rework stage": saved.get("target_rework_stage") or "Empty",
-                "Requested changes": saved.get("requested_changes_count", 0),
-                "Notes": saved.get("user_notes_preview") or "Empty",
-            })
-            _render_rework_panel(ui, data, actions, state, refresh, review_data)
-        else:
-            ui.label("No stage review saved for this run.").classes("text-sm text-gray-500")
-
-        with ui.row().classes("w-full items-center gap-2"):
-            status = ui.select(
-                options=review_data.get("review_status_options") or ["approved", "needs_revision", "blocked"],
-                value="approved",
-                label="Review status",
-            ).classes("flex-1")
-            _help_icon(ui, "选择当前阶段的 review 结论。needs_revision 会要求填写打回目标和修改说明。")
-        with ui.row().classes("w-full items-center gap-2"):
-            target = ui.select(
-                options=review_data.get("target_rework_stage_options") or ["requirement", "assembly_plan"],
-                value="assembly_plan" if stage == "requirement" else "requirement",
-                label="Target rework stage",
-            ).classes("flex-1")
-            _help_icon(ui, "如果需要打回，这里选择要回到哪个阶段重新处理。")
-        with ui.row().classes("w-full items-start gap-2"):
-            notes = ui.textarea("User notes").props("outlined autogrow").classes("flex-1")
-            _help_icon(ui, "人工 review 备注，会保存在 stage review artifact 中。")
-        with ui.row().classes("w-full items-start gap-2"):
-            changes = ui.textarea("Requested changes").props("outlined autogrow").classes("flex-1")
-            _help_icon(ui, "需要 rework 时写清具体修改要求。后续 rework run 会读取这些内容。")
-        result_key = f"stage_review_result_{stage}"
-        if state.get(result_key) is not None:
-            ui.markdown(f"```json\n{json.dumps(state[result_key], indent=2, sort_keys=True)}\n```").classes("w-full")
-        button = ui.button(
-            "Save review",
-            icon="save",
-            on_click=lambda: _save_stage_review_ui(
-                actions,
-                run_id,
-                stage,
-                status.value,
-                target.value,
-                notes.value,
-                changes.value,
-                state,
-                result_key,
-                refresh,
-            ),
-        )
-        if not run_id:
-            button.disable()
-        button.tooltip("保存当前阶段 review。不会修改旧 run，只会写入新的 review artifact。")
-
-
-def _render_rework_panel(
-    ui: Any,
-    data: dict[str, Any],
-    actions: WorkflowConsoleActions,
-    state: dict[str, Any],
-    refresh: Callable[[], None],
-    review_data: dict[str, Any],
-) -> None:
-    run_id = data.get("selected_run_id")
-    saved = review_data.get("saved") or {}
-    decision = review_data.get("rework_decision")
-    with ui.card().classes("w-full"):
-        _label_with_help(ui, "Rework Execution", "当 stage review 为 needs_revision 时，从指定阶段创建新的 rework run。旧 run 保持 immutable。", "text-lg font-medium")
-        _key_values(ui, {
-            "Available": review_data.get("rework_available"),
-            "Supported now": review_data.get("rework_supported"),
-            "Target": saved.get("target_rework_stage") or "Empty",
-            "Requested changes": saved.get("requested_changes_count", 0),
-            "Blocked reason": review_data.get("rework_blocked_reason") or "Empty",
-        })
-        if decision is not None:
-            _key_values(ui, {
-                "Last execution": decision.get("execution_status") or "Empty",
-                "Child run": decision.get("child_run_id") or "Empty",
-                "Created artifacts": decision.get("created_artifact_count", 0),
-                "Diagnostics": ", ".join(decision.get("diagnostic_codes") or []) or "Empty",
-            })
-            _list_block(ui, "Requested changes preview", decision.get("requested_changes_preview"))
-        if state.get("rework_result") is not None:
-            ui.markdown(f"```json\n{json.dumps(state['rework_result'], indent=2, sort_keys=True)}\n```").classes("w-full")
-        button = ui.button("Run Rework", icon="play_arrow", on_click=lambda: _run_rework_ui(actions, run_id, state, refresh))
-        button.tooltip("按已保存的 needs_revision review 启动 rework。不会覆盖旧 run。")
-        if not run_id or saved.get("review_status") != "needs_revision":
-            button.disable()
 
 
 def _render_part_workflow(
@@ -3165,36 +3210,6 @@ def _run_ui_action(
     refresh()
 
 
-def _save_stage_review_ui(
-    actions: WorkflowConsoleActions,
-    run_id: str | None,
-    stage: str,
-    review_status: str,
-    target_rework_stage: str | None,
-    user_notes: str | None,
-    requested_changes: str | None,
-    state: dict[str, Any],
-    result_key: str,
-    refresh: Callable[[], None],
-) -> None:
-    if run_id is None:
-        state[result_key] = {"ok": False, "error": "Select a run first."}
-        refresh()
-        return
-    try:
-        state[result_key] = actions.save_stage_review(
-            run_id,
-            stage=stage,
-            review_status=review_status,
-            target_rework_stage=target_rework_stage if review_status == "needs_revision" else None,
-            user_notes=user_notes,
-            requested_changes=requested_changes,
-        )
-    except Exception as exc:
-        state[result_key] = {"ok": False, "error": str(exc)}
-    refresh()
-
-
 def _save_artifact_override_ui(
     actions: WorkflowConsoleActions,
     run_id: str | None,
@@ -3275,23 +3290,6 @@ def _apply_requirement_clarification_ui(
         )
     except Exception as exc:
         state["requirement_clarification_result"] = {"ok": False, "error": str(exc)}
-    refresh()
-
-
-def _run_rework_ui(
-    actions: WorkflowConsoleActions,
-    run_id: str | None,
-    state: dict[str, Any],
-    refresh: Callable[[], None],
-) -> None:
-    if run_id is None:
-        state["rework_result"] = {"ok": False, "error": "Select a run first."}
-        refresh()
-        return
-    try:
-        state["rework_result"] = actions.run_rework(run_id)
-    except Exception as exc:
-        state["rework_result"] = {"ok": False, "error": str(exc)}
     refresh()
 
 

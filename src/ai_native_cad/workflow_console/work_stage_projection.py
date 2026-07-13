@@ -9,9 +9,11 @@ into one read-only lineage view without changing their on-disk locations.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ai_native_cad.workflow_console.backend import _sanitize_public_artifact_content
 from ai_native_cad.workflow_console.work_index import build_work_index
 
 
@@ -115,10 +117,13 @@ def _discover_work_artifacts(
                 "source_run_id": source_run_id,
                 "source_relative_path": relative,
                 "present": True,
+                "modified_at": datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat(),
             }
             content = _read_content(path)
             if content is not None:
-                record["content"] = content
+                # The projection feeds the interactive artifact viewer directly,
+                # so apply the same public-content filter as the backend route.
+                record["content"] = _sanitize_public_artifact_content(content)
             records[path.name].append(record)
     for name, items in records.items():
         records[name] = sorted(items, key=lambda item: _record_rank(item, root_run_id))

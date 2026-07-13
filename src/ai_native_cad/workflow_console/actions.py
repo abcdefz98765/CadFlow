@@ -687,6 +687,8 @@ def _build_stage_review_artifact(
         raise ValueError(f"unsupported workflow console rework target stage: {target_rework_stage}")
     if review_status == "needs_revision" and target_rework_stage is None:
         raise ValueError("workflow console stage review target_rework_stage is required for needs_revision")
+    if review_status == "blocked" and not _sanitize_note(user_notes):
+        raise ValueError("workflow console stage review user_notes are required for blocked")
     if review_status == "approved":
         target_rework_stage = None
 

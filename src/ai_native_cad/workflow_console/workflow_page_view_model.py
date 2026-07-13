@@ -22,6 +22,35 @@ ViewMode = Literal["current_work", "run_snapshot"]
 _ATTENTION = {"blocked": "required", "needs_review": "required", "running": "in_progress", "stale": "required"}
 _SELECTION_PRIORITY = ("blocked", "needs_review", "running", "stale")
 _READ_ONLY_REASON = "Historical Run Snapshots are read-only. Return to Current Work or create a new Rework attempt."
+_REVIEW_DECISION_ACTIONS = {"save_stage_review", "approve_stage", "mark_needs_revision", "mark_blocked"}
+_AGENT_REVIEW_ACTIONS = {"part_review", "part_result_review", "create_workflow_review"}
+
+
+def _artifact_kind(name: str) -> str:
+    """Return the UI kind used by the single artifact-viewer contract."""
+    if name.endswith(".json"):
+        return "json"
+    if name.endswith(".md"):
+        return "markdown"
+    if name.endswith(".step"):
+        return "step"
+    if name.endswith(".stl"):
+        return "stl"
+    return "text"
+
+
+def _artifact_display_name(name: str) -> str:
+    names = {
+        "workflow_review.json": "Workflow review",
+        "workflow_review.md": "Workflow review summary",
+        "stage_review.json": "Stage review decision",
+        "part_result_review.json": "Part result report",
+        "report.json": "Run report",
+        "report.md": "Run report summary",
+        "model.step": "STEP model",
+        "model.stl": "STL model",
+    }
+    return names.get(name, name)
 
 
 def build_workflow_page_view_model(
@@ -171,36 +200,116 @@ def _stage_detail(stage: dict[str, Any], fallback_source: str | None, view_mode:
     source_input = inputs[0] if inputs else {}
     source_output = outputs[0] if outputs else {}
     source_run = detail.get("source_run_id") or source_input.get("source_run_id") or fallback_source
+    stage_id = str(detail.get("stage_id") or detail.get("key") or "")
+    input_contracts = [_artifact_contract(item, detail, "input", fallback_source) for item in inputs]
+    output_contracts = [_artifact_contract(item, detail, "output", fallback_source) for item in outputs]
     detail.update({
-        "stage_id": detail.get("stage_id") or detail.get("key"),
+        "stage_id": stage_id,
         "conclusion": {"title": _nested(detail, "status_banner", "title") or detail.get("stage_name"), "summary": _nested(detail, "status_banner", "summary") or detail.get("human_summary") or detail.get("short_summary")},
         "user_input": {
-            "summary": source_input.get("summary") or ("Inherited from an accepted upstream stage." if not inputs else "Accepted upstream workflow input."),
+            "summary": _human_input_summary(detail, input_contracts),
             "source_run_id": source_input.get("source_run_id") or source_run,
             "source_stage_id": _input_stage(detail.get("stage_id")),
             "source_type": "active_override" if detail.get("override_present") else "accepted_upstream_output",
             "editable": view_mode == "current_work" and bool(detail.get("override_present")),
             "stale_downstream": bool(detail.get("override_present")),
-            "artifacts": inputs,
+            "artifacts": input_contracts,
         },
         "agent_decision": {
-            "summary": detail.get("human_summary") or detail.get("short_summary"),
-            "decisions": detail.get("key_decisions_human") or [],
+            "summary": _human_decision_summary(detail),
+            "decisions": _human_decisions(detail),
             "assumptions": detail.get("limitations_summary") or [],
             "interventions": [],
         },
         "agent_output": {
-            "summary": source_output.get("summary") or ("No stage output is available yet." if not outputs else detail.get("short_summary")),
+            "summary": _human_output_summary(detail, output_contracts),
             "source_run_id": source_output.get("source_run_id") or detail.get("source_run_id") or fallback_source,
             "source_stage_id": detail.get("stage_id"),
             "validation_status": "passed" if detail.get("status") in {"completed", "contract_complete", "execution_skipped"} else detail.get("status"),
-            "artifacts": outputs,
-            "products": [item for item in outputs if item.get("name") in {"model.step", "model.stl"}],
+            "artifacts": output_contracts,
+            "products": [item for item in output_contracts if item.get("name") in {"model.step", "model.stl"}],
             "step_stl_expectation": "not_expected" if detail.get("status") in {"contract_complete", "execution_skipped"} else "expected",
         },
-        "evidence": detail.get("important_artifacts") or [],
+        "evidence": _evidence_contracts(input_contracts, output_contracts),
     })
     return detail
+
+
+def _artifact_contract(item: dict[str, Any], detail: dict[str, Any], direction: str, fallback_source: str | None) -> dict[str, Any]:
+    """Keep every visible artifact self-describing and directly openable."""
+    name = str(item.get("name") or "artifact")
+    status = "passed" if direction == "output" and detail.get("status") in {"completed", "contract_complete", "execution_skipped"} else "available"
+    return {
+        "name": name,
+        "display_name": _artifact_display_name(name),
+        "kind": _artifact_kind(name),
+        "summary": item.get("summary") or ("Stage output" if direction == "output" else "Stage input"),
+        "source_run_id": item.get("source_run_id") or detail.get("source_run_id") or fallback_source,
+        "source_stage_id": detail.get("stage_id") or detail.get("key"),
+        "relative_path": item.get("source_relative_path") or name,
+        "modified_at": item.get("modified_at"),
+        "validation_status": status,
+        "source_type": item.get("source_type") or "original",
+        "previewable": _artifact_kind(name) in {"json", "markdown", "text", "stl", "step"},
+        "downloadable": _artifact_kind(name) in {"step", "stl"},
+        "editable": False,
+        "open_action": {"type": "artifact_dialog"},
+        "content": item.get("content"),
+        "direction": direction,
+    }
+
+
+def _human_input_summary(detail: dict[str, Any], artifacts: list[dict[str, Any]]) -> str:
+    if detail.get("stage_id") == "workflow_review":
+        part = detail.get("selected_part_id") or _nested(detail.get("report_summary"), "selected_candidate")
+        if not part:
+            part = next((
+                item.get("content", {}).get("part_id")
+                for item in artifacts
+                if isinstance(item.get("content"), dict) and isinstance(item["content"].get("part_id"), str)
+            ), None)
+        part = part or "result"
+        return f"The selected {part} result was ready for work-level review."
+    if not artifacts:
+        return "No accepted upstream input is available for this stage yet."
+    names = ", ".join(item["display_name"] for item in artifacts[:2])
+    return f"This stage used accepted upstream records: {names}."
+
+
+def _human_decision_summary(detail: dict[str, Any]) -> str:
+    if detail.get("stage_id") == "workflow_review":
+        return "CadFlow assessed the available Work lineage and prepared a work-level review conclusion."
+    return str(detail.get("human_summary") or detail.get("short_summary") or "No agent interpretation is available.")
+
+
+def _human_decisions(detail: dict[str, Any]) -> list[Any]:
+    if detail.get("stage_id") == "workflow_review":
+        decisions = ["The current result is ready for user review."]
+        limitations = detail.get("limitations_summary") if isinstance(detail.get("limitations_summary"), list) else []
+        decisions.extend(limitations[:2])
+        return decisions
+    return detail.get("key_decisions_human") or []
+
+
+def _human_output_summary(detail: dict[str, Any], artifacts: list[dict[str, Any]]) -> str:
+    if detail.get("stage_id") == "workflow_review" and artifacts:
+        return "Workflow review created successfully. This is the stage output, not an inherited upstream block."
+    if not artifacts:
+        return "No stage output is available yet."
+    return str(detail.get("short_summary") or "Stage output is available.")
+
+
+def _evidence_contracts(inputs: list[dict[str, Any]], outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group same-named lineage files without erasing their distinct origins."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in [*outputs, *inputs]:
+        grouped.setdefault(str(item.get("name")), []).append(item)
+    evidence = []
+    for name, items in grouped.items():
+        primary = items[0]
+        related = items[1:]
+        evidence.append({**primary, "related": related, "related_count": len(related)})
+    return evidence
 
 
 def _scoped_actions(stage: dict[str, Any] | None, view_mode: ViewMode, work_id: str, target_run_id: str | None) -> dict[str, Any]:
@@ -228,11 +337,72 @@ def _scoped_actions(stage: dict[str, Any] | None, view_mode: ViewMode, work_id: 
             "updates_active_lineage": creates_new_run,
             "next_stage_on_success": _next_stage_for_action(backend_action or action.get("key"), stage.get("stage_id") if isinstance(stage, dict) else None),
         })
+        action["tooltip"] = _action_tooltip(action, stage)
         prepared.append(action)
-    enabled = [action for action in prepared if action.get("enabled")]
-    primary = enabled[0] if enabled else None
-    secondary = [action for action in enabled if action is not primary]
-    return {"primary_action": primary, "secondary_actions": secondary, "disabled_actions": [action for action in prepared if not action.get("enabled")], "advanced_actions": []}
+    agent_review = next((action for action in prepared if action.get("enabled") and action.get("key") in _AGENT_REVIEW_ACTIONS), None)
+    if agent_review is None and stage is not None:
+        agent_review = {
+            "key": "create_workflow_review",
+            "label": "Refresh agent workflow review",
+            "enabled": view_mode == "current_work" and bool(target_run_id),
+            "disabled_reason": _READ_ONLY_REASON if view_mode == "run_snapshot" else "Select an active Run first.",
+            "backend_action": "create_workflow_review",
+            "scope": "run_snapshot" if view_mode == "run_snapshot" else "current_work",
+            "target_work_id": work_id,
+            "target_run_id": target_run_id,
+            "creates_new_run": False,
+            "updates_active_lineage": False,
+            "next_stage_on_success": "workflow_review",
+        }
+        agent_review["tooltip"] = _action_tooltip(agent_review, stage)
+    if agent_review is not None:
+        agent_review["label"] = _agent_review_label(agent_review, stage)
+        agent_review["tooltip"] = _action_tooltip(agent_review, stage)
+    enabled = [action for action in prepared if action.get("enabled") and action.get("key") not in _REVIEW_DECISION_ACTIONS]
+    secondary = [action for action in enabled if action is not agent_review]
+    disabled = [action for action in prepared if not action.get("enabled")]
+    if agent_review is not None and not agent_review.get("enabled"):
+        disabled.insert(0, agent_review)
+    return {
+        "primary_action": agent_review,
+        "secondary_actions": secondary,
+        "disabled_actions": disabled,
+        "advanced_actions": [],
+        "review_actions": [action for action in prepared if action.get("key") in _REVIEW_DECISION_ACTIONS],
+}
+
+
+def _agent_review_label(action: dict[str, Any], stage: dict[str, Any] | None) -> str:
+    key = str(action.get("key") or "")
+    if key == "create_workflow_review":
+        return "Refresh agent workflow review"
+    if key == "part_result_review":
+        return "Request agent result review"
+    return "Request agent review"
+
+
+def _action_tooltip(action: dict[str, Any], stage: dict[str, Any] | None) -> str:
+    """Explain action, target, and effect; disabled actions keep their reason."""
+    key = str(action.get("key") or "")
+    stage_name = str((stage or {}).get("stage_name") or (stage or {}).get("stage_id") or "selected stage")
+    run_id = action.get("target_run_id") or "active Run"
+    target = f"Current Work · {stage_name} · Run {run_id}"
+    copy = {
+        "save_stage_review": ("Save the selected review decision and notes.", "Writes a traceable stage_review record; does not rerun the agent or modify existing output."),
+        "approve_stage": ("Quick approve this stage without notes.", "Records Approved, keeps all artifacts, and updates the Work review state. It does not create CAD."),
+        "mark_blocked": ("Record that this stage cannot continue.", "The review form requires a reason and suggested return stage. Existing results are preserved."),
+        "mark_needs_revision": ("Request a revision through the stage-review form.", "The saved review records requested changes and can enable a rework run."),
+        "create_workflow_review": ("Refresh the work-level review from the current lineage.", "Writes workflow_review artifacts; it does not generate a CAD model."),
+        "view_cad_ir_draft": ("Open the selected CAD IR artifact.", "Read-only inspection; no workflow state changes."),
+        "edit_assembly_plan": ("Open the assembly plan and its validated override editor.", "Saving an override preserves the original artifact and may mark downstream stages stale."),
+        "view_diagnostics": ("Open raw validation and trace diagnostics.", "Read-only troubleshooting; no workflow state changes."),
+    }
+    action_text, result_text = copy.get(key, ("Run this workflow action.", "The result is recorded against the selected Work and Run."))
+    disabled = action.get("disabled_reason")
+    lines = [action_text, "", f"Target: {target}", "", f"Result: {result_text}"]
+    if disabled:
+        lines.extend(["", f"Currently unavailable: {disabled}"])
+    return "\n".join(lines)
 
 
 def _run_strip(history: Any, lineage: dict[str, Any], view_mode: ViewMode, viewed_run_id: str | None) -> list[dict[str, Any]]:
