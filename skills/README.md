@@ -1,46 +1,78 @@
-# Skills
+# CadFlow Skills
 
-This directory describes workflow skills used by the CAD agent.
+Skills are versioned behavior contracts for logical agent roles. They are organized by canonical workflow responsibility, not by provider, CAD backend, product family, or UI page.
 
-Skills are organized by major workflow responsibility, not by CAD backend or
-product type. Keep the list small: if a capability is only a helper for one
-step, place it under that step's `knowledge/` directory.
+Read first:
 
-```text
-input
-  -> requirement
-  -> planning
-  -> part_modeling
-  -> revision
-  -> assembly
-  -> review
-```
+- `../docs/architecture/cadflow-canonical-product-architecture.md`
+- `../docs/architecture/agent-skill-knowledge.md`
+- `../docs/workflow_contract.md`
 
-Each skill owns the rules, local knowledge, and prompts needed for its step.
-Shared policies stay in `policies/`; top-level `knowledge/` is only an index
-for cross-skill knowledge.
+## Skill map
 
-For provider-backed agents, a skill is also runtime context. CadFlow should send
-the current stage's skill guide, operation contract guide, and selected compact
-knowledge summary to the provider. It should not send every skill or the whole
-knowledge tree by default.
+    Prompt
+      -> requirement
+      -> planning
+      -> cad_ir
+      -> part_modeling
+      -> review
 
-## Current Status
+    accepted parent result + change request
+      -> revision
 
-- `requirement/`: requirement elicitation, product intent, early decomposition,
-  check-level field policy, and missing-information behavior.
-- `planning/`: design analysis, workflow routing, datums, interfaces, risk, and
-  confirmation gates before geometry generation.
-- `part_modeling/`: template-backed part generation and the single-part closed
-  loop.
-- `revision/`: parent-run context, change intent parsing, revision plans,
-  constrained patch boundaries, and child-run lineage.
-- `assembly/`: part relationships, contacts, clearances, serviceability,
-  backend-neutral assembly configs, and assembly validation.
-- `review/`: check-level report organization for parts and assemblies.
+    multiple accepted Part Jobs, future
+      -> assembly
 
-Export/output behavior is a shared policy in `policies/output_contract.md`, not
-a standalone skill.
+Current skill directories:
 
-See `docs/architecture/agent-skill-knowledge.md` for the provider-facing
-agent/skill/knowledge architecture.
+- `requirement/` — prompt interpretation, structured requirement, assumptions, missing information, and clarification.
+- `planning/` — design route, decomposition, interfaces, candidate/reference planning, and engineering trade-offs.
+- `cad_ir/` — one reviewed part intent to backend-neutral CAD IR through bounded context and validation feedback.
+- `part_modeling/` — validated CAD IR to deterministic geometry, products, and execution evidence.
+- `review/` — scoped Part Request, Part Result, and Work-level evidence explanation; user approval remains separate.
+- `revision/` — change intent, revision plan, structured patch proposal, and parent/child lineage.
+- `assembly/` — future assembly placement, constraints, clearance, and assembly-level validation after multiple Part Jobs exist.
+
+## Ownership rules
+
+Each `SKILL.md` defines only its owned responsibility:
+
+- canonical checkpoint;
+- accepted inputs;
+- structured outputs or actions;
+- allowed context and tools;
+- shared knowledge scopes;
+- private knowledge scopes;
+- validation and stop conditions;
+- prohibited side effects;
+- next handoff.
+
+A skill must not duplicate or redefine the entire product workflow.
+
+## Knowledge placement
+
+- Global invariants live in `policies/`.
+- Cross-skill knowledge lives in top-level `knowledge/` only when multiple skills truly share one source of truth.
+- Skill-private knowledge lives under `skills/<skill>/knowledge/`.
+- Accepted Work artifacts are runtime context, not static knowledge.
+- Validator and execution feedback are Run/episode observations, not global knowledge.
+
+Do not duplicate the same rule in multiple knowledge directories. Promote it to a shared source instead.
+
+## Runtime loading
+
+A provider or proposer should receive only:
+
+- global minimal rules;
+- the current skill guide;
+- the operation contract;
+- selected shared knowledge;
+- selected skill-private knowledge;
+- compact allowlisted Work context;
+- current Run observations.
+
+It must not receive every skill, the entire knowledge tree, arbitrary files, secrets, raw transcripts, or execution authority.
+
+## Development rule
+
+Changing a skill responsibility or knowledge ownership is an architecture change. Update the canonical agent/skill/knowledge document, affected contracts, runtime selector or registry, tests, roadmap, and readiness status together.
