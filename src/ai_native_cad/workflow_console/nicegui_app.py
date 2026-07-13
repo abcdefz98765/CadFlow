@@ -1127,7 +1127,14 @@ def _render_workflow_page_v2(
     if not snapshot:
         with ui.element("section").classes("workflow-run-strip-panel w-full"):
             _render_run_strip(ui, page.get("run_strip"), on_select_run, on_select_current_work)
-    _render_workflow_stage_graph(ui, {"workflow_graph": page.get("workflow_graph"), "selected_stage_id": _dict_get(page.get("selected_stage"), "stage_id")}, on_select_stage)
+    _render_workflow_stage_graph(
+        ui,
+        {"workflow_graph": page.get("workflow_graph"), "selected_stage_id": _dict_get(page.get("selected_stage"), "stage_id")},
+        on_select_stage,
+        on_open_candidate=lambda candidate: _show_candidate_detail(
+            ui, candidate, data, actions, state, refresh, read_only=snapshot
+        ),
+    )
     _render_selected_stage_detail_v2(ui, page.get("selected_stage"), data, actions, state, refresh, snapshot)
 
 
@@ -1191,6 +1198,7 @@ def _render_selected_stage_detail_v2(
             _render_stage_contract_block(ui, "AGENT INTERPRETATION / DECISION", stage.get("agent_decision"), read_only, actions.backend, state)
             _render_stage_contract_block(ui, "AGENT OUTPUT", stage.get("agent_output"), read_only, actions.backend, state)
         _render_agent_review_panel(ui, stage, data, actions, state, refresh, read_only)
+        _render_stage_review_panel(ui, stage, data, actions, state, refresh, read_only)
         if stage.get("stage_id") in {"requirement", "clarification"} and not read_only:
             _render_inline_requirement_clarification(ui, data, actions, state, refresh)
         secondary = stage.get("secondary_actions") if isinstance(stage.get("secondary_actions"), list) else []
@@ -1280,6 +1288,84 @@ def _render_agent_review_panel(
             button.tooltip(primary.get("tooltip") or "Generate a traceable agent review without changing the CAD model.")
         else:
             ui.label("Agent review is not available until this stage has an active Run.").classes("workflow-disabled-reason")
+
+
+def _render_stage_review_panel(
+    ui: Any,
+    stage: dict[str, Any],
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    read_only: bool,
+) -> None:
+    """Provide one explicit, append-only human review for every visible stage."""
+    stage_id = str(stage.get("stage_id") or "workflow_review")
+    review_stage = {"reviewed_handoff": "handoff", "part_result_review": "single_part_result"}.get(stage_id, stage_id)
+    page = data.get("workflow_page") if isinstance(data.get("workflow_page"), dict) else {}
+    target_run = page.get("active_lineage", {}).get("active_root_run_id") if isinstance(page.get("active_lineage"), dict) else None
+    with ui.element("section").classes("workflow-evidence w-full"):
+        ui.label("STAGE REVIEW").classes("workflow-eyebrow")
+        ui.label(
+            f"Review target: Run {target_run or 'unavailable'} · {review_stage}. Reviews are append-only; the latest compatible stage_review.json remains available to Rework."
+        ).classes("text-sm text-gray-700")
+        if read_only or not target_run:
+            ui.label("This historical Run is read-only; return to Current Work to save a review.").classes("workflow-disabled-reason")
+            return
+        status = ui.select(["approved", "needs_revision", "blocked"], value="approved", label="Review status").props("outlined dense").classes("w-full")
+        notes = ui.textarea("Notes / blocked reason").props("outlined autogrow").classes("w-full")
+        changes = ui.textarea("Requested changes (required for Needs Revision)").props("outlined autogrow").classes("w-full")
+        rework_target = ui.select(
+            ["requirement", "design_brief", "assembly_plan", "candidate_parts", "part_request", "part_review", "handoff", "single_part_result", "workflow_review"],
+            value="workflow_review",
+            label="Target rework stage",
+        ).props("outlined dense").classes("w-full")
+        with ui.row().classes("gap-2 flex-wrap"):
+            save = ui.button(
+                "Save Stage Review",
+                on_click=lambda: _save_stage_review_from_form(
+                    actions, target_run, review_stage, status.value, notes.value, changes.value, rework_target.value, state, refresh
+                ),
+            ).props("color=primary")
+            save.tooltip(
+                f"Save an append-only review for Current Work · Run {target_run} · {review_stage}. It does not create a Run or overwrite original artifacts."
+            )
+            quick = ui.button(
+                "Quick Approve",
+                on_click=lambda: _save_stage_review_from_form(
+                    actions, target_run, review_stage, "approved", None, None, None, state, refresh
+                ),
+            ).props("outline")
+            quick.tooltip(
+                f"Immediately save Approved for Current Work · Run {target_run} · {review_stage}, without notes. No Run is created and existing artifacts remain unchanged."
+            )
+
+
+def _save_stage_review_from_form(
+    actions: WorkflowConsoleActions,
+    run_id: str,
+    stage: str,
+    review_status: Any,
+    notes: Any,
+    changes: Any,
+    rework_target: Any,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    try:
+        result = actions.save_stage_review(
+            run_id,
+            stage=stage,
+            review_status=str(review_status),
+            user_notes=str(notes or ""),
+            requested_changes=str(changes or ""),
+            target_rework_stage=str(rework_target) if rework_target else None,
+        )
+        state["surface_action_result"] = result
+        state["workflow_notice"] = f"Stage Review saved as {review_status}; {result.get('review_id')} is retained in review history."
+    except Exception as exc:
+        state["workflow_notice"] = f"Stage Review could not be saved: {exc}"
+    refresh()
 
 
 def _render_stage_artifact_rows(
@@ -1580,6 +1666,7 @@ def _render_workflow_stage_graph(
     ui: Any,
     surface: dict[str, Any],
     on_select_stage: Callable[[str], None],
+    on_open_candidate: Callable[[dict[str, Any]], None] | None = None,
 ) -> None:
     graph = surface.get("workflow_graph") if isinstance(surface.get("workflow_graph"), dict) else {}
     selected = surface.get("selected_stage_id")
@@ -1597,7 +1684,7 @@ def _render_workflow_stage_graph(
                 if candidates:
                     with ui.row().classes("workflow-lane-row"):
                         for candidate in candidates:
-                            _render_part_candidate_node(ui, candidate, on_select_stage)
+                            _render_part_candidate_node(ui, candidate, on_open_candidate)
                 else:
                     ui.label("No generated part candidates have been identified yet.").classes("text-sm text-gray-500")
             references = graph.get("reference_lane") if isinstance(graph.get("reference_lane"), list) else []
@@ -1606,7 +1693,7 @@ def _render_workflow_stage_graph(
                     ui.label("REFERENCE COMPONENTS").classes("workflow-graph-label")
                     with ui.row().classes("workflow-lane-row"):
                         for candidate in references:
-                            _render_part_candidate_node(ui, candidate, on_select_stage)
+                            _render_part_candidate_node(ui, candidate, on_open_candidate)
             selected_part = graph.get("selected_part_id") or "a selected candidate"
             ui.label(f"SELECTED PART PIPELINE · {selected_part}").classes("workflow-graph-label")
             _render_graph_stage_row(ui, graph.get("selected_part_pipeline") or [], selected, on_select_stage)
@@ -1639,15 +1726,15 @@ def _render_graph_stage_row(ui: Any, nodes: list[dict[str, Any]], selected: Any,
                 ui.element("div").classes("workflow-connector")
 
 
-def _render_part_candidate_node(ui: Any, candidate: dict[str, Any], on_select_stage: Callable[[str], None]) -> None:
+def _render_part_candidate_node(ui: Any, candidate: dict[str, Any], on_open_candidate: Callable[[dict[str, Any]], None] | None) -> None:
     status = str(candidate.get("status") or "candidate")
     classes = "workflow-step workflow-part-candidate" + (" reference-component" if candidate.get("kind") == "reference_component" or candidate.get("reference_only") else "")
     if candidate.get("selected"):
         classes += " workflow-step-selected"
     node = ui.column().classes(classes)
-    node.tooltip(candidate.get("short_summary") or "Assembly part")
-    if not candidate.get("reference_only"):
-        node.on("click", lambda _event: on_select_stage("part_request"))
+    node.tooltip("Open Candidate Detail\n\nTarget: current Work · Assembly Plan\n\nResult: inspect this candidate; it does not change selection or active lineage.")
+    if on_open_candidate is not None:
+        node.on("click", lambda _event, value=dict(candidate): on_open_candidate(value))
     with node:
         ui.element("div").classes(f"workflow-dot status-{_dot_status(status)} kind-{candidate.get('kind') or 'candidate_part'}")
         ui.label(candidate.get("part_id") or "part").classes("text-sm font-semibold text-center")
@@ -1655,6 +1742,146 @@ def _render_part_candidate_node(ui: Any, candidate: dict[str, Any], on_select_st
         ui.label(status.replace("_", " ")).classes("workflow-node-status")
         if candidate.get("supported_candidate"):
             ui.label("supported candidate").classes("text-xs text-green-700 text-center")
+
+
+def _show_candidate_detail(
+    ui: Any,
+    candidate: dict[str, Any],
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    *,
+    read_only: bool,
+) -> None:
+    """Open candidate detail and expose its explicit, confirmable Work action."""
+    with ui.dialog() as dialog, ui.card().classes("w-[620px] max-w-full"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label("Candidate Detail").classes("text-lg font-semibold")
+            ui.button(icon="close", on_click=dialog.close).props("flat round dense").tooltip("Close Candidate Detail without changing the selected part.")
+        fields = (
+            ("Part", candidate.get("part_id")), ("Role", candidate.get("role")),
+            ("Brief", candidate.get("short_summary")), ("Status", candidate.get("status")),
+            ("Generation strategy", candidate.get("generation_strategy")),
+            ("Supported candidate", candidate.get("supported_candidate")),
+            ("Reference only", candidate.get("reference_only")), ("Selected", candidate.get("selected")),
+            ("Source Run", candidate.get("source_run_id")),
+        )
+        for label, value in fields:
+            ui.label(f"{label}: {value if value not in (None, '') else 'Not available'}").classes("text-sm")
+        selection_action = _candidate_selection_action(candidate, data, read_only)
+        button = ui.button(
+            selection_action["label"],
+            on_click=lambda a=selection_action: _show_candidate_selection_confirmation(
+                ui, dialog, a, candidate, actions, state, refresh
+            ),
+        ).props("outline dense")
+        button.tooltip(selection_action["tooltip"])
+        if not selection_action["enabled"]:
+            button.disable()
+    dialog.open()
+
+
+def _candidate_selection_action(candidate: dict[str, Any], data: dict[str, Any], read_only: bool) -> dict[str, Any]:
+    page = data.get("workflow_page") if isinstance(data.get("workflow_page"), dict) else {}
+    work = page.get("work") if isinstance(page.get("work"), dict) else data.get("selected_work") or {}
+    summary = work.get("summary") if isinstance(work.get("summary"), dict) else {}
+    work_id = summary.get("work_id") or work.get("work_id")
+    lineage = page.get("active_lineage") if isinstance(page.get("active_lineage"), dict) else {}
+    part_id = candidate.get("part_id")
+    current = bool(candidate.get("selected"))
+    supported = bool(candidate.get("supported_candidate"))
+    reference = bool(candidate.get("reference_only")) or candidate.get("generation_strategy") == "reference_only"
+    enabled = bool(part_id and work_id and lineage.get("active_root_run_id")) and not read_only and supported and not reference and not current
+    if read_only:
+        disabled_reason = "Run Snapshot is read-only. Return to Current Work to select a candidate."
+    elif reference:
+        disabled_reason = "Reference components are context only and cannot be selected for generation."
+    elif not supported:
+        disabled_reason = "This candidate is not supported by the current single-part workflow."
+    elif current:
+        disabled_reason = "This candidate is already selected; no duplicate override is needed."
+    else:
+        disabled_reason = None
+    target_run = lineage.get("active_root_run_id") or candidate.get("source_run_id")
+    target = f"Current Work · Run {target_run or 'unavailable'} · Assembly Plan"
+    return {
+        "key": "select_candidate_part",
+        "label": "Use This Part Next",
+        "category": "structured_input",
+        "scope": "run_snapshot" if read_only else "current_work",
+        "target_work_id": work_id,
+        "target_run_id": target_run,
+        "target_stage_id": "assembly_plan",
+        "part_id": part_id,
+        "requires_confirmation": True,
+        "creates_new_run": False,
+        "updates_active_lineage": False,
+        "enabled": enabled,
+        "disabled_reason": disabled_reason,
+        "tooltip": "\n".join([
+            "Select this candidate for the next Part Request through a validated, versioned Assembly Plan override.",
+            "",
+            f"Target: {target}",
+            "",
+            "Result: preserves the original plan and old Runs, marks downstream stages stale, and recommends Create Part Request.",
+            "Active lineage changes: no",
+            "New Run: no",
+            *(["", f"Currently unavailable: {disabled_reason}"] if disabled_reason else []),
+        ]),
+    }
+
+
+def _show_candidate_selection_confirmation(
+    ui: Any,
+    detail_dialog: Any,
+    action: dict[str, Any],
+    candidate: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    if not action.get("enabled"):
+        return
+    with ui.dialog() as confirm, ui.card().classes("w-[620px] max-w-full"):
+        ui.label("Confirm candidate selection").classes("text-lg font-semibold")
+        ui.label(f"Current selected candidate: {candidate.get('current_selected_part_id') or 'current Assembly Plan selection'}").classes("text-sm")
+        ui.label(f"New candidate: {action.get('part_id')}").classes("text-sm")
+        ui.label("The following stages become stale: Part Request, Part Review, Reviewed Handoff, CAD IR Draft, Part Modeling, Part Result Review, and Workflow Review.").classes("text-sm")
+        ui.label("Old Runs and accepted part results are retained. CAD generation will not start automatically.").classes("text-sm text-gray-700")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button("Cancel", on_click=confirm.close).props("flat") \
+                .tooltip("Cancel without changing the Assembly Plan override or Work pointers.")
+            ui.button(
+                "Confirm selection",
+                on_click=lambda: _apply_candidate_selection(
+                    action, actions, state, refresh, confirm, detail_dialog
+                ),
+            ).props("color=primary") \
+                .tooltip("Write the validated versioned Assembly Plan override and refresh the Current Work view.")
+    confirm.open()
+
+
+def _apply_candidate_selection(
+    action: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    confirm: Any,
+    detail_dialog: Any,
+) -> None:
+    try:
+        result = actions.select_candidate_part(
+            str(action["target_run_id"]), work_id=str(action["target_work_id"]), part_id=str(action["part_id"])
+        )
+        state["candidate_selection_result"] = result
+        state["selected_stage_id"] = "part_request"
+        state["workflow_notice"] = "Candidate selection saved. Downstream stages are stale; Create Part Request is the recommended next step."
+        confirm.close()
+        detail_dialog.close()
+    except Exception as exc:
+        state["workflow_notice"] = f"Candidate selection could not be completed: {exc}"
+    refresh()
 
 
 def _workflow_node_tooltip(node: dict[str, Any]) -> str:
@@ -1799,9 +2026,9 @@ def _render_action_group(
                 continue
             button = ui.button(
                 action.get("label") or action.get("key"),
-                on_click=lambda a=action: _run_detail_action(ui, actions, data.get("selected_run_id"), a, state, refresh),
+                on_click=lambda a=action: _run_detail_action(ui, actions, data, a, state, refresh),
             ).props("dense" if primary else "outline dense")
-            button.tooltip(action.get("disabled_reason") or action.get("backend_action") or "Available")
+            button.tooltip(action.get("tooltip") or action.get("disabled_reason") or "Unavailable action")
             if not action.get("enabled"):
                 button.disable()
 
@@ -1809,11 +2036,12 @@ def _render_action_group(
 def _run_detail_action(
     ui: Any,
     actions: WorkflowConsoleActions,
-    run_id: str | None,
+    data: dict[str, Any],
     action: dict[str, Any],
     state: dict[str, Any],
     refresh: Callable[[], None],
 ) -> None:
+    run_id = action.get("target_run_id") if isinstance(action.get("target_run_id"), str) else data.get("selected_run_id")
     if action.get("presentation_action") == "view_cad_ir_draft" and run_id:
         _show_stage_artifact_dialog(ui, actions.backend, run_id, str(action.get("artifact_name") or "cad_ir_draft.json"), language=str(state.get("language") or "en"))
         return
@@ -1928,9 +2156,9 @@ def _render_stage_review_card(
             for action in card.get("available_actions") or []:
                 button = ui.button(
                     action.get("label") or action.get("key"),
-                    on_click=lambda a=action: _run_surface_action(actions, data.get("selected_run_id"), a, state, refresh),
+                    on_click=lambda a=action: _run_surface_action(actions, a.get("target_run_id") or data.get("selected_run_id"), a, state, refresh),
                 ).props("outline dense")
-                button.tooltip(action.get("disabled_reason") or action.get("backend_action") or action.get("backend_route") or "Available")
+                button.tooltip(action.get("tooltip") or action.get("disabled_reason") or "Run this action for the displayed Work, Run, and stage.")
                 if not action.get("enabled"):
                     button.disable()
         if card.get("raw_artifacts"):
@@ -2019,6 +2247,11 @@ def _run_surface_action(
             state["surface_action_result"] = actions.create_reviewed_part(run_id)
         elif backend_action == "part_result_review":
             state["surface_action_result"] = actions.review_part_result(run_id)
+        elif backend_action == "approve_part_result":
+            work_id = action.get("target_work_id")
+            if not isinstance(work_id, str):
+                raise ValueError("Approve Single Part Result requires a target Work")
+            state["surface_action_result"] = actions.approve_part_result(run_id, work_id=work_id)
         elif backend_action == "create_workflow_review":
             state["surface_action_result"] = actions.create_workflow_review(run_id)
         elif backend_action == "run_rework":

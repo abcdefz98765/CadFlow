@@ -956,10 +956,11 @@ def test_workflow_console_rework_makes_no_provider_or_cad_pipeline_call(tmp_path
         "action_save_stage_review",
         body={
             "run_id": "local_rework",
-            "stage": "assembly_plan",
-            "review_status": "needs_revision",
-            "target_rework_stage": "workflow_review",
-        },
+                "stage": "assembly_plan",
+                "review_status": "needs_revision",
+                "target_rework_stage": "workflow_review",
+                "requested_changes": ["Review the selected candidate before continuing."],
+            },
     )
 
     def fail_if_called(*args, **kwargs):
@@ -2574,6 +2575,63 @@ def test_actions_create_part_request_uses_assembly_plan_override(tmp_path):
 
     assert result["summary"]["status"] == "ready_for_review"
     assert request["part_id"] == "lid"
+
+
+def test_select_candidate_part_writes_validated_override_and_preserves_work_results(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work("Candidate selection", work_id="candidate_selection")
+    backend.create_work_requirement_run("candidate_selection", "Choose one assembly candidate.", run_id="candidate_selection_root")
+    run_dir = tmp_path / "workspace" / "works" / "candidate_selection" / "runs" / "candidate_selection_root"
+    original = {
+        "artifact_type": "assembly_plan",
+        "selected_part_id": "upper_link",
+        "primary_candidate_part": "upper_link",
+        "parts": [
+            {"part_id": "upper_link", "supported_candidate": True, "part_status": "candidate_for_single_part_generation"},
+            {"part_id": "lower_link", "supported_candidate": True, "part_status": "candidate_for_single_part_generation"},
+            {"part_id": "reference_servo", "supported_candidate": False, "part_status": "reference_only", "generation_strategy": "reference_only"},
+        ],
+        "interfaces": [],
+    }
+    (run_dir / "assembly_plan.json").write_text(json.dumps(original) + "\n", encoding="utf-8")
+    manifest = backend._read_work_manifest("candidate_selection")
+    manifest["accepted_part_results"] = {"upper_link": {"child_run_id": "old_child", "review_id": "review_001", "status": "approved"}}
+    backend._write_work_manifest("candidate_selection", manifest)
+
+    result = WorkflowConsoleActions(backend).select_candidate_part(
+        "candidate_selection_root", work_id="candidate_selection", part_id="lower_link"
+    )
+
+    assert result["selected_candidate"] == "lower_link"
+    assert result["next_action"] == "Create Part Request"
+    assert set(result["downstream_stages_affected"]) >= {"part_request", "part_modeling", "workflow_review"}
+    assert json.loads((run_dir / "assembly_plan.json").read_text(encoding="utf-8"))["selected_part_id"] == "upper_link"
+    assert backend.read_artifact_by_id("candidate_selection_root", "assembly_plan.json", root=backend._work_runs_root("candidate_selection"))["content"]["selected_part_id"] == "lower_link"
+    assert (run_dir / result["metadata_artifact"]).exists()
+    manifest = backend._read_work_manifest("candidate_selection")
+    assert manifest["accepted_part_results"]["upper_link"]["child_run_id"] == "old_child"
+    assert manifest["candidate_selection"]["selected_candidate"] == "lower_link"
+
+
+def test_select_candidate_part_rejects_reference_and_current_candidate_without_mutation(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work("Candidate selection", work_id="candidate_selection_noop")
+    backend.create_work_requirement_run("candidate_selection_noop", "Choose one assembly candidate.", run_id="candidate_selection_noop_root")
+    run_dir = tmp_path / "workspace" / "works" / "candidate_selection_noop" / "runs" / "candidate_selection_noop_root"
+    (run_dir / "assembly_plan.json").write_text(json.dumps({
+        "artifact_type": "assembly_plan", "selected_part_id": "upper_link", "parts": [
+            {"part_id": "upper_link", "supported_candidate": True, "part_status": "candidate_for_single_part_generation"},
+            {"part_id": "reference_servo", "supported_candidate": False, "part_status": "reference_only", "generation_strategy": "reference_only"},
+        ], "interfaces": [],
+    }) + "\n", encoding="utf-8")
+    actions = WorkflowConsoleActions(backend)
+
+    no_op = actions.select_candidate_part("candidate_selection_noop_root", work_id="candidate_selection_noop", part_id="upper_link")
+    assert no_op["no_op"] is True
+    assert backend.active_override_path(run_dir, "assembly_plan.json") is None
+    with pytest.raises(ValueError, match="reference-only"):
+        actions.select_candidate_part("candidate_selection_noop_root", work_id="candidate_selection_noop", part_id="reference_servo")
+    assert backend.active_override_path(run_dir, "assembly_plan.json") is None
 
 
 def test_invalid_cad_ir_draft_override_is_rejected_before_part_modeling(tmp_path):

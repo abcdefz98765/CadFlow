@@ -95,7 +95,7 @@ def build_workflow_page_view_model(
     selected_id = selected.get("stage_id") if selected else None
     if selected is not None:
         selected = _stage_detail(selected, source_run_id, view_mode)
-    graph = _workflow_graph(surface.get("workflow_graph"), stages, selected_id, projection, source_run_id)
+    graph = _workflow_graph(surface.get("workflow_graph"), stages, selected_id, projection, source_run_id, work_id, view_mode)
     action_target = source_run_id
     actions = _scoped_actions(selected, view_mode, work_id, action_target)
     if selected is not None:
@@ -117,6 +117,7 @@ def build_workflow_page_view_model(
         "workflow_graph": graph,
         "selected_stage": selected,
         "available_actions": actions,
+        "action_inventory": _action_inventory(actions, graph),
         "empty_state": None if stages else {"title": "No workflow has started yet.", "summary": "Add a requirement to begin."},
         "error_state": None,
         # Compatibility/debug consumers can inspect the provenance without using
@@ -143,17 +144,41 @@ def _select_stage(stages: list[dict[str, Any]], requested: str | None, view_mode
     return next((stage for stage in stages if stage.get("status") in {"ready", "not_started"}), stages[-1] if stages else None)
 
 
-def _workflow_graph(raw: Any, stages: list[dict[str, Any]], selected_id: str | None, projection: Any, fallback_source: str | None) -> dict[str, Any]:
+def _workflow_graph(
+    raw: Any,
+    stages: list[dict[str, Any]],
+    selected_id: str | None,
+    projection: Any,
+    fallback_source: str | None,
+    work_id: str,
+    view_mode: ViewMode,
+) -> dict[str, Any]:
     graph = deepcopy(raw) if isinstance(raw, dict) else {}
+    active_plan = (
+        projection.get("artifact_contents", {}).get("assembly_plan.json")
+        if isinstance(projection, dict) and isinstance(projection.get("artifact_contents"), dict)
+        else None
+    )
+    if isinstance(active_plan, dict) and isinstance(active_plan.get("selected_part_id"), str):
+        graph["selected_part_id"] = active_plan["selected_part_id"]
     by_id = {str(stage.get("stage_id") or stage.get("key")): stage for stage in stages}
     unavailable = isinstance(projection, dict) and bool(projection.get("diagnostics"))
     for section in ("stage_spine", "selected_part_pipeline", "review_tail"):
         nodes = graph.get(section) if isinstance(graph.get(section), list) else []
         graph[section] = [_stage_node(node, by_id.get(str(node.get("stage_id"))), selected_id, fallback_source, unavailable) for node in nodes if isinstance(node, dict)]
     candidates = graph.get("part_candidates") if isinstance(graph.get("part_candidates"), list) else []
-    graph["part_candidates"] = [_part_node(item, "candidate_part") for item in candidates if isinstance(item, dict)]
+    selected_candidate = graph.get("selected_part_id")
+    candidates = [
+        {**item, "selected": item.get("part_id") == selected_candidate, "current": item.get("part_id") == selected_candidate}
+        for item in candidates if isinstance(item, dict)
+    ]
+    graph["part_candidates"] = [_part_node(item, "candidate_part", work_id, fallback_source, view_mode) for item in candidates if isinstance(item, dict)]
     references = graph.get("reference_lane") if isinstance(graph.get("reference_lane"), list) else []
-    graph["reference_lane"] = [_part_node(item, "reference_component") for item in references if isinstance(item, dict)]
+    graph["reference_lane"] = [_part_node(item, "reference_component", work_id, fallback_source, view_mode) for item in references if isinstance(item, dict)]
+    for lane in ("part_candidates", "reference_lane"):
+        for candidate in graph.get(lane, []):
+            candidate["source_run_id"] = fallback_source
+            candidate["current_selected_part_id"] = graph.get("selected_part_id")
     return graph
 
 
@@ -180,12 +205,50 @@ def _stage_node(node: dict[str, Any], stage: dict[str, Any] | None, selected_id:
     return result
 
 
-def _part_node(item: dict[str, Any], kind: str) -> dict[str, Any]:
+def _part_node(item: dict[str, Any], kind: str, work_id: str, target_run_id: str | None, view_mode: ViewMode) -> dict[str, Any]:
     status = str(item.get("status") or ("reference_only" if kind == "reference_component" else "ready"))
     selected = bool(item.get("selected"))
     if status == "selected":
         status = "ready"
-    return {**item, "kind": kind, "status": status, "selected": selected, "attention": "required" if status == "blocked" else "none", "clickable": kind == "candidate_part"}
+    part_id = str(item.get("part_id") or "")
+    reference = bool(item.get("reference_only")) or kind == "reference_component"
+    selectable = view_mode == "current_work" and bool(item.get("supported_candidate")) and not reference and not selected
+    target = f"Current Work · Run {target_run_id or 'unavailable'} · Assembly Plan"
+    actions = [
+        {
+            "key": "open_candidate_detail",
+            "label": "Open Candidate Detail",
+            "enabled": bool(part_id),
+            "category": "navigation",
+            "scope": "run_snapshot" if view_mode == "run_snapshot" else "current_work",
+            "target_work_id": work_id,
+            "target_run_id": target_run_id,
+            "target_stage_id": "assembly_plan",
+            "tooltip": f"Open Candidate Detail for {part_id}.\n\nTarget: {target}\n\nResult: read-only inspection; no Work pointer, candidate selection, or Run changes.",
+        },
+        {
+            "key": "select_candidate_part",
+            "label": "Use This Part Next",
+            "enabled": selectable,
+            "category": "structured_input",
+            "scope": "run_snapshot" if view_mode == "run_snapshot" else "current_work",
+            "target_work_id": work_id,
+            "target_run_id": target_run_id,
+            "target_stage_id": "assembly_plan",
+            "part_id": part_id,
+            "requires_confirmation": True,
+            "creates_new_run": False,
+            "updates_active_lineage": False,
+            "disabled_reason": (
+                _READ_ONLY_REASON if view_mode == "run_snapshot" else
+                "Reference components cannot be selected for generation." if reference else
+                "This candidate is already selected; no duplicate override is needed." if selected else
+                "This candidate is not supported by the current single-part workflow."
+            ) if not selectable else None,
+            "tooltip": f"Select {part_id} for the next Part Request with confirmation.\n\nTarget: {target}\n\nResult: writes a validated versioned Assembly Plan override, preserves old Runs, and marks downstream stages stale.\nActive lineage changes: no\nNew Run: no",
+        },
+    ]
+    return {**item, "kind": kind, "status": status, "selected": selected, "attention": "required" if status == "blocked" else "none", "clickable": True, "actions": actions}
 
 
 def _validate_node(node: dict[str, Any]) -> None:
@@ -330,12 +393,18 @@ def _scoped_actions(stage: dict[str, Any] | None, view_mode: ViewMode, work_id: 
             action["disabled_reason"] = _READ_ONLY_REASON
         action.update({
             "enabled": enabled,
+            "category": "workflow_command" if backend_action else ("navigation" if action.get("presentation_action") else "disabled_future"),
             "scope": "run_snapshot" if view_mode == "run_snapshot" else "current_work",
             "target_work_id": work_id,
             "target_run_id": target_run_id,
+            "target_stage_id": stage.get("stage_id") if isinstance(stage, dict) else None,
             "creates_new_run": creates_new_run,
             "updates_active_lineage": creates_new_run,
             "next_stage_on_success": _next_stage_for_action(backend_action or action.get("key"), stage.get("stage_id") if isinstance(stage, dict) else None),
+            "expected_postcondition": {
+                "next_stage": _next_stage_for_action(backend_action or action.get("key"), stage.get("stage_id") if isinstance(stage, dict) else None),
+                "updates_active_lineage": creates_new_run,
+            },
         })
         action["tooltip"] = _action_tooltip(action, stage)
         prepared.append(action)
@@ -350,6 +419,8 @@ def _scoped_actions(stage: dict[str, Any] | None, view_mode: ViewMode, work_id: 
             "scope": "run_snapshot" if view_mode == "run_snapshot" else "current_work",
             "target_work_id": work_id,
             "target_run_id": target_run_id,
+            "target_stage_id": stage.get("stage_id") if isinstance(stage, dict) else None,
+            "category": "workflow_command",
             "creates_new_run": False,
             "updates_active_lineage": False,
             "next_stage_on_success": "workflow_review",
@@ -397,12 +468,34 @@ def _action_tooltip(action: dict[str, Any], stage: dict[str, Any] | None) -> str
         "edit_assembly_plan": ("Open the assembly plan and its validated override editor.", "Saving an override preserves the original artifact and may mark downstream stages stale."),
         "view_diagnostics": ("Open raw validation and trace diagnostics.", "Read-only troubleshooting; no workflow state changes."),
     }
+
+
     action_text, result_text = copy.get(key, ("Run this workflow action.", "The result is recorded against the selected Work and Run."))
     disabled = action.get("disabled_reason")
-    lines = [action_text, "", f"Target: {target}", "", f"Result: {result_text}"]
+    lines = [action_text, "", f"Target: {target}", "", f"Result: {result_text}", "", f"Active lineage changes: {'yes' if action.get('updates_active_lineage') else 'no'}", f"New Run: {'yes' if action.get('creates_new_run') else 'no'}"]
     if disabled:
         lines.extend(["", f"Currently unavailable: {disabled}"])
     return "\n".join(lines)
+
+
+def _action_inventory(actions: dict[str, Any], graph: dict[str, Any]) -> list[dict[str, Any]]:
+    """Machine-readable, target-complete inventory for manual cockpit checks."""
+    inventory: list[dict[str, Any]] = []
+    for group in ("primary_action", "secondary_actions", "disabled_actions"):
+        entries = actions.get(group)
+        entries = entries if isinstance(entries, list) else [entries]
+        for item in entries:
+            if isinstance(item, dict):
+                inventory.append(dict(item))
+    for lane in ("part_candidates", "reference_lane"):
+        for candidate in graph.get(lane, []) if isinstance(graph.get(lane), list) else []:
+            if isinstance(candidate, dict):
+                inventory.extend(dict(item) for item in candidate.get("actions", []) if isinstance(item, dict))
+    unique: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for item in inventory:
+        key = (item.get("key"), item.get("target_work_id"), item.get("target_run_id"), item.get("target_stage_id"), item.get("part_id"))
+        unique[key] = item
+    return list(unique.values())
 
 
 def _run_strip(history: Any, lineage: dict[str, Any], view_mode: ViewMode, viewed_run_id: str | None) -> list[dict[str, Any]]:

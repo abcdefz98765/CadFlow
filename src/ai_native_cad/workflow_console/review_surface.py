@@ -613,6 +613,7 @@ def _part_candidate_node(part: dict[str, Any], selected_part_id: Any) -> dict[st
         "part_id": part_id,
         "role": role,
         "brief": str(part.get("brief") or part.get("description") or role),
+        "generation_strategy": part.get("generation_strategy"),
         "status": status,
         "supported_candidate": supported,
         "selected": selected,
@@ -1288,6 +1289,7 @@ def _stage_actions(key: str, review_stage: str, artifacts: set[str], has_run: bo
     if key == "part_result_review":
         ready = {"reviewed_part_handoff.json", "lineage.json"} <= artifacts
         actions.append(_action("part_result_review", "Review Part Result", ready, "Requires reviewed_part_handoff.json and lineage.json.", {"backend_action": "part_result_review"}))
+        actions.append(_action("approve_part_result", "Approve Single Part Result", "part_result_review.json" in artifacts, "Requires an accepted Part Result Review.", {"backend_action": "approve_part_result"}))
     if key == "workflow_review":
         actions.append(_action("create_workflow_review", "Create / Refresh Workflow Review", has_run, None if has_run else "Select a run first.", {"backend_action": "create_workflow_review"}))
     if key == "rework":

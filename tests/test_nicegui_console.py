@@ -901,8 +901,9 @@ def test_nicegui_workflow_review_surface_summarizes_requirement_planning_and_rev
     assert candidates["base"] == {
         "part_id": "base",
         "role": "main housing",
-        "brief": "main housing",
-        "status": "selected",
+            "brief": "main housing",
+            "generation_strategy": "future_part_pipeline",
+            "status": "selected",
         "supported_candidate": True,
         "selected": True,
         "current": True,

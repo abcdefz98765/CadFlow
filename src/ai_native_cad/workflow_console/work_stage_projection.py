@@ -59,6 +59,9 @@ def build_work_stage_projection(backend: Any, work_id: str) -> dict[str, Any]:
         spec["key"]: _project_stage(spec, records, root_run_id, execution)
         for spec in STAGE_SPECS
     }
+    entity_state = work.get("entity_state") if isinstance(work.get("entity_state"), dict) else {}
+    candidate_selection = entity_state.get("candidate_selection") if isinstance(entity_state.get("candidate_selection"), dict) else {}
+    _apply_candidate_selection_staleness(stages, candidate_selection)
     root_run = runs.get(root_run_id) if isinstance(root_run_id, str) else {}
     return {
         "work_id": work_id,
@@ -70,6 +73,7 @@ def build_work_stage_projection(backend: Any, work_id: str) -> dict[str, Any]:
         "artifact_contents": _preferred_artifact_contents(records),
         "root_run": root_run if isinstance(root_run, dict) else {},
         "execution": execution,
+        "candidate_selection": candidate_selection,
     }
 
 
@@ -111,6 +115,11 @@ def _discover_work_artifacts(
             continue
         for path in sorted((item for item in run_path.rglob("*") if item.is_file() and item.name in _KNOWN_NAMES), key=lambda item: item.as_posix()):
             relative = path.relative_to(run_path).as_posix()
+            # User overrides are promoted below through the backend's active
+            # pointer.  Historical edit envelopes must not compete with the
+            # original or active plan in the current Work projection.
+            if relative.startswith("edits/"):
+                continue
             source_run_id = _source_run_id(run_id, relative)
             record = {
                 "name": path.name,
@@ -125,9 +134,37 @@ def _discover_work_artifacts(
                 # so apply the same public-content filter as the backend route.
                 record["content"] = _sanitize_public_artifact_content(content)
             records[path.name].append(record)
+        active_plan = backend.active_override_path(run_path, "assembly_plan.json")
+        if active_plan is not None:
+            content = _read_content(active_plan)
+            records["assembly_plan.json"].insert(0, {
+                "name": "assembly_plan.json",
+                "source_run_id": run_id,
+                "source_relative_path": "edits/active/assembly_plan.json",
+                "present": True,
+                "modified_at": datetime.fromtimestamp(active_plan.stat().st_mtime, tz=timezone.utc).isoformat(),
+                "source_type": "user_override",
+                "content": _sanitize_public_artifact_content(content) if content is not None else None,
+            })
     for name, items in records.items():
         records[name] = sorted(items, key=lambda item: _record_rank(item, root_run_id))
     return records
+
+
+def _apply_candidate_selection_staleness(stages: dict[str, dict[str, Any]], selection: dict[str, Any]) -> None:
+    """Project a Work-level selection change without altering immutable Runs."""
+    selected = selection.get("selected_candidate")
+    affected = selection.get("downstream_stages_affected")
+    if not isinstance(selected, str) or not selected or not isinstance(affected, list):
+        return
+    for key in affected:
+        stage = stages.get(key)
+        if not isinstance(stage, dict):
+            continue
+        stage["status"] = "stale"
+        stage["selected_part_id"] = selected
+        stage["summary"] = f"Stale after selecting {selected}; recreate this stage from the active Assembly Plan."
+        stage["stale_reason"] = "candidate_selection_changed"
 
 
 def _source_run_id(parent_run_id: str, relative: str) -> str:
@@ -141,6 +178,8 @@ def _source_run_id(parent_run_id: str, relative: str) -> str:
 
 def _record_rank(item: dict[str, Any], root_run_id: str | None) -> tuple[int, int, str]:
     relative = str(item.get("source_relative_path") or "")
+    if item.get("source_type") == "user_override":
+        return (0, 0, relative)
     return (0 if item.get("source_run_id") == root_run_id and "/" not in relative else 1, len(Path(relative).parts), relative)
 
 
@@ -176,7 +215,9 @@ def _project_stage(spec: dict[str, Any], records: dict[str, list[dict[str, Any]]
     elif key == "part_result_review" and execution.get("execution_skipped") and not present_outputs:
         status = "skipped"
     source = present_outputs[0] if present_outputs else (next((item for item in inputs if item.get("present")), None) or {})
-    selected_part_id = _selected_part_id([*outputs, *inputs])
+    # Output is the stage's authoritative choice; an upstream assembly plan may
+    # list a different first candidate and must not overwrite the active part.
+    selected_part_id = _selected_part_id([*present_outputs, *inputs])
     child = next((item for item in outputs if item.get("name") in {"input_ir.json", "model.step", "model.stl"} and item.get("source_run_id") != root_run_id), None)
     if key == "part_modeling" and status == "completed" and not any(item.get("name") in {"model.step", "model.stl"} for item in present_outputs):
         status = "contract_complete" if execution.get("execution_mode") == "contract" else "completed"
