@@ -1,6 +1,6 @@
 # Current Product Readiness
 
-Status date: 2026-07-13. This is a capability and verification record, not a
+Status date: 2026-07-14. This is a capability and verification record, not a
 promise that every visible control has completed manual browser acceptance.
 
 ## Usable now
@@ -17,6 +17,11 @@ promise that every visible control has completed manual browser acceptance.
 - Candidate detail and selection semantics: implemented with a confirmation,
   validated versioned Assembly Plan override, stale downstream projection, and
   preserved old Runs/accepted results.
+- Workflow write actions now expose an explicit browser lifecycle (`confirming`
+  / `pending` / `succeeded` / `failed`) with a persistent feedback panel.
+  Candidate selection verifies its persisted override and Work postconditions
+  before it can report success. Chinese action labels, hover text, confirmation,
+  and feedback are catalog-backed on the primary Workflow v2 route.
 - Stage reviews and controlled artifact overrides: append-only per-stage review
   files plus latest `stage_review.json` materialization are implemented.
 - Rework and artifact inspection: implemented for allowlisted contracts.
@@ -43,10 +48,12 @@ promise that every visible control has completed manual browser acceptance.
 - Implemented: deterministic Golden flow, Workflow cockpit, controlled reads,
   reviews, and the bounded episode shell.
 - Automated-tested: Golden contracts and targeted Workflow/Episode tests.
-- Manually-verified: Full/Contract local Golden pages, candidate confirmation
-  and stale feedback, artifact viewer, and read-only Snapshot were exercised
-  in the local browser. Not every visible action or all breakpoint states has
-  received exhaustive manual coverage.
+- Manually-verified: prior Full/Contract local Golden pages, candidate
+  confirmation and stale feedback, artifact viewer, and read-only Snapshot
+  were exercised. The 2026-07-14 runtime feedback/localization changes are
+  **not manually verified in this environment**: the in-app browser could not
+  connect to the locally listening NiceGUI service. New screenshots and the
+  requested 1024px check therefore remain outstanding.
 - Production-usable: local deterministic single-part Golden workflow only;
   the cockpit readiness gate remains partial until full action inventory
   acceptance is completed.

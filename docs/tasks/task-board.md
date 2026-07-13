@@ -14,5 +14,8 @@
 - [ ] Add user-facing Run comparison details.
 - [ ] Expand structured inline interventions beyond the current minimal contract.
 - [ ] Complete browser/manual Golden interaction acceptance; distinguish it from automated tests.
+- [ ] Manually accept runtime pending/success/failure feedback, Chinese action
+  hover copy, and 1024px responsive workflow rendering; capture the required
+  runtime screenshots when the browser can reach the local NiceGUI server.
 - [ ] Close append-only stage review, accepted-part-result pointer, and candidate interaction contracts.
 - [ ] Accept scripted bounded Episode Phase 1.5 dynamics before any provider integration.

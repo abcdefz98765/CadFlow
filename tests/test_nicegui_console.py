@@ -1,4 +1,5 @@
 import importlib.util
+import asyncio
 import json
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from ai_native_cad.workflow_console.nicegui_app import (
     WORK_USER_PAGES,
     _part_viewer_url,
     _run_workflow_page_action,
+    _execute_action_lifecycle,
     _save_artifact_override_ui,
 )
 from ai_native_cad.workflow_console.routes import dispatch_route
@@ -71,9 +73,37 @@ def test_workflow_action_refreshes_without_touching_the_deleted_button_slot():
         lambda: refreshes.append(True),
     )
 
-    assert refreshes == [True]
+    assert len(refreshes) >= 2  # pending is rendered before the backend completes
     assert state["selected_stage_id"] == "part_review"
-    assert state["workflow_notice"].startswith("Workflow updated")
+    assert state["action_execution"]["status"] == "succeeded"
+    assert state["action_execution"]["postcondition_verified"] is True
+
+
+def test_action_lifecycle_reports_failed_postcondition_and_rejects_duplicate_click():
+    state = {}
+    refreshes = []
+    action = {"key": "select_candidate_part", "label": "Use This Part Next", "target_work_id": "work", "target_run_id": "run", "target_stage_id": "assembly_plan", "part_id": "lower_link"}
+    calls = []
+
+    async def exercise():
+        async def first():
+            return await _execute_action_lifecycle(
+                action, state, lambda: refreshes.append(True), lambda: calls.append("run") or {"ok": True},
+                language="zh", verify=lambda _result: (False, "postcondition mismatch"),
+            )
+        task = asyncio.create_task(first())
+        await asyncio.sleep(0)
+        duplicate = await _execute_action_lifecycle(
+            action, state, lambda: refreshes.append(True), lambda: calls.append("duplicate") or {"ok": True}, language="zh"
+        )
+        await task
+        return duplicate
+
+    assert asyncio.run(exercise()) is None
+    assert calls == ["run"]
+    assert state["action_execution"]["status"] == "failed"
+    assert state["action_execution"]["postcondition_verified"] is False
+    assert "postcondition mismatch" in state["action_execution"]["error_detail"]
 
 
 def _does_not_contain_text(value, blocked):
@@ -1064,7 +1094,8 @@ def test_nicegui_artifact_override_editor_rejects_invalid_json_before_backend(tm
 
     assert state["result"]["ok"] is False
     assert state["result"]["diagnostic_code"] == "artifact_override.invalid_json"
-    assert calls == ["refresh"]
+    assert len(calls) >= 2  # the failed lifecycle also renders pending first
+    assert state["action_execution"]["status"] == "failed"
     assert not (tmp_path / "outputs" / "nicegui_run" / "edits").exists()
 
 

@@ -462,6 +462,20 @@ Do not merely show a list of present and absent files.
 
 The user must be able to recognize where intervention is possible.
 
+### 8.0 Write-action runtime feedback
+
+Every Workflow write follows one visible lifecycle: `idle` → `confirming`
+(when required) → `pending` → backend execution → refreshed state and
+postcondition verification → `succeeded` or `failed`. The feedback panel is
+persistent, uses blue/green/red/amber semantic states, and remains visible
+until dismissed or replaced by the next action. A write must never claim
+success merely because its backend call returned without an exception.
+
+The primary Workflow renderer localizes action labels and hover contracts in
+English and Chinese. Artifact contents and stable enums may remain English;
+browser-visible labels must not fall back to backend action names or internal
+keys.
+
 ### 8.1 Intervention categories
 
 - **Review** — inspect and record acceptance or expected limitation.

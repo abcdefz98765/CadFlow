@@ -125,3 +125,19 @@ def test_workflow_review_uses_human_stage_output_and_source_aware_artifact_contr
     assert "token" not in reports["content"]
     assert "raw_provider_response" not in reports["content"]
     assert "Target: Current Work" in page["available_actions"]["primary_action"]["tooltip"]
+
+
+def test_enabled_actions_expose_localized_labels_and_tooltips(tmp_path):
+    backend = _work_with_failed_latest_attempt(tmp_path)
+
+    chinese = build_workflow_page_view_model(backend, "lineage_work", view_mode="current_work", language="zh")
+    english = build_workflow_page_view_model(backend, "lineage_work", view_mode="current_work", language="en")
+
+    for page, language in ((chinese, "zh"), (english, "en")):
+        for action in page["action_inventory"]:
+            assert action["category"]
+            assert action["tooltip"]
+            assert action["label_i18n"][language] == action["label"]
+            assert "backend_action" not in action["tooltip"]
+    assert "Available" not in chinese["available_actions"]["primary_action"]["tooltip"]
+    assert "Target:" not in chinese["available_actions"]["primary_action"]["tooltip"]

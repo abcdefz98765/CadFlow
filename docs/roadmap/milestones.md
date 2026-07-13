@@ -18,6 +18,13 @@ Acceptance. Implemented does not imply manually verified: Golden Contract/Full
 flows, the Workflow cockpit, and deterministic episode shell are
 automated-tested; browser interaction closure remains the release gate.
 
+In progress: Workflow Action Runtime Feedback and Complete Chinese
+Localization. Implemented and automated-tested: action lifecycle state,
+persistent feedback, candidate postcondition verification, and primary-route
+Chinese labels/tooltips. Manually verified: not yet for this update because the
+in-app browser cannot reach the local NiceGUI server; no MVP usability claim is
+made from unit tests alone.
+
 Next: (1) close UI action/review/artifact interaction contracts, (2) accept
 Episode Phase 1.5 scripted dynamics, (3) prototype provider-backed
 `create_part_ir` without changing CAD execution boundaries.

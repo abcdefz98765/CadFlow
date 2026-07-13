@@ -12,6 +12,7 @@ from copy import deepcopy
 from typing import Any, Literal
 
 from ai_native_cad.workflow_console.review_surface import build_workflow_review_surface
+from ai_native_cad.workflow_console.i18n import action_labels, action_label
 from ai_native_cad.workflow_console.work_stage_projection import (
     build_work_stage_projection,
     unavailable_work_stage_projection,
@@ -95,9 +96,9 @@ def build_workflow_page_view_model(
     selected_id = selected.get("stage_id") if selected else None
     if selected is not None:
         selected = _stage_detail(selected, source_run_id, view_mode)
-    graph = _workflow_graph(surface.get("workflow_graph"), stages, selected_id, projection, source_run_id, work_id, view_mode)
+    graph = _workflow_graph(surface.get("workflow_graph"), stages, selected_id, projection, source_run_id, work_id, view_mode, language)
     action_target = source_run_id
-    actions = _scoped_actions(selected, view_mode, work_id, action_target)
+    actions = _scoped_actions(selected, view_mode, work_id, action_target, language)
     if selected is not None:
         selected["primary_action"] = actions["primary_action"]
         selected["secondary_actions"] = actions["secondary_actions"]
@@ -152,6 +153,7 @@ def _workflow_graph(
     fallback_source: str | None,
     work_id: str,
     view_mode: ViewMode,
+    language: str,
 ) -> dict[str, Any]:
     graph = deepcopy(raw) if isinstance(raw, dict) else {}
     active_plan = (
@@ -172,9 +174,9 @@ def _workflow_graph(
         {**item, "selected": item.get("part_id") == selected_candidate, "current": item.get("part_id") == selected_candidate}
         for item in candidates if isinstance(item, dict)
     ]
-    graph["part_candidates"] = [_part_node(item, "candidate_part", work_id, fallback_source, view_mode) for item in candidates if isinstance(item, dict)]
+    graph["part_candidates"] = [_part_node(item, "candidate_part", work_id, fallback_source, view_mode, language) for item in candidates if isinstance(item, dict)]
     references = graph.get("reference_lane") if isinstance(graph.get("reference_lane"), list) else []
-    graph["reference_lane"] = [_part_node(item, "reference_component", work_id, fallback_source, view_mode) for item in references if isinstance(item, dict)]
+    graph["reference_lane"] = [_part_node(item, "reference_component", work_id, fallback_source, view_mode, language) for item in references if isinstance(item, dict)]
     for lane in ("part_candidates", "reference_lane"):
         for candidate in graph.get(lane, []):
             candidate["source_run_id"] = fallback_source
@@ -205,7 +207,7 @@ def _stage_node(node: dict[str, Any], stage: dict[str, Any] | None, selected_id:
     return result
 
 
-def _part_node(item: dict[str, Any], kind: str, work_id: str, target_run_id: str | None, view_mode: ViewMode) -> dict[str, Any]:
+def _part_node(item: dict[str, Any], kind: str, work_id: str, target_run_id: str | None, view_mode: ViewMode, language: str) -> dict[str, Any]:
     status = str(item.get("status") or ("reference_only" if kind == "reference_component" else "ready"))
     selected = bool(item.get("selected"))
     if status == "selected":
@@ -213,22 +215,24 @@ def _part_node(item: dict[str, Any], kind: str, work_id: str, target_run_id: str
     part_id = str(item.get("part_id") or "")
     reference = bool(item.get("reference_only")) or kind == "reference_component"
     selectable = view_mode == "current_work" and bool(item.get("supported_candidate")) and not reference and not selected
-    target = f"Current Work · Run {target_run_id or 'unavailable'} · Assembly Plan"
+    target = f"当前 Work · Run {target_run_id or '不可用'} · 装配计划" if language == "zh" else f"Current Work · Run {target_run_id or 'unavailable'} · Assembly Plan"
     actions = [
         {
             "key": "open_candidate_detail",
-            "label": "Open Candidate Detail",
+            "label": action_label(language, "Open Candidate Detail"),
+            "label_i18n": action_labels("Open Candidate Detail"),
             "enabled": bool(part_id),
             "category": "navigation",
             "scope": "run_snapshot" if view_mode == "run_snapshot" else "current_work",
             "target_work_id": work_id,
             "target_run_id": target_run_id,
             "target_stage_id": "assembly_plan",
-            "tooltip": f"Open Candidate Detail for {part_id}.\n\nTarget: {target}\n\nResult: read-only inspection; no Work pointer, candidate selection, or Run changes.",
+            "tooltip": (f"打开 {part_id} 的候选零件详情。\n\n目标: {target}\n\n结果：只读查看；不会改变 Work 指针、候选选择或 Run。" if language == "zh" else f"Open Candidate Detail for {part_id}.\n\nTarget: {target}\n\nResult: read-only inspection; no Work pointer, candidate selection, or Run changes."),
         },
         {
             "key": "select_candidate_part",
-            "label": "Use This Part Next",
+            "label": action_label(language, "Use This Part Next"),
+            "label_i18n": action_labels("Use This Part Next"),
             "enabled": selectable,
             "category": "structured_input",
             "scope": "run_snapshot" if view_mode == "run_snapshot" else "current_work",
@@ -240,12 +244,12 @@ def _part_node(item: dict[str, Any], kind: str, work_id: str, target_run_id: str
             "creates_new_run": False,
             "updates_active_lineage": False,
             "disabled_reason": (
-                _READ_ONLY_REASON if view_mode == "run_snapshot" else
-                "Reference components cannot be selected for generation." if reference else
-                "This candidate is already selected; no duplicate override is needed." if selected else
-                "This candidate is not supported by the current single-part workflow."
+                ("历史 Run 快照只读；请返回当前 Work。" if language == "zh" else _READ_ONLY_REASON) if view_mode == "run_snapshot" else
+                ("参考组件不能用于生成。" if language == "zh" else "Reference components cannot be selected for generation.") if reference else
+                ("该候选零件已被选择，无需重复覆盖。" if language == "zh" else "This candidate is already selected; no duplicate override is needed.") if selected else
+                ("当前单零件流程不支持该候选零件。" if language == "zh" else "This candidate is not supported by the current single-part workflow.")
             ) if not selectable else None,
-            "tooltip": f"Select {part_id} for the next Part Request with confirmation.\n\nTarget: {target}\n\nResult: writes a validated versioned Assembly Plan override, preserves old Runs, and marks downstream stages stale.\nActive lineage changes: no\nNew Run: no",
+            "tooltip": (f"确认后将 {part_id} 用于下一次零件请求。\n\n目标: {target}\n\n结果：写入经过验证的版本化装配计划覆盖版本，保留旧 Run，并标记下游阶段为过期。\n会改变 active lineage：否\n创建新 Run：否" if language == "zh" else f"Select {part_id} for the next Part Request with confirmation.\n\nTarget: {target}\n\nResult: writes a validated versioned Assembly Plan override, preserves old Runs, and marks downstream stages stale.\nActive lineage changes: no\nNew Run: no"),
         },
     ]
     return {**item, "kind": kind, "status": status, "selected": selected, "attention": "required" if status == "blocked" else "none", "clickable": True, "actions": actions}
@@ -375,7 +379,7 @@ def _evidence_contracts(inputs: list[dict[str, Any]], outputs: list[dict[str, An
     return evidence
 
 
-def _scoped_actions(stage: dict[str, Any] | None, view_mode: ViewMode, work_id: str, target_run_id: str | None) -> dict[str, Any]:
+def _scoped_actions(stage: dict[str, Any] | None, view_mode: ViewMode, work_id: str, target_run_id: str | None, language: str) -> dict[str, Any]:
     groups = stage.get("action_groups") if isinstance(stage, dict) and isinstance(stage.get("action_groups"), dict) else {}
     actions = [dict(item) for group in groups.values() if isinstance(group, list) for item in group if isinstance(item, dict)]
     prepared = []
@@ -406,7 +410,9 @@ def _scoped_actions(stage: dict[str, Any] | None, view_mode: ViewMode, work_id: 
                 "updates_active_lineage": creates_new_run,
             },
         })
-        action["tooltip"] = _action_tooltip(action, stage)
+        action["label_i18n"] = action_labels(action.get("label"), action.get("key"))
+        action["label"] = action["label_i18n"]["zh" if language == "zh" else "en"]
+        action["tooltip"] = _action_tooltip(action, stage, language)
         prepared.append(action)
     agent_review = next((action for action in prepared if action.get("enabled") and action.get("key") in _AGENT_REVIEW_ACTIONS), None)
     if agent_review is None and stage is not None:
@@ -425,10 +431,12 @@ def _scoped_actions(stage: dict[str, Any] | None, view_mode: ViewMode, work_id: 
             "updates_active_lineage": False,
             "next_stage_on_success": "workflow_review",
         }
-        agent_review["tooltip"] = _action_tooltip(agent_review, stage)
+        agent_review["tooltip"] = _action_tooltip(agent_review, stage, language)
     if agent_review is not None:
         agent_review["label"] = _agent_review_label(agent_review, stage)
-        agent_review["tooltip"] = _action_tooltip(agent_review, stage)
+        agent_review["label_i18n"] = action_labels(agent_review["label"], agent_review.get("key"))
+        agent_review["label"] = agent_review["label_i18n"]["zh" if language == "zh" else "en"]
+        agent_review["tooltip"] = _action_tooltip(agent_review, stage, language)
     enabled = [action for action in prepared if action.get("enabled") and action.get("key") not in _REVIEW_DECISION_ACTIONS]
     secondary = [action for action in enabled if action is not agent_review]
     disabled = [action for action in prepared if not action.get("enabled")]
@@ -452,12 +460,12 @@ def _agent_review_label(action: dict[str, Any], stage: dict[str, Any] | None) ->
     return "Request agent review"
 
 
-def _action_tooltip(action: dict[str, Any], stage: dict[str, Any] | None) -> str:
+def _action_tooltip(action: dict[str, Any], stage: dict[str, Any] | None, language: str = "en") -> str:
     """Explain action, target, and effect; disabled actions keep their reason."""
     key = str(action.get("key") or "")
-    stage_name = str((stage or {}).get("stage_name") or (stage or {}).get("stage_id") or "selected stage")
-    run_id = action.get("target_run_id") or "active Run"
-    target = f"Current Work · {stage_name} · Run {run_id}"
+    stage_name = str((stage or {}).get("stage_name") or (stage or {}).get("stage_id") or ("所选阶段" if language == "zh" else "selected stage"))
+    run_id = action.get("target_run_id") or ("当前 Run" if language == "zh" else "active Run")
+    target = f"当前 Work · {stage_name} · Run {run_id}" if language == "zh" else f"Current Work · {stage_name} · Run {run_id}"
     copy = {
         "save_stage_review": ("Save the selected review decision and notes.", "Writes a traceable stage_review record; does not rerun the agent or modify existing output."),
         "approve_stage": ("Quick approve this stage without notes.", "Records Approved, keeps all artifacts, and updates the Work review state. It does not create CAD."),
@@ -472,6 +480,13 @@ def _action_tooltip(action: dict[str, Any], stage: dict[str, Any] | None) -> str
 
     action_text, result_text = copy.get(key, ("Run this workflow action.", "The result is recorded against the selected Work and Run."))
     disabled = action.get("disabled_reason")
+    if language == "zh":
+        action_text = f"执行“{action_label('zh', action.get('label'), key)}”。"
+        result_text = "结果会记录到指定的 Work、Run 和阶段。"
+        lines = [action_text, "", f"目标: {target}", "", f"结果: {result_text}", "", f"会改变 active lineage：{'是' if action.get('updates_active_lineage') else '否'}", f"创建新 Run：{'是' if action.get('creates_new_run') else '否'}"]
+        if disabled:
+            lines.extend(["", f"当前不可用：{disabled}"])
+        return "\n".join(lines)
     lines = [action_text, "", f"Target: {target}", "", f"Result: {result_text}", "", f"Active lineage changes: {'yes' if action.get('updates_active_lineage') else 'no'}", f"New Run: {'yes' if action.get('creates_new_run') else 'no'}"]
     if disabled:
         lines.extend(["", f"Currently unavailable: {disabled}"])
