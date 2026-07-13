@@ -1,254 +1,185 @@
-# Model Revision Workflow
+# Revision Workflow Architecture
 
-CadFlow should support iterative CAD work, not only first-time model creation.
+## Authority and scope
 
-Target flow:
+This document defines structured revision of an existing CadFlow result.
 
-```text
-existing run/model + natural-language change request
-  -> model intake
-  -> editability analysis
-  -> change intent parsing
-  -> revision plan
-  -> patch target selection
-  -> regenerate or modify
-  -> validate
-  -> compare old vs new
-  -> revision report
-```
+It preserves the canonical Workspace / Work / Run / Part Job model in:
 
-This is a staged product direction. The first implementation should focus on
-CadFlow-native runs and patch-based revision. Full external STEP feature
-recovery and mesh reverse engineering are non-goals for the near term.
+- `cadflow-canonical-product-architecture.md`
 
-## v0.6 MVP
+Revision Agent behavior and private knowledge are defined by:
 
-The v0.6 MVP is CadFlow-native and starts from a parent run directory that
-already contains `input_ir.json`.
+- `agent-skill-knowledge.md`
+- `../../skills/revision/SKILL.md`
 
-```text
-parent run + revision prompt
-  -> change_intent.json
-  -> revision_plan.json
-  -> patch.json
-  -> child input_ir.json
-  -> run_ir_pipeline(...)
-  -> comparison.json
-  -> lineage.json
-```
+## Core rule
 
-The implementation entry point is `run_agent_revision_pipeline(...)`.
+A revision creates a child Run. It never overwrites the parent.
 
-The MVP patches CAD IR only. It does not edit external STEP/STL files, does not
-integrate a real provider SDK, and does not execute arbitrary LLM-generated
-code.
+    accepted parent result
+      + explicit natural-language change request
+      -> revision request
+      -> structured change intent
+      -> revision plan
+      -> structured patch when supported
+      -> local validation
+      -> deterministic child execution
+      -> parent/child comparison
+      -> user review and optional acceptance
 
-### Fake Revision Parser Scope
+## Preferred source order
 
-`DesignPlannerFakeAgentAdapter` is a deterministic local test adapter, not a
-real LLM provider. Its v0.6 revision parser supports only small CadFlow-native
-IR edits:
+### CadFlow-native parent
 
-- Named numeric dimension replacement, such as `thickness to 6 mm`.
-- Metric fastener hole requests, such as `M5`, mapped to a simple clearance
-  diameter of nominal size plus 0.5 mm.
-- Explicit hole diameter replacement, such as `hole diameter to 6 mm`.
-- Chamfer removal when `features.chamfer` exists.
+Highest priority. A parent with validated CAD IR can be revised through structured field changes and deterministic regeneration.
 
-Current limitations:
+### CadFlow-compatible IR and implementation artifacts
 
-- It does not understand arbitrary geometry edits.
-- It does not add new topology or new unsupported feature families.
-- It does not patch `model.py`.
-- It does not edit STEP, STL, OBJ, or mesh files.
-- It does not call a real provider SDK.
-- It does not execute arbitrary LLM-generated code.
+May be accepted after validation and import into a controlled parent Run.
 
-## Source Priority
+### External STEP
 
-### 1. CadFlow-Native Run
+Reference and limited derived-edit source only. CadFlow must not promise robust parametric feature-history recovery.
 
-Highest priority.
+### STL, OBJ, or mesh
 
-If a parent run contains artifacts such as `requirement.json`,
-`planning_artifact.json`, `input_ir.json`, `model.py`, `model.step`,
-`report.json`, and `agent_trace.json`, CadFlow should revise it through
-structured patches.
+Visual or measurement reference only unless a future explicit reconstruction capability is implemented and validated.
 
-Preferred path:
+## Revision artifacts
 
-```text
-parent run
-  -> revision request
-  -> change intent
-  -> requirement/planning/IR patch
-  -> new child run
-  -> validation
-  -> comparison report
-```
+A revision child Run may contain:
 
-Example request:
+    revision_request.json
+    change_intent.json
+    revision_plan.json
+    patch.json
+    parent input snapshot or reference
+    child input_ir.json when validation succeeds
+    child model products in Full mode
+    comparison.json
+    revision_report.md
+    lineage.json
+    report.json / report.md
+    agent_trace.json
+    logs/runtime.json
 
-```text
-Take the previous mounting plate and make the holes M5, increase thickness to
-6 mm, and remove the chamfer.
-```
+Blocked revisions preserve intent, plan, patch attempt, comparison, lineage, and report evidence. They do not write misleading child CAD products.
 
-The workflow should produce a structured revision plan and patch before
-regenerating the child run.
+## Change intent
 
-### 2. CadFlow IR + model.py
+`change_intent.json` records what the user requested independently of what the system ultimately changes.
 
-Also high priority.
+It should identify:
 
-If the user provides CadFlow-compatible `input_ir.json` and `model.py`, CadFlow
-may treat the source as an editable native model after validation.
+- target parent Run and part;
+- requested outcome;
+- candidate structured changes;
+- uncertainty and missing decisions;
+- supported, unsupported, or user-input-required status.
 
-### 3. External STEP File
+## Revision plan
 
-Medium priority.
+`revision_plan.json` records:
 
-STEP can be imported as reference geometry, but it usually lacks full modeling
-history. CadFlow may:
+- strategy and target artifact;
+- ordered operations;
+- expected validations;
+- unsupported portions;
+- status: ready, blocked, or user input required.
 
-- Measure bounding box.
-- Inspect simple geometry.
-- Detect some holes, planes, and cylinders when reliable.
-- Use it as reference geometry.
-- Create additive or subtractive operations when feasible.
-- Create a new derived model.
+The plan must not treat free-form regeneration without trace as a valid structured revision.
 
-Documentation and UI must clearly state that STEP import is limited direct
-editing and reference-based editing, not robust parametric feature recovery.
+## Patch contract
 
-### 4. STL / OBJ / Mesh Files
+For CadFlow-native CAD IR, prefer explicit operations:
 
-Low priority.
-
-STL and OBJ should be treated as mesh references, not reliable CAD source files.
-CadFlow may:
-
-- Measure bounding box.
-- Use the mesh as visual or reference geometry.
-- Attempt simple approximation or reconstruction in later versions.
-
-CadFlow must not promise robust parametric editing from STL or OBJ.
-
-## Patch-First Revision
-
-CadFlow should avoid this pattern:
-
-```text
-change request -> regenerate everything from scratch with no trace
-```
-
-Prefer:
-
-```text
-change request
-  -> change intent
-  -> patch target selection
-  -> patch
-  -> regenerate
-  -> compare
-```
-
-Patch targets may include:
-
-- Requirement patch.
-- Planning patch.
-- CAD IR patch.
-- `model.py` patch for trusted CadFlow-compatible sources.
-- External geometry operation for reference-based editing.
-
-For CadFlow-native models, prefer CAD IR patch when the requested change maps
-cleanly to dimensions or features.
-
-Example patch:
-
-```json
-{
-  "patch_type": "cad_ir_patch",
-  "changes": [
     {
+      "op": "replace",
       "path": "dimensions.thickness",
       "before": 5,
-      "after": 6,
-      "reason": "User requested thicker plate"
-    },
-    {
-      "path": "features.holes.diameter",
-      "before": 4.5,
-      "after": 5.5,
-      "reason": "M5 clearance hole"
+      "value": 6,
+      "reason": "User requested a thicker part"
     }
-  ]
-}
-```
 
-## Revision Artifacts
+Rules:
 
-Suggested child run structure:
+- use allowlisted CAD field paths;
+- record before/after where possible;
+- separate user-requested changes from validator/system repair changes;
+- preserve unrelated fields;
+- reject or ask when the change cannot be represented safely;
+- validate the patched CAD IR before deterministic execution.
 
-```text
-runs/<child_run_id>/
-  parent_run_id.txt
-  revision_request.json
-  change_intent.json
-  revision_plan.json
-  patch.json
-  requirement.json
-  planning_artifact.json
-  input_ir.json
-  model.py
-  model.step
-  model.stl
-  report.json
-  report.md
-  comparison.json
-  revision_report.md
-  agent_trace.json
-  lineage.json
-  logs/runtime.json
-```
+## Execution and comparison
 
-If the revision prompt cannot be converted into structured CAD IR changes
-(`revision_plan.status` is not `ready_for_patch` or `patch.changes` is empty),
-the run is recorded as blocked instead of generating a misleading child model.
-Blocked revision runs still write `revision_request.json`, `change_intent.json`,
-`revision_plan.json`, `patch.json`, `comparison.json`, `lineage.json`,
-`report.json`, `report.md`, `revision_report.md`, and `agent_trace.json`.
-They do not write child `input_ir.json`, `model.py`, `model.step`, or
-`model.stl`.
+A validated patch produces a new child Run through the existing deterministic pipeline.
 
-Revisions should create new child runs. They must not overwrite parent runs.
+`comparison.json` and `revision_report.md` should distinguish:
 
-`revision_request.json` records the user change request and parent context.
-`change_intent.json` records parsed change intent. `revision_plan.json` records
-the proposed edit strategy and target artifacts. `patch.json` records structured
-before/after changes where possible. `comparison.json` summarizes old vs new
-dimensions, features, validation status, and changed artifacts.
-`revision_report.md` is the human-readable summary of parent, child, requested
-changes, actual IR changes, validation status, and system repair changes.
-`lineage.json` records parent/child relationships.
+- requested changes;
+- actual structured changes;
+- validation or system repair changes;
+- product availability;
+- limitations and unverified intent;
+- parent and child lineage.
 
-## Lineage Rules
+Creating a successful child Run does not automatically replace the Work's accepted result. User approval remains explicit.
 
-- Every revision child run should record its parent run id.
-- Parent runs remain immutable workflow records.
-- Comparison should identify the parent and child artifacts used.
-- Reports should distinguish user-requested changes from validation or repair
-  changes.
-- Patch records should include before/after values whenever the source artifact
-  makes that possible.
+## Agent boundary
 
-## Non-Goals
+The Revision Agent may:
 
-This stage does not implement:
+- parse user change intent;
+- request allowlisted parent context;
+- propose a structured plan and patch;
+- react to validator feedback;
+- ask the user or stop safely.
 
-- Full LLM provider integration.
-- Complete revision engine.
-- Robust STEP feature recovery.
-- STL reverse engineering.
-- Arbitrary free-form LLM code execution.
-- Full Web revision UI.
+It may not:
+
+- overwrite parent artifacts;
+- execute provider-generated Python, shell, or CadQuery;
+- invent unsupported external-file feature recovery;
+- silently change unrelated geometry;
+- update accepted-result pointers;
+- bypass patch and CAD IR validation.
+
+## Current capability
+
+Current deterministic revision support is intentionally narrow and CadFlow-native. It can represent selected field-level CAD IR changes and create a child Run when the patch validates.
+
+Not yet product-usable:
+
+- arbitrary geometry editing;
+- robust external STEP feature recovery;
+- STL/mesh reverse engineering;
+- complete provider-backed revision episodes;
+- full browser revision experience across all artifacts.
+
+The runtime and UI must expose these limitations rather than implying general CAD editing.
+
+## Tests
+
+Protect:
+
+- parent immutability;
+- explicit child lineage;
+- allowlisted structured paths;
+- before/after patch evidence;
+- blocked unsupported changes;
+- invalid patch never reaching CAD execution;
+- requested versus repair change separation;
+- child creation not automatically updating accepted result;
+- external STEP/mesh limitations;
+- path and secret sanitization.
+
+## Invariants
+
+1. Revision begins from an explicit parent.
+2. Parent Run evidence is immutable.
+3. Change intent, plan, patch, execution, comparison, and approval are separate decisions.
+4. Structured native CAD IR revision is preferred.
+5. Unsupported edits block safely.
+6. New child products require local validation and deterministic execution.
+7. Acceptance remains a user decision at Work level.
