@@ -7,5 +7,11 @@ immutable, read-only audit mode. Workflow graph nodes, selected-stage detail,
 and actions are supplied by one page view model. Each action declares scope and
 target Run; `latest_attempt_run_id` never silently selects the active lineage.
 
-Next: visual-system refinement, responsive screenshot review, and broader
-Run-to-Run comparison UX.
+Completed: the Workflow Cockpit visual and interaction layer. It provides
+centralized semantic UI tokens, a responsive dot-and-connector canvas, Run
+lineage strip, Current Work/Snapshot hierarchy, causal three-part stage detail,
+and Work-scoped History cards. Contract mode explicitly shows execution skipped
+without implying missing model files.
+
+Next: capture browser-reachable Golden screenshots and broaden Run-to-Run
+comparison UX.

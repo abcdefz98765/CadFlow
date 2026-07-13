@@ -35,6 +35,34 @@ WORK_USER_PAGES = (
     ("history", "history", "History"),
 )
 
+# The workflow cockpit deliberately has one visual vocabulary.  Keep semantic
+# state, spacing, and responsive rules here instead of scattering styles among
+# individual renderers.  NiceGUI still only receives presentation data from the
+# workflow page view model; these classes never infer workflow state.
+WORKFLOW_UI_CSS = """
+:root {
+  --wf-space-1:4px; --wf-space-2:8px; --wf-space-3:12px; --wf-space-4:16px;
+  --wf-space-5:24px; --wf-space-6:32px; --wf-radius:10px; --wf-radius-sm:7px;
+  --wf-border:#dbe3ea; --wf-surface:#ffffff; --wf-muted:#64748b;
+  --wf-bg:#f6f8fb; --wf-ink:#172033; --wf-primary:#2563eb;
+  --wf-completed:#15803d; --wf-running:#2563eb; --wf-review:#b7791f;
+  --wf-blocked:#dc2626; --wf-stale:#a16207; --wf-unavailable:#475569;
+  --wf-reference:#64748b; --wf-override:#7c3aed;
+}
+body{background:var(--wf-bg);color:var(--wf-ink)}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.sidebar{background:#fff;border-right:1px solid var(--wf-border);min-height:100vh}.content{min-height:100vh}.nav-btn{justify-content:flex-start;width:100%}
+.work-tree-item{border:1px solid transparent;border-radius:var(--wf-radius-sm);padding:var(--wf-space-2) 10px;width:100%;cursor:pointer}.work-tree-item:hover{background:#f8fafc}.work-tree-item-active{background:#eef6ff;border-color:#bfdbfe}.work-page-tree{border-left:2px solid #dbeafe;margin-left:14px;padding-left:10px}.work-page-btn{font-size:12px;min-height:30px;justify-content:flex-start;width:100%}
+.workflow-hero,.workflow-snapshot-banner,.workflow-run-strip-panel,.workflow-stage-detail-v2{background:var(--wf-surface);border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}
+.workflow-hero{border-color:#cbd5e1;box-shadow:0 1px 2px rgba(15,23,42,.04)}.workflow-snapshot-banner{border-left:4px solid var(--wf-review);background:#fffcf5}.workflow-eyebrow{font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--wf-muted)}.workflow-summary{max-width:760px;line-height:1.55}.workflow-meta{font-size:12px;color:var(--wf-muted)}
+.workflow-run-strip{overflow-x:auto;padding-bottom:var(--wf-space-1)}.workflow-run-strip-inner{min-width:max-content}.workflow-run-item{min-width:180px;border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);cursor:pointer;background:#fff}.workflow-run-item:hover{border-color:#94a3b8}.workflow-run-current{border-color:#60a5fa;background:#eff6ff}.workflow-run-failed{border-color:#fecaca;background:#fff8f8}.workflow-run-state{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.workflow-graph{overflow-x:auto;background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workflow-graph-canvas{min-width:1120px}.workflow-graph-label{font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--wf-muted)}.workflow-stage-row,.workflow-lane-row{display:flex;align-items:flex-start;gap:var(--wf-space-2);flex-wrap:nowrap}.workflow-step{align-items:center;gap:var(--wf-space-1);cursor:pointer;min-width:104px;max-width:132px;padding:var(--wf-space-2);border:1px solid transparent;border-radius:var(--wf-radius-sm)}.workflow-step:hover{background:#f8fafc}.workflow-step-selected{border-color:var(--wf-primary);background:#eff6ff;outline:2px solid #bfdbfe;outline-offset:1px}.workflow-connector{height:2px;min-width:24px;flex:1;background:#cbd5e1;margin-top:18px;position:relative}.workflow-connector:after{content:'›';position:absolute;right:-2px;top:-12px;color:#94a3b8;font-size:24px}.workflow-branch-note{margin-left:208px;color:var(--wf-muted);font-size:12px}.workflow-lane{border-left:2px solid #cbd5e1;margin-left:278px;padding-left:var(--wf-space-3)}
+.workflow-dot{width:18px;height:18px;border:2px solid #fff;border-radius:999px;box-shadow:0 0 0 2px #cbd5e1}.workflow-dot.status-completed,.workflow-dot.status-contract_complete{background:var(--wf-completed);box-shadow:0 0 0 2px #86efac}.workflow-dot.status-running{background:var(--wf-running);box-shadow:0 0 0 2px #93c5fd;animation:wf-pulse 1.7s infinite}.workflow-dot.status-needs_review{background:var(--wf-review);box-shadow:0 0 0 2px #fde68a}.workflow-dot.status-blocked,.workflow-dot.status-failed{background:var(--wf-blocked);box-shadow:0 0 0 2px #fecaca}.workflow-dot.status-stale{background:#fff;border:3px solid var(--wf-stale);box-shadow:0 0 0 2px #fde68a}.workflow-dot.status-user_modified{background:var(--wf-override);box-shadow:0 0 0 2px #ddd6fe}.workflow-dot.status-execution_skipped,.workflow-dot.status-skipped{background:#f8fafc;border:3px double #64748b;box-shadow:0 0 0 2px #cbd5e1}.workflow-dot.status-unavailable{background:#fff;border:2px dashed var(--wf-unavailable);box-shadow:none}.workflow-dot.status-not_started{background:#fff;border-color:#94a3b8;box-shadow:none}.workflow-dot.status-reference_only{border-radius:3px;background:#fff;border-color:var(--wf-reference);box-shadow:none}.workflow-dot.kind-review,.workflow-dot.kind-rework{transform:rotate(45deg);border-radius:3px}.workflow-dot.kind-review+label,.workflow-dot.kind-rework+label{margin-top:2px}.workflow-attention{font-size:10px;color:var(--wf-review);font-weight:700}.workflow-node-status{font-size:11px;color:var(--wf-muted);text-transform:capitalize}
+.workflow-part-candidate{min-width:146px;max-width:180px;border:1px solid var(--wf-border);border-radius:999px;padding:var(--wf-space-2) var(--wf-space-3);background:#fff}.workflow-part-candidate.reference-component{border-radius:var(--wf-radius-sm);border-style:dashed;background:#f8fafc}.workflow-part-selected{border-color:var(--wf-primary);outline:2px solid #bfdbfe;outline-offset:1px}
+.stage-conclusion{border-bottom:1px solid var(--wf-border);padding-bottom:var(--wf-space-3)}.stage-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--wf-space-3)}.stage-detail-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);min-height:156px}.stage-detail-card h3{margin:0 0 var(--wf-space-2);font-size:12px;letter-spacing:.07em;color:var(--wf-muted);font-weight:700}.stage-detail-card.decision{background:#fbfcff}.stage-artifact-list{margin-top:var(--wf-space-2);padding-top:var(--wf-space-2);border-top:1px solid #eef2f7}.workflow-evidence{border-top:1px solid var(--wf-border);padding-top:var(--wf-space-3)}.workflow-disabled-reason{font-size:12px;color:var(--wf-muted)}
+.history-list{display:grid;gap:var(--wf-space-3)}.history-run-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);background:#fff;cursor:pointer}.history-run-card:hover{border-color:#94a3b8}.history-run-grid{display:grid;grid-template-columns:1.2fr repeat(4,minmax(0,1fr));gap:var(--wf-space-3)}.history-field-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--wf-muted)}
+@keyframes wf-pulse{50%{box-shadow:0 0 0 5px #dbeafe}}@media(max-width:1100px){.stage-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr)}}@media(max-width:760px){.sidebar{width:100%;min-height:auto;border-right:0;border-bottom:1px solid var(--wf-border)}.content{min-width:0;padding:var(--wf-space-3)}.workflow-hero,.workflow-snapshot-banner,.workflow-run-strip-panel,.workflow-stage-detail-v2{padding:var(--wf-space-3)}.workflow-graph{padding:var(--wf-space-3)}.workflow-graph-canvas{min-width:1040px}.stage-detail-grid,.history-run-grid{grid-template-columns:1fr}.workflow-lane{margin-left:170px}.workflow-branch-note{margin-left:140px}}
+"""
+
 ARTIFACT_PAGE_ARTIFACTS = (
     "report.md",
     "report.json",
@@ -583,43 +611,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
 
     @ui.page("/")
     def index() -> None:
-        ui.add_head_html(
-            "<style>"
-            "body{background:#f7f8fa}.mono{font-family:ui-monospace, SFMono-Regular, Consolas, monospace}"
-            ".sidebar{background:#ffffff;border-right:1px solid #e5e7eb;min-height:100vh}"
-            ".content{min-height:100vh}.nav-btn{justify-content:flex-start;width:100%}"
-            ".work-tree-item{border:1px solid transparent;border-radius:6px;padding:8px 10px;width:100%;cursor:pointer}"
-            ".work-tree-item:hover{background:#f8fafc}.work-tree-item-active{background:#eef6ff;border-color:#bfdbfe}"
-            ".work-page-tree{border-left:2px solid #dbeafe;margin-left:14px;padding-left:10px}"
-            ".work-page-btn{font-size:12px;min-height:30px;justify-content:flex-start;width:100%}"
-             ".workflow-graph{background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;padding:18px}"
-             ".workflow-page-context,.workflow-current-result,.workflow-stage-detail-v2{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px}"
-             ".workflow-run-strip{overflow-x:auto;padding-bottom:4px}.workflow-run-item{min-width:150px;border:1px solid #dbe3ea;border-radius:6px;padding:8px;cursor:pointer}"
-            ".workflow-step{align-items:center;gap:8px;cursor:pointer;min-width:92px}"
-            ".workflow-part-candidate{border:1px solid #dbe3ea;border-radius:6px;padding:8px;min-width:136px}"
-            ".workflow-step-selected{background:#f8fafc;border:1px solid #bfdbfe;border-radius:8px;padding:8px}"
-            ".workflow-dot{width:18px;height:18px;border-radius:999px;border:2px solid #fff;box-shadow:0 0 0 2px #cbd5e1}"
-            ".workflow-dot.accepted,.workflow-dot.completed,.workflow-dot.completed_with_assumptions,.workflow-dot.available,.workflow-dot.generated{background:#16a34a;box-shadow:0 0 0 2px #86efac}"
-            ".workflow-dot.selected{background:#2563eb;box-shadow:0 0 0 2px #93c5fd}"
-            ".workflow-dot.ready,.workflow-dot.running{background:#2563eb;box-shadow:0 0 0 2px #93c5fd}"
-            ".workflow-dot.needs_review,.workflow-dot.partial_success,.workflow-dot.user_modified,.workflow-dot.stale{background:#ca8a04;box-shadow:0 0 0 2px #fde68a}"
-            ".workflow-dot.blocked,.workflow-dot.failed{background:#dc2626;box-shadow:0 0 0 2px #fecaca}"
-            ".workflow-dot.reference_only{background:#64748b;box-shadow:0 0 0 2px #cbd5e1}"
-            ".workflow-dot.not_started,.workflow-dot.unknown,.workflow-dot.incomplete,.workflow-dot.candidate{background:#e5e7eb;box-shadow:0 0 0 2px #cbd5e1}"
-            ".workflow-arrow{color:#94a3b8;font-size:22px;line-height:1;text-align:center}"
-            ".stage-status-banner{border:1px solid #cbd5e1;border-left:5px solid #2563eb;background:#f8fafc;border-radius:6px;padding:16px}"
-            ".stage-status-banner.blocked{border-left-color:#dc2626;background:#fff7f7}.stage-status-banner.needs_review{border-left-color:#ca8a04;background:#fffbeb}"
-            ".stage-status-banner.user_modified{border-left-color:#7c3aed;background:#faf5ff}.stage-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}"
-            ".stage-detail-card{border:1px solid #e2e8f0;border-radius:6px;padding:12px;min-height:112px}.stage-detail-card h3{margin:0 0 8px;font-size:14px;font-weight:600;color:#475569}"
-            ".stage-status-explanation{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;border-top:1px solid #dbe3ea;padding-top:10px}"
-            ".workflow-context{border:1px solid #e2e8f0;border-radius:6px;background:#fff;padding:16px}.workflow-context-grid{display:grid;grid-template-columns:minmax(280px,.85fr) minmax(0,1.15fr);gap:24px;align-items:start}"
-            ".workflow-prompt{border-left:4px solid #2563eb;background:#f8fafc;padding:12px;white-space:pre-wrap;line-height:1.55}.workflow-record-list{border-top:1px solid #e2e8f0}.workflow-record{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;border-bottom:1px solid #e2e8f0;padding:10px 0}.workflow-record-copy{min-width:0}.workflow-record-copy p{margin:2px 0 0}.artifact-status-table{border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}.artifact-status-head,.artifact-status-row{display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(150px,1.3fr) minmax(88px,.7fr) minmax(88px,.65fr) minmax(70px,.4fr);gap:8px;align-items:center;padding:11px 14px}.artifact-status-head{background:#f8fafc;color:#64748b;font-size:12px;font-weight:600}.artifact-status-row{border-top:1px solid #e2e8f0}.artifact-status-row:hover{background:#f8fafc}"
-            ".artifact-audit-card{border:1px solid #e2e8f0;border-radius:6px;padding:12px;background:#fff}.artifact-summary{border-left:3px solid #94a3b8;padding-left:10px}"
-             "@media(max-width:760px){.sidebar{width:100%;min-height:auto;border-right:0;border-bottom:1px solid #e5e7eb}.content{min-width:0}.stage-detail-grid,.stage-status-explanation,.workflow-context-grid{grid-template-columns:1fr}.workflow-graph{overflow-x:auto}.workflow-graph>div{min-width:max-content}.artifact-status-head{display:none}.artifact-status-row{grid-template-columns:1fr 1fr}.artifact-status-row>div:nth-child(2){grid-column:1/-1}}"
-            ".part-preview{border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#f8fafc;min-height:240px}"
-            ".part-preview iframe{width:100%;height:260px;border:0;pointer-events:none}"
-            "</style>"
-        )
+        ui.add_head_html(f"<style>{WORKFLOW_UI_CSS}</style>")
         with ui.row().classes("w-full gap-0"):
             sidebar = ui.column().classes("sidebar w-80 gap-3 p-4")
             content = ui.column().classes("content flex-1 gap-4 p-5")
@@ -1097,17 +1089,18 @@ def _render_workflow_page_v2(
     snapshot = page.get("view_mode") == "run_snapshot"
     work = page.get("work") if isinstance(page.get("work"), dict) else {}
     lineage = page.get("active_lineage") if isinstance(page.get("active_lineage"), dict) else {}
-    with ui.element("section").classes("workflow-page-context w-full"):
+    with ui.element("section").classes("workflow-snapshot-banner w-full" if snapshot else "workflow-hero w-full"):
         with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
             with ui.column().classes("gap-1"):
-                ui.label("Historical Run Snapshot" if snapshot else "Current Work").classes("text-xl font-semibold")
+                ui.label("HISTORICAL RUN SNAPSHOT · READ-ONLY" if snapshot else "CURRENT WORK").classes("workflow-eyebrow")
+                ui.label(work.get("title") or "Workflow").classes("text-2xl font-semibold")
                 if snapshot:
-                    ui.label(f"Run: {page.get('viewed_run_id')} · immutable · read-only").classes("text-sm text-amber-800")
-                    ui.label("Does not represent the complete current Work.").classes("text-sm text-gray-600")
+                    ui.label(f"Run {page.get('viewed_run_id')} · immutable audit record").classes("text-sm text-amber-800")
+                    ui.label("This snapshot does not represent the complete Current Work.").classes("workflow-summary text-sm text-gray-700")
                 else:
                     leaf = lineage.get("active_leaf_run_id") or lineage.get("active_root_run_id") or "unavailable"
                     root = lineage.get("active_root_run_id")
-                    ui.label(f"Active lineage: {leaf}" + (f" based on {root}" if root and root != leaf else "")).classes("text-sm text-gray-600")
+                    ui.label(f"Active lineage: {root} → {leaf}" if root and root != leaf else f"Active lineage: {leaf}").classes("workflow-meta")
                     if page.get("lineage_inferred"):
                         ui.label("Active lineage inferred from legacy Work metadata.").classes("text-sm text-amber-800")
             with ui.row().classes("gap-2"):
@@ -1116,36 +1109,56 @@ def _render_workflow_page_v2(
                     current.props("color=primary")
                 if snapshot:
                     ui.button("Return to Current Work", icon="undo", on_click=on_select_current_work).props("outline dense")
-        ui.separator()
-        _render_run_strip(ui, page.get("run_strip"), on_select_run)
+    if snapshot:
+        with ui.element("section").classes("workflow-run-strip-panel w-full"):
+            _render_run_strip(ui, page.get("run_strip"), on_select_run, on_select_current_work)
     conclusion = page.get("current_conclusion") if isinstance(page.get("current_conclusion"), dict) else {}
-    with ui.element("section").classes("workflow-current-result w-full"):
-        ui.label(conclusion.get("title") or "Current result").classes("text-lg font-semibold")
-        ui.label(conclusion.get("summary") or "Inspect the selected workflow stage.").classes("text-sm text-gray-700")
+    with ui.element("section").classes("workflow-hero w-full"):
+        ui.label("CURRENT CONCLUSION" if not snapshot else "SNAPSHOT CONCLUSION").classes("workflow-eyebrow")
+        ui.label(conclusion.get("title") or "Current result").classes("text-xl font-semibold")
+        ui.label(conclusion.get("summary") or "Inspect the selected workflow stage.").classes("workflow-summary text-sm text-gray-700")
+        if conclusion.get("rationale"):
+            ui.label(conclusion["rationale"]).classes("workflow-meta")
         action = page.get("recommended_next_action") if isinstance(page.get("recommended_next_action"), dict) else None
         if action and action.get("enabled"):
-            ui.button(action.get("label") or action.get("key"), on_click=lambda a=action: _run_workflow_page_action(ui, actions, a, state, refresh)).props("dense color=primary")
+            ui.button(action.get("label") or action.get("key"), on_click=lambda a=action: _run_workflow_page_action(ui, actions, a, state, refresh)).props("color=primary")
+    if not snapshot:
+        with ui.element("section").classes("workflow-run-strip-panel w-full"):
+            _render_run_strip(ui, page.get("run_strip"), on_select_run, on_select_current_work)
     _render_workflow_stage_graph(ui, {"workflow_graph": page.get("workflow_graph"), "selected_stage_id": _dict_get(page.get("selected_stage"), "stage_id")}, on_select_stage)
-    _render_selected_stage_detail_v2(ui, page.get("selected_stage"), actions, state, refresh, snapshot)
+    _render_selected_stage_detail_v2(ui, page.get("selected_stage"), data, actions, state, refresh, snapshot)
 
 
-def _render_run_strip(ui: Any, runs: Any, on_select_run: Callable[[str], None]) -> None:
-    ui.label("Runs").classes("text-sm font-medium text-gray-600")
-    with ui.row().classes("workflow-run-strip w-full gap-2 no-wrap"):
-        for run in runs if isinstance(runs, list) else []:
-            if not isinstance(run, dict):
-                continue
-            item = ui.column().classes("workflow-run-item gap-1")
-            item.on("click", lambda _event, run_id=run.get("run_id"): on_select_run(str(run_id)))
-            with item:
-                ui.label(run.get("display_label") or run.get("run_id") or "Run").classes("text-sm font-medium")
-                ui.label(str(run.get("lineage_state") or "historical").replace("_", " ")).classes("text-xs text-gray-600")
-                ui.label(run.get("summary") or "Immutable workflow attempt.").classes("text-xs text-gray-500")
+def _render_run_strip(ui: Any, runs: Any, on_select_run: Callable[[str], None], on_select_current_work: Callable[[], None]) -> None:
+    ui.label("RUN LINEAGE").classes("workflow-eyebrow")
+    with ui.row().classes("workflow-run-strip w-full"):
+        with ui.row().classes("workflow-run-strip-inner gap-2 no-wrap"):
+            current = ui.column().classes("workflow-run-item workflow-run-current gap-1")
+            current.on("click", lambda _event: on_select_current_work())
+            with current:
+                ui.label("Current Work").classes("text-sm font-semibold")
+                ui.label("Active aggregated lineage").classes("workflow-run-state text-blue-700")
+                ui.label("Actionable workflow view").classes("text-xs text-gray-500")
+            for run in runs if isinstance(runs, list) else []:
+                if not isinstance(run, dict):
+                    continue
+                state = str(run.get("lineage_state") or "historical")
+                classes = "workflow-run-item gap-1" + (" workflow-run-current" if run.get("is_current") else "") + (" workflow-run-failed" if state == "failed_branch" else "")
+                item = ui.column().classes(classes)
+                item.on("click", lambda _event, run_id=run.get("run_id"): on_select_run(str(run_id)))
+                with item:
+                    ui.label(run.get("display_label") or run.get("run_id") or "Run").classes("text-sm font-medium")
+                    ui.label(state.replace("_", " ")).classes("workflow-run-state")
+                    ui.label(str(run.get("status") or "unknown").replace("_", " ")).classes("text-xs text-gray-600")
+                    ui.label(run.get("summary") or "Immutable workflow attempt.").classes("text-xs text-gray-500")
+                    if run.get("parent_run_id"):
+                        ui.label(f"Parent: {run['parent_run_id']}").classes("workflow-meta")
 
 
 def _render_selected_stage_detail_v2(
     ui: Any,
     stage: Any,
+    data: dict[str, Any],
     actions: WorkflowConsoleActions,
     state: dict[str, Any],
     refresh: Callable[[], None],
@@ -1156,21 +1169,24 @@ def _render_selected_stage_detail_v2(
         return
     conclusion = stage.get("conclusion") if isinstance(stage.get("conclusion"), dict) else {}
     with ui.element("section").classes("workflow-stage-detail-v2 w-full"):
-        with ui.row().classes("w-full items-start justify-between gap-3"):
+        with ui.row().classes("stage-conclusion w-full items-start justify-between gap-3"):
             with ui.column().classes("gap-1"):
+                ui.label("SELECTED STAGE CONCLUSION").classes("workflow-eyebrow")
                 ui.label(conclusion.get("title") or stage.get("stage_name") or stage.get("stage_id")).classes("text-xl font-semibold")
                 ui.label(conclusion.get("summary") or stage.get("short_summary") or "Stage data unavailable.").classes("text-sm text-gray-700")
+                ui.label(f"Source Run: {stage.get('source_run_id') or 'Work lineage'}" + (f" · Selected part: {stage.get('selected_part_id')}" if stage.get("selected_part_id") else "")).classes("workflow-meta")
             ui.badge(str(stage.get("status") or "unavailable").replace("_", " ")).classes(_badge_class(stage.get("status")))
         action = stage.get("primary_action") if isinstance(stage.get("primary_action"), dict) else None
         if action:
-            button = ui.button(action.get("label") or action.get("key"), on_click=lambda a=action: _run_workflow_page_action(ui, actions, a, state, refresh)).props("dense color=primary")
+            ui.label(f"Recommended action: {action.get('label') or action.get('key')}").classes("workflow-meta")
             if not action.get("enabled"):
-                button.disable()
-                button.tooltip(action.get("disabled_reason") or "Unavailable")
+                ui.label(action.get("disabled_reason") or "Unavailable").classes("workflow-disabled-reason")
         with ui.element("div").classes("stage-detail-grid w-full"):
             _render_stage_contract_block(ui, "USER INPUT", stage.get("user_input"), read_only)
+            _render_stage_contract_block(ui, "AGENT INTERPRETATION / DECISION", stage.get("agent_decision"), read_only)
             _render_stage_contract_block(ui, "AGENT OUTPUT", stage.get("agent_output"), read_only)
-        _render_stage_contract_block(ui, "AGENT INTERPRETATION / DECISION", stage.get("agent_decision"), read_only)
+        if stage.get("stage_id") in {"requirement", "clarification"} and not read_only:
+            _render_inline_requirement_clarification(ui, data, actions, state, refresh)
         secondary = stage.get("secondary_actions") if isinstance(stage.get("secondary_actions"), list) else []
         if secondary:
             ui.label("Secondary actions").classes("text-sm font-medium text-gray-600")
@@ -1180,17 +1196,25 @@ def _render_selected_stage_detail_v2(
                     if not action.get("enabled"):
                         button.disable()
                         button.tooltip(action.get("disabled_reason") or "Unavailable")
+        disabled_actions = stage.get("disabled_actions") if isinstance(stage.get("disabled_actions"), list) else []
+        if disabled_actions:
+            ui.label("Unavailable actions").classes("text-xs font-medium text-gray-500")
+            for action in disabled_actions:
+                if isinstance(action, dict):
+                    ui.label(f"{action.get('label') or action.get('key')}: {action.get('disabled_reason') or 'Unavailable'}").classes("workflow-disabled-reason")
         evidence = stage.get("evidence") if isinstance(stage.get("evidence"), list) else []
-        ui.label("EVIDENCE").classes("text-sm font-medium text-gray-600")
-        ui.label(", ".join(str(item.get("name")) for item in evidence if isinstance(item, dict) and item.get("name")) or "No additional evidence is available.").classes("text-sm text-gray-700")
+        with ui.element("section").classes("workflow-evidence w-full"):
+            ui.label("EVIDENCE").classes("workflow-eyebrow")
+            ui.label(", ".join(str(item.get("name")) for item in evidence if isinstance(item, dict) and item.get("name")) or "No additional evidence is available.").classes("text-sm text-gray-700")
         with ui.expansion("Advanced", icon="info").classes("w-full"):
             ui.label("Raw artifacts and diagnostics remain secondary to this stage summary.").classes("text-sm text-gray-500")
 
 
 def _render_stage_contract_block(ui: Any, title: str, value: Any, read_only: bool) -> None:
     item = value if isinstance(value, dict) else {}
-    with ui.element("section").classes("stage-detail-card"):
-        ui.label(title).classes("text-sm font-medium text-gray-600")
+    classes = "stage-detail-card decision" if "DECISION" in title else "stage-detail-card"
+    with ui.element("section").classes(classes):
+        ui.html(f"<h3>{title}</h3>")
         ui.label(item.get("summary") or "No data is available for this stage section.").classes("text-sm text-gray-800")
         source = item.get("source_run_id")
         stage = item.get("source_stage_id")
@@ -1198,6 +1222,15 @@ def _render_stage_contract_block(ui: Any, title: str, value: Any, read_only: boo
             ui.label(f"Source: {source or 'Work lineage'}" + (f" · {stage}" if stage else "")).classes("text-xs text-gray-500")
         if title == "USER INPUT":
             ui.label("Read-only snapshot" if read_only else ("Active override" if item.get("source_type") == "active_override" else "Accepted input")).classes("text-xs text-gray-500")
+            if item.get("stale_downstream"):
+                ui.label("This active override may make downstream stages stale.").classes("text-xs text-amber-800")
+        if title == "AGENT OUTPUT" and item.get("step_stl_expectation") == "not_expected":
+            ui.label("CAD IR validated · execution skipped · STEP/STL not expected").classes("text-xs text-gray-600")
+        for key, label in (("decisions", "Key decisions"), ("assumptions", "Assumptions"), ("artifacts", "Artifacts")):
+            values = item.get(key) if isinstance(item.get(key), list) else []
+            if values:
+                ui.label(label).classes("text-xs font-medium text-gray-500 mt-2")
+                ui.label(" · ".join(str(entry.get("name") if isinstance(entry, dict) else entry) for entry in values[:4])).classes("text-xs text-gray-600")
 
 
 def _run_workflow_page_action(ui: Any, actions: WorkflowConsoleActions, action: dict[str, Any], state: dict[str, Any], refresh: Callable[[], None]) -> None:
@@ -1405,42 +1438,37 @@ def _render_workflow_stage_graph(
         _render_graph_stage_row(ui, surface.get("graph_nodes") or [], selected, on_select_stage)
         return
     with ui.column().classes("workflow-graph w-full gap-4"):
-        ui.label("Assembly workflow").classes("text-sm font-medium text-gray-600")
-        _render_graph_stage_row(ui, graph.get("stage_spine") or [], selected, on_select_stage)
-        with ui.row().classes("w-full items-center gap-2"):
-            ui.label("|").classes("workflow-arrow")
-            ui.label("Assembly Plan separates the work into parts").classes("text-xs text-gray-500")
-        candidates = graph.get("part_candidates") if isinstance(graph.get("part_candidates"), list) else []
-        with ui.column().classes("w-full gap-2"):
-            ui.label("Candidate Parts").classes("text-sm font-medium text-gray-600")
-            if candidates:
-                with ui.row().classes("w-full items-stretch gap-3 flex-wrap"):
-                    for candidate in candidates:
-                        _render_part_candidate_node(ui, candidate, on_select_stage)
-            else:
-                ui.label("No generated part candidates have been identified yet.").classes("text-sm text-gray-500")
-        references = graph.get("reference_lane") if isinstance(graph.get("reference_lane"), list) else []
-        if references:
-            with ui.column().classes("w-full gap-2"):
-                ui.label("Reference Lane").classes("text-sm font-medium text-gray-600")
-                with ui.row().classes("w-full items-stretch gap-3 flex-wrap"):
-                    for candidate in references:
-                        _render_part_candidate_node(ui, candidate, on_select_stage)
-        with ui.row().classes("w-full items-center gap-2"):
-            ui.label("v").classes("workflow-arrow")
+        with ui.column().classes("workflow-graph-canvas gap-4"):
+            ui.label("DOT WORKFLOW GRAPH").classes("workflow-graph-label")
+            _render_graph_stage_row(ui, graph.get("stage_spine") or [], selected, on_select_stage)
+            ui.label("Assembly Plan branches into candidates and reference context").classes("workflow-branch-note")
+            candidates = graph.get("part_candidates") if isinstance(graph.get("part_candidates"), list) else []
+            with ui.column().classes("workflow-lane gap-2"):
+                ui.label("CANDIDATE PARTS").classes("workflow-graph-label")
+                if candidates:
+                    with ui.row().classes("workflow-lane-row"):
+                        for candidate in candidates:
+                            _render_part_candidate_node(ui, candidate, on_select_stage)
+                else:
+                    ui.label("No generated part candidates have been identified yet.").classes("text-sm text-gray-500")
+            references = graph.get("reference_lane") if isinstance(graph.get("reference_lane"), list) else []
+            if references:
+                with ui.column().classes("workflow-lane gap-2"):
+                    ui.label("REFERENCE COMPONENTS").classes("workflow-graph-label")
+                    with ui.row().classes("workflow-lane-row"):
+                        for candidate in references:
+                            _render_part_candidate_node(ui, candidate, on_select_stage)
             selected_part = graph.get("selected_part_id") or "a selected candidate"
-            ui.label(f"Selected Part Pipeline: {selected_part}").classes("text-sm font-medium text-gray-600")
-        _render_graph_stage_row(ui, graph.get("selected_part_pipeline") or [], selected, on_select_stage)
-        tail = graph.get("review_tail") if isinstance(graph.get("review_tail"), list) else []
-        if tail:
-            with ui.row().classes("w-full items-center gap-2"):
-                ui.label("v").classes("workflow-arrow")
-                ui.label("Work Review").classes("text-sm font-medium text-gray-600")
-            _render_graph_stage_row(ui, tail, selected, on_select_stage)
+            ui.label(f"SELECTED PART PIPELINE · {selected_part}").classes("workflow-graph-label")
+            _render_graph_stage_row(ui, graph.get("selected_part_pipeline") or [], selected, on_select_stage)
+            tail = graph.get("review_tail") if isinstance(graph.get("review_tail"), list) else []
+            if tail:
+                ui.label("WORKFLOW REVIEW / REWORK").classes("workflow-graph-label")
+                _render_graph_stage_row(ui, tail, selected, on_select_stage)
 
 
 def _render_graph_stage_row(ui: Any, nodes: list[dict[str, Any]], selected: Any, on_select_stage: Callable[[str], None]) -> None:
-    with ui.row().classes("w-full items-start gap-3 flex-wrap"):
+    with ui.row().classes("workflow-stage-row w-full"):
         for index, node in enumerate(nodes):
             stage_id = str(node.get("stage_id") or "")
             status = node.get("status") or "unknown"
@@ -1451,18 +1479,20 @@ def _render_graph_stage_row(ui: Any, nodes: list[dict[str, Any]], selected: Any,
             step.tooltip(_workflow_node_tooltip(node))
             step.on("click", lambda _event, s=stage_id: on_select_stage(s))
             with step:
-                ui.element("div").classes(f"workflow-dot {_dot_status(status)}")
+                ui.element("div").classes(f"workflow-dot status-{_dot_status(status)} kind-{node.get('kind') or 'stage'}")
                 ui.label(node.get("label") or stage_id).classes("text-sm font-semibold text-center")
-                ui.label(str(status).replace("_", " ")).classes("text-xs text-gray-500 text-center")
+                ui.label(str(status).replace("_", " ")).classes("workflow-node-status text-center")
+                if node.get("attention") not in {None, "none"}:
+                    ui.label("attention required" if node.get("attention") == "required" else "in progress").classes("workflow-attention")
                 if node.get("has_override"):
-                    ui.badge("override").classes("bg-blue-50 text-blue-700")
+                    ui.label("override active").classes("workflow-attention")
             if index < len(nodes) - 1:
-                ui.label("->").classes("workflow-arrow self-center")
+                ui.element("div").classes("workflow-connector")
 
 
 def _render_part_candidate_node(ui: Any, candidate: dict[str, Any], on_select_stage: Callable[[str], None]) -> None:
     status = str(candidate.get("status") or "candidate")
-    classes = "workflow-step workflow-part-candidate"
+    classes = "workflow-step workflow-part-candidate" + (" reference-component" if candidate.get("kind") == "reference_component" or candidate.get("reference_only") else "")
     if candidate.get("selected"):
         classes += " workflow-step-selected"
     node = ui.column().classes(classes)
@@ -1470,10 +1500,10 @@ def _render_part_candidate_node(ui: Any, candidate: dict[str, Any], on_select_st
     if not candidate.get("reference_only"):
         node.on("click", lambda _event: on_select_stage("part_request"))
     with node:
-        ui.element("div").classes(f"workflow-dot {_dot_status(status)}")
+        ui.element("div").classes(f"workflow-dot status-{_dot_status(status)} kind-{candidate.get('kind') or 'candidate_part'}")
         ui.label(candidate.get("part_id") or "part").classes("text-sm font-semibold text-center")
-        ui.label(candidate.get("role") or "assembly component").classes("text-xs text-gray-500 text-center")
-        ui.badge(status.replace("_", " ")).classes(_badge_class(status))
+        ui.label("reference-only" if candidate.get("reference_only") else (candidate.get("role") or "assembly component")).classes("text-xs text-gray-500 text-center")
+        ui.label(status.replace("_", " ")).classes("workflow-node-status")
         if candidate.get("supported_candidate"):
             ui.label("supported candidate").classes("text-xs text-green-700 text-center")
 
@@ -2434,7 +2464,7 @@ def _dot_status(status: Any) -> str:
     value = str(status or "unknown")
     if value in {"accepted_for_preview", "success"}:
         return "accepted"
-    if value in {"completed", "accepted", "available", "ready", "running", "needs_review", "partial_success", "blocked", "reference_only", "not_started", "incomplete", "candidate", "selected", "generated", "failed"}:
+    if value in {"completed", "contract_complete", "execution_skipped", "skipped", "unavailable", "user_modified", "stale", "accepted", "available", "ready", "running", "needs_review", "partial_success", "blocked", "reference_only", "not_started", "incomplete", "candidate", "selected", "generated", "failed"}:
         return value
     if "blocked" in value:
         return "blocked"
@@ -2713,56 +2743,31 @@ def _render_runs(
     runs = data.get("runs") or []
     selected = data.get("selected_run_id")
     pagination = data.get("pagination") if isinstance(data.get("pagination"), dict) else _empty_pagination(DEFAULT_RUN_PAGE_SIZE, 0)
-    _label_with_help(ui, "Runs", "当前 Work 的 immutable run history。默认只显示用户相关摘要，低层细节需要手动打开。", "text-xl font-semibold")
-    with ui.row().classes("w-full items-center gap-4"):
-        low_level = ui.checkbox("Show low-level details", value=bool(state.get("show_low_level_details")))
-        _help_icon(ui, "显示 child runs、bridge、review 等低层调试字段；默认关闭以减少干扰。")
-        unclassified = ui.checkbox("Show unclassified runs", value=bool(state.get("show_unclassified_runs")))
-        _help_icon(ui, "显示未归属到当前 Work 的 legacy/unclassified runs；它们不会被伪装成 Work。")
-        low_level.on_value_change(lambda event: _toggle_run_detail_option(state, "show_low_level_details", bool(event.value), refresh))
-        unclassified.on_value_change(lambda event: _toggle_run_detail_option(state, "show_unclassified_runs", bool(event.value), refresh))
-    with ui.row().classes("w-full items-end gap-3"):
-        search = ui.input("Search runs", value=state.get("search") or "").props("clearable").classes("w-72")
-        _help_icon(ui, "按 run id、stage 或摘要搜索 run history。只在打开 unclassified runs 时用于全局 run 列表。")
-        page_size = ui.select(options=[25, 50, 100], value=state.get("limit", DEFAULT_RUN_PAGE_SIZE), label="Page size").classes("w-36")
-        _help_icon(ui, "每页显示的 run 数量。分页用于避免一次加载过多历史文件。")
-        ui.button("Apply", icon="search", on_click=lambda: _apply_run_filters(state, search.value, page_size.value, refresh)).props("outline").tooltip("应用搜索和分页设置。")
-        previous_button = ui.button("Previous", icon="chevron_left", on_click=lambda: _change_run_page(state, -1, pagination, refresh)).props("outline").tooltip("上一页 run history。")
-        next_button = ui.button("Next", icon="chevron_right", on_click=lambda: _change_run_page(state, 1, pagination, refresh)).props("outline").tooltip("下一页 run history。")
-        ui.label(
-            f"{pagination.get('offset', 0) + 1 if pagination.get('returned') else 0}-"
-            f"{pagination.get('offset', 0) + pagination.get('returned', 0)} of {pagination.get('total', 0)}"
-        ).classes("text-sm text-gray-600")
-        if not data.get("show_unclassified_runs"):
-            search.disable()
-            page_size.disable()
-            previous_button.disable()
-            next_button.disable()
-        if not pagination.get("has_previous"):
-            previous_button.disable()
-        if not pagination.get("has_next"):
-            next_button.disable()
+    _label_with_help(ui, "History", "Immutable Run lineage for this Work. Open a Run to inspect a read-only snapshot.", "text-xl font-semibold")
+    ui.label("Runs are shown as Work lineage first; debug and unclassified runs remain excluded by default.").classes("text-sm text-gray-600")
     if not runs:
         ui.label("No workflow runs found.").classes("text-gray-600")
         return
-    columns = [
-        {"name": "run_id", "label": "Run", "field": "run_id", "align": "left"},
-        {"name": "status", "label": "Status", "field": "status", "align": "left"},
-        {"name": "stage", "label": "Stage", "field": "stage", "align": "left"},
-        {"name": "selected_part_id", "label": "Part", "field": "selected_part_id", "align": "left"},
-        {"name": "step", "label": "STEP", "field": "step", "align": "left"},
-        {"name": "stl", "label": "STL", "field": "stl", "align": "left"},
-    ]
-    rows = [_run_row(run, selected) for run in runs]
-    table = ui.table(columns=columns, rows=rows, row_key="run_id").classes("w-full")
-    table.on("rowClick", lambda event: on_select(event.args[1]["run_id"]))
-    selected_run = data.get("selected_run") or {}
-    with ui.row().classes("gap-3"):
-        ui.badge(f"Selected: {selected or 'none'}")
-        if data.get("show_low_level_details"):
-            ui.badge(f"Children: {len(selected_run.get('child_runs') or [])}")
-            ui.badge(f"Bridge: {_bridge_status(selected_run)}")
-            ui.badge(f"Result review: {_part_result_review_status(selected_run)}")
+    with ui.element("section").classes("history-list w-full"):
+        for run in runs:
+            if not isinstance(run, dict):
+                continue
+            row = _run_row(run, selected)
+            card = ui.element("article").classes("history-run-card" + (" workflow-run-current" if row.get("selected") else ""))
+            card.on("click", lambda _event, run_id=row["run_id"]: on_select(run_id))
+            with card:
+                with ui.row().classes("w-full items-start justify-between gap-3"):
+                    with ui.column().classes("gap-1"):
+                        ui.label(row.get("run_id") or "Run").classes("text-base font-semibold")
+                        ui.label(run.get("summary") or "Immutable workflow attempt.").classes("text-sm text-gray-700")
+                    ui.badge(str(row.get("status") or "unknown").replace("_", " ")).classes(_badge_class(row.get("status")))
+                with ui.element("div").classes("history-run-grid w-full mt-3"):
+                    _history_field(ui, "Relation", run.get("relation") or run.get("lineage_state") or "historical")
+                    _history_field(ui, "Parent", run.get("parent_run_id") or "—")
+                    _history_field(ui, "Active part", row.get("selected_part_id") or "—")
+                    _history_field(ui, "Artifacts", f"STEP {row.get('step')} · STL {row.get('stl')}")
+                    _history_field(ui, "Created", run.get("created_at") or "—")
+                ui.label("Open Snapshot · read-only audit").classes("workflow-meta mt-2")
 
 
 def _toggle_run_detail_option(
@@ -2887,6 +2892,44 @@ def _render_requirement_clarification_form(
             on_click=lambda: _apply_requirement_clarification_ui(actions, run_id, inputs, notes.value, state, refresh),
         )
         if not run_id or not inputs:
+            button.disable()
+
+
+def _render_inline_requirement_clarification(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+) -> None:
+    """Offer the existing structured clarification action in its causal context."""
+    review = data.get("requirement_review") if isinstance(data.get("requirement_review"), dict) else {}
+    requests = review.get("clarification_requests") if isinstance(review.get("clarification_requests"), list) else []
+    if not requests:
+        return
+    with ui.element("section").classes("stage-detail-card w-full"):
+        ui.html("<h3>REQUIREMENT CLARIFICATION</h3>")
+        ui.label("Answer the open questions here. CadFlow creates a validated requirement_v2 record and preserves the original requirement.").classes("text-sm text-gray-700")
+        inputs = []
+        for request in requests:
+            if not isinstance(request, dict):
+                continue
+            question = request.get("question") or request.get("field") or "Clarification"
+            answer = ui.input(str(question)).props("outlined").classes("w-full")
+            inputs.append((request, answer))
+        notes = ui.textarea("Notes").props("outlined autogrow").classes("w-full")
+        result = state.get("requirement_clarification_result")
+        if isinstance(result, dict):
+            if result.get("ok") is False or result.get("error"):
+                ui.label("Clarification could not be saved: " + str(result.get("error") or "validation failed")).classes("text-sm text-red-700")
+            else:
+                ui.label("Clarification saved. The workflow has been refreshed with the updated requirement.").classes("text-sm text-green-700")
+        button = ui.button(
+            "Submit clarification",
+            icon="save",
+            on_click=lambda: _apply_requirement_clarification_ui(actions, data.get("selected_run_id"), inputs, notes.value, state, refresh),
+        ).props("outline")
+        if not data.get("selected_run_id") or not inputs:
             button.disable()
 
 
@@ -3287,6 +3330,12 @@ def _run_row(run: dict[str, Any], selected: str | None) -> dict[str, Any]:
         "stl": "yes" if "model.stl" in downloadables else "no",
         "selected": run.get("run_id") == selected,
     }
+
+
+def _history_field(ui: Any, label: str, value: Any) -> None:
+    with ui.column().classes("gap-1 min-w-0"):
+        ui.label(label).classes("history-field-label")
+        ui.label(str(value)).classes("text-sm text-gray-700 break-words")
 
 
 def _run_history_row_as_run(row: dict[str, Any]) -> dict[str, Any]:

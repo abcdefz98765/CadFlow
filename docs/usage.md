@@ -195,6 +195,21 @@ human summary, current status, key decisions, user actions, important artifacts,
 and collapsed Advanced / Debug sections. The full stage list, raw workflow
 graph, raw diagnostics, and raw allowlisted artifacts are secondary surfaces.
 
+The page now leads with a Work hero, active lineage Run strip, one recommended
+action, and a horizontally scrollable dot workflow graph. The selected stage is
+read left-to-right as **User Input → Agent Interpretation / Decision → Agent
+Output**. On a narrow screen, the same blocks stack in that causal order while
+the graph and Run strip retain their topology through horizontal scrolling.
+Contract examples explicitly say that CAD IR was validated and CAD execution
+was skipped; `input_ir.json` is present while STEP/STL are not expected.
+
+For local visual acceptance, create the Golden Full and Contract examples from
+Workspace, select each Work's Workflow page, then inspect desktop (1440/1024)
+and mobile (390–430) widths. Confirm labels, connector topology, selected
+outline versus status color, candidate/reference distinction, and Current Work
+versus read-only Snapshot context. Browser automation may not be able to reach
+the desktop loopback server; in that case use this checklist in a local browser.
+
 Workflow has two explicit contexts. **Current Work** shows the Work manifest's
 active aggregated lineage and allows workflow actions against the action's
 displayed target Run. Clicking a Run in History opens a **Historical Run

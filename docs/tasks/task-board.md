@@ -9,6 +9,7 @@
 
 ## Next
 
-- [ ] Complete visual status/shape system and narrow-layout screenshot acceptance.
+- [x] Complete Workflow visual status/shape system, Run strip, causal selected-stage detail, and responsive graph behavior.
+- [ ] Capture Golden browser screenshots when the execution browser can reach the local NiceGUI server.
 - [ ] Add user-facing Run comparison details.
 - [ ] Expand structured inline interventions beyond the current minimal contract.

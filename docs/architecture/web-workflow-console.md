@@ -462,6 +462,21 @@ an active-lineage selector. **Work Workflow is an active-lineage aggregated
 view. Run Snapshot is immutable and read-only. Actions declare their scope and
 target Run.**
 
+### Workflow cockpit visual layer
+
+`nicegui_app.py` renders this stable view-model contract through a centralized
+`WORKFLOW_UI_CSS` token block. It does not derive status or lineage in CSS. The
+page has a Work hero/read-only snapshot banner, Run strip, conclusion with one
+primary action, dot-and-connector graph, causal selected-stage detail, evidence,
+and collapsed advanced information. The graph canvas has a fixed useful minimum
+width and `overflow-x:auto`; it must not use responsive wrapping to change the
+workflow topology. Node status, kind, selected state, and attention are emitted
+as separate classes so visual tests can protect their meanings.
+
+History is a Work-scoped lineage view: cards show relation, parent, status,
+active part, summary, artifact availability, and creation time. Opening a card
+switches to immutable Run Snapshot; it does not mutate active lineage.
+
 The MVP stage cards are Requirement, Clarification, Planning, Assembly Plan,
 Part Request, Part Review, Reviewed Handoff, CAD IR Draft, Part Modeling /
 Reviewed Part Create, Part Result Review, Workflow Review, and Rework. Each

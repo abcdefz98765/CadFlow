@@ -988,3 +988,34 @@ is an active-lineage aggregated view. Run Snapshot is immutable and read-only.
 Actions declare their scope and target Run.** Legacy Works retain a conservative
 root-run projection marked `lineage_inferred=true`; a newer attempt is never
 silently treated as accepted solely because it is newer.
+
+## 20. Workflow cockpit visual and interaction layer
+
+The implemented Workflow page is arranged as a cockpit, in this order:
+
+1. a Current Work hero or an unambiguous Historical Run Snapshot read-only banner;
+2. a horizontally scrollable Run lineage strip beginning with Current Work;
+3. current conclusion and the single recommended primary action;
+4. a wide dot-and-connector workflow canvas;
+5. the selected-stage conclusion and causal detail order: **User Input → Agent Interpretation / Decision → Agent Output**;
+6. compact evidence and collapsed advanced detail.
+
+The graph uses a centralized semantic token set. Node **shape** identifies stage,
+candidate, reference, review, or rework; **color** identifies business status;
+an outer outline identifies selection; and a separate attention label identifies
+review, stale, blocked, or running work. Nodes retain labels and compact status
+text at every width. The graph and Run strip scroll horizontally on narrow
+screens rather than wrapping and losing their topology. Candidate parts are
+rounded chips; reference-only components are square/dashed chips.
+
+Contract mode renders `execution_skipped` / `contract_complete` as a valid
+outcome: CAD IR is validated, `input_ir.json` is present, and STEP/STL are not
+expected. It must never look blocked or like missing export files. Full mode
+states that the result is one generic concept part and that no assembly was
+generated.
+
+Screenshot acceptance is performed against executable Golden Full, Contract,
+and historical snapshot Workflows at 1440, 1024, and 390–430 px. If the browser
+environment cannot reach the local console, record that technical limitation,
+the launch command, and the manual checklist rather than claiming visual
+acceptance.

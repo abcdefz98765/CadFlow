@@ -196,6 +196,7 @@ def _stage_detail(stage: dict[str, Any], fallback_source: str | None, view_mode:
             "validation_status": "passed" if detail.get("status") in {"completed", "contract_complete", "execution_skipped"} else detail.get("status"),
             "artifacts": outputs,
             "products": [item for item in outputs if item.get("name") in {"model.step", "model.stl"}],
+            "step_stl_expectation": "not_expected" if detail.get("status") in {"contract_complete", "execution_skipped"} else "expected",
         },
         "evidence": detail.get("important_artifacts") or [],
     })
@@ -244,6 +245,8 @@ def _run_strip(history: Any, lineage: dict[str, Any], view_mode: ViewMode, viewe
             **item,
             "display_label": f"Run {index}",
             "lineage_state": item.get("lineage_state") or "historical",
+            "status": _nested(item, "status", "status") or item.get("status") or "unknown",
+            "summary": item.get("summary") or "Immutable workflow attempt.",
             "is_current": item.get("lineage_state") == "active",
             "read_only": view_mode == "run_snapshot" and run_id == viewed_run_id,
         })
@@ -254,7 +257,20 @@ def _conclusion(surface: dict[str, Any], stage: dict[str, Any] | None, summary: 
     if view_mode == "run_snapshot":
         return {"title": "Historical Run Snapshot", "summary": "Read-only. This Run does not represent the complete current Work."}
     decision = surface.get("decision_panel") if isinstance(surface.get("decision_panel"), dict) else {}
-    return {"title": "Current result", "summary": decision.get("decision") or (stage or {}).get("human_summary") or summary.get("next_action") or "Inspect the active Work lineage."}
+    status = (stage or {}).get("status")
+    if status in {"contract_complete", "execution_skipped"}:
+        return {
+            "title": "CAD IR contract validated",
+            "summary": "input_ir.json was created. CAD execution was intentionally skipped, so STEP/STL are not expected.",
+            "rationale": "This is a contract-complete workflow, not a missing-model failure.",
+        }
+    if decision.get("scope") == "single_generic_concept_part":
+        return {
+            "title": "Single generic concept part generated",
+            "summary": "CadFlow generated and validated upper_link as link_like_part / elongated_plate_with_end_holes. This is not a complete robot-arm assembly.",
+            "rationale": "assembly_generated=false · result scope: single_generic_concept_part",
+        }
+    return {"title": "Current result", "summary": decision.get("decision") or (stage or {}).get("human_summary") or summary.get("next_action") or "Inspect the active Work lineage.", "rationale": decision.get("rationale") or None}
 
 
 def _first_enabled(stage: dict[str, Any]) -> bool:
