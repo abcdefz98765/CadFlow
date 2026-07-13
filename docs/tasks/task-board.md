@@ -13,3 +13,6 @@
 - [ ] Capture Golden browser screenshots when the execution browser can reach the local NiceGUI server.
 - [ ] Add user-facing Run comparison details.
 - [ ] Expand structured inline interventions beyond the current minimal contract.
+- [ ] Complete browser/manual Golden interaction acceptance; distinguish it from automated tests.
+- [ ] Close append-only stage review, accepted-part-result pointer, and candidate interaction contracts.
+- [ ] Accept scripted bounded Episode Phase 1.5 dynamics before any provider integration.

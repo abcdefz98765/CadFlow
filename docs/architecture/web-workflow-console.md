@@ -634,6 +634,18 @@ chat UI, no provider calls for free-form chat, no automatic rework execution, no
 loop queue, no automatic all-part generation, no batch generation, and no
 assembly generation.
 
+### Candidate selection closure
+
+Candidate selection is a controlled Work-level intervention. `Use This Part
+Next` accepts an explicit Work id, active Assembly Plan root Run id, and
+candidate part id; it rejects arbitrary paths, reference-only and unsupported
+candidates, Snapshot writes, and redundant current selections. It saves the
+existing validated Assembly Plan override, records controlled selection
+metadata, preserves immutable Runs and `accepted_part_results`, and projects
+the dependent part stages as stale. `accepted_part_results` records user
+accepted outputs per part and must not be treated as the sole active-lineage
+leaf: future sibling part Runs may be accepted independently.
+
 ## Security Notes
 
 - Bind to `127.0.0.1` by default.

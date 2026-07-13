@@ -1019,3 +1019,19 @@ and historical snapshot Workflows at 1440, 1024, and 390–430 px. If the browse
 environment cannot reach the local console, record that technical limitation,
 the launch command, and the manual checklist rather than claiming visual
 acceptance.
+
+## 21. Candidate selection and review closure
+
+`Use This Part Next` is a structured Current Work action, not a selectable
+graph chip. It displays a confirmation containing the old/new candidate, stale
+downstream stages, preserved historical Runs, and the fact that it does not
+start CAD generation. Confirmation writes a validated, versioned Assembly Plan
+override and Work-level selection metadata; it never edits the original Run
+artifact, clears an accepted result, or changes active lineage. Reference-only,
+unsupported, already-selected, and Run Snapshot candidates remain disabled with
+an explanatory hover.
+
+Every selected stage exposes an append-only Stage Review form and Quick
+Approve. Needs Revision requires requested changes; Blocked requires a reason.
+The latest compatible `stage_review.json` is materialized for existing rework
+while each original review remains under `reviews/<stage>/review_NNN.json`.
