@@ -2,6 +2,46 @@
 
 These are high-frequency rules for Codex and other coding agents. Keep this file short. Read the linked architecture and UX documents when the task touches those areas.
 
+## Mandatory architecture baseline
+
+Before changing product behavior, workflow, UI, agents, artifacts, lineage, reviews, or CAD execution, read:
+
+- `docs/architecture/cadflow-canonical-product-architecture.md`
+
+This document is the source of truth for the product object model, workflow checkpoints, and stage responsibilities.
+
+Canonical object model:
+
+- Workspace contains many Works and workspace configuration.
+- Work is one mutable user-facing engineering task.
+- Work contains or references Runs and Part Jobs.
+- Run is one append-only execution attempt and audit record.
+- Part Job is one intended part with multiple attempts and an explicit accepted-result pointer.
+- Current Work is actionable and aggregates the active lineage.
+- Run Snapshot is immutable and read-only.
+- Active lineage and accepted part results are different concepts.
+
+Canonical workflow:
+
+- Prompt / Requirement Input
+- Requirement
+- Clarification when required
+- Planning / Design Brief
+- Assembly Plan and Candidate Parts
+- Explicit Part Selection
+- Part Request
+- Part Review
+- Reviewed Handoff
+- CAD IR Draft
+- CAD IR Validation and Part Modeling
+- Part Result Review
+- User Approval / Accepted Part Result
+- Work-level Workflow Review
+- Rework or next Part Job
+- Deliverables
+
+Do not add, remove, reorder, merge, or redefine these responsibilities as an incidental implementation change. An architecture change requires an explicit proposal and synchronized updates to the canonical architecture, contracts, projections, tests, UX, roadmap, task board, and readiness status.
+
 ## Product goal
 
 CadFlow is a user-facing CAD workflow product, not an artifact browser, debug console, template catalogue, or collection of disconnected buttons.
@@ -18,8 +58,10 @@ The primary user experience must always answer:
 
 Write down the following for the affected user task:
 
+- affected canonical object: Workspace, Work, Run, or Part Job;
+- affected canonical checkpoint;
+- stage input, output, and user decision;
 - user goal;
-- current checkpoint;
 - information the user actually needs now;
 - decision required, if any;
 - one recommended next action;
@@ -73,7 +115,10 @@ Every visible stage and action must match the real workflow:
 - accepted part results are distinct from the current active lineage;
 - changing an upstream decision marks affected downstream stages stale;
 - no stage may look completed if its own output did not complete;
-- upstream limitations must not be shown as the selected stage's execution failure.
+- upstream limitations must not be shown as the selected stage's execution failure;
+- creating a result does not automatically approve it;
+- a single generated part is not a complete assembly;
+- Contract mode does not expect STEP/STL and is not a failure.
 
 ## Interaction closure
 
@@ -121,6 +166,7 @@ Do not fall back to backend keys, `Available`, raw enums, or English-only toolti
 Constrain side effects, not useful reasoning.
 
 - Agent reasoning may request context, compare candidates, submit structured proposals, and repair from validation feedback within a bounded episode.
+- Agents operate inside checkpoint transitions; they do not redefine or bypass the product workflow.
 - Only validated structured contracts may reach deterministic CAD execution.
 - Do not allow provider-generated Python, shell, or CadQuery to bypass CAD IR.
 - Deterministic adapters are tests, CI, examples, and fallback behavior; they are not the product capability ceiling.
@@ -142,6 +188,7 @@ Manually verify the affected user journey in a real browser whenever possible. D
 
 After changing code, behavior, workflow, artifacts, actions, ports, configuration, or user-visible semantics, inspect and update the relevant documents:
 
+- `docs/architecture/cadflow-canonical-product-architecture.md`
 - `docs/usage.md`
 - `FINAL-PRD.md`
 - `docs/status/current-product-readiness.md`
@@ -155,12 +202,16 @@ Interface or data-structure changes require contract, projection, migration, and
 
 ## Required reading by task
 
+For every product task:
+
+- `docs/architecture/cadflow-canonical-product-architecture.md`
+- `docs/status/current-product-readiness.md`
+
 For Workflow Cockpit work:
 
 - `docs/ux/product-usability-principles.md`
 - `docs/ux/workflow-cockpit-design-spec.md`
 - `docs/architecture/web-workflow-console.md`
-- `docs/status/current-product-readiness.md`
 
 For agent architecture work:
 
@@ -178,6 +229,8 @@ For agent architecture work:
 
 Before reporting completion, answer:
 
+- Does the change preserve the canonical Workspace / Work / Run / Part Job model?
+- Does it preserve the canonical checkpoint order and stage responsibility?
 - Is the primary user task clearer than before?
 - Can the user identify the current state and next action without reading diagnostics?
 - Does every enabled action produce immediate and final feedback?
@@ -185,5 +238,5 @@ Before reporting completion, answer:
 - Does the UI reflect the real Workflow and Work/Run semantics?
 - Is nonessential information progressively disclosed?
 - Are Chinese and English experiences consistent?
-- Were relevant docs and readiness status updated?
+- Were architecture, UX, readiness, roadmap, and tests synchronized?
 - Were manual verification limits reported honestly?
