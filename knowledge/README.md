@@ -1,26 +1,40 @@
-# Knowledge
+# Shared Knowledge
 
-Top-level knowledge is an index for shared, cross-skill references.
+This directory contains only knowledge that is genuinely shared by more than one CadFlow skill.
 
-Step-specific knowledge should live under the owning skill:
+Read:
 
-- requirement knowledge: `skills/requirement/knowledge/`
-- planning knowledge: `skills/planning/knowledge/`
-- part modeling knowledge: `skills/part_modeling/knowledge/`
-- assembly knowledge: `skills/assembly/knowledge/`
-- revision knowledge: `skills/revision/knowledge/`
-- review knowledge: `skills/review/knowledge/`
+- `../docs/architecture/agent-skill-knowledge.md`
 
-Keep this directory lightweight. Add global knowledge only when multiple skills
-need the same source of truth.
+## What belongs here
 
-Provider requests should not include the whole knowledge tree. The provider
-context assembler should select a compact global summary plus stage-specific
-knowledge only when it is relevant to the current operation.
+Examples:
 
-The first implementation should use an explicit operation-to-skill mapping and
-small static summaries. It should not require embeddings, RAG, a vector
-database, or automatic knowledge indexing.
+- cross-skill CAD IR vocabulary;
+- shared units and naming references not already owned by policy;
+- interface vocabulary used by Planning, CAD IR, Assembly, and Review;
+- common manufacturing references needed by multiple skills.
 
-See `docs/architecture/agent-skill-knowledge.md` for the agent/skill/knowledge
-context design.
+A shared source has one owner and one version. Do not copy separate variants into several skill directories.
+
+## What does not belong here
+
+Skill-private knowledge stays under:
+
+- `skills/requirement/knowledge/`;
+- `skills/planning/knowledge/`;
+- `skills/cad_ir/knowledge/`;
+- `skills/part_modeling/knowledge/`;
+- `skills/assembly/knowledge/`;
+- `skills/review/knowledge/`;
+- `skills/revision/knowledge/`.
+
+Global invariants and safety rules belong in `policies/`, not in knowledge files.
+
+Accepted Work artifacts, selected candidates, reviews, and prior results are runtime context selected from the active lineage. Validator feedback and repair attempts are Run/episode observations. Neither category should be copied into static knowledge.
+
+## Runtime selection
+
+Provider or proposer requests receive only selected compact summaries declared by the current skill. They must not receive the whole knowledge tree, arbitrary files, secrets, raw logs, or provider transcripts.
+
+When a skill-private reference becomes necessary to multiple skills, promote it to a shared source and update the skill/knowledge registry rather than duplicating it.
