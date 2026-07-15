@@ -1049,3 +1049,26 @@ Every selected stage exposes an append-only Stage Review form and Quick
 Approve. Needs Revision requires requested changes; Blocked requires a reason.
 The latest compatible `stage_review.json` is materialized for existing rework
 while each original review remains under `reviews/<stage>/review_NNN.json`.
+
+## 22. Guidance Contract and reduced primary surface
+
+Every visible canonical stage has a bilingual Guidance Contract in the Workflow
+page view model: `stage_purpose`, `current_conclusion`, `why_this_matters`,
+`user_decision_required`, `user_decision_summary`,
+`recommended_next_action`, `expected_result`, `normal_next_stage`,
+`blocked_reason`, `recovery_action`, and `limitations`. The contract explains
+the established checkpoint responsibility without adding or redefining a
+checkpoint.
+
+Selected-stage details present the contract before causal detail, in this order:
+current conclusion; user decision; one recommended action; expected result;
+User Input; Agent Interpretation / Decision; Agent Output; related review and
+evidence; alternatives; then Advanced. Primary surfaces use friendly Run labels
+where context is needed and do not show raw Work/Run ids, target ids, backend
+action names, relative paths, diagnostics, or full side-effect lists by default.
+Those records remain available in expandable Action Details and Advanced.
+
+Default Hover contains only the action, its most important result or risk, and
+whether it creates a Run or changes Current Work. Disabled Hover also states the
+unavailability reason. Chinese Hover must use the same human explanation and
+must not expose English backend labels.

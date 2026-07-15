@@ -15,6 +15,7 @@
 
 ## Current — Workflow Cockpit usability gate
 
+- [x] Define bilingual Guidance Contract fields and move default audit/action metadata to expandable Action Details / Advanced.
 - [ ] Click every visible enabled action in a real browser and record PASS/FAIL.
 - [ ] Verify Chinese labels, Hover, dialogs, validation, pending, success, failure, and disabled reasons.
 - [ ] Verify at least one deliberate action failure and recovery path.

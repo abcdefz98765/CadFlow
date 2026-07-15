@@ -1172,12 +1172,10 @@ def _render_workflow_page_v2(
                 ui.label("HISTORICAL RUN SNAPSHOT · READ-ONLY" if snapshot else "CURRENT WORK").classes("workflow-eyebrow")
                 ui.label(work.get("title") or "Workflow").classes("text-2xl font-semibold")
                 if snapshot:
-                    ui.label(f"Run {page.get('viewed_run_id')} · immutable audit record").classes("text-sm text-amber-800")
+                    ui.label("Immutable audit record" if str(data.get("language") or "en") != "zh" else "不可变审计记录").classes("text-sm text-amber-800")
                     ui.label("This snapshot does not represent the complete Current Work.").classes("workflow-summary text-sm text-gray-700")
                 else:
-                    leaf = lineage.get("active_leaf_run_id") or lineage.get("active_root_run_id") or "unavailable"
-                    root = lineage.get("active_root_run_id")
-                    ui.label(f"Active lineage: {root} → {leaf}" if root and root != leaf else f"Active lineage: {leaf}").classes("workflow-meta")
+                    ui.label("Active lineage · actionable current workflow" if str(data.get("language") or "en") != "zh" else "当前谱系 · 可操作的当前工作流").classes("workflow-meta")
                     if page.get("lineage_inferred"):
                         ui.label("Active lineage inferred from legacy Work metadata.").classes("text-sm text-amber-800")
             with ui.row().classes("gap-2"):
@@ -1239,7 +1237,7 @@ def _render_run_strip(ui: Any, runs: Any, on_select_run: Callable[[str], None], 
                     ui.label(str(run.get("status") or "unknown").replace("_", " ")).classes("text-xs text-gray-600")
                     ui.label(run.get("summary") or "Immutable workflow attempt.").classes("text-xs text-gray-500")
                     if run.get("parent_run_id"):
-                        ui.label(f"Parent: {run['parent_run_id']}").classes("workflow-meta")
+                        ui.label("Based on an earlier attempt" if not run.get("is_current") else "Current attempt").classes("workflow-meta")
 
 
 def _render_action_feedback_panel(ui: Any, state: dict[str, Any], language: str) -> None:
@@ -1254,15 +1252,15 @@ def _render_action_feedback_panel(ui: Any, state: dict[str, Any], language: str)
             with ui.column().classes("gap-1"):
                 ui.label(i18n_copy(language, title_key)).classes("text-sm font-semibold")
                 ui.label(str(execution.get("message") or "")).classes("text-sm")
-                target = " · ".join(str(value) for value in (execution.get("target_work_id"), execution.get("target_run_id"), execution.get("target_stage_id")) if value)
-                if target:
-                    ui.label(("目标: " if language == "zh" else "Target: ") + target).classes("workflow-meta")
                 if status == "succeeded" and execution.get("action_key") == "select_candidate_part":
                     ui.label("装配计划已保存为用户覆盖版本。零件请求及后续阶段已标记为过期。已有 Run 和已批准结果保持不变。" if language == "zh" else "The Assembly Plan was saved as a user override. Part Request and downstream stages are stale. Existing Runs and accepted results are unchanged.").classes("text-xs")
                     ui.label(i18n_copy(language, "next_create_part_request")).classes("text-xs font-medium")
                 if status == "failed" and execution.get("error_detail"):
                     with ui.expansion(i18n_copy(language, "details"), icon="error_outline").classes("w-full"):
                         ui.label(str(execution["error_detail"])).classes("text-xs whitespace-pre-wrap")
+                with ui.expansion(i18n_copy(language, "action_details"), icon="rule").classes("w-full"):
+                    target = {key: execution.get(key) for key in ("action_key", "target_work_id", "target_run_id", "target_stage_id")}
+                    ui.label(json.dumps(target, ensure_ascii=False, sort_keys=True)).classes("text-xs whitespace-pre-wrap workflow-meta")
             close = ui.button(icon="close", on_click=lambda: state.__setitem__("action_execution", None)).props("flat round dense")
             close.tooltip(i18n_copy(language, "close"))
 
@@ -1283,26 +1281,34 @@ def _render_selected_stage_detail_v2(
     language = str(data.get("language") or stage.get("display_language") or "en")
     with ui.element("section").classes("workflow-stage-detail-v2 w-full"):
         _render_action_feedback_panel(ui, state, language)
+        guidance = stage.get("guidance") if isinstance(stage.get("guidance"), dict) else {}
         with ui.row().classes("stage-conclusion w-full items-start justify-between gap-3"):
             with ui.column().classes("gap-1"):
                 ui.label(i18n_copy(language, "selected_stage").upper()).classes("workflow-eyebrow")
                 ui.label(conclusion.get("title") or stage.get("stage_name") or stage.get("stage_id")).classes("text-xl font-semibold")
-                ui.label(conclusion.get("summary") or stage.get("short_summary") or i18n_copy(language, "not_available")).classes("text-sm text-gray-700")
-                ui.label(("来源 Run: " if language == "zh" else "Source Run: ") + str(stage.get('source_run_id') or ('Work 谱系' if language == 'zh' else 'Work lineage')) + ((f" · 所选零件: {stage.get('selected_part_id')}" if language == "zh" else f" · Selected part: {stage.get('selected_part_id')}") if stage.get("selected_part_id") else "")).classes("workflow-meta")
+                ui.label(guidance.get("current_conclusion") or conclusion.get("summary") or stage.get("short_summary") or i18n_copy(language, "not_available")).classes("text-sm text-gray-700")
             ui.badge(str(stage.get("status") or "unavailable").replace("_", " ")).classes(_badge_class(stage.get("status")))
         action = stage.get("primary_action") if isinstance(stage.get("primary_action"), dict) else None
-        if action:
-            ui.label(("建议操作: " if language == "zh" else "Recommended action: ") + str(action.get('label') or action.get('key'))).classes("workflow-meta")
-            if not action.get("enabled"):
-                ui.label(action.get("disabled_reason") or ("当前不可用" if language == "zh" else "Unavailable")).classes("workflow-disabled-reason")
-        with ui.element("div").classes("stage-detail-grid w-full"):
-            _render_stage_contract_block(ui, i18n_copy(language, "user_input"), stage.get("user_input"), read_only, actions.backend, state, language=language)
-            _render_stage_contract_block(ui, i18n_copy(language, "agent_decision"), stage.get("agent_decision"), read_only, actions.backend, state, language=language)
-            _render_stage_contract_block(ui, i18n_copy(language, "agent_output"), stage.get("agent_output"), read_only, actions.backend, state, language=language)
-        _render_agent_review_panel(ui, stage, data, actions, state, refresh, read_only)
-        _render_stage_review_panel(ui, stage, data, actions, state, refresh, read_only)
+        _render_guidance_contract(ui, guidance, action, language)
+        if action and action.get("enabled"):
+            button = ui.button(action.get("label") or action.get("key"), on_click=lambda a=action: _run_workflow_page_action(ui, actions, a, state, refresh)).props("color=primary")
+            button.tooltip(action.get("tooltip") or i18n_copy(language, "recommended_action"))
+        elif action:
+            ui.label(action.get("disabled_reason") or ("当前不可用" if language == "zh" else "Unavailable")).classes("workflow-disabled-reason")
+        # Keep causal information in the decision order rather than three equal cards.
+        _render_stage_contract_block(ui, i18n_copy(language, "user_input"), stage.get("user_input"), read_only, actions.backend, state, language=language)
+        _render_stage_contract_block(ui, i18n_copy(language, "agent_decision"), stage.get("agent_decision"), read_only, actions.backend, state, language=language)
+        _render_stage_contract_block(ui, i18n_copy(language, "agent_output"), stage.get("agent_output"), read_only, actions.backend, state, language=language)
         if stage.get("stage_id") in {"requirement", "clarification"} and not read_only:
             _render_inline_requirement_clarification(ui, data, actions, state, refresh)
+        evidence = stage.get("evidence") if isinstance(stage.get("evidence"), list) else []
+        with ui.element("section").classes("workflow-evidence w-full"):
+            ui.label(i18n_copy(language, "evidence").upper()).classes("workflow-eyebrow")
+            if evidence:
+                _render_stage_artifact_rows(ui, evidence, actions.backend, state, compact=True)
+            else:
+                ui.label("没有额外证据可用。" if language == "zh" else "No additional evidence is available.").classes("text-sm text-gray-700")
+        _render_stage_review_panel(ui, stage, data, actions, state, refresh, read_only)
         secondary = stage.get("secondary_actions") if isinstance(stage.get("secondary_actions"), list) else []
         if secondary:
             ui.label(i18n_copy(language, "secondary_actions")).classes("text-sm font-medium text-gray-600")
@@ -1321,15 +1327,53 @@ def _render_selected_stage_detail_v2(
                         button = ui.button(action.get("label") or action.get("key")).props("outline dense")
                         button.disable()
                         button.tooltip(action.get("tooltip") or action.get("disabled_reason") or ("当前不可用" if language == "zh" else "Unavailable"))
-        evidence = stage.get("evidence") if isinstance(stage.get("evidence"), list) else []
-        with ui.element("section").classes("workflow-evidence w-full"):
-            ui.label(i18n_copy(language, "evidence").upper()).classes("workflow-eyebrow")
-            if evidence:
-                _render_stage_artifact_rows(ui, evidence, actions.backend, state, compact=True)
-            else:
-                ui.label("没有额外证据可用。" if language == "zh" else "No additional evidence is available.").classes("text-sm text-gray-700")
         with ui.expansion(i18n_copy(language, "advanced"), icon="info").classes("w-full"):
             ui.label("原始资料和诊断信息仍作为该阶段摘要的辅助信息。" if language == "zh" else "Raw artifacts and diagnostics remain secondary to this stage summary.").classes("text-sm text-gray-500")
+            _render_action_details(ui, stage, language)
+
+
+def _render_guidance_contract(ui: Any, guidance: dict[str, Any], action: dict[str, Any] | None, language: str) -> None:
+    """Render the decision-critical guidance before causal implementation detail."""
+    with ui.element("section").classes("workflow-evidence w-full"):
+        ui.label(i18n_copy(language, "stage_purpose").upper()).classes("workflow-eyebrow")
+        ui.label(str(guidance.get("stage_purpose") or "")).classes("text-sm text-gray-700")
+        ui.label(i18n_copy(language, "decision_required").upper()).classes("workflow-eyebrow mt-3")
+        decision = guidance.get("user_decision_summary") or ""
+        prefix = "需要用户决定。" if guidance.get("user_decision_required") and language == "zh" else "No user decision is required now." if not guidance.get("user_decision_required") and language != "zh" else "User decision required." if guidance.get("user_decision_required") else "当前无需用户决定。"
+        ui.label(f"{prefix} {decision}".strip()).classes("text-sm text-gray-700")
+        ui.label(i18n_copy(language, "recommended_action").upper()).classes("workflow-eyebrow mt-3")
+        ui.label(str((action or {}).get("label") or guidance.get("recommended_next_action") or "")).classes("text-sm font-medium text-gray-800")
+        ui.label(i18n_copy(language, "expected_result").upper()).classes("workflow-eyebrow mt-3")
+        ui.label(str(guidance.get("expected_result") or "")).classes("text-sm text-gray-700")
+        if guidance.get("blocked_reason"):
+            ui.label(("阻断原因" if language == "zh" else "Blocked reason").upper()).classes("workflow-eyebrow mt-3")
+            ui.label(str(guidance["blocked_reason"])).classes("workflow-disabled-reason")
+            ui.label(str(guidance.get("recovery_action") or "")).classes("text-sm text-gray-700")
+        limitations = guidance.get("limitations") if isinstance(guidance.get("limitations"), list) else []
+        if limitations:
+            ui.label(i18n_copy(language, "limitations").upper()).classes("workflow-eyebrow mt-3")
+            ui.label(" · ".join(str(item) for item in limitations[:2])).classes("text-sm text-gray-700")
+
+
+def _render_action_details(ui: Any, stage: dict[str, Any], language: str) -> None:
+    """Keep audit targets and internal action metadata inspectable but off the primary surface."""
+    with ui.expansion(i18n_copy(language, "action_details"), icon="rule").classes("w-full"):
+        actions = [item for item in [stage.get("primary_action")] if isinstance(item, dict)]
+        actions.extend(item for item in stage.get("secondary_actions", []) if isinstance(item, dict))
+        if not actions:
+            ui.label("暂无操作审计详情。" if language == "zh" else "No action audit details are available.").classes("text-sm text-gray-600")
+        for action in actions:
+            ui.label(str(action.get("label") or action.get("key") or "Action")).classes("text-sm font-medium")
+            audit = {
+                "backend_action": action.get("backend_action"),
+                "target_work_id": action.get("target_work_id"),
+                "target_run_id": action.get("target_run_id"),
+                "target_stage_id": action.get("target_stage_id"),
+                "creates_new_run": action.get("creates_new_run"),
+                "updates_active_lineage": action.get("updates_active_lineage"),
+                "expected_postcondition": action.get("expected_postcondition"),
+            }
+            ui.label(json.dumps(audit, ensure_ascii=False, indent=2, sort_keys=True)).classes("text-xs whitespace-pre-wrap workflow-meta")
 
 
 def _render_stage_contract_block(
@@ -1346,14 +1390,10 @@ def _render_stage_contract_block(
     with ui.element("section").classes(classes):
         ui.html(f"<h3>{title}</h3>")
         ui.label(item.get("summary") or ("此阶段区域暂无数据。" if language == "zh" else "No data is available for this stage section.")).classes("text-sm text-gray-800")
-        source = item.get("source_run_id")
-        stage = item.get("source_stage_id")
-        if source or stage:
-            ui.label(("来源: " if language == "zh" else "Source: ") + str(source or ("Work 谱系" if language == "zh" else "Work lineage")) + (f" · {stage}" if stage else "")).classes("text-xs text-gray-500")
         if title in {"USER INPUT", "用户输入"}:
             ui.label(("只读快照" if read_only else ("当前覆盖版本" if item.get("source_type") == "active_override" else "已接受输入")) if language == "zh" else ("Read-only snapshot" if read_only else ("Active override" if item.get("source_type") == "active_override" else "Accepted input"))).classes("text-xs text-gray-500")
             if item.get("stale_downstream"):
-                ui.label("This active override may make downstream stages stale.").classes("text-xs text-amber-800")
+                ui.label("当前覆盖版本可能使下游阶段过期。" if language == "zh" else "This active override may make downstream stages stale.").classes("text-xs text-amber-800")
         if title in {"AGENT OUTPUT", "Agent 输出"} and item.get("step_stl_expectation") == "not_expected":
             ui.label("CAD IR 已验证 · 已跳过执行 · 不预期 STEP/STL" if language == "zh" else "CAD IR validated · execution skipped · STEP/STL not expected").classes("text-xs text-gray-600")
         for key, label in (("decisions", "关键决策" if language == "zh" else "Key decisions"), ("assumptions", "假设" if language == "zh" else "Assumptions"), ("artifacts", "资料" if language == "zh" else "Artifacts")):
@@ -1410,9 +1450,7 @@ def _render_stage_review_panel(
     target_run = page.get("active_lineage", {}).get("active_root_run_id") if isinstance(page.get("active_lineage"), dict) else None
     with ui.element("section").classes("workflow-evidence w-full"):
         ui.label(i18n_copy(language, "stage_review").upper()).classes("workflow-eyebrow")
-        ui.label(
-            f"Review target: Run {target_run or 'unavailable'} · {review_stage}. Reviews are append-only; the latest compatible stage_review.json remains available to Rework."
-        ).classes("text-sm text-gray-700")
+        ui.label("记录对此阶段的决定。评审是追加记录，不会修改原有结果。" if language == "zh" else "Record your decision for this stage. Reviews are append-only and do not change the original result.").classes("text-sm text-gray-700")
         if read_only or not target_run:
             ui.label("This historical Run is read-only; return to Current Work to save a review.").classes("workflow-disabled-reason")
             return
@@ -1431,18 +1469,14 @@ def _render_stage_review_panel(
                     actions, target_run, review_stage, status.value, notes.value, changes.value, rework_target.value, state, refresh, target_work_id=(data.get("workflow_page") or {}).get("work", {}).get("work_id")
                 )),
             ).props("color=primary")
-            save.tooltip(
-                f"Save an append-only review for Current Work · Run {target_run} · {review_stage}. It does not create a Run or overwrite original artifacts."
-            )
+            save.tooltip("保存可追溯的阶段评审；不会创建 Run 或覆盖原有结果。" if language == "zh" else "Save a traceable stage review. It does not create a Run or overwrite original results.")
             quick = ui.button(
                 i18n_copy(language, "quick_approve"),
                 on_click=lambda: _schedule_action(_save_stage_review_from_form(
                     actions, target_run, review_stage, "approved", None, None, None, state, refresh, target_work_id=(data.get("workflow_page") or {}).get("work", {}).get("work_id")
                 )),
             ).props("outline")
-            quick.tooltip(
-                f"Immediately save Approved for Current Work · Run {target_run} · {review_stage}, without notes. No Run is created and existing artifacts remain unchanged."
-            )
+            quick.tooltip("立即保存“已批准”；不会创建 Run，已有结果保持不变。" if language == "zh" else "Immediately save Approved. No Run is created and existing results remain unchanged.")
 
 
 async def _save_stage_review_from_form(

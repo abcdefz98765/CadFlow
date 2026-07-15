@@ -17,6 +17,7 @@ This is a capability and verification record, not a promise that every visible c
 - Candidate detail and selection: implemented with confirmation, validated Assembly Plan override, stale downstream projection, and preserved old Runs/accepted results.
 - Workflow write-action lifecycle: confirming, pending, succeeded, failed, duplicate-click protection, persistent feedback, and selected postcondition verification are implemented on the primary v2 path.
 - Chinese/English catalog coverage exists for the primary Workflow interaction path, but complete real-browser acceptance is outstanding.
+- Workflow guidance and default information reduction are implemented in the unified page view model: each visible stage has bilingual user-facing purpose, conclusion, decision, next-action, result, recovery, and limitation fields; audit details are expandable.
 - Stage Review and controlled artifact overrides are implemented with append-only history and compatibility materialization.
 - Rework and revision exist for narrow allowlisted contracts, not general CAD editing.
 - Bounded Agent Episode dynamic action behavior is automated-tested; no provider-backed agentic CAD is product-usable.
@@ -57,7 +58,7 @@ Agent roles, skills, shared knowledge, skill-private knowledge, Work context, an
 - Implemented: deterministic Golden flow, Workflow cockpit contracts, candidate selection, controlled reads/overrides, reviews, accepted-result pointer, and bounded episode shell.
 - Automated verified: targeted Workflow, Golden, Agent Adapter, and Agent Episode regression suites reported `367 passed, 1 skipped` before this documentation-only consolidation.
 - Manually verified: earlier Full/Contract pages, candidate confirmation and stale behavior, artifact viewer, and Snapshot boundaries were exercised.
-- Not manually verified: the latest runtime-feedback/localization pass, complete enabled-action inventory, 1024px acceptance, and new screenshots. The in-app browser could not connect to the locally listening NiceGUI service during the last pass.
+- Not manually verified: the latest workflow-guidance browser pass, complete enabled-action inventory, 1024px acceptance, and new screenshots. The in-app browser could not connect to the locally listening NiceGUI service during the last pass.
 - Production usable: local deterministic single-part Golden workflow only. Workflow Cockpit readiness remains partial.
 
 ## Next milestones

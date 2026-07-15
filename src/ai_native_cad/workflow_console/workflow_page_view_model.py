@@ -26,6 +26,95 @@ _READ_ONLY_REASON = "Historical Run Snapshots are read-only. Return to Current W
 _REVIEW_DECISION_ACTIONS = {"save_stage_review", "approve_stage", "mark_needs_revision", "mark_blocked"}
 _AGENT_REVIEW_ACTIONS = {"part_review", "part_result_review", "create_workflow_review"}
 
+# Canonical checkpoints stay owned by the architecture.  This catalog only
+# explains their established responsibility in the user's language.
+_GUIDANCE: dict[str, dict[str, tuple[str, str]]] = {
+    "requirement": {
+        "purpose": ("Turn the request into an engineering requirement with assumptions and missing information.", "将需求转为包含假设和缺失信息的工程需求。"),
+        "decision": ("No decision is needed unless an assumption or missing detail is wrong.", "除非假设或缺失信息有误，否则当前无需决定。"),
+        "next": ("Continue to planning.", "继续进入规划。"),
+        "expected": ("A design approach will be prepared; no CAD model will be created.", "将形成设计路径，不会创建 CAD 模型。"),
+        "recovery": ("Clarify or correct the requirement.", "补充或更正需求。"),
+    },
+    "clarification": {
+        "purpose": ("Resolve only the information that materially affects the requirement.", "仅解决会实质影响需求的信息。"),
+        "decision": ("Answer the focused questions or accept the stated assumptions.", "回答聚焦问题，或接受已说明的假设。"),
+        "next": ("Update the active requirement, then continue to planning.", "更新当前需求后继续规划。"),
+        "expected": ("A new requirement version will record the clarification.", "新的需求版本将记录这些澄清。"),
+        "recovery": ("Return to the requirement when the scope itself is wrong.", "如范围本身不正确，请返回需求阶段。"),
+    },
+    "planning": {
+        "purpose": ("Choose an engineering approach and define its scope and capability boundaries.", "确定工程路线，并界定范围和能力边界。"),
+        "decision": ("No decision is needed unless the proposed approach is unsuitable.", "除非建议的路线不合适，否则当前无需决定。"),
+        "next": ("Review the assembly plan.", "查看装配计划。"),
+        "expected": ("CadFlow will describe candidate strategies; it will not generate CAD yet.", "CadFlow 将说明候选路线；此时不会生成 CAD。"),
+        "recovery": ("Revise the requirement or planning approach.", "修改需求或规划路线。"),
+    },
+    "assembly_plan": {
+        "purpose": ("Split the confirmed request into candidate parts, reference components, and their interface context.", "将已确认需求拆分为候选零件、参考组件及其接口上下文。"),
+        "decision": ("No decision is needed unless you want a different next part.", "除非希望更换下一步零件，否则当前无需决定。"),
+        "next": ("Create a Part Request for the selected part.", "为已选零件创建零件请求。"),
+        "expected": ("A scoped single-part task will be prepared; CAD will not run yet.", "将准备单零件任务；不会立即执行 CAD。"),
+        "recovery": ("Inspect candidates or return to planning if the split is wrong.", "检查候选零件；若拆分有误则返回规划。"),
+    },
+    "part_request": {
+        "purpose": ("Define the scoped contract for exactly one selected part.", "为一个已选零件定义范围明确的任务合同。"),
+        "decision": ("Confirm the part scope is right before modeling review.", "在建模评审前确认零件范围正确。"),
+        "next": ("Review whether this part request is ready for modeling.", "评审该零件请求是否可建模。"),
+        "expected": ("A reviewable task contract will be created, not a CAD result.", "将创建可评审的任务合同，而非 CAD 结果。"),
+        "recovery": ("Return to the assembly plan when the selected part is wrong.", "如所选零件有误，请返回装配计划。"),
+    },
+    "part_review": {
+        "purpose": ("Check whether the part request is coherent and ready for modeling.", "检查零件请求是否连贯且可进入建模。"),
+        "decision": ("Review the request before it becomes the CAD input.", "在其成为 CAD 输入前评审该请求。"),
+        "next": ("Create the reviewed handoff.", "创建已评审交接。"),
+        "expected": ("CadFlow will record a readiness conclusion; it will not create CAD.", "CadFlow 将记录就绪结论；不会创建 CAD。"),
+        "recovery": ("Request changes to the part request.", "请求修改零件请求。"),
+    },
+    "reviewed_handoff": {
+        "purpose": ("Freeze the approved modeling brief and assembly context for the CAD IR proposal.", "冻结已批准的建模简报和装配上下文，供 CAD IR 提案使用。"),
+        "decision": ("No decision is needed unless the modeling brief is incorrect.", "除非建模简报有误，否则当前无需决定。"),
+        "next": ("Create a CAD IR draft.", "创建 CAD IR 草稿。"),
+        "expected": ("A structured geometry proposal can be prepared from this handoff.", "可基于此交接准备结构化几何提案。"),
+        "recovery": ("Return to Part Review to correct the brief.", "返回零件评审以更正简报。"),
+    },
+    "cad_ir_draft": {
+        "purpose": ("Present a structured, reviewable geometry proposal before deterministic execution.", "在确定性执行前呈现结构化、可评审的几何提案。"),
+        "decision": ("Inspect the proposal when a limitation or validation issue needs attention.", "当限制或验证问题需要关注时检查该提案。"),
+        "next": ("Validate the CAD IR and proceed to part modeling when valid.", "验证 CAD IR；有效后进入零件建模。"),
+        "expected": ("A validated CAD IR can be passed to deterministic modeling.", "已验证的 CAD IR 可交给确定性建模。"),
+        "recovery": ("Correct the reviewed handoff or record a rework request.", "更正已评审交接，或记录返工请求。"),
+    },
+    "part_modeling": {
+        "purpose": ("Validate CAD IR and execute deterministic modeling only when it is valid.", "验证 CAD IR，并且仅在有效时执行确定性建模。"),
+        "decision": ("Review the result when it is ready; Contract mode intentionally needs no export decision.", "结果就绪时进行检查；Contract 模式的跳过执行不需要导出决策。"),
+        "next": ("Review the single-part result.", "评审单零件结果。"),
+        "expected": ("Full mode may create STEP/STL. Contract mode records validated input only and intentionally skips execution.", "Full 模式可能生成 STEP/STL；Contract 模式只记录已验证输入，并有意跳过执行。"),
+        "recovery": ("Inspect the CAD IR or return upstream with a rework request.", "检查 CAD IR，或带着返工请求返回上游。"),
+    },
+    "part_result_review": {
+        "purpose": ("Assess one child part result against its reviewed handoff.", "根据已评审交接评估一个子零件结果。"),
+        "decision": ("Decide whether to approve this part result, request revision, or leave it unaccepted.", "决定批准该零件结果、请求修改，或暂不接受。"),
+        "next": ("Approve the result only when it is acceptable for this part.", "仅在该零件结果可接受时批准它。"),
+        "expected": ("Approval updates the accepted result for this part only; it does not claim a complete assembly.", "批准只更新此零件的已接受结果；不会宣称完整装配已完成。"),
+        "recovery": ("Request revision or leave the result unaccepted.", "请求修改，或保持该结果未接受。"),
+    },
+    "workflow_review": {
+        "purpose": ("Summarize the current Work, accepted results, limitations, and valid next action.", "总结当前 Work、已接受结果、限制及有效的下一步。"),
+        "decision": ("Choose whether to continue with another part, request rework, or inspect deliverables.", "选择继续下一个零件、请求返工，或检查交付物。"),
+        "next": ("Continue with the recommended Work-level action.", "继续执行推荐的 Work 级操作。"),
+        "expected": ("The Work conclusion will be refreshed; this does not generate a complete assembly.", "将刷新 Work 结论；不会生成完整装配。"),
+        "recovery": ("Request rework when the current scope is not acceptable.", "若当前范围不可接受，请请求返工。"),
+    },
+    "rework": {
+        "purpose": ("Create a traceable new attempt from an explicit review decision.", "根据明确的评审决定创建可追溯的新尝试。"),
+        "decision": ("Confirm the requested changes and target checkpoint.", "确认请求的修改和目标检查点。"),
+        "next": ("Create a new rework Run.", "创建新的返工 Run。"),
+        "expected": ("A child Run will preserve the older attempt and advance the requested rework path.", "将创建子 Run，保留旧尝试并推进请求的返工路径。"),
+        "recovery": ("Save a Needs Revision review with requested changes first.", "请先保存包含请求修改的“需要修改”评审。"),
+    },
+}
+
 
 def _artifact_kind(name: str) -> str:
     """Return the UI kind used by the single artifact-viewer contract."""
@@ -92,6 +181,7 @@ def build_workflow_page_view_model(
         source_run_id = active_root if isinstance(active_root, str) else None
 
     stages = [dict(stage) for stage in surface.get("stages", []) if isinstance(stage, dict)]
+    stages = [_with_guidance(stage, language, view_mode) for stage in stages]
     selected = _select_stage(stages, selected_stage_id, view_mode)
     selected_id = selected.get("stage_id") if selected else None
     if selected is not None:
@@ -103,6 +193,7 @@ def build_workflow_page_view_model(
         selected["primary_action"] = actions["primary_action"]
         selected["secondary_actions"] = actions["secondary_actions"]
         selected["disabled_actions"] = actions["disabled_actions"]
+        selected["guidance"] = _with_action_guidance(selected["guidance"], actions, language)
     conclusion = _conclusion(surface, selected, summary, view_mode)
     return {
         "view_mode": view_mode,
@@ -116,6 +207,7 @@ def build_workflow_page_view_model(
         "current_conclusion": conclusion,
         "recommended_next_action": actions["primary_action"],
         "workflow_graph": graph,
+        "stages": stages,
         "selected_stage": selected,
         "available_actions": actions,
         "action_inventory": _action_inventory(actions, graph),
@@ -125,6 +217,95 @@ def build_workflow_page_view_model(
         # it to assemble another UI surface.
         "source": {"projection": projection, "surface": surface},
     }
+
+
+def _with_guidance(stage: dict[str, Any], language: str, view_mode: ViewMode) -> dict[str, Any]:
+    """Attach the complete, localized user-guidance contract to every stage."""
+    result = dict(stage)
+    key = str(result.get("stage_id") or result.get("key") or "")
+    catalog = _GUIDANCE.get(key, _GUIDANCE["workflow_review"])
+    text = lambda name: catalog[name][1 if language == "zh" else 0]
+    status = str(result.get("status") or "not_started")
+    blocked = str(result.get("current_block") or "")
+    is_snapshot = view_mode == "run_snapshot"
+    required = status in {"blocked", "needs_review", "stale"} or key in {"clarification", "part_result_review", "rework"}
+    if is_snapshot:
+        decision = "此历史 Run 仅供查看；请返回当前 Work 后再做决定。" if language == "zh" else "This historical Run is read-only; return to Current Work before making a decision."
+        recovery = "返回当前 Work，或从评审决定创建返工尝试。" if language == "zh" else "Return to Current Work, or create a rework attempt from a review decision."
+    else:
+        decision, recovery = text("decision"), text("recovery")
+    if status in {"contract_complete", "execution_skipped"} and key == "part_modeling":
+        conclusion = "CAD IR 已验证；已按 Contract 模式有意跳过 CAD 执行。" if language == "zh" else "CAD IR is validated; CAD execution was intentionally skipped in Contract mode."
+        limitations = ["不预期 STEP/STL；这不是错误或阻断。" if language == "zh" else "STEP/STL are not expected; this is not an error or a block."]
+    else:
+        conclusion = _localized_stage_conclusion(key, status, str(result.get("human_summary") or result.get("short_summary") or ""), language)
+        limitations = list(result.get("limitations_summary") or [])
+    result["guidance"] = {
+        "stage_purpose": text("purpose"),
+        "current_conclusion": conclusion,
+        "why_this_matters": str(result.get("why_it_matters") or text("purpose")),
+        "user_decision_required": required,
+        "user_decision_summary": decision,
+        "recommended_next_action": text("next"),
+        "expected_result": text("expected"),
+        "normal_next_stage": _normal_next_stage(key, language),
+        "blocked_reason": blocked or None,
+        "recovery_action": recovery,
+        "limitations": limitations,
+    }
+    return result
+
+
+def _localized_stage_conclusion(stage_id: str, status: str, fallback: str, language: str) -> str:
+    if language != "zh":
+        return fallback
+    if status in {"not_started", "ready"}:
+        return "此阶段尚未完成，等待满足前置条件后继续。"
+    if status == "stale":
+        return "上游决定已改变；此阶段的旧结果需要重新检查或生成。"
+    if status == "blocked":
+        return "此阶段暂时无法继续；请查看阻断原因和恢复操作。"
+    conclusions = {
+        "requirement": "需求已整理为可供后续工程决策使用的内容。",
+        "clarification": "澄清内容已记录到当前需求版本。",
+        "planning": "设计路线已确定，可进入装配级拆分。",
+        "assembly_plan": "候选零件、参考组件和当前选定零件已明确。",
+        "part_request": "已为选定零件建立范围明确的建模任务。",
+        "part_review": "零件请求已得到可建模性结论。",
+        "reviewed_handoff": "已评审的建模简报已准备好作为 CAD IR 输入。",
+        "cad_ir_draft": "结构化几何提案已准备好进行验证。",
+        "part_modeling": "已完成当前零件的 CAD IR 验证和建模结果投影。",
+        "part_result_review": "单零件结果已具备评审依据，但尚未自动批准。",
+        "workflow_review": "当前 Work 的结果、限制和可行下一步已汇总。",
+        "rework": "返工将以新的 Run 保存，旧尝试保持不变。",
+    }
+    return conclusions.get(stage_id, fallback)
+
+
+def _with_action_guidance(guidance: dict[str, Any], actions: dict[str, Any], language: str) -> dict[str, Any]:
+    result = dict(guidance)
+    primary = actions.get("primary_action") if isinstance(actions.get("primary_action"), dict) else None
+    if primary and primary.get("enabled"):
+        result["recommended_next_action"] = primary.get("label") or result["recommended_next_action"]
+    elif not primary or not primary.get("enabled"):
+        result["recommended_next_action"] = (
+            "当前无需执行操作；请按正常工作流继续，或检查可用的恢复操作。"
+            if language == "zh" else "No action is available here yet; continue with the normal workflow or inspect the available recovery action."
+        )
+    return result
+
+
+def _normal_next_stage(stage_id: str, language: str) -> str:
+    names = {
+        "requirement": ("Planning", "规划"), "clarification": ("Planning", "规划"), "planning": ("Assembly Plan", "装配计划"),
+        "assembly_plan": ("Part Request", "零件请求"), "part_request": ("Part Review", "零件评审"),
+        "part_review": ("Reviewed Handoff", "已评审交接"), "reviewed_handoff": ("CAD IR Draft", "CAD IR 草稿"),
+        "cad_ir_draft": ("Part Modeling", "零件建模"), "part_modeling": ("Part Result Review", "零件结果评审"),
+        "part_result_review": ("Workflow Review", "工作流评审"), "workflow_review": ("Rework or next Part Job", "返工或下一个零件任务"),
+        "rework": ("New rework Run", "新的返工 Run"),
+    }
+    pair = names.get(stage_id, ("Next workflow stage", "下一工作流阶段"))
+    return pair[1 if language == "zh" else 0]
 
 
 def _select_stage(stages: list[dict[str, Any]], requested: str | None, view_mode: ViewMode) -> dict[str, Any] | None:
@@ -215,7 +396,6 @@ def _part_node(item: dict[str, Any], kind: str, work_id: str, target_run_id: str
     part_id = str(item.get("part_id") or "")
     reference = bool(item.get("reference_only")) or kind == "reference_component"
     selectable = view_mode == "current_work" and bool(item.get("supported_candidate")) and not reference and not selected
-    target = f"当前 Work · Run {target_run_id or '不可用'} · 装配计划" if language == "zh" else f"Current Work · Run {target_run_id or 'unavailable'} · Assembly Plan"
     actions = [
         {
             "key": "open_candidate_detail",
@@ -227,7 +407,7 @@ def _part_node(item: dict[str, Any], kind: str, work_id: str, target_run_id: str
             "target_work_id": work_id,
             "target_run_id": target_run_id,
             "target_stage_id": "assembly_plan",
-            "tooltip": (f"打开 {part_id} 的候选零件详情。\n\n目标: {target}\n\n结果：只读查看；不会改变 Work 指针、候选选择或 Run。" if language == "zh" else f"Open Candidate Detail for {part_id}.\n\nTarget: {target}\n\nResult: read-only inspection; no Work pointer, candidate selection, or Run changes."),
+            "tooltip": (f"查看 {part_id} 的职责、接口和支持状态。\n不会改变当前选择或 Work。" if language == "zh" else f"Inspect {part_id}'s role, interfaces, and support status.\nIt does not change the selected part or Current Work."),
         },
         {
             "key": "select_candidate_part",
@@ -249,7 +429,7 @@ def _part_node(item: dict[str, Any], kind: str, work_id: str, target_run_id: str
                 ("该候选零件已被选择，无需重复覆盖。" if language == "zh" else "This candidate is already selected; no duplicate override is needed.") if selected else
                 ("当前单零件流程不支持该候选零件。" if language == "zh" else "This candidate is not supported by the current single-part workflow.")
             ) if not selectable else None,
-            "tooltip": (f"确认后将 {part_id} 用于下一次零件请求。\n\n目标: {target}\n\n结果：写入经过验证的版本化装配计划覆盖版本，保留旧 Run，并标记下游阶段为过期。\n会改变 active lineage：否\n创建新 Run：否" if language == "zh" else f"Select {part_id} for the next Part Request with confirmation.\n\nTarget: {target}\n\nResult: writes a validated versioned Assembly Plan override, preserves old Runs, and marks downstream stages stale.\nActive lineage changes: no\nNew Run: no"),
+            "tooltip": (f"把 {part_id} 设为接下来的建模对象。\n系统会保存新的装配计划覆盖版本，并将旧的下游结果标记为过期；已有 Run 和已批准结果不会被删除。" if language == "zh" else f"Use {part_id} as the next modeling target.\nCadFlow saves a new Assembly Plan override and marks older downstream results stale; existing Runs and accepted results remain."),
         },
     ]
     return {**item, "kind": kind, "status": status, "selected": selected, "attention": "required" if status == "blocked" else "none", "clickable": True, "actions": actions}
@@ -461,11 +641,8 @@ def _agent_review_label(action: dict[str, Any], stage: dict[str, Any] | None) ->
 
 
 def _action_tooltip(action: dict[str, Any], stage: dict[str, Any] | None, language: str = "en") -> str:
-    """Explain action, target, and effect; disabled actions keep their reason."""
+    """Keep default Hover focused on action, important result, and availability."""
     key = str(action.get("key") or "")
-    stage_name = str((stage or {}).get("stage_name") or (stage or {}).get("stage_id") or ("所选阶段" if language == "zh" else "selected stage"))
-    run_id = action.get("target_run_id") or ("当前 Run" if language == "zh" else "active Run")
-    target = f"当前 Work · {stage_name} · Run {run_id}" if language == "zh" else f"Current Work · {stage_name} · Run {run_id}"
     copy = {
         "save_stage_review": ("Save the selected review decision and notes.", "Writes a traceable stage_review record; does not rerun the agent or modify existing output."),
         "approve_stage": ("Quick approve this stage without notes.", "Records Approved, keeps all artifacts, and updates the Work review state. It does not create CAD."),
@@ -482,14 +659,22 @@ def _action_tooltip(action: dict[str, Any], stage: dict[str, Any] | None, langua
     disabled = action.get("disabled_reason")
     if language == "zh":
         action_text = f"执行“{action_label('zh', action.get('label'), key)}”。"
-        result_text = "结果会记录到指定的 Work、Run 和阶段。"
-        lines = [action_text, "", f"目标: {target}", "", f"结果: {result_text}", "", f"会改变 active lineage：{'是' if action.get('updates_active_lineage') else '否'}", f"创建新 Run：{'是' if action.get('creates_new_run') else '否'}"]
+        result_text = "结果会更新当前工作流状态。"
+        lines = [action_text, result_text]
+        if action.get("creates_new_run"):
+            lines.append("这会创建新的 Run。")
+        elif action.get("updates_active_lineage"):
+            lines.append("这会改变当前 Work。")
         if disabled:
-            lines.extend(["", f"当前不可用：{disabled}"])
+            lines.append(f"当前不可用：{disabled}")
         return "\n".join(lines)
-    lines = [action_text, "", f"Target: {target}", "", f"Result: {result_text}", "", f"Active lineage changes: {'yes' if action.get('updates_active_lineage') else 'no'}", f"New Run: {'yes' if action.get('creates_new_run') else 'no'}"]
+    lines = [action_text, result_text]
+    if action.get("creates_new_run"):
+        lines.append("This creates a new Run.")
+    elif action.get("updates_active_lineage"):
+        lines.append("This changes the Current Work.")
     if disabled:
-        lines.extend(["", f"Currently unavailable: {disabled}"])
+        lines.append(f"Unavailable: {disabled}")
     return "\n".join(lines)
 
 

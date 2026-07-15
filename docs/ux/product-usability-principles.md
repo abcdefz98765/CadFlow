@@ -458,3 +458,18 @@ Before completing a UI or Workflow task:
 - Verify Chinese and English experiences.
 - Update readiness, roadmap, task board, usage, architecture, or UX documents as applicable.
 - Report what was not manually verified.
+
+## Workflow guidance and information reduction gate
+
+Each visible Workflow stage projection provides a localized Guidance Contract:
+purpose, current conclusion, why it matters, whether a user decision is
+required, decision summary, one recommended next action, expected result,
+normal next stage, blocked reason, recovery action, and limitations. These
+fields explain the user's engineering workflow; they do not expose action keys,
+Run ids, artifact paths, or backend state as the explanation.
+
+The selected-stage primary order is: current conclusion, user decision,
+recommended action, expected result, user input, agent interpretation, agent
+output, related review and evidence, alternatives, then Advanced. Action hover
+remains concise. Full action targets, internal action keys, expected
+postconditions, and audit metadata stay available in expandable Action Details.

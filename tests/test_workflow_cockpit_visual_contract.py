@@ -6,6 +6,8 @@ data and the semantic CSS classes that make a workflow legible at any width.
 
 from __future__ import annotations
 
+import inspect
+
 from ai_native_cad.examples import golden_desktop_robot_arm as golden_service
 from ai_native_cad.pipeline import runner as pipeline_runner
 from ai_native_cad.workflow_console import WorkflowConsoleBackend
@@ -49,6 +51,10 @@ def test_candidate_reference_and_contract_rendering_contracts_are_explicit(tmp_p
     assert {item["kind"] for item in graph["reference_lane"]} == {"reference_component"}
     assert page["selected_stage"]["status"] == "execution_skipped"
     assert page["selected_stage"]["agent_output"]["step_stl_expectation"] == "not_expected"
+    guidance = page["selected_stage"]["guidance"]
+    assert guidance["current_conclusion"].startswith("CAD IR is validated")
+    assert guidance["normal_next_stage"] == "Part Result Review"
+    assert any("STEP/STL are not expected" in item for item in guidance["limitations"])
     assert "reference-component" in WORKFLOW_UI_CSS
 
 
@@ -68,3 +74,15 @@ def test_current_and_snapshot_page_structure_are_distinguishable(tmp_path, monke
     assert [page for page, _icon, _label in WORK_USER_PAGES] == ["overview", "workflow", "parts", "history"]
     assert "grid-template-columns:repeat(3" in WORKFLOW_UI_CSS
     assert "@media(max-width:760px)" in WORKFLOW_UI_CSS
+
+
+def test_primary_surface_keeps_audit_metadata_in_expanded_action_details():
+    from ai_native_cad.workflow_console import nicegui_app
+
+    source = inspect.getsource(nicegui_app._render_selected_stage_detail_v2)
+    assert "_render_guidance_contract" in source
+    assert "_render_action_details" in source
+    assert "source_run_id" not in source
+    action_details = inspect.getsource(nicegui_app._render_action_details)
+    assert "backend_action" in action_details
+    assert "target_run_id" in action_details

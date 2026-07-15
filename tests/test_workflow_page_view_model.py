@@ -124,7 +124,8 @@ def test_workflow_review_uses_human_stage_output_and_source_aware_artifact_contr
     assert reports["related"][0]["source_run_id"] == "single_part_upper_link"
     assert "token" not in reports["content"]
     assert "raw_provider_response" not in reports["content"]
-    assert "Target: Current Work" in page["available_actions"]["primary_action"]["tooltip"]
+    assert "Target:" not in page["available_actions"]["primary_action"]["tooltip"]
+    assert len(page["available_actions"]["primary_action"]["tooltip"].splitlines()) <= 3
 
 
 def test_enabled_actions_expose_localized_labels_and_tooltips(tmp_path):
@@ -141,3 +142,33 @@ def test_enabled_actions_expose_localized_labels_and_tooltips(tmp_path):
             assert "backend_action" not in action["tooltip"]
     assert "Available" not in chinese["available_actions"]["primary_action"]["tooltip"]
     assert "Target:" not in chinese["available_actions"]["primary_action"]["tooltip"]
+
+
+def test_every_visible_stage_has_a_complete_bilingual_guidance_contract(tmp_path):
+    backend = _work_with_failed_latest_attempt(tmp_path)
+    english = build_workflow_page_view_model(backend, "lineage_work", language="en")
+    chinese = build_workflow_page_view_model(backend, "lineage_work", language="zh")
+    fields = {
+        "stage_purpose", "current_conclusion", "why_this_matters", "user_decision_required",
+        "user_decision_summary", "recommended_next_action", "expected_result", "normal_next_stage",
+        "blocked_reason", "recovery_action", "limitations",
+    }
+    assert {stage["stage_id"] for stage in english["stages"]} == {stage["stage_id"] for stage in chinese["stages"]}
+    for english_stage, chinese_stage in zip(english["stages"], chinese["stages"]):
+        assert fields <= set(english_stage["guidance"])
+        assert fields <= set(chinese_stage["guidance"])
+        assert english_stage["guidance"]["stage_purpose"]
+        assert chinese_stage["guidance"]["stage_purpose"]
+        assert all(ord(char) < 128 or "\u4e00" <= char <= "\u9fff" or char in "，。；：、（）" for char in chinese_stage["guidance"]["current_conclusion"])
+        assert isinstance(english_stage["guidance"]["user_decision_required"], bool)
+
+
+def test_contract_guidance_and_snapshot_guidance_preserve_user_workflow_semantics(tmp_path):
+    backend = _work_with_failed_latest_attempt(tmp_path)
+    current = build_workflow_page_view_model(backend, "lineage_work", selected_stage_id="part_modeling")
+    snapshot = build_workflow_page_view_model(
+        backend, "lineage_work", view_mode="run_snapshot", selected_run_id="accepted_root", selected_stage_id="part_modeling",
+    )
+    assert current["selected_stage"]["guidance"]["normal_next_stage"] == "Part Result Review"
+    assert snapshot["selected_stage"]["guidance"]["user_decision_summary"].startswith("This historical Run is read-only")
+    assert snapshot["selected_stage"]["guidance"]["recovery_action"].startswith("Return to Current Work")
