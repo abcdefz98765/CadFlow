@@ -1,69 +1,91 @@
-# Design Planning Skill
+# Planning Skill
 
-Purpose: turn the requirement package into an engineering-oriented design plan
-and workflow route before any CAD geometry is generated.
+## Role
 
-Planning is the bridge between "what the user wants" and "what the modeling and
-assembly steps should do." It owns analysis and sequencing, not requirement
-clarification and not backend-specific CAD operations.
+Owned by the Planning Agent.
+
+Canonical checkpoints:
+
+- accepted Requirement -> Planning / Design Brief;
+- Planning -> Assembly Plan and Candidate Parts when decomposition is required.
+
+## Purpose
+
+Translate the accepted Requirement into an engineering route, design strategy, and reviewable decomposition before CAD IR is created.
+
+Planning owns functional decomposition, candidate/reference distinction, interface intent, datums, dependencies, risks, and concise alternatives.
+
+It does not own requirement elicitation, detailed CAD IR synthesis, or backend-specific geometry execution.
 
 ## Inputs
 
-- `requirement.json`
-- candidate manufactured parts and reference components from Requirement
-- missing-information notes and assumptions
-- requested `check_level`
+- active accepted Requirement;
+- accepted assumptions and clarification results;
+- check level and product scope;
+- relevant shared engineering vocabulary.
 
 ## Outputs
 
-- `plan.md`
-- workflow route: single-part generation, multi-part generation, assembly loop,
-  or confirmation-needed
-- design strategy and functional datums
-- part modeling order and template candidates
-- interface map between parts and reference components
-- risk list and confirmation gates
-- structural, motion, degree-of-freedom, fit, clearance, and serviceability
-  reasonableness notes
-- review targets for each downstream step
+Depending on the route:
 
-## Analysis Responsibilities
+- `design_brief.json`;
+- `planning_artifact.json`;
+- candidate plan artifacts where supported;
+- `assembly_plan.json` for assembly or multi-part scope;
+- candidate parts and reference-only components;
+- selected or recommended candidate;
+- interfaces, dependencies, datums, risks, and capability boundaries;
+- planning gate state.
 
-- Decide whether the request should continue as one part or an assembly.
-- Choose the functional decomposition that downstream steps should follow.
-- Define datums, mating intent, motion/clearance expectations, and service
-  access assumptions at a backend-neutral level.
-- Identify obvious structural risks, load paths, weak regions, required support
-  strategy, and missing load assumptions.
-- Identify intended constrained and free degrees of freedom for moving or
-  assembled products.
-- Identify which part templates are likely needed without parameterizing them
-  in detail.
-- Decide the order of generation so reference envelopes, interfaces, and carrier
-  parts are available before dependent parts.
-- Route missing or risky decisions back to Requirement when the plan cannot be
-  stable without the user.
+## Allowed context
+
+Shared:
+
+- requirement and planning contracts;
+- interface and reference-component vocabulary;
+- shared manufacturing and check-level policy.
+
+Private knowledge:
+
+- decomposition patterns;
+- interface-planning heuristics;
+- candidate comparison guidance;
+- datum, dependency, serviceability, and risk heuristics.
+
+Runtime context:
+
+- active Requirement and accepted clarifications;
+- relevant prior planning review or user override when revising.
+
+## Behavior
+
+- Decide whether the request is single-part, assembly, multi-part, reference-only, or unsupported.
+- Produce alternatives when meaningful and expose concise trade-offs.
+- Separate generated candidates from reference-only components.
+- Preserve functional interfaces and assembly context for downstream Part Jobs.
+- Define the current selected or recommended candidate explicitly.
+- Return to Requirement when an upstream product decision is missing.
+- State capability boundaries without treating current backend support as the entire product design space.
 
 ## Boundaries
 
-- Requirement owns user clarification and product intent capture.
-- CAD IR owns encoding resolved part-level decisions into explicit generation
-  fields; it must not make design tradeoffs or invent geometry from open-ended
-  analysis notes.
-- Part Modeling owns template parameterization, geometry generation, and
-  single-part generation checks.
-- Assembly owns placement, contacts, constraints, clearances, and assembly
-  validation.
-- Review owns report organization and check-level presentation.
+Must not:
 
-Planning must consume requirement assumptions and missing-information notes
-rather than silently ignoring them.
+- re-parse the prompt as a substitute for the accepted Requirement;
+- generate detailed CAD IR;
+- emit Python, CadQuery, or shell commands;
+- silently choose an unrelated template because it is supported;
+- claim that planning artifacts are generated CAD;
+- perform final strength, motion, fit, tolerance-stack, or assembly validation.
 
-Simulation is future validation work. Planning may define required checks,
-loads, motion ranges, or unresolved engineering questions, but it does not
-perform final strength simulation, motion simulation, tolerance stack-up, or
-production release verification.
+## Handoff
 
-See also:
+For a single-part route, Planning hands an accepted part strategy toward CAD IR preparation.
 
+For assembly or multi-part scope, Planning produces the Assembly Plan. Explicit candidate selection then leads to a Part Request for exactly one Part Job.
+
+## References
+
+- `../../docs/architecture/cadflow-canonical-product-architecture.md`
+- `../../docs/architecture/agent-skill-knowledge.md`
 - `../../docs/workflow_contract.md`

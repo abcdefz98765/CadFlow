@@ -89,4 +89,55 @@ def test_current_work_actions_have_one_primary_and_an_explicit_target(tmp_path):
     assert primary["target_work_id"] == "lineage_work"
     assert primary["target_run_id"] == "accepted_root"
     assert primary["next_stage_on_success"] == "workflow_review"
+    assert primary["label"] == "Refresh agent workflow review"
+    assert primary["backend_action"] == "create_workflow_review"
     assert page["selected_stage"]["primary_action"] == primary
+
+
+def test_workflow_review_uses_human_stage_output_and_source_aware_artifact_contract(tmp_path):
+    backend = _work_with_failed_latest_attempt(tmp_path)
+    run_dir = backend._work_runs_root("lineage_work") / "accepted_root"
+    (run_dir / "report.json").write_text(json.dumps({
+        "status": "ready_for_review",
+        "part_id": "upper_link",
+        "token": "must-not-reach-the-artifact-dialog",
+        "raw_provider_response": "must-not-reach-the-artifact-dialog",
+    }) + "\n", encoding="utf-8")
+    child = run_dir / "single_part_upper_link"
+    child.mkdir()
+    (child / "report.json").write_text(json.dumps({"status": "completed", "part_id": "upper_link"}) + "\n", encoding="utf-8")
+    (run_dir / "workflow_review.json").write_text(json.dumps({"overall_status": "completed", "summary": ["Single generic concept part available"]}) + "\n", encoding="utf-8")
+    (run_dir / "workflow_review.md").write_text("# Workflow Review\n", encoding="utf-8")
+    backend.invalidate_work_index()
+
+    page = build_workflow_page_view_model(backend, "lineage_work", view_mode="current_work", selected_stage_id="workflow_review")
+    stage = page["selected_stage"]
+
+    assert stage["agent_output"]["summary"].startswith("Workflow review created successfully")
+    assert stage["agent_output"]["validation_status"] == "passed"
+    assert stage["user_input"]["summary"] == "The selected upper_link result was ready for work-level review."
+    output = {item["name"]: item for item in stage["agent_output"]["artifacts"]}
+    assert output["workflow_review.json"]["open_action"] == {"type": "artifact_dialog"}
+    assert output["workflow_review.json"]["source_run_id"] == "accepted_root"
+    reports = next(item for item in stage["evidence"] if item["name"] == "report.json")
+    assert reports["related_count"] == 1
+    assert reports["related"][0]["source_run_id"] == "single_part_upper_link"
+    assert "token" not in reports["content"]
+    assert "raw_provider_response" not in reports["content"]
+    assert "Target: Current Work" in page["available_actions"]["primary_action"]["tooltip"]
+
+
+def test_enabled_actions_expose_localized_labels_and_tooltips(tmp_path):
+    backend = _work_with_failed_latest_attempt(tmp_path)
+
+    chinese = build_workflow_page_view_model(backend, "lineage_work", view_mode="current_work", language="zh")
+    english = build_workflow_page_view_model(backend, "lineage_work", view_mode="current_work", language="en")
+
+    for page, language in ((chinese, "zh"), (english, "en")):
+        for action in page["action_inventory"]:
+            assert action["category"]
+            assert action["tooltip"]
+            assert action["label_i18n"][language] == action["label"]
+            assert "backend_action" not in action["tooltip"]
+    assert "Available" not in chinese["available_actions"]["primary_action"]["tooltip"]
+    assert "Target:" not in chinese["available_actions"]["primary_action"]["tooltip"]

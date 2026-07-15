@@ -1,50 +1,88 @@
 # Assembly Skill
 
-Purpose: define assembly structure, placements, constraints, and validation
-rules.
+## Role
 
-Assembly-owned rules belong here, including mating faces, clearances, fastener
-alignment, stack-up, wire exits, and access for sensors or switches.
+Owned by the future Assembly Agent.
+
+Canonical checkpoint:
+
+- multiple accepted Part Jobs -> assembly placement, constraints, and assembly-level validation.
+
+Current status:
+
+- Planning already produces `assembly_plan.json` as decomposition and interface context.
+- Full assembly generation, constraint solving, and assembly STEP export are not yet usable product capabilities.
+
+## Purpose
+
+Define how accepted parts relate after they exist: placement, contacts, mating intent, clearances, degrees of freedom, fastener alignment, serviceability, and assembly-level checks.
+
+This skill does not own the initial decomposition of a product into candidate parts. That belongs to Planning / Assembly Plan.
 
 ## Inputs
 
-- `requirement.json`
-- part-level `part_spec.json` or equivalent part metadata
-- generated part reports with bbox, status, and validation summary
+Future inputs include:
+
+- accepted Part Job results;
+- active Assembly Plan and interfaces;
+- reference-component envelopes;
+- placement and constraint intent;
+- assembly review targets.
 
 ## Outputs
 
-- `assembly_plan.json`
-- `assembly_plan.md`
-- backend-neutral `assembly.json`
-- backend-neutral `constraint_assembly.json`
-- `assembly_review.md`
+Future structured outputs may include:
 
-## Confirmation Gate
+- backend-neutral assembly placement contract;
+- constraint contract;
+- clearance and degree-of-freedom observations;
+- assembly validation report;
+- assembly products only when a deterministic backend supports them.
 
-Pause only for high-risk topology decisions. Examples:
+## Allowed context
 
-- unknown switch, sensor, or electronics envelope
-- unknown wire exit direction or bend/service clearance
-- unknown fastening method when it changes part interfaces
-- unknown serviceability requirement for removable vs sealed assemblies
+Shared:
 
-For L0 visual work, non-topology assumptions may continue, but must be written
-into the plan and review.
+- Assembly Plan interface vocabulary;
+- accepted-result and lineage rules;
+- shared units, check-level, and output policy.
 
-## Validation Stages
+Private knowledge:
 
-- `preflight_assembly_intent`
-- `validate_part_inputs`
-- `validate_placement_relationships`
-- `validate_constraints`
-- `validate_assembly_exports`
+- placement and mating rules;
+- constraint patterns;
+- clearance and interference guidance;
+- degree-of-freedom reasoning;
+- assembly serviceability and access rules.
 
-Do not move single-part geometry checks into this skill. Single-part rules stay
-in part generation and review; this skill owns how parts relate to one another.
+Runtime context:
 
-See:
+- accepted Part Job products and reports;
+- active assembly interfaces;
+- assembly validator observations.
 
+## Behavior
+
+- Operate only on accepted or explicitly selected part results.
+- Preserve the difference between reference components and generated products.
+- Make constrained and free degrees of freedom explicit.
+- Record assumptions and unsupported checks.
+- Stop safely when part interfaces or accepted results are insufficient.
+
+## Boundaries
+
+Must not:
+
+- redefine product decomposition owned by Planning;
+- generate missing individual parts as a hidden side effect;
+- move single-part geometry checks into assembly validation;
+- claim fit, motion, strength, or tolerance validation unless corresponding deterministic checks ran;
+- imply current product support before implementation and acceptance exist.
+
+## References
+
+- `../../docs/architecture/cadflow-canonical-product-architecture.md`
+- `../../docs/architecture/agent-skill-knowledge.md`
 - `../../docs/workflow_contract.md`
 - `knowledge/assembly_rules.md`
 - `knowledge/constraints.md`

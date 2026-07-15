@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_native_cad.agents.base import AgentAdapter
+from ai_native_cad.agents.episode import run_create_part_ir_episode
 from ai_native_cad.agents.json_contract import JsonContractProviderError, ProviderRequirementCompilerError
 from ai_native_cad.agents.validation import validate_adapter_result, validate_input_ir_draft
 from ai_native_cad.cad_ir.parser import ir_from_planning_artifact
@@ -2299,8 +2300,21 @@ def run_reviewed_part_single_create_pipeline(
         "part_execution_request": execution_request,
         "prompt": execution_request["prompt"],
     }
+    episode_result = None
     try:
-        input_ir = adapter.create_part_ir(sanitized_handoff, context=context)
+        episode_result = run_create_part_ir_episode(
+            adapter=adapter,
+            handoff=sanitized_handoff,
+            execution_request=execution_request,
+            adapter_context=context,
+            artifact_dir=output_path,
+        )
+        if not episode_result.validated or episode_result.final_contract is None:
+            raise ValueError(
+                "create_part_ir episode stopped before a validated CAD IR contract: "
+                f"{episode_result.stop_reason.value}"
+            )
+        input_ir = episode_result.final_contract
         _reject_reviewed_part_ir_bypass(input_ir)
         _write_json(output_path / "cad_ir_draft.json", input_ir)
         validate_input_ir_draft(input_ir)
@@ -2365,6 +2379,8 @@ def run_reviewed_part_single_create_pipeline(
         "concept_scope": "single_generic_concept_part" if input_ir.get("part_type") == "link_like_part" else "single_part",
         "assembly_generated": False,
         "strength_validated": False,
+        "capability_mode": "deterministic_fallback",
+        "agent_episode": episode_result.as_dict(),
         "adapter": _safe_provider_identity(adapter),
         "local_authority": [
             "reviewed_part_handoff.json",
@@ -2421,6 +2437,8 @@ def run_reviewed_part_single_create_pipeline(
         "concept_scope": metadata["concept_scope"],
         "assembly_generated": False,
         "strength_validated": False,
+        "capability_mode": metadata["capability_mode"],
+        "agent_episode": metadata["agent_episode"],
         "source_handoff": "reviewed_part_handoff.json",
         "child_run_dir": _repo_relative_string(child_output_dir),
         "cad_ir_created": metadata["cad_ir_created"],

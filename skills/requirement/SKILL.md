@@ -1,65 +1,90 @@
 # Requirement Skill
 
-Purpose: turn a user's natural-language product idea into a structured,
-traceable requirement package that later steps can safely plan from.
+## Role
 
-This skill owns requirement elicitation, product intent, early decomposition,
-and missing-information questions. It must not generate CAD geometry and must
-not choose backend-specific modeling operations.
+Owned by the Requirement Agent.
 
-The handoff artifact is `requirement.json`. Natural-language parsing is only an
-input-understanding mechanism inside this skill; downstream workflow steps must
-consume the structured requirement fields instead of re-parsing the original
-prompt.
+Canonical checkpoint:
+
+- Prompt / Requirement Input -> Requirement -> optional Clarification.
+
+## Purpose
+
+Convert the user's natural-language engineering goal into a structured, reviewable requirement contract.
+
+This skill owns intent capture, requirement fields, assumptions, missing information, focused clarification, and a proceed/clarify/safe-block recommendation.
+
+It does not own final product decomposition, candidate selection, CAD IR, or geometry execution.
 
 ## Inputs
 
-- Natural-language user request.
-- Optional structured overrides.
-- Requested `check_level`, defaulting to `L0`.
-- Existing user decisions from earlier clarification turns.
+- immutable user prompt;
+- optional accepted prior Work context for revision;
+- controlled user overrides or clarification answers;
+- requested check level when present.
 
 ## Outputs
 
-- `requirement.json`
-- product scope: single part, assembly, or unknown
-- candidate manufactured parts and reference components
-- functional interfaces and required user-facing behavior
-- `missing_information`
-- `follow_up_questions`
-- `cad_brief`
-- `assumptions`
-- `field_policy`
-- `requirement_status`
+- `requirement.json` or a new active `requirement_vN.json`;
+- scope and object goal;
+- known dimensions, constraints, and interfaces stated by the user;
+- assumptions;
+- missing or risky information;
+- focused follow-up questions;
+- requirement flow decision.
+
+## Allowed context
+
+Shared:
+
+- global policy and check-level vocabulary;
+- requirement artifact contract;
+- common units and naming rules.
+
+Private knowledge:
+
+- requirement elicitation heuristics;
+- missing-information policy;
+- question prioritization;
+- requirement field examples.
+
+Runtime context:
+
+- original prompt;
+- accepted clarification answers;
+- explicit prior Work decisions for revision.
 
 ## Behavior
 
-- Treat L0 as playground generation: missing non-critical information may use
-  template defaults, but assumptions must be recorded.
-- Ask the user when missing information changes topology, interfaces, assembly
-  feasibility, manufacturing strategy, serviceability, wiring/sensor access, or
-  safety review.
-- For product requests, identify likely parts and reference components before
-  planning. Example: a pet button likely needs a base, cap, switch or sensor
-  envelope, wiring outlet, and a retention/fastening intent.
-- Do not require surface finish, precise tolerances, or certification context in
-  L0/L1 unless the user explicitly requests them.
-- Attach tolerances and surface finish to functional faces or interfaces, not as
-  vague global fields.
-- Return unresolved decisions to the user when an assumption would change the
-  product architecture.
-- Emit `cad_brief` as requirement/planning metadata only. It may summarize
-  intent, coordinate convention, parsed fields, conservative validation targets,
-  assumptions, and clarification state, but CAD IR remains the source of truth
-  for generated geometry.
-- Treat `source.input_text` as trace/debug data after `requirement.json` has
-  been authored. It must not override structured fields in later stages.
+- Preserve uncertainty instead of guessing material engineering decisions.
+- Use assumptions only when they are low risk and visible.
+- Ask focused questions when missing information changes topology, interfaces, intended motion, manufacturing route, safety, or acceptance criteria.
+- Keep the requirement backend-neutral.
+- Record what is known, assumed, missing, and blocked separately.
+- Return unresolved product-architecture decisions to the user.
 
-See also:
+## Boundaries
 
+Must not:
+
+- choose the final decomposition into candidate parts;
+- select a part for generation;
+- invent safety-critical dimensions, loads, tolerances, or certification claims;
+- generate CAD IR or CAD code;
+- overwrite the original prompt or requirement artifact;
+- reclassify browser state as accepted product context.
+
+## Handoff
+
+The active structured Requirement is consumed by Planning.
+
+Planning may use Requirement-provided scope hints, but Planning owns the engineering route, decomposition, candidate/reference distinction, and design strategy.
+
+## References
+
+- `../../docs/architecture/cadflow-canonical-product-architecture.md`
+- `../../docs/architecture/agent-skill-knowledge.md`
 - `../../docs/workflow_contract.md`
-- `../../policies/requirement_contract.md`
 - `knowledge/requirement_template.md`
 - `knowledge/fields_by_check_level.md`
 - `knowledge/missing_info_policy.md`
-- `knowledge/product_decomposition.md`

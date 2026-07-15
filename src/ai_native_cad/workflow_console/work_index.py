@@ -155,6 +155,10 @@ def create_work_manifest(
         "active_lineage": _empty_active_lineage(),
         "run_ids": [],
         "part_jobs": [],
+        "accepted_part_results": {},
+        "candidate_selection": {},
+        "accepted_part_results": {},
+        "candidate_selection": {},
         "requirement": {"status": "not_started", "root_run_id": None},
         "advancement_mode": backend.read_workspace_config().get("advancement_mode", "manual_confirm"),
         "metadata": safe_metadata,
@@ -338,6 +342,8 @@ def _public_manifest(value: dict[str, Any] | None) -> dict[str, Any] | None:
             if isinstance(item, str) and item and "/" not in item and "\\" not in item and ":" not in item
         ][:200],
         "part_jobs": _safe_part_jobs(value.get("part_jobs")),
+        "accepted_part_results": _safe_accepted_part_results(value.get("accepted_part_results")),
+        "candidate_selection": _safe_candidate_selection(value.get("candidate_selection")),
         "requirement": _safe_requirement_state(value.get("requirement")),
         "advancement_mode": value.get("advancement_mode") if value.get("advancement_mode") in {"manual_confirm", "auto_advance"} else "manual_confirm",
         "metadata": _safe_metadata(value.get("metadata") if isinstance(value.get("metadata"), dict) else {}),
@@ -362,6 +368,8 @@ def _entity_state(work_id: str, manifest: dict[str, Any] | None) -> dict[str, An
         "active_lineage": manifest.get("active_lineage") or _empty_active_lineage(),
         "run_ids": manifest.get("run_ids") or [],
         "part_jobs": manifest.get("part_jobs") or [],
+        "accepted_part_results": manifest.get("accepted_part_results") or {},
+        "candidate_selection": manifest.get("candidate_selection") or {},
         "requirement": manifest.get("requirement") or {},
         "advancement_mode": manifest.get("advancement_mode") or "manual_confirm",
         "metadata": manifest.get("metadata") or {},
@@ -504,6 +512,40 @@ def _safe_active_lineage(value: Any) -> dict[str, Any]:
     return result
 
 
+def _safe_accepted_part_results(value: Any) -> dict[str, dict[str, str]]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, dict[str, str]] = {}
+    for part_id, item in value.items():
+        if not isinstance(part_id, str) or not part_id or not isinstance(item, dict):
+            continue
+        child_run_id = item.get("child_run_id")
+        review_id = item.get("review_id")
+        status = item.get("status")
+        if all(isinstance(field, str) and field for field in (child_run_id, review_id, status)):
+            result[part_id] = {"child_run_id": child_run_id, "review_id": review_id, "status": status}
+    return result
+
+
+def _safe_candidate_selection(value: Any) -> dict[str, Any]:
+    """Expose a compact Work-level candidate-selection decision, never paths."""
+    if not isinstance(value, dict):
+        return {}
+    selected = value.get("selected_candidate")
+    if not isinstance(selected, str) or not selected:
+        return {}
+    affected = value.get("downstream_stages_affected")
+    return {
+        "reason": _safe_optional_text(value.get("reason"), limit=240),
+        "previous_selected_candidate": _safe_optional_text(value.get("previous_selected_candidate"), limit=120),
+        "selected_candidate": selected,
+        "created_at": _safe_optional_text(value.get("created_at"), limit=80),
+        "downstream_stages_affected": [
+            item for item in affected if isinstance(item, str) and item
+        ][:20] if isinstance(affected, list) else [],
+    }
+
+
 def _json_dumps(value: dict[str, Any]) -> str:
     return json.dumps(value, indent=2, sort_keys=True) + "\n"
 
@@ -608,7 +650,7 @@ def _build_work(
     active_lineage = _resolve_active_lineage(manifest, runs_by_id, root_run_id, latest_run_id)
     active_root_run_id = active_lineage.get("active_root_run_id") or root_run_id
     root_run = runs_by_id.get(active_root_run_id) or runs_by_id.get(root_run_id) or runs_by_id.get(root_id) or {}
-    parts = _build_parts({"summary": {"root_run_id": root_run_id or root_id}, "runs_by_id": runs_by_id})
+    parts = _build_parts({"summary": {"root_run_id": root_run_id or root_id}, "runs_by_id": runs_by_id, "entity_state": _entity_state(root_id, manifest)})
     part_counts = _part_counts(parts)
     title = DEBUG_WORK_TITLE if debug_only else ((manifest or {}).get("title") or _work_title(root_run, root_id))
     status = (manifest or {}).get("status") or "incomplete"
@@ -626,7 +668,11 @@ def _build_work(
         "report_status": _report_status(root_run),
         "readiness_score": _readiness_score(root_run, part_counts),
         "risk_level": _risk_level(root_run, part_counts),
-        "next_action": _next_action(part_counts, root_run),
+        "next_action": (
+            "Create Part Request"
+            if _dict(_entity_state(root_id, manifest).get("candidate_selection")).get("selected_candidate")
+            else _next_action(part_counts, root_run)
+        ),
         "updated_at": max([str((manifest or {}).get("updated_at") or ""), *[run.get("updated_at") or "" for run in runs_by_id.values()]], default=None),
         "diagnostic_codes": _diagnostic_codes(root_run, parts),
     }
@@ -639,7 +685,9 @@ def _build_parts(work: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
     for part in assembly_parts:
         part_id = part.get("part_id")
-        status = _part_status(part, work["runs_by_id"])
+        accepted_results = _dict(work.get("entity_state")).get("accepted_part_results") or {}
+        accepted_result = _dict(accepted_results.get(part_id)) if isinstance(part_id, str) else {}
+        status = "accepted" if accepted_result.get("status") == "approved" else _part_status(part, work["runs_by_id"])
         review = _part_review_for(part_id, work["runs_by_id"])
         latest_run_id = _latest_part_run_id(part_id, work["runs_by_id"]) or work["summary"].get("root_run_id")
         rows.append({
@@ -653,7 +701,7 @@ def _build_parts(work: dict[str, Any]) -> list[dict[str, Any]]:
             "has_step": _part_has_download(part_id, work["runs_by_id"], "model.step"),
             "has_stl": _part_has_download(part_id, work["runs_by_id"], "model.stl"),
             "has_preview": _part_has_download(part_id, work["runs_by_id"], "preview.png"),
-            "review_status": _dict(review).get("status") or part.get("part_status"),
+            "review_status": accepted_result.get("status") or _dict(review).get("status") or part.get("part_status"),
             "next_action": _part_next_action(status),
         })
     manifest_jobs = _dict(work.get("entity_state")).get("part_jobs") or []

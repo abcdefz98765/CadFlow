@@ -250,6 +250,11 @@ def _projection_artifact_refs(items: Any) -> list[dict[str, Any]]:
             "summary": _artifact_summary(name, item.get("content")) if present else "missing",
             "source_run_id": item.get("source_run_id"),
             "source_relative_path": item.get("source_relative_path"),
+            "modified_at": item.get("modified_at"),
+            # Kept in the in-memory presentation model only. This lets the
+            # artifact dialog open the exact lineage record instead of guessing
+            # from a repeated filename.
+            "content": item.get("content"),
         })
     return result
 
@@ -608,6 +613,7 @@ def _part_candidate_node(part: dict[str, Any], selected_part_id: Any) -> dict[st
         "part_id": part_id,
         "role": role,
         "brief": str(part.get("brief") or part.get("description") or role),
+        "generation_strategy": part.get("generation_strategy"),
         "status": status,
         "supported_candidate": supported,
         "selected": selected,
@@ -1283,6 +1289,7 @@ def _stage_actions(key: str, review_stage: str, artifacts: set[str], has_run: bo
     if key == "part_result_review":
         ready = {"reviewed_part_handoff.json", "lineage.json"} <= artifacts
         actions.append(_action("part_result_review", "Review Part Result", ready, "Requires reviewed_part_handoff.json and lineage.json.", {"backend_action": "part_result_review"}))
+        actions.append(_action("approve_part_result", "Approve Single Part Result", "part_result_review.json" in artifacts, "Requires an accepted Part Result Review.", {"backend_action": "approve_part_result"}))
     if key == "workflow_review":
         actions.append(_action("create_workflow_review", "Create / Refresh Workflow Review", has_run, None if has_run else "Select a run first.", {"backend_action": "create_workflow_review"}))
     if key == "rework":
@@ -1539,6 +1546,7 @@ def _artifact_ref(name: str, artifact_names: set[str], contents: dict[str, Any])
         "name": name,
         "present": present,
         "summary": _artifact_summary(name, contents.get(name)) if present else "missing",
+        "content": contents.get(name) if present else None,
     }
 
 

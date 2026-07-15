@@ -40,6 +40,7 @@ ACTION_ARTIFACTS = {
     "reviewed_handoff": ("04_handoff/reviewed_part_handoff.json", "reviewed_part_handoff.json"),
     "cad_ir_draft": ("05_single_create/cad_ir_draft.json", "cad_ir_draft.json"),
     "single_create_lineage": ("05_single_create/lineage.json", "lineage.json"),
+    "part_result_review": ("06_part_result_review/part_result_review.json", "part_result_review.json"),
 }
 
 ACTION_NAMES = {
@@ -52,7 +53,21 @@ ACTION_NAMES = {
     "apply_requirement_clarification",
     "run_rework",
     "create_workflow_review",
+    "select_candidate_part",
 }
+
+# A selection is a Work-level user decision.  Existing outputs are deliberately
+# retained as immutable historical evidence, but they no longer describe the
+# selected candidate and must not be presented as the next current route.
+CANDIDATE_SELECTION_STALE_STAGES = (
+    "part_request",
+    "part_review",
+    "reviewed_handoff",
+    "cad_ir_draft",
+    "part_modeling",
+    "part_result_review",
+    "workflow_review",
+)
 
 STAGE_REVIEW_STAGES = {
     "requirement",
@@ -233,6 +248,16 @@ class WorkflowConsoleActions:
             target_rework_stage=target_rework_stage,
             requested_changes=requested_changes,
         )
+        # Reviews are append-only by stage.  The root materialization remains
+        # for the existing rework path, which deliberately consumes the latest
+        # compatible review without mutating earlier review evidence.
+        review_dir = self.backend._require_child_path(run_path, f"reviews/{stage}")
+        review_dir.mkdir(parents=True, exist_ok=True)
+        review_number = len(list(review_dir.glob("review_*.json"))) + 1
+        review_id = f"review_{review_number:03d}"
+        artifact = {**artifact, "review_id": review_id}
+        review_path = self.backend._require_child_path(run_path, f"reviews/{stage}/{review_id}.json")
+        review_path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         artifact_path = self.backend._require_child_path(run_path, "stage_review.json")
         artifact_path.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         summary = _compact_stage_review_summary(artifact)
@@ -241,7 +266,135 @@ class WorkflowConsoleActions:
             "action": "save_stage_review",
             "stage_count": 0,
             "summary": summary,
+            "review_id": review_id,
+            "review_artifact": f"reviews/{stage}/{review_id}.json",
             "run": _public_run_summary(self.backend.read_run_metadata(run_path)),
+        }
+
+    def approve_part_result(
+        self,
+        run_id: str,
+        *,
+        work_id: str,
+        root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Accept one reviewed child part result by updating only the Work pointer."""
+        run_path = self.backend.resolve_run(run_id, root=root)
+        review = _read_json_if_present(self._find_artifact(run_path, "part_result_review")) or {}
+        if review.get("status") not in {"accepted_for_preview", "accepted", "success"}:
+            raise ValueError("Approve Single Part Result requires an accepted part_result_review")
+        lineage = _read_json_if_present(self._find_artifact(run_path, "single_create_lineage")) or {}
+        part_id = review.get("part_id") or lineage.get("part_id")
+        child_run_id = review.get("child_run") or lineage.get("child_run_id")
+        if not isinstance(part_id, str) or not isinstance(child_run_id, str):
+            raise ValueError("part result review is missing accepted part lineage")
+        review_result = self.save_stage_review(
+            run_id, stage="single_part_result", review_status="approved", root=root,
+        )
+        manifest = self.backend._read_work_manifest(work_id)
+        accepted = manifest.get("accepted_part_results") if isinstance(manifest.get("accepted_part_results"), dict) else {}
+        accepted[part_id] = {
+            "child_run_id": child_run_id,
+            "review_id": review_result["review_id"],
+            "status": "approved",
+        }
+        manifest["accepted_part_results"] = accepted
+        manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self.backend._write_work_manifest(work_id, manifest)
+        self.backend.activate_work_lineage(work_id, parent_run_id=run_id, child_run_id=child_run_id)
+        return {"action": "approve_part_result", "part_id": part_id, "accepted_part_result": accepted[part_id], "review": review_result}
+
+    def select_candidate_part(
+        self,
+        run_id: str,
+        *,
+        work_id: str,
+        part_id: str,
+        root: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Select a supported assembly candidate through a versioned override.
+
+        This is intentionally not a Run mutation: the original assembly plan
+        remains immutable and the Work only records that downstream evidence is
+        stale for the newly selected candidate.  Accepted part-result pointers
+        are independent Work decisions and are never removed here.
+        """
+        if not isinstance(part_id, str) or not part_id:
+            raise ValueError("candidate part id is required")
+        run_path = self.backend.resolve_run(run_id, root=root)
+        manifest = self.backend._read_work_manifest(work_id)
+        active_lineage = manifest.get("active_lineage") if isinstance(manifest.get("active_lineage"), dict) else {}
+        active_root = active_lineage.get("active_root_run_id") or manifest.get("root_run_id")
+        if active_root != run_id:
+            raise ValueError("candidate selection must target the active Assembly Plan Run")
+
+        assembly_plan = _read_json_if_present(self._find_artifact(run_path, "assembly_plan"))
+        if not isinstance(assembly_plan, dict):
+            raise ValueError("active assembly plan is unavailable")
+        parts = assembly_plan.get("parts")
+        if not isinstance(parts, list):
+            raise ValueError("active assembly plan has no candidate parts")
+        candidate = next((item for item in parts if isinstance(item, dict) and item.get("part_id") == part_id), None)
+        if candidate is None:
+            raise ValueError("candidate part is not present in the active Assembly Plan")
+        if candidate.get("reference_only") or candidate.get("generation_strategy") == "reference_only" or candidate.get("part_status") == "reference_only":
+            raise ValueError("reference-only components cannot be selected for generation")
+        if not candidate.get("supported_candidate"):
+            raise ValueError("unsupported candidate cannot be selected for generation")
+
+        previous = assembly_plan.get("selected_part_id")
+        if previous == part_id:
+            return {
+                "action": "select_candidate_part",
+                "no_op": True,
+                "selected_candidate": part_id,
+                "message": "This candidate is already selected; no override was created.",
+                "downstream_stages_affected": [],
+            }
+
+        # JSON copies preserve the artifact's contract shape and avoid changing
+        # the original parsed object before backend validation succeeds.
+        selected_plan = json.loads(json.dumps(assembly_plan))
+        selected_plan["selected_part_id"] = part_id
+        selected_plan["primary_candidate_part"] = part_id
+        override = self.backend.write_artifact_by_id(
+            run_id,
+            "assembly_plan.json",
+            selected_plan,
+            root=root,
+            edit_reason="Selected from Candidate Detail",
+        )
+        metadata_dir = self.backend._require_child_path(run_path, "edits/assembly_plan")
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        metadata_number = len(list(metadata_dir.glob("metadata_*.json"))) + 1
+        created_at = datetime.now(timezone.utc).isoformat()
+        metadata = {
+            "schema_version": 1,
+            "reason": "Selected from Candidate Detail",
+            "previous_selected_candidate": previous,
+            "selected_candidate": part_id,
+            "created_at": created_at,
+            "downstream_stages_affected": list(CANDIDATE_SELECTION_STALE_STAGES),
+            "override_artifact": ((override.get("edit") or {}).get("edit_artifact")),
+        }
+        metadata_path = self.backend._require_child_path(
+            run_path, f"edits/assembly_plan/metadata_{metadata_number:03d}.json"
+        )
+        metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        manifest["candidate_selection"] = metadata
+        manifest["updated_at"] = created_at
+        # accepted_part_results is intentionally retained: accepted outputs can
+        # later come from sibling part Runs and are not an active-lineage leaf.
+        self.backend._write_work_manifest(work_id, manifest)
+        self._record_action(run_path, {"action": "select_candidate_part", "status": "selected", "success": True, "stage_count": 0})
+        return {
+            "action": "select_candidate_part",
+            "selected_candidate": part_id,
+            "previous_selected_candidate": previous,
+            "downstream_stages_affected": list(CANDIDATE_SELECTION_STALE_STAGES),
+            "override": override.get("override"),
+            "metadata_artifact": f"edits/assembly_plan/metadata_{metadata_number:03d}.json",
+            "next_action": "Create Part Request",
         }
 
     def apply_requirement_clarification(
@@ -687,10 +840,14 @@ def _build_stage_review_artifact(
         raise ValueError(f"unsupported workflow console rework target stage: {target_rework_stage}")
     if review_status == "needs_revision" and target_rework_stage is None:
         raise ValueError("workflow console stage review target_rework_stage is required for needs_revision")
+    if review_status == "blocked" and not _sanitize_note(user_notes):
+        raise ValueError("workflow console stage review user_notes are required for blocked")
     if review_status == "approved":
         target_rework_stage = None
 
     changes = _sanitize_requested_changes(requested_changes)
+    if review_status == "needs_revision" and not changes:
+        raise ValueError("workflow console stage review requested_changes are required for needs_revision")
     artifact = {
         "schema_version": 1,
         "stage": stage,

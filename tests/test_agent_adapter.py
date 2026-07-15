@@ -3453,6 +3453,11 @@ def test_reviewed_part_single_create_ready_handoff_invokes_agent_part_ir(tmp_pat
     assert (output_dir / "lineage.json").exists()
     assert (output_dir / "report.json").exists()
     assert (output_dir / "agent_trace.json").exists()
+    assert (output_dir / "agent_episode.json").exists()
+    assert (output_dir / "context_manifest.json").exists()
+    assert (output_dir / "agent_events.jsonl").exists()
+    assert (output_dir / "contract_submissions" / "submission_001.json").exists()
+    assert (output_dir / "validation_feedback" / "validation_001.json").exists()
     assert (child_dir / "input_ir.json").exists()
     assert (child_dir / "model.step").exists()
     assert (child_dir / "model.stl").exists()
@@ -3498,6 +3503,8 @@ def test_reviewed_part_single_create_ready_handoff_invokes_agent_part_ir(tmp_pat
         "record_lineage",
     ]
     assert report["reviewed_part_single_create"]["workflow_mode"] == "agent_ir_synthesis"
+    assert report["capability_mode"] == "deterministic_fallback"
+    assert report["agent_episode"]["validated"] is True
     assert trace["reviewed_part_single_create"]["part_id"] == "base"
 
 

@@ -1,55 +1,60 @@
 # CadFlow UX Design Pack
 
-This directory is the product-facing UI specification for CadFlow. It sits between product intent and implementation.
+This directory defines what users should see, understand, and do. Product objects and checkpoint responsibilities are defined by the canonical architecture; technical storage and action boundaries are defined by specialized architecture documents.
 
-The architecture documents explain how workflow data is stored and projected. The UX documents explain what the user should see, understand, and do.
+## Authoritative documents
 
-## Canonical documents
+Read in this order:
 
-- [`workflow-cockpit-design-spec.md`](workflow-cockpit-design-spec.md) — authoritative design specification for Workspace, Work, Run, workflow graph, stage detail, intervention, visual hierarchy, and acceptance.
-- [`../architecture/web-console-ux-architecture.md`](../architecture/web-console-ux-architecture.md) — existing Web Console information architecture and review-surface principles.
-- [`../architecture/web-workflow-console.md`](../architecture/web-workflow-console.md) — backend, lineage projection, artifact, and action architecture.
+1. `../architecture/cadflow-canonical-product-architecture.md` — Workspace, Work, Run, Part Job, checkpoint order, and stage responsibility.
+2. `product-usability-principles.md` — information relevance, guidance, progressive disclosure, Hover, and action feedback.
+3. `workflow-cockpit-design-spec.md` — Workflow Cockpit pages, graph, stage detail, interaction, responsive behavior, and acceptance.
+4. `../architecture/web-workflow-console.md` — view-model, renderer, action, artifact, and runtime feedback boundaries.
+5. `../status/current-product-readiness.md` — what is implemented, verified, and actually usable now.
 
-If implementation and UX copy disagree, first decide whether the problem is product design or backend projection. Do not patch the presentation layer until the expected user behavior is written here.
+Do not patch presentation behavior until the expected user task and canonical checkpoint are clear.
 
 ## Required UI design workflow
 
-Every meaningful Web Console change should follow this order:
+Every meaningful Web Console change follows:
 
-1. **User task** — state what the user is trying to accomplish.
-2. **User journey** — state where the user came from and what should happen next.
-3. **Information hierarchy** — decide what is primary, secondary, advanced, and debug-only.
-4. **Interaction flow** — define default selection, click behavior, actions, and post-action navigation.
-5. **View-model contract** — define required fields and fallback states before rendering.
-6. **Wireframe** — provide an ASCII or visual layout before styling.
-7. **State matrix** — cover loading, empty, ready, running, completed, needs-review, blocked, failed, skipped, stale, and unavailable.
-8. **Visual rules** — apply consistent typography, spacing, status colors, selected state, and action hierarchy.
-9. **Implementation** — connect NiceGUI to the approved view model; do not invent workflow state in the UI.
-10. **Screenshot acceptance** — verify the page visually with the Golden Desktop Robot Arm flow, not only through unit tests.
+1. Identify the affected canonical object and checkpoint.
+2. State the user's goal and current decision.
+3. Define primary, secondary, advanced, and diagnostic information.
+4. Define one recommended action and its visible postcondition.
+5. Define failure feedback and recovery.
+6. Confirm the view-model contract and immutable Work/Run boundaries.
+7. Cover loading, empty, ready, running, completed, needs-review, blocked, failed, skipped, stale, and unavailable states as applicable.
+8. Implement through the shared renderer and action lifecycle.
+9. Run automated contract tests.
+10. Exercise the affected journey in a real browser and record verification honestly.
 
-## Non-negotiable product rules
+## Non-negotiable rules
 
-- The primary workflow state is a **clickable dot-and-connector flow graph**.
-- Every stage must make **user input**, **agent interpretation/decision**, and **agent output** distinguishable.
-- Users must be able to identify where they can review, override, approve, rerun, or request rework.
-- A **Work** and its immutable **Runs** must never be visually conflated.
-- The normal UI must explain conclusions without requiring raw JSON, diagnostic codes, or provider traces.
-- A graph node may never render as an unlabeled or semantically blank dot. Missing data is an explicit `unavailable` state with a human-readable explanation.
-- Work-level workflow and run-level audit are separate modes:
-  - **Current Work** shows the active aggregated lineage and allows actions.
-  - **Run Snapshot** shows one immutable attempt and is read-only except for creating a new rework/child run.
-- User edits are validated overrides. Original agent artifacts remain immutable.
-- NiceGUI renders view models and calls backend actions. It does not derive business status from CSS, file names, or local component state.
+- Workflow is a clickable checkpoint graph, not a raw backend route diagram.
+- Current Work is actionable; Run Snapshot is immutable and read-only.
+- Every selected stage distinguishes user input, agent interpretation/decision, agent output, review, and evidence.
+- The primary screen explains the current conclusion and next action without raw JSON or diagnostics.
+- One action is visually dominant for the current task.
+- Candidate inspection and candidate selection are distinct.
+- User edits are validated, versioned overrides; original Run artifacts remain immutable.
+- Enabled write actions provide confirmation when needed, immediate pending state, postcondition verification, persistent success/failure, and refreshed workflow state.
+- Important artifacts are directly inspectable through controlled viewers.
+- Contract and Full modes are visually and semantically distinct.
+- Chinese and English primary UI experiences switch consistently.
+- NiceGUI renders approved view models and calls safe actions; it does not invent business state.
 
-## Definition of done for a UI change
+## Definition of done
 
-A UI change is not complete because tests pass. It is complete when:
+A UI change is not complete only because tests pass.
 
-- the primary user task is obvious within five seconds;
-- the current Work/Run context is unambiguous;
-- all visible graph nodes have label, state, summary, and click behavior;
-- stage input and output are recognizable without opening raw JSON;
-- the recommended next action is clear and limited to one primary action;
-- blocked, skipped, and unavailable states explain their cause and consequence;
-- Contract and Full example modes are visually distinct;
-- screenshots for the Golden Desktop Robot Arm flow satisfy the acceptance criteria in the canonical design specification.
+It is complete when:
+
+- the user can identify the current state and recommended action quickly;
+- the action has a real backend target and visible result;
+- success and failure are unambiguous;
+- the relevant artifact or review can be inspected;
+- Work/Run semantics remain correct;
+- responsive behavior is usable at the affected widths;
+- manual verification limits and screenshots are reported honestly;
+- readiness, roadmap, tasks, and affected architecture/UX documents are synchronized.

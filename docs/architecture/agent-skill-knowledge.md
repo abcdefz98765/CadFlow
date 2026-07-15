@@ -1,361 +1,435 @@
 # Agent, Skill, and Knowledge Architecture
 
-CadFlow should integrate provider-backed LLMs through narrow stage agents, not a
-single broad agent. Each workflow stage owns one agent role, one skill guide,
-selected knowledge, and one or more structured JSON contracts.
+## Authority
 
-```text
-Workflow stage
-  -> stage agent
-  -> skill guide + selected knowledge
-  -> JSON contract artifact
-  -> local validation and gate
-  -> next stage
-```
+This document defines CadFlow's logical agents, skill ownership, and knowledge layering.
 
-The provider is replaceable. CadFlow owns context assembly, privacy filtering,
-local validation, artifact persistence, gates, and deterministic execution.
+It specializes the product checkpoints in:
 
-For provider-backed whole-prompt create, the conservative fallback path is the
-explicit normalized workflow:
+- `cadflow-canonical-product-architecture.md`
 
-```text
-prompt
-  -> provider extraction
-  -> local requirement/planning compiler
-  -> deterministic CAD IR conversion
-  -> run_ir_pipeline
-```
+It does not allow agents to reorder or bypass that workflow.
 
-This is exposed as `run_provider_normalized_create_pipeline(...)` and maps to
-`extract_then_compile` mode internally. It is useful for stable fallback,
-offline tests, and provider extraction evaluation, but it is not the primary
-architecture for Web reviewed-part CAD generation. Strict provider contract
-mode remains available for compliance testing, where provider outputs must
-directly satisfy CadFlow contracts and no silent fallback is allowed.
+## Core model
 
-For reviewed-part create, the primary CAD entry is:
+CadFlow separates five concepts:
 
-```text
-reviewed_part_handoff.json
-  -> CadIrAgent / AgentAdapter.create_part_ir
-  -> CAD IR draft
-  -> validate_input_ir_draft + validate_ir
-  -> run_ir_pipeline
-```
+- **Agent role** — the logical responsibility active for one checkpoint transition.
+- **Skill** — the behavior contract for that role: purpose, inputs, outputs, tools, stop conditions, and prohibitions.
+- **Knowledge** — selected reference material available to a skill.
+- **Runtime context** — accepted Work/Run artifacts and observations for the current episode.
+- **Adapter/provider** — the replaceable implementation used to produce structured agent actions or contracts.
 
-Templates, deterministic parsers, and primitive compilers stabilize and test the
-system; they must not block agent CAD IR synthesis by default or silently
-replace unsupported reviewed parts with unrelated templates.
+A provider model is not itself the architecture. One adapter may implement several logical agent roles, but each operation must still use the correct skill, knowledge scope, contract, and context.
 
-## Concepts
+    checkpoint transition
+      -> logical agent role
+      -> one skill contract
+      -> allowed shared and private knowledge
+      -> compact runtime context
+      -> structured action or artifact proposal
+      -> local validation and persistence
 
-### Agent
+## Logical agent roles
 
-An agent is the runtime role for one workflow responsibility. It turns user
-intent and artifact context into structured JSON. It does not execute CAD code,
-write files directly, call shell commands, or decide what is persisted.
+### Requirement Agent
 
-Initial stage agents:
+Checkpoint:
 
-- `RequirementAgent`: user prompt to `requirement.json`.
-- `PlanningAgent`: `requirement.json` to `planning_artifact.json`.
-- `CadIrAgent`: planning or reviewed-part handoff to `input_ir.json` through
-  agent-generated CAD IR synthesis plus local validation. Deterministic
-  primitive/template conversion is a local/mock fallback and guardrail, not the
-  product's primary architecture.
-- `PartModelingAgent`: validated CAD IR to generated artifacts through the CAD
-  Agent Loop.
-- `RepairAgent`: validation or execution failures to constrained repair
-  suggestions.
-- `ReviewAgent`: reports and traces to review explanations and gate summaries.
-- `RevisionIntentAgent`: user revision text plus parent context to
-  `change_intent.json`.
-- `RevisionPlanAgent`: change intent plus parent context to
-  `revision_plan.json`.
+- Prompt -> Requirement / Clarification.
 
-### Skill
+Owns:
 
-A skill is the agent's behavior guide for one stage. It explains how to reason
-for that stage, what to output, what to ask, and what not to do. For provider
-requests, this is CadFlow-owned runtime context sent to the external model. It
-is separate from Codex development-time skills.
+- interpreting user intent;
+- structured requirement fields;
+- assumptions, missing information, and focused questions;
+- proceed, clarify, or safe-block recommendation.
 
-Every provider-facing skill guide must include:
+Does not own:
 
-- Agent role and operation.
-- Required JSON artifact contract.
-- Required and optional fields.
-- Missing-information behavior.
-- Gate behavior.
-- Safety and manufacturing boundaries.
-- Explicit prohibitions against CAD code, Python code, shell commands, local
-  absolute paths, provider transcripts, secrets, and free-form prose.
+- final design decomposition;
+- candidate selection;
+- CAD IR or geometry execution.
 
-### Knowledge
+Primary operations:
 
-Knowledge is selected reference material for a stage. It is not automatically
-sent in full. CadFlow should send compact summaries that are useful for the
-current operation.
+- `parse_requirement`;
+- structured clarification support.
 
-Knowledge has two levels:
+### Planning Agent
 
-- Global knowledge: cross-stage rules and vocabularies.
-- Stage knowledge: local references owned by a skill.
+Checkpoint:
 
-The first provider-ready implementation should start with skill guides and
-artifact contracts. Knowledge injection can remain small and explicit until a
-real retrieval layer exists.
+- accepted Requirement -> Planning / Design Brief -> Assembly Plan candidates.
 
-## Repository Layout
+Owns:
 
-Use the existing layout:
+- engineering route and scope;
+- design strategy and alternatives;
+- functional decomposition;
+- interfaces, dependencies, datums, and risk summaries;
+- candidate and reference-component planning.
 
-```text
-knowledge/
-  README.md
-  parts/
+Does not own:
 
-skills/
-  requirement/
-    SKILL.md
+- requirement elicitation;
+- detailed CAD IR synthesis;
+- backend-specific geometry execution.
+
+Primary operations:
+
+- `create_plan`;
+- future bounded planning-candidate episode.
+
+### CAD IR Agent
+
+Checkpoint:
+
+- Reviewed Handoff -> CAD IR Draft.
+
+Owns:
+
+- converting one accepted part intent into backend-neutral structured CAD IR;
+- requesting allowlisted context;
+- exposing assumptions and uncertainty;
+- repairing a draft from structured validator feedback.
+
+Does not own:
+
+- arbitrary Python, shell, or CadQuery execution;
+- user approval;
+- assembly completion claims.
+
+Primary operations:
+
+- `create_part_ir`;
+- `repair_contract` or constrained `suggest_repair`.
+
+### Part Modeling Executor / Agent Loop
+
+Checkpoint:
+
+- validated CAD IR -> deterministic part artifacts.
+
+Owns:
+
+- backend capability mapping;
+- deterministic geometry generation;
+- export and geometry checks;
+- structured execution observations;
+- implementation-level repair within validated intent.
+
+This role is primarily a CadFlow-owned deterministic executor. A provider may advise through structured contracts but cannot inject executable code.
+
+### Assembly Agent, future
+
+Checkpoint:
+
+- multiple accepted Part Jobs -> assembly placement, constraints, and assembly validation.
+
+Owns:
+
+- relationships between already-defined parts;
+- placements, contacts, clearances, degrees of freedom, and assembly-level checks.
+
+Does not own:
+
+- initial product decomposition, which belongs to Planning / Assembly Plan;
+- single-part geometry generation;
+- unsupported claims of full assembly generation.
+
+Current product status:
+
+- Assembly Plan exists as a planning artifact.
+- Full assembly generation and constraint solving are not yet usable capabilities.
+
+### Review Agent
+
+Checkpoint:
+
+- structured reports and evidence -> concise review explanation.
+
+Review has three distinct scopes:
+
+- Part Request Review — is the modeling request ready?
+- Part Result Review — does one result match the Reviewed Handoff?
+- Work-level Workflow Review — what is the current product state and valid next action?
+
+The Review Agent may explain evidence and limitations. User acceptance remains an explicit human action.
+
+Primary operation:
+
+- `explain_review`;
+- future scoped review operations.
+
+### Revision Agent
+
+Checkpoint:
+
+- accepted parent result plus user change request -> structured revision child Run.
+
+Owns:
+
+- change-intent extraction;
+- revision planning;
+- structured patch proposal;
+- identifying when a requested change cannot be represented safely.
+
+Does not overwrite parent artifacts or directly edit external CAD without an explicit supported path.
+
+Primary operations:
+
+- `parse_revision_request`;
+- `create_revision_plan`.
+
+## Skill contract
+
+A skill is a versioned stage behavior contract, not an informal prompt fragment.
+
+Every `skills/<skill>/SKILL.md` should define:
+
+- skill id and owned logical agent role;
+- canonical checkpoint;
+- purpose and non-goals;
+- accepted input artifact types;
+- output or action contracts;
+- allowed tools and context requests;
+- shared knowledge scopes;
+- private skill knowledge scopes;
+- missing-information behavior;
+- validation and stop conditions;
+- prohibited side effects;
+- user handoff and next checkpoint.
+
+Skills must not duplicate the entire product workflow. They reference the canonical architecture and describe only their owned responsibility.
+
+## Knowledge layers
+
+Knowledge is not the same as Work context. Static knowledge should be layered and selected explicitly.
+
+### Layer 0 — Global invariants and policy
+
+Available to every agent operation when relevant.
+
+Examples:
+
+- structured-output and privacy rules;
+- units and naming conventions;
+- CAD execution safety boundary;
+- immutable Run and explicit approval rules;
+- check-level vocabulary;
+- output and path-safety policy.
+
+Repository ownership:
+
+- `policies/`;
+- compact global rules compiled by provider context assembly.
+
+This layer must stay small.
+
+### Layer 1 — Shared workflow and contract knowledge
+
+Shared by adjacent skills that must agree on handoffs.
+
+Examples:
+
+- requirement contract vocabulary used by Requirement and Planning;
+- Assembly Plan and interface vocabulary used by Planning, CAD IR, and future Assembly;
+- CAD IR schema vocabulary used by CAD IR, Part Modeling, Repair, and Review;
+- review-state vocabulary used by Review, Workflow, and Rework.
+
+Repository ownership:
+
+- canonical architecture and artifact-contract documents;
+- top-level `knowledge/` only when the material is genuinely cross-skill.
+
+A shared rule has one source of truth. Do not copy independent versions into multiple skill directories.
+
+### Layer 2 — Skill-private knowledge
+
+Owned by exactly one skill and loaded only for that skill's operations.
+
+Examples:
+
+- Requirement: elicitation and missing-information heuristics;
+- Planning: decomposition patterns and interface-planning heuristics;
+- CAD IR: geometry-family normalization and CAD IR construction guidance;
+- Part Modeling: backend capabilities, feature implementation, and export checks;
+- Assembly: placement, constraint, clearance, and degree-of-freedom rules;
+- Review: evidence interpretation and check presentation;
+- Revision: supported patch paths and change-intent patterns.
+
+Repository ownership:
+
+- `skills/<skill>/knowledge/`.
+
+When private knowledge becomes necessary to more than one skill, promote it to a shared source rather than duplicating it.
+
+### Layer 3 — Work-scoped accepted context
+
+Dynamic product context selected by the Context Broker.
+
+Examples:
+
+- active Requirement;
+- accepted Planning or Assembly Plan;
+- selected candidate;
+- Reviewed Handoff;
+- accepted part result;
+- user Stage Review.
+
+This is not static knowledge and must not be stored under `knowledge/`.
+
+It is selected from the active Work lineage with provenance.
+
+### Layer 4 — Run- and episode-scoped observations
+
+Dynamic observations available only to the current attempt.
+
+Examples:
+
+- previous CAD IR submissions;
+- validator codes and field errors;
+- execution failure summaries;
+- repair attempts;
+- episode budgets and stop reason.
+
+These remain Run artifacts and episode observations. They are not promoted to global knowledge automatically.
+
+### Layer 5 — Provider-specific operational guidance
+
+Provider formatting, timeout, retry, and response-envelope behavior belong to adapter/client configuration.
+
+Provider quirks must not redefine product contracts or skill knowledge. A provider-specific workaround should be isolated and removable.
+
+## Knowledge access rules
+
+- Default context is minimal.
+- An operation receives only its skill guide, contract guide, selected shared knowledge, selected private knowledge, and compact runtime context.
+- No operation receives the entire repository or every skill by default.
+- Arbitrary path access is prohibited.
+- Every dynamic context item records source Work, Run, Stage, and source type.
+- Knowledge ids included in a provider request are recorded in a privacy-safe trace summary.
+- Raw provider chain-of-thought is neither required nor persisted.
+- A knowledge source cannot grant execution authority; only local policy and validation can do that.
+
+## Repository layout
+
+    policies/
+      global cross-agent invariants
+
     knowledge/
-
-  planning/
-    SKILL.md
-    knowledge/
-
-  part_modeling/
-    SKILL.md
-    knowledge/
-
-  revision/
-    SKILL.md
-    knowledge/
-
-  assembly/
-    SKILL.md
-    knowledge/
-
-  review/
-    SKILL.md
-```
-
-Top-level `knowledge/` is an index for references shared by more than one
-skill. Stage-specific references stay under the owning skill.
-
-## Provider Context Assembly
-
-Provider requests should be assembled in this order:
-
-```text
-system:
-  global minimal rules
-  stage skill guide
-  operation-specific JSON contract guide
-  selected compact knowledge summary
-
-user:
-  sanitized user prompt or upstream artifact
-  sanitized model context when needed
-
-request metadata:
-  operation name
-  response format
-  non-secret provider options
-```
-
-The context assembler must run before the injected provider client sees the
-request. It must use allowlisted structured data and the existing privacy
-sanitizer.
-
-The first runtime implementation lives in
-`src/ai_native_cad/agents/provider_context.py`. It uses a static
-operation-to-skill mapping and compact operation-specific knowledge summaries;
-it does not perform embedding search, vector retrieval, auto-indexing, external
-search, or long-document stuffing.
-
-Provider-visible context must not include:
-
-- API keys, tokens, passwords, or secret values.
-- Environment variable names used for API keys.
-- Local absolute paths.
-- `run_dir`, `output_dir`, `output_root`, `project_root`, `workspace_root`,
-  `root`, or filesystem `path` fields.
-- Raw transcripts, chat logs, runtime logs, or provider responses.
-
-Structured CAD paths such as `dimensions.thickness` are allowed only where the
-artifact contract explicitly requires field paths, such as revision operations.
-
-## Stage Responsibilities
-
-### Requirement
-
-Input:
-
-- User prompt.
-- Optional non-secret overrides.
-- Minimal workflow context.
-
-Output:
-
-- `requirement.json`.
-
-Skill behavior:
-
-- Preserve abstract user intent as structured uncertainty.
-- Use `assumptions` for low-risk defaults.
-- Use `missing_information` and `follow_up_questions` when the request is
-  under-specified.
-- Do not invent safety-critical, load-bearing, fit, material, tolerance, or
-  certification details.
-
-### Planning
-
-Input:
-
-- Validated `requirement.json`.
-- Selected compact template or routing knowledge.
-
-Output:
-
-- `planning_artifact.json`.
-
-Skill behavior:
-
-- Select route, template candidates, datums, interfaces, and resolved design
-  decisions.
-- Convert requirement uncertainty into gate status and rework decisions.
-- Keep geometry decisions structured in `resolved_decisions`.
-
-### CAD IR
-
-Input:
-
-- Validated planning artifact or reviewed-part handoff.
-
-Output:
-
-- `input_ir.json`.
-
-Skill behavior:
-
-- Synthesize backend-neutral CAD IR for the selected part or reviewed handoff.
-- Keep CAD IR normalized and backend-neutral.
-- Do not allow provider text to bypass local CAD IR validation.
-- Do not generate CadQuery/Python code, shell commands, raw provider payloads,
-  transcripts, secrets, or local paths.
-- Unsupported agent-generated IR should block at CAD IR validation with clear
-  diagnostics rather than falling back to an unrelated supported template.
-
-### Part Modeling
-
-Input:
-
-- Validated CAD IR.
-
-Output:
-
-- `model.py`, `model.step`, derived outputs, `report.json`, and trace
-  artifacts.
-
-Skill behavior:
-
-- Execution stays in CadFlow Python code and CAD Agent Loop.
-- Provider advice may help repair or explain, but provider output must not be
-  executed as arbitrary code.
-
-### Repair
-
-Input:
-
-- Validation or execution failure.
-- Current CAD IR.
-
-Output:
-
-- Repair suggestion with analysis and constrained repaired IR or patch intent.
-
-Skill behavior:
-
-- Map failure context to small, structured changes.
-- Preserve user intent and do not silently change unrelated geometry.
-
-### Review
-
-Input:
-
-- Report and trace summaries.
-
-Output:
-
-- Review explanation or gate summary.
-
-Skill behavior:
-
-- Explain status, errors, warnings, and publishability.
-- Keep summaries path-free and secret-free.
-
-### Revision
-
-Input:
-
-- User revision prompt.
-- Sanitized parent model context.
-
-Output:
-
-- `change_intent.json`.
-- `revision_plan.json`.
-- Later deterministic patch artifacts.
-
-Skill behavior:
-
-- Express user change as field-level operations where possible.
-- Use CAD field paths such as `dimensions.thickness`.
-- Block or ask when the requested change cannot be mapped safely.
-- Never overwrite parent artifacts.
-
-## Runtime Implementation
-
-The first runtime implementation uses a provider context module rather than
-expanding inline strings in `json_contract.py`:
-
-```text
-src/ai_native_cad/agents/provider_context.py
-```
-
-Current responsibilities:
-
-- `system_prompt_for(operation)`: combine global rules and the stage skill
-  guide.
-- `contract_guide_for(operation)`: return the compact operation-specific
-  contract guide.
-- `knowledge_summary_for(operation, context)`: return a small static summary
-  selected for the stage.
-- `provider_messages_for(...)`: build provider-visible system/user messages
-  containing selected context and the sanitized operation payload.
-
-This first version is static and deterministic. It does not implement
-general RAG, long knowledge stuffing, background indexing, or provider-side
-memory. Selection should use an explicit operation-to-skill mapping, for
-example `parse_requirement -> requirement`, `create_plan -> planning`,
-`parse_revision_request -> revision`, and `create_revision_plan -> revision`.
-Each mapped operation should receive only a small hand-written summary of the
-relevant skill and knowledge. Embeddings, vector databases, model-driven
-retrieval, and automatic repository indexing are later options, not part of the
-first implementation.
-
-## Testing Requirements
-
-Each operation should have fake-client tests proving:
-
-- The provider-visible system prompt includes the expected skill and contract
-  guide.
-- Sensitive fields are removed before request construction.
-- Abstract user prompts can be represented as structured missing-information
-  contracts.
-- Local validation rejects malformed or bypassing provider outputs.
-
-Real provider smoke tests remain manual or explicitly opt-in. They must not run
-in CI and must not require secrets.
+      README.md
+      genuinely shared cross-skill references only
+
+    skills/
+      README.md
+      requirement/
+        SKILL.md
+        knowledge/
+      planning/
+        SKILL.md
+        knowledge/
+      cad_ir/
+        SKILL.md
+        knowledge/
+      part_modeling/
+        SKILL.md
+        knowledge/
+      assembly/
+        SKILL.md
+        knowledge/
+      review/
+        SKILL.md
+        knowledge/
+      revision/
+        SKILL.md
+        knowledge/
+
+    src/ai_native_cad/agents/
+      adapter and provider boundaries
+      bounded episode orchestration
+      context and knowledge selection
+      validation
+
+## Runtime context assembly
+
+Provider or proposer context is assembled in this order:
+
+    global minimal rules
+      -> skill guide
+      -> operation-specific contract guide
+      -> selected shared knowledge summaries
+      -> selected skill-private knowledge summaries
+      -> compact Work context envelope
+      -> current Run observations
+      -> sanitized user or upstream artifact payload
+
+The Context Broker resolves dynamic context. A knowledge selector resolves static knowledge. These responsibilities should remain distinct even if they share implementation helpers.
+
+## Current implementation
+
+Current code provides:
+
+- one `AgentAdapter` protocol with stage-specific operations;
+- deterministic and JSON-contract adapter implementations;
+- static operation-to-stage mapping in `provider_context.py`;
+- compact static knowledge summaries;
+- a bounded `create_part_ir` episode and semantic Context Broker.
+
+This is a valid bootstrap, but it has limitations:
+
+- logical roles are implemented behind one broad adapter interface;
+- skill guides are partly duplicated as inline strings in `provider_context.py`;
+- knowledge source paths are descriptive and are not yet a loaded registry;
+- `create_part_ir` has a bounded episode, while other operations remain mostly one-shot;
+- shared versus skill-private knowledge is not yet enforced by a typed registry;
+- missing skill files or stale template-centric descriptions can diverge from runtime prompts.
+
+## Required next consolidation
+
+Before provider-backed agentic CAD is treated as usable:
+
+1. Introduce a typed skill registry or compiled manifest containing:
+   - skill id;
+   - operations;
+   - contract types;
+   - shared knowledge ids;
+   - private knowledge ids;
+   - allowed context keys;
+   - allowed tools and stop reasons.
+2. Make one source authoritative for each skill guide; runtime prompt text should be compiled from it or tested against it.
+3. Add a knowledge registry with ownership and layer metadata.
+4. Reject an operation requesting knowledge outside its declared scopes.
+5. Add provenance and selected knowledge ids to episode/provider traces.
+6. Keep provider-specific formatting separate from skill semantics.
+
+This consolidation is architecture work. It should not be mixed with adding new CAD families or UI features.
+
+## Tests
+
+Tests should prove:
+
+- every adapter operation maps to one declared skill;
+- every skill maps to canonical checkpoints and accepted artifact types;
+- missing skill definitions fail fast;
+- shared and private knowledge ids are unique and owned;
+- operations cannot access another skill's private knowledge;
+- only allowlisted dynamic context keys are supplied;
+- provider-visible requests contain no secrets, absolute paths, raw logs, or transcripts;
+- malformed structured output cannot reach deterministic execution;
+- deterministic fallback is clearly labeled;
+- adding a provider does not change the canonical workflow.
+
+## Invariants
+
+1. Agents operate inside checkpoint transitions; they do not redefine the workflow.
+2. Skills own behavior, not persistent product state.
+3. Static knowledge never substitutes for accepted Work context.
+4. Work and Run artifacts never become global knowledge automatically.
+5. Private skill knowledge is not visible to unrelated agents.
+6. Shared knowledge has one source of truth.
+7. Provider adapters are replaceable and have no execution authority.
+8. Only validated structured contracts reach deterministic CAD execution.
+9. Human approval remains explicit.
+10. The UI shows product conclusions, not raw knowledge or provider internals.
