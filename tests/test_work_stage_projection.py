@@ -32,6 +32,11 @@ def test_golden_work_projection_discovers_nested_lineage_and_contract_statuses(t
     ))
     assert stages["part_modeling"]["status"] == "execution_skipped"
     assert stages["part_modeling"]["status"] != "blocked"
+    assert stages["part_modeling"]["input_status"] == "accepted_upstream"
+    assert stages["part_modeling"]["execution_status"] == "skipped"
+    assert stages["part_modeling"]["result_status"] == "contract_complete"
+    assert stages["part_modeling"]["user_review_status"] == "not_reviewed"
+    assert stages["part_modeling"]["capability_mode"] == "contract"
     assert stages["part_result_review"]["status"] == "skipped"
     assert stages["rework"]["status"] == "not_started"
     assert stages["part_request"]["output_artifacts"][0]["source_relative_path"] == "02_part_request/part_create_request.json"
@@ -59,7 +64,12 @@ def test_golden_full_projection_completes_modeling_and_result_review(tmp_path, m
 
     stages = build_work_stage_projection(backend, result["work_id"])["stages"]
     assert stages["part_modeling"]["status"] == "completed"
+    assert stages["part_modeling"]["execution_status"] == "completed"
+    assert stages["part_modeling"]["result_status"] == "generated"
+    assert stages["part_modeling"]["user_review_status"] == "not_reviewed"
     assert stages["part_result_review"]["status"] == "completed"
+    assert stages["part_result_review"]["agent_review_status"] == "accepted"
+    assert stages["part_result_review"]["user_review_status"] == "not_reviewed"
     outputs = {item["name"]: item for item in stages["part_modeling"]["output_artifacts"] if item["present"]}
     assert outputs["model.step"]["source_relative_path"].endswith("single_part_upper_link/model.step")
     assert outputs["model.stl"]["source_relative_path"].endswith("single_part_upper_link/model.stl")

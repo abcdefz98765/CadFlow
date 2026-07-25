@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -74,10 +76,14 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
         attempt_results = []
 
         for candidate in candidates:
-            execution = execute_model(candidate["code"], output_path)
-            model = _load_generated_model(output_path / "model.py", current_ir.to_dict()) if execution["status"] == "success" else None
-            (output_path / "report.json").write_text("{}\n", encoding="utf-8")
-            validation = validate_pipeline_outputs(model, output_path, current_ir, execution)
+            candidate_path = Path(tempfile.mkdtemp(prefix=f".candidate-{attempt}-{candidate['candidate']}-", dir=output_path))
+            try:
+                execution = execute_model(candidate["code"], candidate_path)
+                model = _load_generated_model(candidate_path / "model.py", current_ir.to_dict()) if execution["status"] == "success" else None
+                (candidate_path / "report.json").write_text("{}\n", encoding="utf-8")
+                validation = validate_pipeline_outputs(model, candidate_path, current_ir, execution)
+            finally:
+                shutil.rmtree(candidate_path, ignore_errors=True)
             score = score_candidate(candidate["candidate"], validation, execution)
             attempt_results.append({
                 "candidate": candidate["candidate"],
@@ -110,6 +116,8 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
             trace["final_selected_candidate"] = best["candidate"]
             trace["steps"].append(step)
             final_execution, final_validation = _materialize_selected(output_path, selected_code, selected_ir)
+            if final_execution.get("status") != "success" or not final_validation.get("valid"):
+                remove_untrusted_products(output_path)
             trace["final_execution_status"] = final_execution.get("status")
             trace["final_measured_validation_targets"] = final_validation.get("measured_validation_targets", [])
             trace["final_inspection_summary"] = _inspection_summary(final_validation.get("inspection", {}))
@@ -143,6 +151,7 @@ def run_agent_loop(ir: CADIR | dict[str, Any], output_dir: str | Path, max_attem
     trace["final_measured_validation_targets"] = last_validation.get("measured_validation_targets", [])
     trace["final_inspection_summary"] = _inspection_summary(last_validation.get("inspection", {}))
     trace["final_flow_decision"] = part_modeling_final_decision(status="failed", validation=last_validation)
+    remove_untrusted_products(output_path)
     _write_trace(output_path, trace)
     return {
         "status": "failed",
@@ -163,6 +172,18 @@ def _materialize_selected(output_path: Path, code: str, cad_ir: CADIR) -> tuple[
     (output_path / "report.json").write_text("{}\n", encoding="utf-8")
     validation = validate_pipeline_outputs(model, output_path, cad_ir, execution)
     return execution, validation
+
+
+def remove_untrusted_products(output_path: Path) -> None:
+    """Keep failed-attempt evidence while removing files that look deliverable."""
+
+    for name in ("model.py", "model.step", "model.stl", "preview.png"):
+        path = output_path / name
+        if path.is_file():
+            path.unlink()
+    cache = output_path / "__pycache__"
+    if cache.is_dir():
+        shutil.rmtree(cache, ignore_errors=True)
 
 
 def _load_generated_model(model_path: Path, ir_data: dict[str, Any]) -> Any:

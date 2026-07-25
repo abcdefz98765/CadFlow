@@ -157,8 +157,6 @@ def create_work_manifest(
         "part_jobs": [],
         "accepted_part_results": {},
         "candidate_selection": {},
-        "accepted_part_results": {},
-        "candidate_selection": {},
         "requirement": {"status": "not_started", "root_run_id": None},
         "advancement_mode": backend.read_workspace_config().get("advancement_mode", "manual_confirm"),
         "metadata": safe_metadata,
@@ -690,17 +688,25 @@ def _build_parts(work: dict[str, Any]) -> list[dict[str, Any]]:
         status = "accepted" if accepted_result.get("status") == "approved" else _part_status(part, work["runs_by_id"])
         review = _part_review_for(part_id, work["runs_by_id"])
         latest_run_id = _latest_part_run_id(part_id, work["runs_by_id"]) or work["summary"].get("root_run_id")
+        accepted_run_id = _accepted_run_id(accepted_result)
+        attempt_run_id = _part_download_run_id(part_id, work["runs_by_id"])
         rows.append({
             "part_id": part_id,
             "role": part.get("role"),
             "status": status,
+            "result_status": "accepted" if status == "accepted" else ("ready_for_review" if status == "needs_review" else status),
+            "user_review_status": "approved" if accepted_result.get("status") == "approved" else "not_reviewed",
+            "agent_review_status": _dict(review).get("status"),
             "current_stage": _part_stage(status, review),
             "latest_run_id": latest_run_id,
-            "download_run_id": _part_download_run_id(part_id, work["runs_by_id"]),
+            "download_run_id": accepted_run_id or attempt_run_id,
             "attempt_count": _part_attempt_count(part_id, work["runs_by_id"]),
             "has_step": _part_has_download(part_id, work["runs_by_id"], "model.step"),
             "has_stl": _part_has_download(part_id, work["runs_by_id"], "model.stl"),
             "has_preview": _part_has_download(part_id, work["runs_by_id"], "preview.png"),
+            "deliverable_available": bool(
+                accepted_run_id and _run_or_child_has_download(work["runs_by_id"], accepted_run_id, "model.step")
+            ),
             "review_status": accepted_result.get("status") or _dict(review).get("status") or part.get("part_status"),
             "next_action": _part_next_action(status),
         })
@@ -728,13 +734,21 @@ def _build_parts(work: dict[str, Any]) -> list[dict[str, Any]]:
         })
     if rows:
         return rows
+    accepted_results = _dict(work.get("entity_state")).get("accepted_part_results") or {}
     for run_id, run in sorted(work["runs_by_id"].items()):
         selected = run.get("selected_part_id")
         if selected:
+            accepted_result = _dict(accepted_results.get(selected)) if isinstance(selected, str) else {}
+            accepted_run_id = _accepted_run_id(accepted_result)
+            generated = bool(run.get("has_step")) or _has_download(run, "model.step")
+            status = "accepted" if accepted_run_id == run_id and accepted_result.get("status") == "approved" else ("needs_review" if generated else "incomplete")
             rows.append({
                 "part_id": selected,
                 "role": None,
-                "status": "accepted" if run.get("has_step") or _has_download(run, "model.step") else "incomplete",
+                "status": status,
+                "result_status": "accepted" if status == "accepted" else ("ready_for_review" if generated else "incomplete"),
+                "user_review_status": "approved" if status == "accepted" else "not_reviewed",
+                "agent_review_status": _dict(_dict(run.get("reviewed_part_summary")).get("part_result_review")).get("status"),
                 "current_stage": "single_part_generation",
                 "latest_run_id": run_id,
                 "download_run_id": run_id if any(_has_download(run, name) for name in DOWNLOADABLE_FILES) else None,
@@ -742,6 +756,7 @@ def _build_parts(work: dict[str, Any]) -> list[dict[str, Any]]:
                 "has_step": bool(run.get("has_step")) or _has_download(run, "model.step"),
                 "has_stl": bool(run.get("has_stl")) or _has_download(run, "model.stl"),
                 "has_preview": _has_download(run, "preview.png"),
+                "deliverable_available": status == "accepted" and generated,
                 "review_status": _dict(_dict(run.get("reviewed_part_summary")).get("part_result_review")).get("status"),
                 "next_action": "View products",
             })
@@ -848,18 +863,78 @@ def _run_lineage_relation(run: dict[str, Any]) -> tuple[str, str | None]:
 
 
 def _build_products(work: dict[str, Any]) -> dict[str, Any]:
-    artifact_by_name = {}
-    download_by_name = {}
-    for run in work["runs_by_id"].values():
-        for item in run.get("artifacts", []):
-            if isinstance(item, dict) and isinstance(item.get("name"), str):
-                artifact_by_name[item["name"]] = {"name": item["name"], "collapsed": True, "read_on_demand": True}
-        for item in run.get("downloadables", []):
-            if isinstance(item, dict) and item.get("name") in {"model.step", "model.stl", "preview.png"}:
-                download_by_name[item["name"]] = {"name": item["name"], "available": True}
+    accepted_results = _dict(work.get("entity_state")).get("accepted_part_results") or {}
+    accepted_run_to_parts: dict[str, list[str]] = {}
+    for part_id, value in (accepted_results.items() if isinstance(accepted_results, dict) else ()):
+        accepted = _dict(value)
+        run_id = _accepted_run_id(accepted)
+        if accepted.get("status") == "approved" and run_id:
+            accepted_run_to_parts.setdefault(run_id, []).append(str(part_id))
+
+    accepted_artifacts: dict[tuple[str, str], dict[str, Any]] = {}
+    supporting_artifacts: dict[tuple[str, str], dict[str, Any]] = {}
+    accepted_downloads: dict[tuple[str, str], dict[str, Any]] = {}
+    reviewable_downloads: dict[tuple[str, str], dict[str, Any]] = {}
+    failed_attempt_output_count = 0
+    untrusted_output_count = 0
+    for record in _iter_run_output_records(work["runs_by_id"]):
+        run_id = str(record.get("run_id") or "")
+        status = _status_value(record.get("status"))
+        accepted_parts = accepted_run_to_parts.get(run_id, [])
+        downloads = [name for name in record.get("downloadables", []) if name in {"model.step", "model.stl", "preview.png"}]
+        for name in record.get("artifacts", []):
+            supporting_artifacts[(run_id, name)] = {
+                "name": name,
+                "source_run_id": run_id,
+                "trust_status": "evidence",
+                "collapsed": True,
+                "read_on_demand": True,
+            }
+        if accepted_parts:
+            for name in record.get("artifacts", []):
+                accepted_artifacts[(run_id, name)] = {
+                    "name": name,
+                    "source_run_id": run_id,
+                    "part_ids": accepted_parts,
+                    "trust_status": "accepted",
+                    "collapsed": True,
+                    "read_on_demand": True,
+                }
+            for name in downloads:
+                accepted_downloads[(run_id, name)] = {
+                    "name": name,
+                    "source_run_id": run_id,
+                    "part_ids": accepted_parts,
+                    "available": True,
+                    "trust_status": "accepted",
+                }
+        elif _attempt_status_is_failed(status):
+            failed_attempt_output_count += len(downloads)
+        elif _attempt_status_is_reviewable(status):
+            for name in downloads:
+                reviewable_downloads[(run_id, name)] = {
+                    "name": name,
+                    "source_run_id": run_id,
+                    "available": True,
+                    "trust_status": "reviewable",
+                }
+        else:
+            untrusted_output_count += len(downloads)
     return {
-        "human_facing": filter_artifacts_for_display(list(artifact_by_name.values())),
-        "downloadables": list(download_by_name.values()),
+        "artifact_state": {
+            "accepted_deliverable_count": len(accepted_downloads),
+            "reviewable_output_count": len(reviewable_downloads),
+            "failed_attempt_output_count": failed_attempt_output_count,
+            "untrusted_output_count": untrusted_output_count,
+        },
+        "accepted_deliverables": list(accepted_downloads.values()),
+        "reviewable_outputs": list(reviewable_downloads.values()),
+        "failed_attempt_outputs_are_diagnostics": True,
+        "supporting_artifacts": filter_artifacts_for_display(list(supporting_artifacts.values())),
+        # Compatibility fields now have strict semantics: Work Products and
+        # Deliverables contain only explicitly accepted results.
+        "human_facing": filter_artifacts_for_display(list(accepted_artifacts.values())),
+        "downloadables": list(accepted_downloads.values()),
         "artifacts_secondary_by_default": True,
     }
 
@@ -922,6 +997,8 @@ def _available_actions(run: dict[str, Any]) -> list[dict[str, Any]]:
 def _overall_status(counts: dict[str, int], run: dict[str, Any]) -> str:
     meaningful = counts["accepted"] + counts["blocked"] + counts["needs_review"] + counts["incomplete"]
     if counts["blocked"]:
+        if counts["needs_review"]:
+            return "needs_review"
         return "partial_success" if counts["accepted"] else "blocked"
     if counts["needs_review"]:
         return "needs_review"
@@ -951,8 +1028,8 @@ def _part_status(part: dict[str, Any], runs: dict[str, dict[str, Any]]) -> str:
         return "reference_only"
     review = _part_review_for(part.get("part_id"), runs)
     review_status = _dict(review).get("status")
-    if review_status in {"accepted_for_preview", "accepted", "success"} and _part_has_download(part.get("part_id"), runs, "model.step"):
-        return "accepted"
+    if review_status in {"accepted_for_preview", "accepted", "success", "ready_for_review"} and _part_has_download(part.get("part_id"), runs, "model.step"):
+        return "needs_review"
     if review_status and ("blocked" in str(review_status) or "failed" in str(review_status)):
         return "blocked"
     if part.get("part_status") == "blocked":
@@ -960,6 +1037,75 @@ def _part_status(part: dict[str, Any], runs: dict[str, dict[str, Any]]) -> str:
     if part.get("supported_candidate") is True:
         return "incomplete"
     return "blocked" if part.get("supported_candidate") is False else "incomplete"
+
+
+def _accepted_run_id(value: dict[str, Any]) -> str | None:
+    run_id = value.get("child_run_id") or value.get("run_id")
+    return run_id if isinstance(run_id, str) and run_id else None
+
+
+def _run_or_child_has_download(runs: dict[str, dict[str, Any]], target_run_id: str, name: str) -> bool:
+    run = runs.get(target_run_id)
+    if isinstance(run, dict) and _has_download(run, name):
+        return True
+    for parent in runs.values():
+        for child in parent.get("child_runs", []):
+            if isinstance(child, dict) and child.get("run_id") == target_run_id and name in (child.get("downloadables") or []):
+                return True
+    return False
+
+
+def _iter_run_output_records(runs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for run_id, run in runs.items():
+        records.append({
+            "run_id": run_id,
+            "status": run.get("status"),
+            "artifacts": _artifact_name_list(run.get("artifacts")),
+            "downloadables": _artifact_name_list(run.get("downloadables")),
+        })
+        for child in run.get("child_runs", []):
+            if not isinstance(child, dict) or not isinstance(child.get("run_id"), str):
+                continue
+            records.append({
+                "run_id": child["run_id"],
+                "status": child.get("status"),
+                "artifacts": _artifact_name_list(child.get("artifacts")),
+                "downloadables": _artifact_name_list(child.get("downloadables")),
+            })
+    return records
+
+
+def _artifact_name_list(value: Any) -> list[str]:
+    result = []
+    for item in value if isinstance(value, list) else []:
+        name = item.get("name") if isinstance(item, dict) else item
+        if isinstance(name, str) and name:
+            result.append(name)
+    return result
+
+
+def _status_value(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("status")
+    return str(value or "unknown")
+
+
+def _attempt_status_is_failed(value: str) -> bool:
+    return value in {"failed", "blocked", "error"} or "failed" in value or "blocked" in value
+
+
+def _attempt_status_is_reviewable(value: str) -> bool:
+    return value in {
+        "success",
+        "completed",
+        "completed_with_assumptions",
+        "ready_for_review",
+        "accepted_for_preview",
+        "generated",
+        "accepted",
+        "approved",
+    }
 
 
 def _part_review_for(part_id: Any, runs: dict[str, dict[str, Any]]) -> dict[str, Any]:

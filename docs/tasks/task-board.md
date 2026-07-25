@@ -12,6 +12,9 @@
 - [x] Add bounded deterministic `create_part_ir` Episode and scripted dynamic action tests.
 - [x] Consolidate current architecture documents and remove superseded milestone architecture.
 - [x] Define logical agents, skills, shared knowledge, skill-private knowledge, Work context, and Run observations.
+- [x] Separate accepted input, execution, result, agent review, user approval, and capability-mode state.
+- [x] Isolate CAD candidate execution and remove product-positioned model files after terminal validation failure.
+- [x] Restrict Work Deliverables to explicit approved `accepted_part_results`; keep unapproved outputs reviewable.
 
 ## Current — Workflow Cockpit usability gate
 
@@ -23,7 +26,14 @@
 - [ ] Verify Contract Golden does not offer STEP/STL or part-result approval and does not appear blocked.
 - [ ] Complete 1024px responsive acceptance.
 - [ ] Capture current desktop, candidate, review, failure, Snapshot, 1024px, and mobile screenshots.
+- [ ] Store release acceptance evidence outside the product artifact tree, with scenario and viewport metadata.
 - [ ] Mark Workflow Cockpit MVP usable only after the manual gate passes.
+
+### Navigation and guidance acceptance follow-up
+
+- [x] Restore Work → Workflow navigation with an event-safe page callback and strict page-id contract.
+- [ ] Recapture valid Chinese Guidance evidence after the current semantic and navigation changes.
+- [ ] Select and verify the Contract Golden flow, Run Snapshot, and 390–430px layout before closing the usability gate.
 
 ## Next — Typed Skill and Knowledge Registry
 

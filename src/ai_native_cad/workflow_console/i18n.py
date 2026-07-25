@@ -79,6 +79,41 @@ _ACTION_LABELS: dict[str, str] = {
 }
 _REVERSE_ACTION_LABELS = {value: key for key, value in _ACTION_LABELS.items()}
 
+_STAGE_LABELS: dict[str, tuple[str, str]] = {
+    "requirement": ("Requirement", "需求"),
+    "clarification": ("Clarification", "澄清"),
+    "planning": ("Planning", "规划"),
+    "assembly_plan": ("Assembly Plan", "装配计划"),
+    "part_request": ("Part Request", "零件请求"),
+    "part_review": ("Part Review", "零件评审"),
+    "reviewed_handoff": ("Reviewed Handoff", "已评审交接"),
+    "cad_ir_draft": ("CAD IR Draft", "CAD IR 草稿"),
+    "part_modeling": ("Part Modeling", "零件建模"),
+    "part_result_review": ("Part Result Review", "零件结果评审"),
+    "workflow_review": ("Workflow Review", "工作流评审"),
+    "rework": ("Rework", "返工"),
+}
+
+_STATUS_LABELS: dict[str, tuple[str, str]] = {
+    "completed": ("Completed", "已完成"),
+    "contract_complete": ("Contract complete", "合同已完成"),
+    "execution_skipped": ("Execution skipped", "已跳过执行"),
+    "skipped": ("Skipped", "已跳过"),
+    "unavailable": ("Unavailable", "不可用"),
+    "not_started": ("Not started", "未开始"),
+    "ready": ("Ready", "已就绪"),
+    "running": ("Running", "进行中"),
+    "needs_review": ("Needs review", "需要评审"),
+    "blocked": ("Blocked", "受阻"),
+    "failed": ("Failed", "失败"),
+    "stale": ("Stale", "已过期"),
+    "candidate": ("Candidate", "候选"),
+    "reference_only": ("Reference only", "仅参考"),
+    "selected": ("Selected", "已选定"),
+    "generated": ("Generated", "已生成"),
+    "accepted": ("Accepted", "已批准"),
+}
+
 
 def copy(language: str, key: str, default: str | None = None) -> str:
     """Return localized copy without exposing internal keys as UI fallback."""
@@ -99,6 +134,22 @@ def action_label(language: str, label: Any, key: Any = None) -> str:
 
 def action_labels(label: Any, key: Any = None) -> dict[str, str]:
     return {"en": action_label("en", label, key), "zh": action_label("zh", label, key)}
+
+
+def stage_label(language: str, stage_id: Any, fallback: Any = None) -> str:
+    value = str(stage_id or "")
+    pair = _STAGE_LABELS.get(value)
+    if pair is None:
+        return str(fallback or value.replace("_", " ").title() or "Workflow")
+    return pair[1] if language == "zh" else pair[0]
+
+
+def status_label(language: str, status: Any) -> str:
+    value = str(status or "unavailable")
+    pair = _STATUS_LABELS.get(value)
+    if pair is None:
+        return value.replace("_", " ")
+    return pair[1] if language == "zh" else pair[0]
 
 
 def localize_action(action: dict[str, Any], language: str) -> dict[str, Any]:

@@ -213,6 +213,12 @@ Full mode consumes validated `input_ir.json` and may write:
 
 Contract mode writes validated `input_ir.json` and explicit `contract_complete` or `execution_skipped` status. STEP/STL are not expected.
 
+Candidate execution is isolated from the Run product directory. Candidate files
+become Run-level product files only after the selected candidate passes local
+validation. If execution or validation ultimately fails, CadFlow preserves the
+CAD IR, structured report, trace, and validation evidence, but does not leave
+`model.py`, STEP, STL, or preview files in the product location.
+
 Part Modeling does not approve its own result or claim assembly completion.
 
 ## Part Result Review
@@ -246,6 +252,28 @@ Only explicit user approval updates:
 
 Approval does not modify the child Run or its STEP/STL, accept sibling parts, or imply full assembly completion.
 
+## Artifact trust and product state
+
+File presence is not a business status. Projections keep these concepts
+separate:
+
+- `input_status` — missing, available but unverified, accepted upstream, or stale;
+- `execution_status` — not started, running, completed, skipped, blocked, or failed;
+- `result_status` — not created, generated, contract complete, ready for review, accepted, stale, or no trusted result;
+- `agent_review_status` — the Part Result Review conclusion;
+- `user_review_status` — not reviewed, approved, needs revision, or blocked;
+- `capability_mode` — contract, full, deterministic fallback, or agentic where supported.
+
+User-facing artifact roles are:
+
+- accepted input — active upstream evidence consumed by a checkpoint;
+- attempt output — a validated result available for review but not yet approved;
+- final output — an explicitly approved result referenced by the Work;
+- diagnostic evidence — reports and traces from blocked or failed attempts.
+
+`accepted_for_preview` is an agent/result-review conclusion. It is not user
+approval and does not update `accepted_part_results`.
+
 ## Work-level Workflow Review
 
 Primary artifacts:
@@ -262,6 +290,13 @@ The review summarizes:
 - relevant risks and valid next actions.
 
 It is a product-level conclusion, not a raw aggregation of internal diagnostics.
+
+## Deliverables
+
+Work-level Deliverables are derived only from explicit approved
+`accepted_part_results` pointers. Reviewable outputs remain available from the
+Part and Run Snapshot surfaces. Failed-attempt artifacts remain diagnostics and
+never appear as Work deliverables.
 
 ## Rework and revision
 

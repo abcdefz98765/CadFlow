@@ -122,11 +122,12 @@ class WorkflowConsoleBackend:
         """Return sanitized workspace identity and storage state."""
         manifest_path = self._resolve_workspace_path(WORKSPACE_MANIFEST_NAME)
         manifest = _read_json_if_present(manifest_path) or {}
+        relative_path = self._relative_project_path_or_none(self.workspace_root)
         return {
             "schema_version": manifest.get("schema_version") if isinstance(manifest.get("schema_version"), int) else WORKSPACE_SCHEMA_VERSION,
             "name": _safe_summary_text(manifest.get("name")) or self.workspace_root.name,
-            "display_path": str(self.workspace_root),
-            "relative_path": self._relative_project_path_or_none(self.workspace_root),
+            "display_path": relative_path or self.workspace_root.name,
+            "relative_path": relative_path,
             "is_external": not self._is_project_child(self.workspace_root),
             "present": manifest_path.exists(),
             "works_path": "works",

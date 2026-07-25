@@ -14,7 +14,7 @@ from ai_native_cad.agents.validation import validate_adapter_result, validate_in
 from ai_native_cad.cad_ir.parser import ir_from_planning_artifact
 from ai_native_cad.cad_ir.schema import CADIR
 from ai_native_cad.cad_ir.validator import validate_ir
-from ai_native_cad.pipeline.agent_loop import run_agent_loop
+from ai_native_cad.pipeline.agent_loop import remove_untrusted_products, run_agent_loop
 from ai_native_cad.pipeline.report import write_pipeline_report
 from ai_native_cad.planning import PlanningHandoffBlocked, assembly_plan_from_planning_artifact, create_planning_artifact
 from ai_native_cad.requirements import RequirementAgent
@@ -802,6 +802,7 @@ def run_ir_pipeline(
     part_name = ir_data.get("part_name") or ir_data["part_type"]
     output_dir = _resolve_output_dir(part_name, output_root, output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    remove_untrusted_products(output_dir)
     (output_dir / "input_ir.json").write_text(json.dumps(ir_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     ir_validation = validate_ir(cad_ir)

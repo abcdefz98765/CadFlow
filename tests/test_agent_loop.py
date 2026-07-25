@@ -115,6 +115,27 @@ def test_agent_loop_repairs_failed_hole_clearance_and_writes_trace():
     assert (output_dir / "preview.png").exists()
     assert (output_dir / "report.json").exists()
     assert (output_dir / "report.md").exists()
+    assert not list(output_dir.glob(".candidate-*"))
+
+
+def test_agent_loop_failure_does_not_leave_untrusted_product_files(tmp_path, monkeypatch):
+    monkeypatch.setattr("ai_native_cad.cadquery.executor.PROJECT_ROOT", tmp_path)
+    ir = {
+        "part_type": "mounting_plate",
+        "part_name": "pytest_agent_loop_failed_products",
+        "unit": "mm",
+        "dimensions": {"length": 30, "width": 20, "thickness": 4},
+        "features": {"holes": {"diameter": 8, "positions": "corner_4", "offset_from_edge": 1}},
+        "outputs": ["step", "stl"],
+    }
+
+    result = run_agent_loop(ir, tmp_path, max_attempts=1)
+
+    assert result["status"] == "failed"
+    assert result["validation"]["valid"] is False
+    assert (tmp_path / "agent_trace.json").exists()
+    assert not any((tmp_path / name).exists() for name in ("model.py", "model.step", "model.stl", "preview.png"))
+    assert not list(tmp_path.glob(".candidate-*"))
 
 
 def test_agent_loop_successful_first_attempt_has_no_repair_diff():

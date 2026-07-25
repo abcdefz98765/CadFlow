@@ -53,6 +53,9 @@ tmp_outputs/
 generated/
 exports/
 
+# Local browser/debug captures are not product source.
+docs/screenshots/
+
 # IR pipeline example-local generated outputs
 examples/ir_pipeline/*/outputs/
 

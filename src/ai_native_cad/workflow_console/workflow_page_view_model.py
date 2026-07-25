@@ -12,7 +12,7 @@ from copy import deepcopy
 from typing import Any, Literal
 
 from ai_native_cad.workflow_console.review_surface import build_workflow_review_surface
-from ai_native_cad.workflow_console.i18n import action_labels, action_label
+from ai_native_cad.workflow_console.i18n import action_labels, action_label, stage_label
 from ai_native_cad.workflow_console.work_stage_projection import (
     build_work_stage_projection,
     unavailable_work_stage_projection,
@@ -195,6 +195,11 @@ def build_workflow_page_view_model(
         selected["disabled_actions"] = actions["disabled_actions"]
         selected["guidance"] = _with_action_guidance(selected["guidance"], actions, language)
     conclusion = _conclusion(surface, selected, summary, view_mode)
+    if language == "zh" and selected is not None:
+        guidance = selected.get("guidance") if isinstance(selected.get("guidance"), dict) else {}
+        conclusion["title"] = stage_label(language, selected.get("stage_id"), "当前工作流")
+        conclusion["summary"] = guidance.get("current_conclusion") or conclusion.get("summary")
+        conclusion["rationale"] = " · ".join(str(item) for item in guidance.get("limitations", [])[:2])
     return {
         "view_mode": view_mode,
         "read_only": view_mode == "run_snapshot",
@@ -448,6 +453,19 @@ def _stage_detail(stage: dict[str, Any], fallback_source: str | None, view_mode:
     source_output = outputs[0] if outputs else {}
     source_run = detail.get("source_run_id") or source_input.get("source_run_id") or fallback_source
     stage_id = str(detail.get("stage_id") or detail.get("key") or "")
+    legacy_status = str(detail.get("status") or "not_started")
+    detail.setdefault("execution_status", "skipped" if legacy_status in {"execution_skipped", "skipped"} else legacy_status)
+    detail.setdefault(
+        "result_status",
+        "contract_complete"
+        if legacy_status in {"execution_skipped", "contract_complete"}
+        else "no_trusted_result"
+        if legacy_status in {"failed", "blocked"}
+        else "available"
+        if legacy_status in {"completed", "completed_with_assumptions"}
+        else "not_created",
+    )
+    detail.setdefault("user_review_status", "not_reviewed")
     input_contracts = [_artifact_contract(item, detail, "input", fallback_source) for item in inputs]
     output_contracts = [_artifact_contract(item, detail, "output", fallback_source) for item in outputs]
     detail.update({
@@ -455,6 +473,7 @@ def _stage_detail(stage: dict[str, Any], fallback_source: str | None, view_mode:
         "conclusion": {"title": _nested(detail, "status_banner", "title") or detail.get("stage_name"), "summary": _nested(detail, "status_banner", "summary") or detail.get("human_summary") or detail.get("short_summary")},
         "user_input": {
             "summary": _human_input_summary(detail, input_contracts),
+            "input_status": detail.get("input_status") or ("accepted_upstream" if input_contracts else "missing"),
             "source_run_id": source_input.get("source_run_id") or source_run,
             "source_stage_id": _input_stage(detail.get("stage_id")),
             "source_type": "active_override" if detail.get("override_present") else "accepted_upstream_output",
@@ -472,9 +491,16 @@ def _stage_detail(stage: dict[str, Any], fallback_source: str | None, view_mode:
             "summary": _human_output_summary(detail, output_contracts),
             "source_run_id": source_output.get("source_run_id") or detail.get("source_run_id") or fallback_source,
             "source_stage_id": detail.get("stage_id"),
-            "validation_status": "passed" if detail.get("status") in {"completed", "contract_complete", "execution_skipped"} else detail.get("status"),
+            "execution_status": detail.get("execution_status") or detail.get("status"),
+            "result_status": detail.get("result_status"),
+            "agent_review_status": detail.get("agent_review_status"),
+            "user_review_status": detail.get("user_review_status"),
+            "validation_status": "passed" if detail.get("result_status") in {"available", "generated", "accepted", "ready_for_review", "contract_complete"} else detail.get("result_status") or detail.get("status"),
             "artifacts": output_contracts,
-            "products": [item for item in output_contracts if item.get("name") in {"model.step", "model.stl"}],
+            "products": [
+                item for item in output_contracts
+                if item.get("name") in {"model.step", "model.stl"} and item.get("trust_status") in {"reviewable", "accepted"}
+            ],
             "step_stl_expectation": "not_expected" if detail.get("status") in {"contract_complete", "execution_skipped"} else "expected",
         },
         "evidence": _evidence_contracts(input_contracts, output_contracts),
@@ -485,7 +511,37 @@ def _stage_detail(stage: dict[str, Any], fallback_source: str | None, view_mode:
 def _artifact_contract(item: dict[str, Any], detail: dict[str, Any], direction: str, fallback_source: str | None) -> dict[str, Any]:
     """Keep every visible artifact self-describing and directly openable."""
     name = str(item.get("name") or "artifact")
-    status = "passed" if direction == "output" and detail.get("status") in {"completed", "contract_complete", "execution_skipped"} else "available"
+    result_status = str(detail.get("result_status") or "")
+    if direction == "input":
+        trust_status = str(detail.get("input_status") or "available_unverified")
+        artifact_role = (
+            "accepted_input"
+            if trust_status == "accepted_upstream"
+            else "stale_input"
+            if trust_status == "stale"
+            else "unverified_input"
+        )
+        validation_status = "passed" if trust_status == "accepted_upstream" else trust_status
+    elif name in {"model.step", "model.stl", "preview.png", "model.py"}:
+        artifact_role = (
+            "final_output"
+            if result_status == "accepted"
+            else "attempt_output"
+            if result_status == "generated"
+            else "diagnostic_evidence"
+        )
+        trust_status = (
+            "accepted"
+            if result_status == "accepted"
+            else "reviewable"
+            if result_status == "generated"
+            else "untrusted"
+        )
+        validation_status = "passed" if trust_status in {"accepted", "reviewable"} else result_status or "failed"
+    else:
+        artifact_role = "diagnostic_evidence" if result_status in {"no_trusted_result", "blocked"} else "stage_output"
+        trust_status = "diagnostic" if artifact_role == "diagnostic_evidence" else "validated"
+        validation_status = "passed" if trust_status == "validated" else result_status or "available"
     return {
         "name": name,
         "display_name": _artifact_display_name(name),
@@ -495,10 +551,12 @@ def _artifact_contract(item: dict[str, Any], detail: dict[str, Any], direction: 
         "source_stage_id": detail.get("stage_id") or detail.get("key"),
         "relative_path": item.get("source_relative_path") or name,
         "modified_at": item.get("modified_at"),
-        "validation_status": status,
+        "artifact_role": artifact_role,
+        "trust_status": trust_status,
+        "validation_status": validation_status,
         "source_type": item.get("source_type") or "original",
         "previewable": _artifact_kind(name) in {"json", "markdown", "text", "stl", "step"},
-        "downloadable": _artifact_kind(name) in {"step", "stl"},
+        "downloadable": _artifact_kind(name) in {"step", "stl"} and trust_status in {"reviewable", "accepted"},
         "editable": False,
         "open_action": {"type": "artifact_dialog"},
         "content": item.get("content"),

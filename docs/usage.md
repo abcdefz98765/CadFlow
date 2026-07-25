@@ -203,6 +203,13 @@ the graph and Run strip retain their topology through horizontal scrolling.
 Contract examples explicitly say that CAD IR was validated and CAD execution
 was skipped; `input_ir.json` is present while STEP/STL are not expected.
 
+The Console separates accepted inputs, execution state, result state, agent
+review, and user approval. A generated STEP/STL result appears as reviewable
+output until the user explicitly approves it. Only the Run referenced by
+`accepted_part_results[part_id]` appears under Accepted Deliverables. Failed
+candidate execution preserves report and trace evidence but does not publish
+`model.py`, STEP, STL, or preview files in the Run product location.
+
 For local visual acceptance, create the Golden Full and Contract examples from
 Workspace, select each Work's Workflow page, then inspect desktop (1440/1024)
 and mobile (390–430) widths. Confirm labels, connector topology, selected

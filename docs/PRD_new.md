@@ -1,192 +1,194 @@
-# PRD: Workflow-first Natural Language Parametric CAD
+# PRD: CadFlow Workflow-first Parametric CAD
 
-## 1. 产品定位
+Status date: 2026-07-25.
 
-CadFlow 是一个开源的 IR-driven、workflow-first 自然语言参数化 CAD agent。用户通过自然语言或结构化输入描述机械零件，系统先生成 JSON CAD IR，再进入 CAD Agent Loop：生成候选实现、执行、验证、分析失败、修复 IR、重试，并最终输出 STEP-first CAD artifact、派生 STL、验证报告和 agent trace。
+`FINAL-PRD.md` is the concise product baseline. This document records the
+current product requirements without redefining the canonical architecture in
+`architecture/cadflow-canonical-product-architecture.md`.
 
-项目不是单纯的 Prompt to CAD，也不是 Prompt to STL，更不是宏大的 AI Engineering OS。当前阶段聚焦一个可运行、可追踪、可扩展后端、可自修复的 IR-first engineering CAD MVP。
+## 1. User problem
 
-## 2. 核心 Workflow
+A user needs to turn an engineering request into a CAD result while retaining:
 
-```text
-input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
-```
+- the interpreted requirement and assumptions;
+- design and part-decomposition decisions;
+- the exact part selected for modeling;
+- validated CAD IR;
+- deterministic execution and inspection evidence;
+- explicit review and approval;
+- immutable attempt history and a clear recovery path.
 
-单零件生成的主路径为：
+A directory containing generated files is not sufficient because it does not
+answer which result is current, trusted, approved, stale, failed, or safe to
+deliver.
 
-```text
-text/input_ir.json
-  -> CAD IR
-  -> validate IR
-  -> CAD Agent Loop
-       -> candidate CadQuery generation
-       -> execution
-       -> STEP-first inspection + geometry validation
-       -> failure analysis
-       -> IR repair
-       -> retry, max 3
-  -> model.py + STEP primary artifact + STL derived artifact
-  -> report + agent_trace
-```
+## 2. Product outcome
 
-IR-first pipeline 的标准输出目录为：
+For every Work, the primary experience must answer:
 
-```text
-outputs/<part_name>/
-  input_ir.json
-  model.py
-  model.step
-  model.stl
-  report.json
-  report.md
-  preview.png
-  agent_trace.json
-  logs/runtime.json
-```
+1. What is being created?
+2. What checkpoint is current?
+3. Which accepted inputs were used?
+4. Did execution complete, skip, block, or fail?
+5. Is there a generated result, a reviewable result, or an approved deliverable?
+6. What limitation matters?
+7. Does the user need to decide anything?
+8. What is the recommended next action and visible success condition?
 
-旧 workflow 入口仍保留兼容，输出目录为：
+## 3. Product model and workflow
+
+CadFlow uses Workspace, Work, Run, and Part Job. A Work is mutable; Run evidence
+is append-only. Current Work is actionable; Run Snapshot is read-only.
+
+The required checkpoint sequence is:
 
 ```text
-project/
-  input.md
-  requirement.json
-  plan.md
-  part_spec.json
-  model.py
-  review.md
-  exports/
-    model.step
-    model.stl
-  logs/
-    run.json
-    generation.json
+Prompt -> Requirement -> Clarification -> Planning / Design Brief
+-> Assembly Plan / Candidate Parts -> Explicit Part Selection
+-> Part Request -> Part Review -> Reviewed Handoff -> CAD IR Draft
+-> CAD IR Validation / Part Modeling -> Part Result Review
+-> User Approval -> Work-level Review -> Rework / Next Part -> Deliverables
 ```
 
-## 3. 当前版本目标
+Stages may be visually compact, but responsibilities may not be merged or
+silently skipped.
 
-V0/V1 聚焦自然语言参数化建模和可追踪 CAD agent loop：
+## 4. Functional requirements
 
-- 保留现有 CadQuery MVP。
-- 新增 CAD IR 层，所有新生成路径先生成 IR，再生成 CadQuery 代码。
-- 新增 CAD Agent Loop，沉淀 traceable attempts、failure analysis、IR repair 和 candidate scoring。
-- 抽象 CAD Backend，不让上层 workflow 绑定具体 CAD 工具。
-- 至少提供 `mounting_plate`、`spacer`、`simple_bracket` 三个 IR pipeline 示例并保证可运行。
-- 建立 `knowledge/` 与 `policies/` 目录，但不过度实现。
+### Requirement and planning
 
-## 4. 模块职责
+- Preserve the original prompt in a Run.
+- Produce structured requirements with assumptions and focused missing information.
+- Keep requirement interpretation separate from design decomposition.
+- Preserve assembly interfaces and distinguish generated candidates from reference-only components.
+- Candidate inspection is read-only; candidate selection is explicit and versioned.
 
-### Requirement
+### Reviewed part handoff
 
-负责将自然语言转化为结构化需求，并进行早期产品意图分析：单零件/装配判断、候选制造件、参考组件、关键接口、缺失信息和用户回问。当前实现可以保守地识别内置示例，并支持显式 overrides。
+- Scope exactly one part.
+- Preserve relevant requirement and assembly context.
+- Require Part Review before creating the Reviewed Handoff.
+- Never replace unknown intent with an unrelated template.
 
-### Design Planner
+### CAD IR and execution
 
-负责生成 `plan.md`，完成设计分析、workflow routing、功能基准、接口关系、模板候选、风险和确认 gate。Planning 不做用户需求澄清，也不写具体 CAD backend 代码。
+- Agent/provider output is structured CAD IR only.
+- Local validators decide whether CAD execution is allowed.
+- Candidate execution is isolated from the Run product directory.
+- Only a validated selected candidate is materialized as `model.py`, STEP, STL, and preview.
+- A terminal failure preserves structured evidence but publishes no untrusted product files.
+- Maximum deterministic repair attempts remain bounded.
 
-### Part Modeling
+### Reviews and approval
 
-负责模板选择、参数化、单零件生成闭环、几何检查和零件级意图一致性。新主路径通过 CAD IR 驱动 CAD Agent Loop；旧路径仍可通过 CAD Backend 兼容现有 examples。当前默认 backend 是 CadQuery。
+- Part Result Review is an agent/system assessment.
+- `accepted_for_preview` means ready for user review, not approved.
+- User approval is an explicit append-only action.
+- Only approval updates `accepted_part_results[part_id]`.
+- Creating or reviewing a result never approves it automatically.
 
-### CAD IR
+### Products and Deliverables
 
-负责表达后端无关的零件意图，包括 `part_type`、`unit`、`dimensions`、`features`、`outputs` 和 `check_level`。IR 必须可 JSON 序列化、可验证、可作为重试和再生成的稳定输入。新生成流程不得把自然语言直接作为主要代码生成输入。
+- Reviewable outputs remain attached to their immutable Run.
+- Failed attempt files are diagnostics.
+- Work Products and Deliverables include only approved accepted-result pointers.
+- One accepted part does not imply a complete assembly.
+- Contract mode does not expect STEP/STL and is not a missing-output failure.
 
-### CAD Agent Loop
+### Workflow Cockpit
 
-负责从 CAD IR 生成候选 CadQuery 代码、执行、验证、分析失败、修复 IR 并重试。最大尝试次数为 3。失败必须转化为结构化 root cause 和 suggested IR fix。IR repair 不改变 `part_type`，不删除必需 feature，除非失败分析明确要求，否则不简化用户意图。
+- Current Work and Run Snapshot are visually and behaviorally distinct.
+- One dominant recommended action is shown.
+- Write actions use confirmation, pending, duplicate protection, backend execution, refreshed projection, postcondition verification, and persistent success/failure feedback.
+- Primary UI does not expose absolute paths, backend keys, raw enums, provider payloads, or unrestricted artifact browsing.
+- Chinese and English primary paths remain semantically consistent.
 
-### CAD Brief
+## 5. State contract
 
-后续用于承接复杂自然语言、参考图、技术图纸或多源输入。CAD Brief 是面向审查的建模意图记录，位于 Requirement 和 CAD IR 之间；它记录单位、尺寸、feature、坐标约定、假设、冲突和验证目标。CAD Brief 不替代 CAD IR，最终生成仍以 IR 为 source of truth。
+Implementations and projections keep these dimensions separate:
 
-### Geometry Inspector
+```text
+input_status
+execution_status
+result_status
+agent_review_status
+user_review_status
+capability_mode
+```
 
-从 STEP/model 输出路径记录可测事实。当前已覆盖 STEP/STL artifact facts、solid count、bbox、volume，并在 topology 可靠时验证 mounting_plate through-hole 数量和孔径；chamfers/fillets 仍为 inspection scaffold，孔距、槽、倒角、关键尺寸和 repair diff 后续继续推进。
+Compatibility `status` fields may remain, but must be derived from these
+dimensions rather than from filenames.
 
-### Assembly
+## 6. Output contract
 
-负责装配 plan、确认 gate、零件关系、contacts、clearances、轻量 placement/constraint intent 和 backend-neutral assembly config。当前 assembly 是初版 planning/config/validation workflow scaffold，不是成熟几何约束求解器或工业装配系统。
+Validated Full result:
 
-### Reviewer
+```text
+input_ir.json
+model.py
+model.step
+model.stl
+report.json
+report.md
+preview.png
+agent_trace.json
+logs/runtime.json
+```
 
-按 `check_level` 输出 `review.md`。当前支持 L0，L1 输出 maker 检查框架。
+Failed result:
 
-### Output / Export Utility
+```text
+input_ir.json or best structured draft
+report / validation evidence
+agent_trace / episode evidence
+```
 
-负责把模型导出为 STEP/STL，当前 CAD Agent Loop 直接写入 `outputs/<part_name>/model.step` 和 `model.stl`；旧 workflow 仍写入 `exports/`。`model.step` 是主 CAD artifact，`model.stl` 是派生 mesh exchange。输出路径和导出规则属于 `policies/output_contract.md`，不是独立设计 skill。
+No product-positioned `model.py`, STEP, STL, or preview may remain after final
+validation failure.
 
-### CAD Backend
+## 7. Capability boundary
 
-后端抽象应允许未来接入 CadQuery、build123d、FreeCAD API、JSCAD/replicad 等。
+Currently usable:
 
-## 5. Check Levels
+- deterministic Golden single-part flow;
+- supported CAD IR part families;
+- local workflow storage, lineage, reviews, and explicit accepted pointers;
+- Contract and Full execution semantics;
+- controlled artifact viewing and downloading.
 
-### L0 Playground
+Partial or prototype:
 
-当前真正支持：
+- complete browser acceptance;
+- generalized natural-language coverage;
+- bounded agent episode beyond deterministic proposer behavior;
+- revision/rework beyond allowlisted fields;
+- deeper feature-level inspection.
 
-- 模型是否生成。
-- STEP/STL 是否导出。
-- 基础几何验证是否通过。
-- CadQuery execution 是否成功。
-- shape validity / watertight 检查是否通过或记录为不可用。
-- 主要尺寸和文件路径是否记录。
+Not currently usable:
 
-### L1 Maker
+- provider-backed agentic CAD product path;
+- full assembly generation;
+- multi-part batch generation;
+- strength, motion, fit, tolerance-stack, DFM/DFA, GD&T, FEA, or safety release;
+- arbitrary external CAD editing.
 
-当前只输出报告框架，后续补：
+## 8. Acceptance requirements
 
-- 最小壁厚。
-- 悬垂和支撑风险。
-- STL 可打印性。
-- 常见 3D 打印约束。
+- Failed validation leaves no product files.
+- A generated STEP without explicit approval remains `needs_review`.
+- Approved Deliverables resolve through `accepted_part_results`.
+- Contract modeling is `execution_skipped` / `contract_complete`.
+- Run history remains immutable.
+- Upstream selection changes mark downstream stages stale.
+- Tests cover the state dimensions and product trust boundary.
+- Browser acceptance is reported honestly and separately from automated tests.
 
-### L2 Engineering
+## 9. Current roadmap
 
-预留：装配间隙、材料、制造方式、公差和基础工程约束。预留不代表当前工程放行。
+1. Finish Workflow Cockpit action, failure/recovery, localization, Snapshot, 1024px, and mobile acceptance.
+2. Implement a typed Skill and Knowledge Registry.
+3. Add one provider-backed bounded CAD IR proposer behind the same contracts and validators.
+4. Add multiple Part Job progression before assembly execution.
 
-### L3 Industrial
-
-预留：DFM/DFA、BOM、工艺路线、粗糙度、GD&T、设计评审记录。
-
-### L4 Safety Critical
-
-预留：FMEA、可追溯性、独立 Review、验证记录和标准符合性。当前不得自动放行安全关键件。
-
-## 6. 架构原则
-
-- **Workflow First**：先有流程和记录，再有几何。
-- **Backend Agnostic**：CAD 后端可替换。
-- **Engineering over Geometry**：工程意图和检查优先于形状表演。
-- **Traceable by Default**：默认输出全链路记录。
-- **Knowledge Ready**：预留知识库结构。
-- **Policy Ready**：预留策略文件和校核等级。
-
-## 7. 非目标
-
-当前不追求：
-
-- 完整工业 CAD 替代。
-- 复杂自由曲面建模。
-- 完整装配设计自动化。
-- 成熟几何装配约束求解、任意 CAD mating 自动推断、完整 tolerance stack-up、工业 DFA 和运动仿真。
-- 正式工程图自动标注。
-- 完整 GD&T。
-- FEA。
-- 工业级 DFM。
-- 安全关键件自动设计和放行。
-- 多用户协同平台或 AI Engineering OS。
-
-## 8. MVP 验收标准
-
-- IR pipeline 可从 `input_ir.json` 生成模型。
-- `examples/ir_pipeline/generate_examples.py` 可生成 mounting_plate、spacer、simple_bracket。
-- `examples/parts/circular_button/model.py` 可运行，并保留开关触点/线束出口。
-- workflow 可输出 `input.md`、`requirement.json`、`plan.md`、`model.py`、`review.md`、`exports/`、`logs/`。
-- CAD Agent Loop 可输出 `input_ir.json`、`model.py`、`model.step`、`model.stl`、`report.json`、`report.md`、`preview.png`、`agent_trace.json`、`logs/runtime.json`。
-- CAD Agent Loop 可输出 `agent_trace.json`，并记录 attempt、measured validation targets、inspection summary、failure analysis、IR repair 和 final selected candidate。
-- 至少一个失败几何案例可通过 IR repair 自动恢复。
-- `python examples/workflow/mounting_plate_demo.py` 可一键运行 workflow demo。
-- 至少 STEP/STL 可导出。
-- 现有示例和测试不被破坏。
-- 文档、PRD、架构、roadmap 和 philosophy 指向同一产品方向。
+Historical version-number roadmaps under `docs/project/` are reference material
+only and must not override `docs/roadmap/milestones.md`.

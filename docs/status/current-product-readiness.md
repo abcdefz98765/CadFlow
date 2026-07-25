@@ -1,6 +1,6 @@
 # Current Product Readiness
 
-Status date: 2026-07-14.
+Status date: 2026-07-25.
 
 This is a capability and verification record, not a promise that every visible control has completed manual browser acceptance.
 
@@ -11,12 +11,14 @@ This is a capability and verification record, not a promise that every visible c
 - One reviewed generic `link_like_part` with validated CAD IR; Full mode emits STEP/STL and Contract mode intentionally skips CAD execution.
 - Work/Run lineage, controlled artifact reads, append-only reviews, and basic Workflow cockpit inspection.
 - Deterministic bounded `create_part_ir` episode infrastructure.
+- Explicit separation between accepted inputs, execution state, reviewable results, user approval, and accepted Work deliverables.
+- Isolated candidate execution; terminal validation failure does not publish model source, STEP, STL, or preview product files.
 
 ## Partially usable
 
 - Candidate detail and selection: implemented with confirmation, validated Assembly Plan override, stale downstream projection, and preserved old Runs/accepted results.
 - Workflow write-action lifecycle: confirming, pending, succeeded, failed, duplicate-click protection, persistent feedback, and selected postcondition verification are implemented on the primary v2 path.
-- Chinese/English catalog coverage exists for the primary Workflow interaction path, but complete real-browser acceptance is outstanding.
+- Work-page navigation now rejects event objects and unknown pages, preserves the selected Work, and reaches the unified Workflow renderer from Overview, Parts, and History navigation.
 - Workflow guidance and default information reduction are implemented in the unified page view model: each visible stage has bilingual user-facing purpose, conclusion, decision, next-action, result, recovery, and limitation fields; audit details are expandable.
 - Stage Review and controlled artifact overrides are implemented with append-only history and compatibility materialization.
 - Rework and revision exist for narrow allowlisted contracts, not general CAD editing.
@@ -51,14 +53,15 @@ Agent roles, skills, shared knowledge, skill-private knowledge, Work context, an
 - Runtime static skill/knowledge summaries can drift from repository skill documents until one typed registry becomes authoritative.
 - Any UI control without an explicit postcondition and visible feedback is a release blocker.
 - Active-lineage, accepted-result, stale-state, and review-history semantics must remain covered by tests.
+- Legacy Runs may contain product-looking files from failed attempts; projections must keep those files diagnostic and untrusted.
 - Browser usability cannot be inferred from automated tests.
 
 ## Verification state
 
-- Implemented: deterministic Golden flow, Workflow cockpit contracts, candidate selection, controlled reads/overrides, reviews, accepted-result pointer, and bounded episode shell.
-- Automated verified: targeted Workflow, Golden, Agent Adapter, and Agent Episode regression suites reported `367 passed, 1 skipped` before this documentation-only consolidation.
+- Implemented: deterministic Golden flow, Workflow cockpit contracts, candidate selection, controlled reads/overrides, isolated candidate execution, reviewable-versus-accepted product projection, accepted-result pointer, and bounded episode shell.
+- Automated verified: targeted state, product-trust, Workflow, and Golden regressions pass; the final full suite reports `541 passed, 2 skipped`.
 - Manually verified: earlier Full/Contract pages, candidate confirmation and stale behavior, artifact viewer, and Snapshot boundaries were exercised.
-- Not manually verified: the latest workflow-guidance browser pass, complete enabled-action inventory, 1024px acceptance, and new screenshots. The in-app browser could not connect to the locally listening NiceGUI service during the last pass.
+- Not currently re-verified: the latest Workflow renderer, complete enabled-action inventory, successful Contract Golden selection, Run Snapshot, failure/recovery journey, 1024px layout, and 390–430px responsive pass. Earlier debug screenshots did not provide valid acceptance evidence and were removed from the product tree.
 - Production usable: local deterministic single-part Golden workflow only. Workflow Cockpit readiness remains partial.
 
 ## Next milestones

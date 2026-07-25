@@ -1,46 +1,28 @@
-# Project PRD
+# Project PRD Index
 
-本文件指向当前主 PRD：`docs/PRD_new.md` 与最终版摘要 `docs/FINAL-PRD.md`。
+Current product requirements:
 
-项目方向已经调整为：
+- `../FINAL-PRD.md` — concise current product baseline;
+- `../PRD_new.md` — detailed current product requirements;
+- `../architecture/cadflow-canonical-product-architecture.md` — authoritative object model and checkpoint responsibilities;
+- `../workflow_contract.md` — artifact, trust-state, review, and delivery contracts;
+- `../status/current-product-readiness.md` — honest implementation and verification status;
+- `../roadmap/milestones.md` — current milestone order.
+
+Historical phase and version documents under `docs/project/` are implementation
+history. They do not override the sources above.
+
+Current direction:
 
 ```text
-input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
+accepted engineering intent
+  -> reviewed structured CAD contract
+  -> isolated deterministic execution
+  -> validated reviewable result
+  -> explicit user approval
+  -> accepted Work deliverable
 ```
 
-单零件生成主路径为：
-
-```text
-text/input_ir.json
-  -> CAD IR
-  -> CAD Agent Loop
-       -> candidate code generation
-       -> execution
-       -> STEP-first inspection + validation
-       -> failure analysis
-       -> IR repair
-       -> retry, max 3
-  -> STEP-first output
-  -> report + agent_trace
-```
-
-核心目标是 IR-driven、workflow-first 的自然语言参数化 CAD agent，而不是 Prompt to CAD 脚本集合，也不是 AI Engineering OS。
-
-当前验收重点：
-
-- 保留可运行自然语言建模 MVP。
-- 新增 CAD IR、workflow 层和 CAD backend 抽象。
-- 固化标准输出目录。
-- 支持 L0 Playground。
-- 为 L1 Maker 输出报告框架。
-- 建立 `knowledge/` 和 `policies/`。
-- 保证 IR pipeline 的 `mounting_plate`、`spacer`、`simple_bracket` 示例可运行。
-- 保证 CAD Agent Loop 可以记录失败、修复 IR、重试并输出 `agent_trace.json`。
-
-下一阶段重点：
-
-- STEP-first inspection：以 `model.step` 为主验证对象，STL 作为派生 mesh 输出；当前已记录 artifact facts、solid count、bbox、volume，并在 topology 可靠时验证 mounting_plate through-hole 数量和孔径。
-- CAD brief：在复杂自然语言或多源输入时，先形成可审查的建模 brief，再落到 CAD IR。
-- Geometry inspector：继续推进孔距、槽、倒角、关键距离和 repair diff 的真实拓扑验证。
-- Real preview/viewer：当前 `preview.png` 仍是 placeholder；后续在不引入重依赖的前提下实现真实几何渲染或 viewer snapshot。
-- Benchmark suite：用固定 prompts、expected IR 和 expected checks 衡量架构进步。
+File presence is not approval. Failed attempts retain diagnostic evidence but
+do not publish product-positioned CAD files. Contract mode validates the
+contract and intentionally skips STEP/STL execution.

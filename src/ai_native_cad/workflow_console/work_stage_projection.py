@@ -55,11 +55,12 @@ def build_work_stage_projection(backend: Any, work_id: str) -> dict[str, Any]:
     }
     records = _discover_work_artifacts(backend, runs, root_run_id, active_run_ids or ({root_run_id} if root_run_id in runs else set()))
     execution = _execution_metadata(records)
+    entity_state = work.get("entity_state") if isinstance(work.get("entity_state"), dict) else {}
+    accepted_results = entity_state.get("accepted_part_results") if isinstance(entity_state.get("accepted_part_results"), dict) else {}
     stages = {
-        spec["key"]: _project_stage(spec, records, root_run_id, execution)
+        spec["key"]: _project_stage(spec, records, root_run_id, execution, accepted_results)
         for spec in STAGE_SPECS
     }
-    entity_state = work.get("entity_state") if isinstance(work.get("entity_state"), dict) else {}
     candidate_selection = entity_state.get("candidate_selection") if isinstance(entity_state.get("candidate_selection"), dict) else {}
     _apply_candidate_selection_staleness(stages, candidate_selection)
     root_run = runs.get(root_run_id) if isinstance(root_run_id, str) else {}
@@ -162,6 +163,9 @@ def _apply_candidate_selection_staleness(stages: dict[str, dict[str, Any]], sele
         if not isinstance(stage, dict):
             continue
         stage["status"] = "stale"
+        stage["input_status"] = "stale"
+        stage["execution_status"] = "completed"
+        stage["result_status"] = "stale"
         stage["selected_part_id"] = selected
         stage["summary"] = f"Stale after selecting {selected}; recreate this stage from the active Assembly Plan."
         stage["stale_reason"] = "candidate_selection_changed"
@@ -204,7 +208,13 @@ def _execution_metadata(records: dict[str, list[dict[str, Any]]]) -> dict[str, A
     return {"mode": mode or execution.get("mode"), "execution_mode": "contract" if skipped else "full", "execution_skipped": skipped}
 
 
-def _project_stage(spec: dict[str, Any], records: dict[str, list[dict[str, Any]]], root_run_id: str | None, execution: dict[str, Any]) -> dict[str, Any]:
+def _project_stage(
+    spec: dict[str, Any],
+    records: dict[str, list[dict[str, Any]]],
+    root_run_id: str | None,
+    execution: dict[str, Any],
+    accepted_results: dict[str, Any],
+) -> dict[str, Any]:
     inputs = _stage_artifacts(spec["inputs"], records)
     outputs = _stage_artifacts(spec["outputs"], records)
     present_outputs = [item for item in outputs if item.get("present")]
@@ -212,6 +222,8 @@ def _project_stage(spec: dict[str, Any], records: dict[str, list[dict[str, Any]]
     status = "completed" if present_outputs else "not_started"
     if key == "part_modeling" and execution.get("execution_skipped"):
         status = "execution_skipped"
+    elif key == "part_modeling" and _part_modeling_failed(records, root_run_id):
+        status = "failed"
     elif key == "part_result_review" and execution.get("execution_skipped") and not present_outputs:
         status = "skipped"
     source = present_outputs[0] if present_outputs else (next((item for item in inputs if item.get("present")), None) or {})
@@ -223,8 +235,18 @@ def _project_stage(spec: dict[str, Any], records: dict[str, list[dict[str, Any]]
         status = "contract_complete" if execution.get("execution_mode") == "contract" else "completed"
     count = len({(item.get("source_run_id"), item.get("source_relative_path")) for item in [*inputs, *outputs] if item.get("present")})
     summary = _summary_for(key, status, count, selected_part_id)
+    dimensions = _stage_state_dimensions(
+        key=key,
+        status=status,
+        inputs=inputs,
+        outputs=outputs,
+        selected_part_id=selected_part_id,
+        accepted_results=accepted_results,
+        execution=execution,
+    )
     return {
         "status": status,
+        **dimensions,
         "source_run_id": source.get("source_run_id"),
         "source_relative_path": source.get("source_relative_path"),
         "input_artifacts": inputs,
@@ -235,6 +257,85 @@ def _project_stage(spec: dict[str, Any], records: dict[str, list[dict[str, Any]]
         "diagnostics": [],
         "execution_mode": execution.get("execution_mode"),
         "execution_skipped": bool(execution.get("execution_skipped")),
+    }
+
+
+def _part_modeling_failed(records: dict[str, list[dict[str, Any]]], root_run_id: str | None) -> bool:
+    for item in records.get("report.json", []):
+        content = item.get("content")
+        if not isinstance(content, dict):
+            continue
+        status = str(content.get("status") or "")
+        execution = content.get("execution") if isinstance(content.get("execution"), dict) else {}
+        validation = content.get("validation") if isinstance(content.get("validation"), dict) else {}
+        if status in {"failed", "error", "blocked_cad_ir_validation"}:
+            return True
+        if execution.get("status") in {"failed", "error"} or validation.get("valid") is False:
+            return True
+        if item.get("source_run_id") != root_run_id and content.get("success") is False:
+            return True
+    return False
+
+
+def _stage_state_dimensions(
+    *,
+    key: str,
+    status: str,
+    inputs: list[dict[str, Any]],
+    outputs: list[dict[str, Any]],
+    selected_part_id: str | None,
+    accepted_results: dict[str, Any],
+    execution: dict[str, Any],
+) -> dict[str, Any]:
+    present_inputs = any(item.get("present") for item in inputs)
+    accepted = accepted_results.get(selected_part_id) if isinstance(selected_part_id, str) else None
+    accepted = accepted if isinstance(accepted, dict) else {}
+    user_review_status = "approved" if accepted.get("status") == "approved" else "not_reviewed"
+
+    if status == "stale":
+        execution_status = "completed"
+        result_status = "stale"
+        input_status = "stale"
+    elif status in {"execution_skipped", "skipped"}:
+        execution_status = "skipped"
+        result_status = "contract_complete" if key == "part_modeling" else "skipped"
+        input_status = "accepted_upstream" if present_inputs else "missing"
+    elif status == "failed":
+        execution_status = "failed"
+        result_status = "no_trusted_result"
+        input_status = "accepted_upstream" if present_inputs else "missing"
+    elif status == "blocked":
+        execution_status = "blocked"
+        result_status = "blocked"
+        input_status = "available_unverified" if present_inputs else "missing"
+    elif status == "not_started":
+        execution_status = "not_started"
+        result_status = "not_created"
+        input_status = "available_unverified" if present_inputs else "missing"
+    else:
+        execution_status = "completed"
+        result_status = (
+            "accepted"
+            if user_review_status == "approved" and key in {"part_modeling", "part_result_review"}
+            else "generated"
+            if key == "part_modeling"
+            else "ready_for_review"
+            if key == "part_result_review"
+            else "available"
+        )
+        input_status = "accepted_upstream" if present_inputs else "not_required"
+
+    agent_review_status = None
+    if key == "part_result_review":
+        review = next((item.get("content") for item in outputs if isinstance(item.get("content"), dict)), {})
+        agent_review_status = review.get("status") if isinstance(review, dict) else None
+    return {
+        "input_status": input_status,
+        "execution_status": execution_status,
+        "result_status": result_status,
+        "agent_review_status": agent_review_status,
+        "user_review_status": user_review_status,
+        "capability_mode": "contract" if execution.get("execution_mode") == "contract" else "full",
     }
 
 

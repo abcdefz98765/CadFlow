@@ -240,7 +240,8 @@ def test_workspace_create_and_config_are_file_backed_without_secrets(tmp_path):
     assert config["ok"] is True
     assert config["data"]["config"]["advancement_mode"] == "auto_advance"
     assert secret["ok"] is False
-    assert workspace["data"]["workspace"]["display_path"] == str((tmp_path / "workspace_demo").resolve())
+    assert workspace["data"]["workspace"]["display_path"] == "workspace_demo"
+    assert str(tmp_path.resolve()) not in workspace["data"]["workspace"]["display_path"]
     assert _does_not_contain_text(config["data"], ["api_key", "secret"])
 
 
@@ -260,12 +261,13 @@ def test_workspace_can_be_external_and_load_requires_initialized_marker(tmp_path
 
     assert created["ok"] is True
     assert created["data"]["workspace"]["is_external"] is True
-    assert created["data"]["workspace"]["display_path"] == str(external.resolve())
+    assert created["data"]["workspace"]["display_path"] == "external_workspace"
+    assert str(tmp_path.resolve()) not in created["data"]["workspace"]["display_path"]
     assert (external / "workspace.json").exists()
     assert loaded["ok"] is True
     assert plain["ok"] is False
     assert plain["status_code"] == 404
-    assert backend.read_workspace()["display_path"] == str(external.resolve())
+    assert backend.read_workspace()["display_path"] == "external_workspace"
 
 
 def test_workspace_can_seed_static_example_works_under_external_root(tmp_path, monkeypatch):
@@ -299,7 +301,8 @@ def test_workspace_can_seed_static_example_works_under_external_root(tmp_path, m
         "reviewed_one_part_enclosure_base",
     }
     assert {part["part_id"] for part in detail["data"]["parts"]} >= {"base", "lid", "screws"}
-    assert any(item["name"] == "model.step" for item in detail["data"]["products"]["downloadables"])
+    assert not detail["data"]["products"]["downloadables"]
+    assert any(item["name"] == "model.step" for item in detail["data"]["products"]["reviewable_outputs"])
 
 
 def test_workspace_example_seed_rejects_existing_work_without_overwrite(tmp_path):

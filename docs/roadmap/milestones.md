@@ -6,6 +6,8 @@
 - Current Work active-lineage projection and immutable Run Snapshot boundary.
 - Reviewed single-part artifact flow through CAD IR validation and deterministic Contract/Full execution.
 - Work-level accepted part-result pointers and append-only Stage Reviews.
+- Separate input, execution, result, agent-review, user-review, and capability-mode projection dimensions.
+- Isolated CAD candidate execution and accepted-pointer-only Work Deliverables.
 - Provider-independent bounded `create_part_ir` episode shell with dynamic scripted action tests.
 - Canonical Agent, Skill, and Knowledge ownership model.
 
@@ -23,6 +25,8 @@ Implemented and automated-tested:
 - write-action lifecycle and persistent feedback;
 - primary Workflow Chinese/English catalog coverage;
 - Contract versus Full semantics.
+- reviewable output versus explicitly accepted Deliverable semantics;
+- failed validation preserving diagnostics without publishing CAD product files.
 
 Acceptance still required:
 

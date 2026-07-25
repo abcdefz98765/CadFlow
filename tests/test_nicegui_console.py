@@ -22,6 +22,12 @@ from ai_native_cad.workflow_console.nicegui_app import (
     build_artifacts_page_data,
     read_artifact_page_content,
     WORK_USER_PAGES,
+    PAGE_IDS,
+    _page_selection_callback,
+    _select_console_page,
+    _select_console_run,
+    _select_console_work,
+    _select_current_console_work,
     _part_viewer_url,
     _run_workflow_page_action,
     _execute_action_lifecycle,
@@ -46,6 +52,63 @@ def _does_not_contain_absolute_paths(value, root: Path):
     if isinstance(value, str):
         return str(root.resolve()) not in value and not Path(value).is_absolute()
     return True
+
+
+def test_console_page_navigation_contract_preserves_work_and_reaches_workflow_view_model(tmp_path):
+    _sample_work(tmp_path)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    refreshes = []
+    state = {
+        "selected_work_id": "enclosure_work",
+        "selected_node_id": "legacy-node",
+        "selected_stage_id": "planning",
+        "view_mode": "current_work",
+    }
+
+    _select_console_work(state, "enclosure_work", lambda: refreshes.append("work"))
+    assert state["active_page"] == "overview"
+    assert state["selected_work_id"] == "enclosure_work"
+
+    _select_console_page(state, "workflow", lambda: refreshes.append("workflow"))
+    assert state["active_page"] == "workflow"
+    assert state["selected_work_id"] == "enclosure_work"
+    assert state["selected_node_id"] is None
+    assert state["selected_stage_id"] is None
+    workflow = build_console_page_data(backend, selected_work_id=state["selected_work_id"], active_page=state["active_page"])
+    assert workflow["active_page"] == state["active_page"]
+    assert isinstance(workflow["workflow_page"], dict)
+
+    _select_console_page(state, "parts", lambda: refreshes.append("parts"))
+    assert state["active_page"] == "parts"
+    _select_console_page(state, "history", lambda: refreshes.append("history"))
+    assert state["active_page"] == "history"
+    assert refreshes == ["work", "workflow", "parts", "history"]
+
+
+def test_console_navigation_callbacks_consume_events_and_snapshot_boundaries():
+    selected_pages = []
+    callback = _page_selection_callback(selected_pages.append, "workflow")
+    callback(object())
+    assert selected_pages == ["workflow"]
+    assert all(page in PAGE_IDS for page in selected_pages)
+
+    state = {"selected_work_id": "work-1", "selected_node_id": "node-1", "selected_stage_id": "part_modeling"}
+    refreshes = []
+    _select_console_run(state, "run-1", lambda: refreshes.append("run"))
+    assert state["active_page"] == "workflow"
+    assert state["view_mode"] == "run_snapshot"
+    assert state["selected_run_id"] == "run-1"
+
+    _select_current_console_work(state, lambda: refreshes.append("current"))
+    assert state["active_page"] == "workflow"
+    assert state["view_mode"] == "current_work"
+    assert state["selected_run_id"] is None
+    assert refreshes == ["run", "current"]
+
+    with pytest.raises(ValueError):
+        _select_console_page(state, object(), lambda: None)
+    with pytest.raises(ValueError):
+        _select_console_page(state, "not-a-page", lambda: None)
 
 
 def test_workflow_action_refreshes_without_touching_the_deleted_button_slot():
@@ -338,7 +401,8 @@ def test_nicegui_defaults_to_workspace_page_without_selecting_first_work(tmp_pat
     assert data["active_page"] == "workspace"
     assert data["selected_work_id"] is None
     assert data["selected_work"]["summary"] is None
-    assert data["workspace"]["display_path"] == str((tmp_path / "workspace").resolve())
+    assert data["workspace"]["display_path"] == "workspace"
+    assert not Path(data["workspace"]["display_path"]).is_absolute()
     assert data["workspace"]["work_count"] == 1
 
 
@@ -351,12 +415,12 @@ def test_nicegui_work_dashboard_infers_work_and_hides_debug_by_default(tmp_path)
     detail = data["selected_work"]
 
     assert [work["work_id"] for work in works] == ["enclosure_work"]
-    assert works[0]["overall_status"] == "partial_success"
+    assert works[0]["overall_status"] == "needs_review"
     assert works[0]["part_counts"] == {
         "total": 3,
-        "accepted": 1,
+        "accepted": 0,
         "blocked": 1,
-        "needs_review": 0,
+        "needs_review": 1,
         "reference_only": 1,
         "incomplete": 0,
     }
@@ -375,21 +439,81 @@ def test_nicegui_work_detail_separates_current_state_parts_nodes_and_products(tm
     node_status = {node["id"]: node["status"] for node in detail["nodes"]}
     products = detail["products"]
 
-    assert parts["base"]["status"] == "accepted"
+    assert parts["base"]["status"] == "needs_review"
+    assert parts["base"]["user_review_status"] == "not_reviewed"
+    assert parts["base"]["agent_review_status"] == "accepted_for_preview"
+    assert parts["base"]["deliverable_available"] is False
     assert parts["base"]["has_step"] is True
     assert parts["lid"]["status"] == "blocked"
     assert parts["screws"]["status"] == "reference_only"
     assert node_status["assembly_plan"] == "completed"
-    assert node_status["part:base"] == "accepted"
+    assert node_status["part:base"] == "needs_review"
     assert node_status["part:lid"] == "blocked"
-    assert "workflow_review.md" in {item["name"] for item in products["human_facing"]}
-    assert {item["name"] for item in products["downloadables"]} <= {"model.step", "model.stl", "preview.png"}
+    assert products["human_facing"] == []
+    assert "workflow_review.md" in {item["name"] for item in products["supporting_artifacts"]}
+    assert products["downloadables"] == []
+    assert {item["name"] for item in products["reviewable_outputs"]} == {"model.step", "model.stl"}
+    assert products["artifact_state"] == {
+        "accepted_deliverable_count": 0,
+        "reviewable_output_count": 2,
+        "failed_attempt_output_count": 0,
+        "untrusted_output_count": 0,
+    }
     directory_map = detail["directory_map"]
     assert [item["label"] for item in directory_map["inputs"]["items"]] == ["Original request", "Reviewed requirement"]
     assert {item["label"] for item in directory_map["parts"]["items"]} == {"base", "lid", "screws"}
     assert {item["label"] for item in directory_map["history"]["items"]} == {"enclosure_work_root", "rework_workflow_review_1"}
     assert products["artifacts_secondary_by_default"] is True
     assert _does_not_contain_absolute_paths(detail, tmp_path)
+
+
+def test_nicegui_deliverables_require_explicit_accepted_result_pointer(tmp_path):
+    _sample_work(tmp_path)
+    manifest_path = tmp_path / "workspace" / "works" / "enclosure_work" / "work_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["accepted_part_results"] = {
+        "base": {
+            "child_run_id": "single_part_base",
+            "review_id": "review_001",
+            "status": "approved",
+        }
+    }
+    _write_json(manifest_path, manifest)
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    detail = build_console_page_data(backend, selected_work_id="enclosure_work")["selected_work"]
+    base = next(part for part in detail["parts"] if part["part_id"] == "base")
+    products = detail["products"]
+
+    assert base["status"] == "accepted"
+    assert base["user_review_status"] == "approved"
+    assert base["deliverable_available"] is True
+    assert {item["name"] for item in products["accepted_deliverables"]} == {"model.step", "model.stl"}
+    assert {item["name"] for item in products["downloadables"]} == {"model.step", "model.stl"}
+    assert products["reviewable_outputs"] == []
+
+
+def test_nicegui_product_projection_does_not_trust_file_presence_without_success_state(tmp_path):
+    _sample_work(tmp_path)
+    child_report = (
+        tmp_path
+        / "workspace"
+        / "works"
+        / "enclosure_work"
+        / "runs"
+        / "enclosure_work_root"
+        / "05_single_create"
+        / "single_part_base"
+        / "report.json"
+    )
+    _write_json(child_report, {"status": "unknown", "success": None})
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+
+    products = build_console_page_data(backend, selected_work_id="enclosure_work")["selected_work"]["products"]
+
+    assert products["accepted_deliverables"] == []
+    assert products["reviewable_outputs"] == []
+    assert products["artifact_state"]["untrusted_output_count"] == 2
 
 
 def test_nicegui_work_dashboard_does_not_mix_debug_group_into_work_list(tmp_path):
@@ -471,9 +595,13 @@ def test_nicegui_workspace_examples_are_visible_as_workspace_works(tmp_path):
         "reviewed_one_part_enclosure_base",
     }
     assert {part["part_id"] for part in planning_data["selected_work"]["parts"]} >= {"base", "lid", "screws"}
-    assert any(
+    assert not any(
         item["name"] == "model.step"
         for item in reviewed_data["selected_work"]["products"]["downloadables"]
+    )
+    assert any(
+        item["name"] == "model.step"
+        for item in reviewed_data["selected_work"]["products"]["reviewable_outputs"]
     )
     assert _does_not_contain_text(reviewed_data["selected_work"], ["api_key", "secret", "bearer"])
 
@@ -512,7 +640,7 @@ def test_nicegui_workflow_graph_groups_examples_by_stage_parts_and_review(tmp_pa
     assert {node["part_id"] for node in planning["part_nodes"]} >= {"base", "lid", "screws"}
     assert planning["layout"] == "multi_part"
     reviewed_parts = {node["part_id"]: node for node in reviewed["part_nodes"]}
-    assert reviewed_parts["base"]["status"] == "accepted"
+    assert reviewed_parts["base"]["status"] == "needs_review"
     assert set(reviewed_parts) == {"base"}
     assert [node["id"] for node in reviewed["review_nodes"]] == ["result"]
     assert reviewed_parts["base"]["review_status"] == "accepted_for_preview"

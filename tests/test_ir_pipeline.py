@@ -8,6 +8,7 @@ from ai_native_cad.cadquery.generator import generate_cadquery_code
 from ai_native_cad.agents import DesignPlannerFakeAgentAdapter
 from ai_native_cad.exporter import export_model
 from ai_native_cad.pipeline import run_agent_create_pipeline, run_agent_revision_pipeline, run_ir_pipeline
+from ai_native_cad.pipeline import runner as pipeline_runner
 from ai_native_cad.pipeline.report import write_pipeline_report
 from ai_native_cad.pipeline.validator import validate_pipeline_outputs
 
@@ -57,6 +58,31 @@ def test_validate_ir_rejects_missing_required_dimension():
 
     assert result["valid"] is False
     assert any(error["code"] == "missing_dimension" and error["dimension"] == "inner_diameter" for error in result["errors"])
+
+
+def test_invalid_ir_clears_untrusted_products_from_reused_output_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_runner, "PROJECT_ROOT", tmp_path)
+    output_dir = tmp_path / "outputs" / "reused_spacer"
+    output_dir.mkdir(parents=True)
+    for name in ("model.py", "model.step", "model.stl", "preview.png"):
+        (output_dir / name).write_text("stale output", encoding="utf-8")
+
+    result = run_ir_pipeline(
+        {
+            "part_type": "spacer",
+            "part_name": "reused_spacer",
+            "unit": "mm",
+            "dimensions": {"outer_diameter": 12, "thickness": 20},
+        },
+        output_dir=output_dir,
+    )
+
+    assert result["status"] == "failed"
+    assert result["validation"]["valid"] is False
+    for name in ("model.py", "model.step", "model.stl", "preview.png"):
+        assert not (output_dir / name).exists()
+    for name in ("input_ir.json", "agent_trace.json", "report.json", "report.md"):
+        assert (output_dir / name).exists()
 
 
 def test_text_parser_returns_cad_ir():

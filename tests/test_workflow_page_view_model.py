@@ -163,6 +163,34 @@ def test_every_visible_stage_has_a_complete_bilingual_guidance_contract(tmp_path
         assert isinstance(english_stage["guidance"]["user_decision_required"], bool)
 
 
+def test_artifact_roles_do_not_conflate_unverified_inputs_or_failed_outputs(tmp_path):
+    backend = _work_with_failed_latest_attempt(tmp_path)
+    page = build_workflow_page_view_model(backend, "lineage_work", language="en")
+
+    for stage in page["stages"]:
+        detail = build_workflow_page_view_model(
+            backend,
+            "lineage_work",
+            language="en",
+            selected_stage_id=stage["stage_id"],
+        )["selected_stage"]
+        for artifact in detail["user_input"]["artifacts"]:
+            if artifact["trust_status"] == "accepted_upstream":
+                assert artifact["artifact_role"] == "accepted_input"
+            else:
+                assert artifact["artifact_role"] in {"unverified_input", "stale_input"}
+        for artifact in detail["agent_output"]["artifacts"]:
+            if artifact["name"] not in {"model.py", "model.step", "model.stl", "preview.png"}:
+                continue
+            if artifact["trust_status"] == "accepted":
+                assert artifact["artifact_role"] == "final_output"
+            elif artifact["trust_status"] == "reviewable":
+                assert artifact["artifact_role"] == "attempt_output"
+            else:
+                assert artifact["artifact_role"] == "diagnostic_evidence"
+                assert artifact["downloadable"] is False
+
+
 def test_contract_guidance_and_snapshot_guidance_preserve_user_workflow_semantics(tmp_path):
     backend = _work_with_failed_latest_attempt(tmp_path)
     current = build_workflow_page_view_model(backend, "lineage_work", selected_stage_id="part_modeling")

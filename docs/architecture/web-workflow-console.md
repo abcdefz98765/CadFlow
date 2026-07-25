@@ -181,6 +181,8 @@ User-facing artifact contracts include:
 
 - purpose-oriented display name;
 - filename as secondary metadata;
+- artifact role: accepted input, attempt output, final output, or diagnostic evidence;
+- trust status: accepted, reviewable, validated evidence, or untrusted;
 - source Work, Run, and Stage;
 - original or override source type;
 - validation status;
@@ -190,6 +192,11 @@ User-facing artifact contracts include:
 JSON, Markdown, and text use controlled viewers. STEP/STL are opened through product preview/download paths. Arbitrary directory browsing is not exposed.
 
 Repeated filenames are grouped by purpose and provenance rather than displayed as indistinguishable rows.
+
+Work Products and Deliverables contain only files reached through explicit
+approved `accepted_part_results` pointers. A STEP/STL file in an unapproved Run
+is reviewable attempt output, not a Work deliverable. Files from a failed Run
+are diagnostic evidence even when retained by legacy data.
 
 ## Overrides and reviews
 

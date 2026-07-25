@@ -49,7 +49,7 @@ def test_web_route_creates_contract_example_with_product_status(tmp_path, monkey
         selected_stage_id="part_modeling",
     )
     stages = {stage["key"]: stage for stage in data["workflow_review_surface"]["stages"]}
-    assert stages["part_modeling"]["status"] == "completed"
+    assert stages["part_modeling"]["status"] == "execution_skipped"
     assert stages["part_modeling"]["status"] != "blocked"
 
 
@@ -98,9 +98,10 @@ def test_example_completion_navigates_to_workflow_and_selects_work(monkeypatch):
     _create_golden_example_ui("contract", state, lambda: refreshed.append(True))
 
     assert state["selected_work_id"] == result["work_id"]
-    assert state["selected_run_id"] == result["run_id"]
+    assert state["selected_run_id"] is None
+    assert state["view_mode"] == "current_work"
     assert state["active_page"] == "workflow"
-    assert state["selected_stage_id"] == "workflow_review"
+    assert state["selected_stage_id"] is None
     assert refreshed == [True, True]
 
 
