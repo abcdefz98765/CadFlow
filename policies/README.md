@@ -1,20 +1,12 @@
-# Policies
+# CadFlow Policies
 
-Reserved for workflow and review policies.
+Policies hold global invariants that apply across Agents and skills.
 
-Current status: intentionally lightweight.
+- `check_levels.md` — Explore, Engineer, and Release assurance and claim rules.
+- `requirement_contract.md` — Intent, clarification, and legacy Requirement
+  compatibility.
+- `output_contract.md` — output trust, publication, containment, and
+  Deliverable Package rules.
 
-Policy areas:
-
-- check levels: L0, L1, L2, L3, L4
-- required output artifacts
-- backend safety boundaries
-- export defaults
-- review and release requirements
-
-Current implementation supports L0 and writes an L1 report scaffold.
-
-Current policy files:
-
-- `check_levels.md`
-- `output_contract.md`
+Behavior guidance belongs in skills; engineering reference material belongs in
+knowledge; runtime evidence belongs in Runs.

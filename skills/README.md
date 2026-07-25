@@ -1,78 +1,84 @@
 # CadFlow Skills
 
-Skills are versioned behavior contracts for logical agent roles. They are organized by canonical workflow responsibility, not by provider, CAD backend, product family, or UI page.
+Skills are CadFlow-owned behavior contracts for logical Agent roles. They
+describe what an Agent may decide, which context and tools it may request, what
+it must return, and when it must ask, stop, or hand off.
 
 Read first:
 
-- `../docs/architecture/cadflow-canonical-product-architecture.md`
 - `../docs/architecture/agent-skill-knowledge.md`
+- `../docs/architecture/bounded-agent-loop-context-broker-and-checkpoints.md`
 - `../docs/workflow_contract.md`
 
-## Skill map
+## Target skill map
 
-    Prompt
-      -> requirement
-      -> planning
-      -> cad_ir
-      -> part_modeling
-      -> review
+```text
+Intent
+  -> Design
+  -> Geometry
+  -> Evaluation
+  -> Revision
 
-    accepted parent result + change request
-      -> revision
+accepted Part results
+  -> Assembly
+  -> Evaluation
 
-    multiple accepted Part Jobs, future
-      -> assembly
+accepted Part / Assembly results
+  -> Deliverables
+```
 
-Current skill directories:
+Current directories are retained during migration:
 
-- `requirement/` — prompt interpretation, structured requirement, assumptions, missing information, and clarification.
-- `planning/` — design route, decomposition, interfaces, candidate/reference planning, and engineering trade-offs.
-- `cad_ir/` — one reviewed part intent to backend-neutral CAD IR through bounded context and validation feedback.
-- `part_modeling/` — validated CAD IR to deterministic geometry, products, and execution evidence.
-- `review/` — scoped Part Request, Part Result, and Work-level evidence explanation; user approval remains separate.
-- `revision/` — change intent, revision plan, structured patch proposal, and parent/child lineage.
-- `assembly/` — future assembly placement, constraints, clearance, and assembly-level validation after multiple Part Jobs exist.
+- `requirement/` — compatibility name for Intent interpretation and focused
+  clarification.
+- `planning/` — compatibility name for Design exploration, decomposition,
+  interfaces, and alternatives.
+- `cad_ir/` — structured Geometry candidate skill; currently limited to the
+  legacy closed CAD IR.
+- `part_modeling/` — controlled candidate execution and geometry evidence;
+  currently deterministic CAD IR execution.
+- `review/` — compatibility name for Evaluation and evidence explanation.
+- `revision/` — child-Run change intent and candidate revision.
+- `assembly/` — Assembly Job planning, placement, constraints, and checks.
 
-## Ownership rules
+Target additions still required by the roadmap:
 
-Each `SKILL.md` defines only its owned responsibility:
+- a model-program skill for sandboxed allowlisted CAD source;
+- a deliverables skill for accepted-result-derived drawings, BOMs, and packages.
 
-- canonical checkpoint;
-- accepted inputs;
-- structured outputs or actions;
-- allowed context and tools;
-- shared knowledge scopes;
-- private knowledge scopes;
-- validation and stop conditions;
-- prohibited side effects;
-- next handoff.
+## Skill contract
 
-A skill must not duplicate or redefine the entire product workflow.
+Each `SKILL.md` declares:
+
+- owned Agent role and supported actions;
+- accepted inputs and candidate outputs;
+- allowed context requests and tools;
+- episode budgets and stop conditions;
+- shared and private knowledge scopes;
+- prohibited authority and side effects;
+- validation and handoff rules;
+- current implementation gaps.
+
+Skills do not own execution authority. Side effects go through the Tool Broker,
+and accepted-result pointers change only through explicit user action.
 
 ## Knowledge placement
 
 - Global invariants live in `policies/`.
-- Cross-skill knowledge lives in top-level `knowledge/` only when multiple skills truly share one source of truth.
+- Cross-skill knowledge has one source under top-level `knowledge/`.
 - Skill-private knowledge lives under `skills/<skill>/knowledge/`.
 - Accepted Work artifacts are runtime context, not static knowledge.
-- Validator and execution feedback are Run/episode observations, not global knowledge.
+- Validator and execution feedback are episode observations, not knowledge.
 
-Do not duplicate the same rule in multiple knowledge directories. Promote it to a shared source instead.
+Do not load every skill or the whole repository into a provider context.
+Runtime context is minimal, semantic, allowlisted, and auditable.
 
-## Runtime loading
+## Migration rule
 
-A provider or proposer should receive only:
+A fixed sequence that merely calls a provider once is not an Agentic episode.
+Target skills must support provider-chosen actions, context requests, strategy
+changes, and responses to observations within CadFlow-controlled budgets.
 
-- global minimal rules;
-- the current skill guide;
-- the operation contract;
-- selected shared knowledge;
-- selected skill-private knowledge;
-- compact allowlisted Work context;
-- current Run observations.
-
-It must not receive every skill, the entire knowledge tree, arbitrary files, secrets, raw transcripts, or execution authority.
-
-## Development rule
-
-Changing a skill responsibility or knowledge ownership is an architecture change. Update the canonical agent/skill/knowledge document, affected contracts, runtime selector or registry, tests, roadmap, and readiness status together.
+Changing skill responsibility or authority is an architecture change. Update
+the canonical architecture, contracts, registry/runtime routing, tests, roadmap,
+and readiness together.

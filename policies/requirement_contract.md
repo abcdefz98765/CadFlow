@@ -1,85 +1,46 @@
-# Requirement Contract
+# Intent Contract Policy
 
-Purpose: define the Requirement Agent's handoff artifact.
+Compatibility artifact: `requirement.json`.
 
-The Requirement Agent is the first workflow step that turns user intent into a
-structured, reviewable requirement package. It may use natural-language parsing,
-rules, clarification questions, structured overrides, or future LLM assistance,
-but its output is always `requirement.json`.
+## Purpose
 
-The full end-to-end workflow responsibility map lives in
-`docs/workflow_contract.md`; this policy is limited to the Requirement Agent
-handoff contract.
+Capture enough structured engineering intent for an Agent to begin useful
+design exploration while keeping facts, assumptions, uncertainty, and
+acceptance targets distinct.
 
-Downstream workflow stages must consume structured fields from
-`requirement.json`. They must not re-parse `source.input_text` to infer geometry
-or features.
+## Minimum target content
 
-## Boundary
+- objective and scope;
+- known dimensions and units;
+- functions and interfaces;
+- manufacturing and material intent when known;
+- evaluation and deliverable expectations;
+- accepted user facts;
+- Agent assumptions;
+- missing decisions and focused questions;
+- assurance mode;
+- source and revision provenance.
 
-```text
-user natural language
-  -> Requirement Agent
-  -> requirement.json
-  -> Planning / CAD IR / Review
-```
+The original prompt remains immutable evidence. An Intent artifact may summarize
+and normalize it but must not silently contradict it.
 
-The natural-language parser is an implementation detail of the Requirement
-Agent. It is not a downstream modeling contract.
+## Clarification policy
 
-## Source Of Truth
+Ask when the answer materially changes topology, number of parts, real-component
+fit, interfaces, intended motion, manufacturing route, safety, or acceptance
+criteria. Otherwise choose a reversible exploratory assumption, expose it, and
+continue.
 
-For CAD generation, the source of truth is:
+## Downstream policy
 
-1. `requirement.json` structured fields while still in the requirement/planning
-   workflow.
-2. `input_ir.json` / `CADIR` after requirement fields have been normalized into
-   CAD IR.
+Design and Geometry skills consume the active Intent plus accepted Work context;
+they do not repeatedly re-parse raw history as an alternative source of truth.
+Changing upstream meaning creates a new version and marks dependent candidates
+stale.
 
-`source.input_text` is trace data. It should help review and debugging, but it
-must not override `part_type`, `dimensions`, `features`, `outputs`, or
-`check_level` after the Requirement Agent has produced the structured fields.
+## Legacy compatibility
 
-## Required Shape
-
-Minimum `requirement.json` fields:
-
-- `part_type`
-- `unit`
-- `intent`
-- `dimensions`
-- `features`
-- `outputs`
-- `check_level`
-- `field_policy`
-- `missing_information`
-- `follow_up_questions`
-- `follow_up_requests`
-- `cad_brief`
-- `assumptions`
-- `requirement_status`
-- `source`
-
-Missing or ambiguous user decisions must be explicit in `missing_information`.
-User-facing clarification items must be mirrored in `follow_up_questions` for
-compatibility and `follow_up_requests` for machine-readable clients.
-
-## Agent Behavior
-
-- Fill structured fields when user intent is clear.
-- Ask or record missing information when a field changes topology, fit,
-  manufacturing method, assembly behavior, or safety review.
-- Record assumptions when L0 generation proceeds with defaults.
-- Keep parser diagnostics visible instead of silently changing structured
-  fields.
-- Emit `cad_brief` as planning metadata derived from requirement/CAD IR fields.
-
-## Downstream Rules
-
-- Planning may read `intent`, `dimensions`, `features`, `missing_information`,
-  `follow_up_requests`, `assumptions`, `requirement_status`, and `cad_brief`.
-- CAD IR conversion may read `part_type`, `unit`, `dimensions`, `features`,
-  `outputs`, `check_level`, `part_name`, and `source` for traceability.
-- Part modeling and validation must use CAD IR, not original prompt text.
-- Benchmarks remain IR-first; parser/requirement cases belong in separate
-  parser tests or prompt pipeline debug examples.
+Current code requires fields such as `part_type`, `dimensions`, `features`,
+`outputs`, `check_level`, and `cad_brief`. Compatibility adapters may continue
+to populate them for the legacy CAD IR. They are not the target limit of Intent
+or the Agent's design space.

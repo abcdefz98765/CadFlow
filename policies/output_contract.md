@@ -1,118 +1,75 @@
-# Output Contract
+# Output and Publication Policy
 
-Purpose: define traceable output artifacts and path behavior without becoming a
-separate design skill.
+## Trust rule
 
-Export is a utility capability. It writes exchange files and reports requested
-by workflow steps, but it must not make requirement, planning, modeling,
-assembly, or review decisions.
+Files are not product state. Every output has an artifact identity, trust role,
+source Run, candidate or accepted-result reference, schema/version metadata,
+and controlled viewer or download policy.
 
-CAD Agent Loop single-part output shape:
+Trust roles are:
 
-```text
-outputs/<part_name>/
-  input_ir.json
-  model.py
-  model.step
-  model.stl
-  report.json
-  report.md
-  preview.png
-  agent_trace.json
-  logs/
-    runtime.json
-```
+- candidate;
+- observation;
+- reviewable result;
+- accepted result;
+- deliverable;
+- diagnostic.
 
-`model.py` must be written before execution. Execution must run from the part
-output directory inside the project workspace. Runtime errors must be logged so
-the same IR can be analyzed, repaired, retried, or regenerated.
+## Candidate publication
 
-`model.step` is the primary CAD artifact. `model.stl` is a derived mesh output
-for downstream exchange and preview use. Validation and trace summaries should
-prefer measured CAD facts over mesh-only facts.
+A candidate becomes reviewable only after its source or contract validates,
+controlled execution completes, requested geometry/output checks run, and the
+result manifest is written successfully.
 
-Phase 1.8 inspection records STEP/STL artifact facts, solid count, bounding
-box, volume, and mounting_plate through-hole count, diameter, and spacing when
-the CadQuery topology is reliable. Unreliable feature topology must be recorded
-as unverified instead of guessed.
+Failed or blocked candidates retain source, observations, reports, and logs but
+must not expose partial geometry as a trusted product.
 
-`preview.png` is still a placeholder snapshot in Phase 1.8 unless a lightweight
-geometry renderer is available. Real preview rendering is intentionally deferred
-from this slice because Blender and FreeCAD automation are out of scope.
+## Product precedence
 
-`agent_trace.json` must record the loop history:
+STEP is the current primary exchange geometry. STL is a derived mesh. Native or
+source models, assembly files, BOMs, and drawings are included only where the
+selected backend and validation profile support them.
 
-- total attempts, capped at 3
-- per-attempt status
-- selected candidate and candidate scores when candidate mode is used
-- measured validation targets
-- inspection summary for generated geometry and STEP/STL artifacts
-- feature inspection status, including mounting_plate hole inspection when available
-- structured failure analysis for failed attempts
-- IR repair changes and structured before/after diffs for repaired attempts
-- final selected candidate
+Output presence alone does not prove intent match or engineering readiness.
 
-When an attempt triggers IR repair, `ir_repair.diff` records concise changed
-IR paths alongside the existing repair metadata. Each diff item includes
-`path`, `before`, `after`, `reason`, and `affected_feature` when a feature is
-known. Successful attempts that do not invoke repair should omit repair diff
-fields.
+## Deliverable Package
 
-The IR is the source of truth for generated CAD. Text-to-code bypass is outside
-the supported output contract.
+A Deliverable Package resolves exact accepted Part and Assembly result
+identities. It may contain:
 
-Workflow responsibilities and handoff boundaries are defined in
-`docs/workflow_contract.md`. `requirement.json` remains the Requirement Agent
-handoff artifact and `input_ir.json` remains the CAD generation source of truth;
-this policy only defines output directories, artifact expectations, trace
-requirements, and path behavior.
+- source or native model;
+- STEP and requested derived formats;
+- accepted assembly;
+- BOM;
+- drawings;
+- evaluation and limitation reports;
+- manifest and provenance.
 
-Legacy workflow output shape:
+It never searches for a vaguely named latest file and never packages an
+unaccepted candidate.
+
+## Execution containment
+
+Model-program candidates execute only in isolated candidate storage through the
+Tool Broker. Writes outside the allowlist, network access, shell, subprocess,
+credentials, and dynamic dependency installation are prohibited by default.
+
+## Legacy compatibility
+
+Current deterministic Runs may still contain:
 
 ```text
-input.md
-requirement.json
-plan.md
+input_ir.json
 model.py
-review.md
-exports/
-logs/
+model.step
+model.stl
+report.json
+report.md
+preview.png
+agent_trace.json
+logs/runtime.json
 ```
 
-`logs/` stores structured JSON logs. The workflow-level run record is
-`logs/run.json`; generation-loop details are also written to
-`logs/generation.json`.
-
-For assemblies, outputs may also include BOM, assembly reports,
-backend-neutral assembly configs, and backend-native assembly files.
-
-Benchmark suite output shape:
-
-```text
-outputs/benchmarks/
-  benchmark_summary.json
-  <benchmark_case_id>/
-    input_ir.json
-    model.py
-    model.step
-    model.stl
-    report.json
-    report.md
-    preview.png
-    agent_trace.json
-```
-
-Benchmark cases must remain IR-first and deterministic. Benchmark expectations
-may check artifacts, bounding boxes, measured validation targets, feature
-inspection, attempt counts, and repair diffs, but they must not parse natural
-language into generated code.
-
-Path policy:
-
-- User workflow runs should receive an explicit `output_dir`.
-- Missing workflow `output_dir` falls back to `runs/<instance_name>/`.
-- Missing CAD Agent Loop output root falls back to `outputs/`.
-- Example scripts write generated artifacts next to their own `model.py`.
-- `examples/` is not the default destination for arbitrary user projects.
-- `outputs/` is the primary path for CAD Agent Loop generated artifacts.
-- Generated code and exchange files must stay inside the project workspace unless the user explicitly chooses another approved location.
+Legacy readers remain supported during migration, but new product state should
+use manifests and explicit artifact references rather than recursive filename
+discovery.

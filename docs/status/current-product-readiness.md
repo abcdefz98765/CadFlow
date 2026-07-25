@@ -2,70 +2,168 @@
 
 Status date: 2026-07-25.
 
-This is a capability and verification record, not a promise that every visible control has completed manual browser acceptance.
+This document distinguishes the Agent-first target architecture from the
+currently implemented workflow-first product.
 
-## Usable now
+## Target status
 
-- Local Workspace and Work creation with immutable Run storage and active-lineage pointers.
-- Deterministic Golden Desktop Robot Arm in Contract and Full modes.
-- One reviewed generic `link_like_part` with validated CAD IR; Full mode emits STEP/STL and Contract mode intentionally skips CAD execution.
-- Work/Run lineage, controlled artifact reads, append-only reviews, and basic Workflow cockpit inspection.
-- Deterministic bounded `create_part_ir` episode infrastructure.
-- Explicit separation between accepted inputs, execution state, reviewable results, user approval, and accepted Work deliverables.
-- Isolated candidate execution; terminal validation failure does not publish model source, STEP, STL, or preview product files.
+The authoritative target is now:
 
-## Partially usable
+- Agent-first CAD design workbench;
+- Intent, Design, Build & Evaluate, Accept & Deliver;
+- provider-selected bounded design actions;
+- structured feature-graph and sandboxed model-program candidate paths;
+- first-class Part Job attempts and Assembly Job;
+- accepted-result-derived STEP, assembly, BOM, and drawing packages.
 
-- Candidate detail and selection: implemented with confirmation, validated Assembly Plan override, stale downstream projection, and preserved old Runs/accepted results.
-- Workflow write-action lifecycle: confirming, pending, succeeded, failed, duplicate-click protection, persistent feedback, and selected postcondition verification are implemented on the primary v2 path.
-- Work-page navigation now rejects event objects and unknown pages, preserves the selected Work, and reaches the unified Workflow renderer from Overview, Parts, and History navigation.
-- Workflow guidance and default information reduction are implemented in the unified page view model: each visible stage has bilingual user-facing purpose, conclusion, decision, next-action, result, recovery, and limitation fields; audit details are expandable.
-- Stage Review and controlled artifact overrides are implemented with append-only history and compatibility materialization.
-- Rework and revision exist for narrow allowlisted contracts, not general CAD editing.
-- Bounded Agent Episode dynamic action behavior is automated-tested; no provider-backed agentic CAD is product-usable.
+This target is documented, not implemented.
 
-## Architecture status
+## Implemented and usable now
 
-Canonical current sources:
+- Local Workspace and Work creation.
+- Append-only Run storage and active-lineage pointers.
+- Initial Part Job and accepted part-result records.
+- Deterministic prompt and CAD IR pipelines.
+- Eight supported deterministic CAD IR part families.
+- STEP-first generation for supported families.
+- Basic geometry, export, and selected feature inspection.
+- Isolated deterministic candidate execution.
+- Final failure cleanup that avoids publishing untrusted product files.
+- Explicit part-result acceptance and accepted-pointer-only Deliverables.
+- Controlled artifact reads, overrides, and Run Snapshot boundaries.
+- Local NiceGUI Workflow Console for the legacy workflow.
 
-- `docs/architecture/cadflow-canonical-product-architecture.md`;
-- `docs/architecture/agent-skill-knowledge.md`;
-- `docs/architecture/bounded-agent-loop-context-broker-and-checkpoints.md`;
-- `docs/architecture/web-workflow-console.md`;
-- `docs/architecture/revision-workflow.md`;
-- `docs/workflow_contract.md`.
+Production-usable scope:
 
-Superseded milestone architecture documents were removed rather than retained as competing current definitions.
+- local deterministic supported-family single-part generation and review.
 
-Agent roles, skills, shared knowledge, skill-private knowledge, Work context, and Run observations now have explicit architectural ownership. The runtime still uses static mappings and summaries in `provider_context.py`; a typed skill/knowledge registry has not yet been implemented.
+## Implemented but not Agentic
 
-## Not usable yet
+- `AgentAdapter` abstraction;
+- JSON-contract provider clients;
+- provider configuration in the local console;
+- bounded episode state machine;
+- semantic Context Broker prototype;
+- `create_part_ir` episode artifacts;
+- validator observations.
 
-- Full assembly generation, multi-part batch generation, motion/strength/fit validation, and assembly STEP export.
-- Provider-backed agentic `create_part_ir` as an accepted product path.
-- Typed runtime skill and knowledge registry with enforced private/shared scopes.
-- Complete inline editing and complete browser acceptance of every visible action.
-- General external STEP editing or mesh reverse engineering.
+The product `create_part_ir` path currently follows a fixed proposer sequence:
+one fixed context request, one adapter submission, one validation request, and
+no real provider-selected repair loop. It must be labeled deterministic or
+one-shot orchestration, not Agentic design.
 
-## Current risks
+## Partial or migration-only
 
-- A deterministic fallback can be mistaken for agentic capability unless `capability_mode` is visible.
-- Runtime static skill/knowledge summaries can drift from repository skill documents until one typed registry becomes authoritative.
-- Any UI control without an explicit postcondition and visible feedback is a release blocker.
-- Active-lineage, accepted-result, stale-state, and review-history semantics must remain covered by tests.
-- Legacy Runs may contain product-looking files from failed attempts; projections must keep those files diagnostic and untrusted.
-- Browser usability cannot be inferred from automated tests.
+- Work / Part Job projection: Part Jobs do not yet own complete ordered attempt
+  histories.
+- Current Work state: parts of the projection still infer state through file
+  discovery and compatibility heuristics.
+- Provider usage: different entry points do not consistently use the configured
+  adapter.
+- Revision: narrow field-level native CAD IR patches only.
+- Assembly: planning helpers, bounding-box validation, and external FreeCAD
+  scripts exist but are not a normal Assembly Job flow.
+- Drawings: TechDraw helper exists but is not integrated into accepted-result
+  Deliverable Packages.
+- Browser usability: the legacy Workflow Cockpit has automated coverage but its
+  latest complete manual acceptance remains unfinished.
+
+## Not implemented
+
+- Agent-selected multi-action Design Episode.
+- Tool Broker for untrusted model programs.
+- Enforced sandbox profile for provider-generated CAD source.
+- General feature-graph geometry contract.
+- Non-template general CAD design capability.
+- First-class Part Job attempt lists.
+- Assembly Job with accepted input identities.
+- Integrated assembly STEP or native assembly deliverable.
+- Integrated BOM and drawing package.
+- Agent-first four-phase workbench UI.
+- Engineering release checks for fit, tolerance, motion, strength, DFM/DFA,
+  GD&T, FEA, or safety.
+
+## Code concentration risk
+
+Current approximate Python line distribution:
+
+- Workflow Console: 14.5k lines;
+- Agent layer: 3.2k lines;
+- CAD IR: 0.6k lines;
+- CadQuery and backend layer: 0.5k lines.
+
+This reflects the former product priority. Further Workflow Cockpit polish is
+not the current milestone unless required to preserve safe operation during
+migration.
+
+## Architecture conformance gaps
+
+The following current behavior does not conform to the target architecture:
+
+- fixed fifteen-checkpoint primary Workflow;
+- flat closed-family CAD IR;
+- deterministic fixed-action episode behavior;
+- product-state inference from artifact filenames;
+- singular Part Job `run_id` storage;
+- hard-coded capability labeling in reviewed-part results;
+- multiple competing create and execution paths;
+- disconnected assembly and drawing utilities.
+
+These are migration tasks, not accepted target behavior.
 
 ## Verification state
 
-- Implemented: deterministic Golden flow, Workflow cockpit contracts, candidate selection, controlled reads/overrides, isolated candidate execution, reviewable-versus-accepted product projection, accepted-result pointer, and bounded episode shell.
-- Automated verified: targeted state, product-trust, Workflow, and Golden regressions pass; the final full suite reports `541 passed, 2 skipped`.
-- Manually verified: earlier Full/Contract pages, candidate confirmation and stale behavior, artifact viewer, and Snapshot boundaries were exercised.
-- Not currently re-verified: the latest Workflow renderer, complete enabled-action inventory, successful Contract Golden selection, Run Snapshot, failure/recovery journey, 1024px layout, and 390–430px responsive pass. Earlier debug screenshots did not provide valid acceptance evidence and were removed from the product tree.
-- Production usable: local deterministic single-part Golden workflow only. Workflow Cockpit readiness remains partial.
+- Automated verified: full suite reports `541 passed, 2 skipped`.
+- Verified meaning: the current deterministic workflow, console contracts,
+  safety boundaries, and compatibility behavior are internally consistent.
+- Not proven by those tests: Agent design breadth, provider-selected actions,
+  sandbox security, non-template geometry success, multi-part assembly, or
+  drawing-package usability.
+- Manual browser verification: incomplete for the latest legacy Workflow
+  Cockpit.
+- Target architecture verification: not started.
 
-## Next milestones
+## Current risks
 
-1. Complete real-browser Workflow Cockpit action, localization, failure-path, and 1024px acceptance.
-2. Implement the typed Agent Skill and Knowledge registry and remove duplicated runtime skill/knowledge definitions.
-3. Prototype provider-backed bounded `create_part_ir` using the same validators and deterministic pipeline.
+- Passing workflow tests can be mistaken for progress toward Agent design
+  capability.
+- Provider configuration can be mistaken for an Agentic product path.
+- The existing CAD IR blocks unknown designs before a capable Agent can realize
+  them.
+- A sandboxed code path implemented without enforceable isolation would create
+  unacceptable host risk.
+- Legacy documents or entry points can silently restore the former architecture.
+- Assembly heuristics can be mistaken for geometric fit or motion validation.
+- Generated drawings can be mistaken for checked drawings unless annotation
+  provenance is explicit.
+
+## Current milestone
+
+M0 documentation correction is complete. Current implementation work begins at:
+
+1. runtime and domain-model consolidation;
+2. first provider-backed Agentic design vertical slice;
+3. feature-graph geometry contract;
+4. multi-Part Job and Assembly Job progression;
+5. integrated Deliverable Package and drawings;
+6. Agent-first workbench UX.
+
+See:
+
+- `../roadmap/milestones.md`
+- `../tasks/task-board.md`
+
+## Release language
+
+Until the corresponding acceptance gate passes, do not claim:
+
+- Agentic CAD design;
+- arbitrary or general CAD generation;
+- assembly generation;
+- engineering drawing-package support;
+- fit, motion, strength, tolerance, manufacturing, or release validation.
+
+Allowed current description:
+
+> CadFlow has a tested deterministic single-part CAD workflow foundation and is
+> migrating to an Agent-first design workbench.

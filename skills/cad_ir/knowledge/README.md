@@ -1,21 +1,14 @@
-# CAD IR Private Knowledge
+# Structured Geometry Private Knowledge
 
-This directory is owned by the CAD IR Skill.
+This directory is owned by the Structured Geometry Skill.
 
-Appropriate content includes:
+Suitable content includes feature-graph construction, stable references,
+sketch/feature patterns, datum and interface representation, topology-aware
+repair, and schema migration from legacy CAD IR.
 
-- backend-neutral CAD IR construction guidance;
-- generic geometry-family normalization;
-- feature-combination rules expressed at contract level;
-- schema-aware repair guidance;
-- examples that preserve source part intent and interfaces.
+Backend execution recipes belong to Candidate Build. Product decomposition
+belongs to Design. Run artifacts and validator feedback are runtime context and
+observations. Global safety belongs in `policies/`.
 
-Do not place here:
-
-- backend implementation code or execution recipes owned by Part Modeling;
-- product decomposition owned by Planning;
-- accepted Work artifacts or validator feedback from a specific Run;
-- global safety and privacy policy;
-- provider-specific formatting workarounds.
-
-Knowledge from this directory is available only to CAD IR and declared repair operations. Promote a source to top-level `knowledge/` when multiple skills genuinely require the same authority.
+The current closed CAD IR is compatibility knowledge, not the target geometry
+limit.

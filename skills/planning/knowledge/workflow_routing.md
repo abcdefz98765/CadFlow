@@ -1,22 +1,18 @@
-# Workflow Routing
+# Design Routing Guidance
 
-Planning selects the next workflow route from the requirement package.
+Routing selects the next useful Agent action, not a mandatory stage sequence.
 
-## Routes
+Possible actions include:
 
-- `single_part`: one manufacturable part can satisfy the request.
-- `multi_part`: multiple generated parts are needed, but no assembly placement
-  is required yet.
-- `assembly`: generated parts and reference components need relationships,
-  clearances, contacts, or service access.
-- `confirmation_needed`: a topology-changing decision is missing.
+- inspect Intent or accepted interface context;
+- propose or compare concepts;
+- create or revise a Part Job;
+- create or revise an Assembly Job;
+- build a structured geometry candidate;
+- build a sandboxed model-program candidate;
+- request Evaluation;
+- ask one focused question;
+- stop with a typed safe reason.
 
-## Routing Guidance
-
-- Use `single_part` for simple plates, brackets, spacers, and covers with no
-  moving or installed components.
-- Use `assembly` when the request includes moving parts, electronics, sensors,
-  wiring, replaceable components, fasteners, or serviceability.
-- Use `confirmation_needed` when choosing a route would require guessing switch
-  type, sensor envelope, fastening style, wire direction, removable vs sealed
-  behavior, or another topology-changing interface.
+Choose actions by expected information gain, design risk, and user value.
+Internal artifacts record the decision but do not become a user-facing wizard.

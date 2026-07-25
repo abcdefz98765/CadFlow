@@ -1,201 +1,423 @@
-# FINAL PRD: CadFlow Workflow-first Parametric CAD
+# FINAL PRD: CadFlow Agent CAD Workbench
 
 Status date: 2026-07-25.
 
-## Product direction
+Status: target product baseline. The repository is migrating from the former
+workflow-first single-part product to this Agent-first architecture. Capability
+claims must continue to follow `docs/status/current-product-readiness.md`.
 
-CadFlow is a local, IR-driven workflow product that turns a natural-language or
-structured engineering request into reviewable, traceable parametric CAD
-results.
+## 1. Product direction
 
-CadFlow is not a prompt-to-code tool, a raw artifact browser, a complete
-industrial CAD replacement, or an unbounded autonomous coding agent. Agent or
-provider output reaches CAD execution only through validated structured
-contracts. Deterministic services remain authoritative for model generation,
-inspection, and export.
+CadFlow is an Agent-first CAD design workbench.
 
-## Product objects
+It helps a user turn an incomplete engineering goal into:
 
-- Workspace contains many Works and safe workspace configuration.
-- Work is one mutable user-facing engineering task.
-- Run is one append-only execution attempt and audit record.
-- Part Job is one intended part with multiple attempts and one explicit accepted-result pointer.
-- Current Work aggregates the actionable active lineage.
-- Run Snapshot is immutable and read-only.
-- Active lineage and accepted part results are separate.
+- explored and compared design strategies;
+- parametric part models;
+- accepted part results;
+- assemblies made from accepted parts;
+- reviewable engineering deliverables such as STEP, BOM, and drawings;
+- an auditable history of attempts, observations, decisions, and acceptance.
 
-## Canonical workflow
+The Agent is the primary design collaborator. CadFlow supplies context,
+geometry tools, isolated execution, validation, artifact management, lineage,
+and approval boundaries.
 
-```text
-Prompt / Requirement Input
-  -> Requirement
-  -> Clarification when required
-  -> Planning / Design Brief
-  -> Assembly Plan and Candidate Parts
-  -> Explicit Part Selection
-  -> Part Request
-  -> Part Review
-  -> Reviewed Handoff
-  -> CAD IR Draft
-  -> CAD IR Validation and Part Modeling
-  -> Part Result Review
-  -> User Approval / Accepted Part Result
-  -> Work-level Workflow Review
-  -> Rework or next Part Job
-  -> Deliverables
-```
+CadFlow must not reduce an unfamiliar design to the nearest built-in part
+template merely because that template is executable.
 
-Simple single-part work may present compact Planning and Assembly Plan
-information, but checkpoint responsibilities remain distinct.
+## 2. Product promise
 
-## Trusted CAD boundary
+For a normal Work, the user should be able to:
 
-```text
-reviewed part handoff
-  -> bounded create_part_ir episode or deterministic proposer
-  -> CAD IR draft
-  -> local schema and policy validation
-  -> isolated deterministic candidate execution
-  -> geometry inspection and result validation
-  -> validated reviewable result or typed safe block
-```
+1. describe the intended product or change in natural language;
+2. answer only questions that materially affect topology, interfaces, risk, or
+   acceptance;
+3. let the Agent explore, model, inspect, and repair candidate designs;
+4. compare meaningful alternatives and understand important assumptions;
+5. accept individual part results without losing earlier attempts;
+6. continue from accepted parts into assembly and deliverable generation;
+7. revise any accepted result through a traceable child Run.
 
-Provider-generated Python, shell, CadQuery, or arbitrary file operations cannot
-bypass CAD IR.
+The default experience is a design conversation with visible geometry and
+evidence, not a form wizard, template catalogue, artifact browser, or mandatory
+sequence of review screens.
 
-## State and artifact semantics
+## 3. Product objects
 
-CadFlow does not infer product trust from file presence.
+### Workspace
 
-- Input state records whether upstream evidence is missing, unverified, accepted, or stale.
-- Execution state records not started, running, completed, skipped, blocked, or failed.
-- Result state records draft, generated, contract complete, ready for review, accepted, stale, or no trusted result.
-- Agent review and user approval are separate.
-- Only explicit user approval updates `accepted_part_results`.
+A local container for configuration, Works, safe runtime storage, and optional
+provider settings.
 
-Artifacts are projected as:
+### Work
 
-- accepted inputs;
-- reviewable attempt outputs;
-- final approved deliverables;
-- diagnostic evidence from failed or blocked attempts.
+One mutable user-facing engineering objective. A Work owns or references:
 
-Failed candidates execute in isolation. A final failure preserves reports,
-trace, CAD IR, and validation evidence but does not publish `model.py`, STEP,
-STL, or preview files as Run products.
+- its current intent and accepted decisions;
+- Runs and active design lineage;
+- Part Jobs;
+- an optional Assembly Job;
+- accepted part and assembly result pointers;
+- deliverable packages;
+- the current recommendation and unresolved user decisions.
 
-## Execution modes
+### Run
 
-### Contract
+One append-only attempt and audit record. A Run may contain one or more bounded
+Agent Episodes, candidate executions, observations, and review evidence.
+Historical execution evidence is immutable.
 
-- validates and records CAD IR;
-- reports `contract_complete` or `execution_skipped`;
-- does not expect STEP/STL;
-- is not a failure;
-- does not offer part-result approval without a reviewable generated result.
+### Part Job
 
-### Full
+One intended part within a Work. A Part Job owns:
 
-- validates CAD IR;
-- executes deterministic CAD generation;
-- may produce STEP as the primary CAD artifact and STL as a derived artifact;
-- requires Part Result Review and explicit user approval before Work-level delivery.
+- a stable part identity and role;
+- interface and assembly context;
+- multiple attempt Run references;
+- candidate results;
+- one explicit accepted-result pointer or no accepted result.
 
-### Agentic
+### Assembly Job
 
-Provider-backed bounded `create_part_ir` remains a prototype milestone, not a
-production-usable capability. Deterministic fallback must be labeled.
+An optional Work-level task that combines accepted part results and reference
+components. It owns:
 
-## Current product scope
+- assembly intent and interfaces;
+- part-result inputs;
+- placement and constraint attempts;
+- validation evidence;
+- one explicit accepted assembly result or no accepted result.
 
-Usable:
+### Deliverable Package
 
-- local Workspace/Work creation and append-only Run storage;
-- deterministic Golden single-part Contract and Full flows;
-- CAD IR validation and deterministic CadQuery generation;
-- candidate selection through versioned Assembly Plan override;
-- Part Review, Part Result Review, explicit approval, and accepted-result pointers;
-- controlled artifact reads and Run Snapshot inspection;
-- bounded deterministic `create_part_ir` episode infrastructure.
+A versioned package derived only from accepted results. Depending on available
+capability it may contain:
 
-Partial:
+- part STEP files;
+- assembly STEP or native assembly files;
+- STL preview files;
+- BOM;
+- PDF/SVG drawings;
+- model and validation reports;
+- explicit limitations and unverified claims.
 
-- Workflow Cockpit browser usability and complete bilingual acceptance;
-- narrow allowlisted revision/rework;
-- feature-level geometry inspection;
-- skill and knowledge runtime ownership enforcement.
+## 4. User-facing design loop
 
-Not usable:
-
-- provider-backed agentic CAD as an accepted product path;
-- full assembly generation or assembly STEP export;
-- multi-part batch generation;
-- motion, strength, tolerance-stack, fit, DFM/DFA, or safety release;
-- arbitrary external STEP editing or mesh reverse engineering.
-
-## Output contracts
-
-Successful Full part result:
+CadFlow has four user-facing phases:
 
 ```text
-input_ir.json
-model.py
-model.step
-model.stl
-report.json
-report.md
-preview.png
-agent_trace.json
-logs/runtime.json
+Intent
+  -> Design
+  -> Build & Evaluate
+  -> Accept & Deliver
+       ↘ revise / continue another Part Job / assemble
 ```
 
-Failed part attempt:
+These phases describe the user journey. They are not a fixed script for every
+model call or artifact.
+
+### Intent
+
+Capture the goal, known constraints, desired deliverables, and risk level.
+Clarification appears only when missing information materially changes the
+design or the requested assurance.
+
+Visible success:
+
+- the Agent can state what it is trying to create;
+- important assumptions and unresolved decisions are visible;
+- the next design action is clear.
+
+### Design
+
+The Agent explores geometry and engineering strategies. It may:
+
+- request allowlisted context;
+- decompose an assembly into Part Jobs;
+- compare candidate concepts;
+- define parameters, datums, interfaces, and manufacturing assumptions;
+- create or patch a structured geometry contract;
+- create or patch a sandboxed CAD model program;
+- ask the user when a material decision cannot be made safely.
+
+Visible success:
+
+- at least one coherent design candidate exists;
+- the candidate preserves the user's intent and relevant interfaces;
+- alternatives and trade-offs are concise and meaningful.
+
+### Build & Evaluate
+
+CadFlow executes candidates in isolation, generates geometry, inspects results,
+and returns structured observations to the Agent.
+
+The Agent may repair and retry within budgets. The system, not the provider,
+decides whether a candidate is valid and reviewable.
+
+Visible success:
+
+- a candidate has measured geometry and requested exports; or
+- a typed block explains what is missing and how to recover.
+
+### Accept & Deliver
+
+The user reviews outcomes rather than internal ceremony. Explicit acceptance:
+
+- updates the accepted result pointer;
+- never rewrites a Run;
+- does not automatically accept sibling parts;
+- does not imply assembly or engineering release unless those results exist.
+
+After part acceptance, the recommended action may be:
+
+- revise the part;
+- continue another Part Job;
+- create or update the Assembly Job;
+- generate a deliverable package.
+
+## 5. Internal checkpoints
+
+CadFlow persists trusted internal checkpoints, but they are not all mandatory
+user-visible stages:
+
+- intent snapshot;
+- clarification decision when required;
+- design brief and candidate set;
+- selected Part Job or Assembly Job;
+- model contract or model-program candidate;
+- execution request;
+- validation and inspection observations;
+- reviewable result;
+- explicit acceptance;
+- assembly result;
+- deliverable package.
+
+Requirement, Planning, Part Request, Reviewed Handoff, CAD IR Draft, and Review
+artifacts may remain as compatibility or specialized artifacts. They must not
+force every low-risk design through a fixed fifteen-step UI.
+
+## 6. Geometry execution architecture
+
+CadFlow supports two controlled candidate paths.
+
+### Structured geometry path
+
+The Agent submits a backend-neutral geometry contract. The target contract is a
+feature and assembly graph rather than a closed `part_type` template selector.
+
+The evolving contract should support:
+
+- typed parameters and units;
+- datums and coordinate frames;
+- sketches and constraints;
+- extrude, revolve, sweep, loft, shell, and boolean operations;
+- holes, pockets, fillets, chamfers, ribs, patterns, and transforms;
+- named faces, axes, interfaces, and functional features;
+- manufacturing and inspection intent;
+- assembly placements, joints, mates, and reference components.
+
+### Sandboxed CAD program path
+
+For geometry not yet expressible in the structured contract, the Agent may
+submit a CAD model program as an untrusted candidate.
+
+The Tool Broker must enforce:
+
+- isolated process or container execution;
+- no network by default;
+- allowlisted imports and CAD APIs;
+- explicit CPU, memory, step, and wall-clock budgets;
+- a dedicated writable candidate directory;
+- no arbitrary workspace mutation;
+- captured source, parameters, logs, and outputs;
+- local geometry and artifact validation before publication.
+
+Provider-generated code is never trusted merely because it executed. It becomes
+a reviewable result only after local policy, geometry, and output checks pass.
+
+### Shared publication boundary
+
+Both paths converge on:
 
 ```text
-input_ir.json or best CAD IR draft
-report.json
-report.md when produced
-agent_trace.json
-structured validation / episode evidence
+untrusted candidate
+  -> isolated execution
+  -> geometry inspection
+  -> policy and result validation
+  -> reviewable Run result or typed safe block
 ```
 
-Failure output must not contain product-positioned STEP/STL/model source or
-preview files.
+Only accepted results become Work deliverables.
 
-Compatibility workflow outputs may remain for examples and migration, but do
-not redefine Current Work, approval, or Deliverables semantics.
+## 7. Agent behavior
 
-## Check levels
+A bounded Agent Episode may choose among declared actions such as:
 
-- L0 Playground: implemented baseline generation and artifact/geometry facts.
-- L1 Maker: report framework only; not complete printability validation.
-- L2 Engineering: reserved; no engineering release claim.
-- L3 Industrial: reserved; no industrial DFM/DFA claim.
-- L4 Safety Critical: reserved; never automatically released.
+- request context;
+- ask the user;
+- propose or compare candidates;
+- create or patch a geometry contract;
+- create or patch a sandboxed model program;
+- request candidate execution;
+- inspect structured observations;
+- repair and retry;
+- create Part Jobs;
+- propose assembly operations;
+- request drawing or deliverable generation;
+- stop with a typed reason.
 
-## Current acceptance gate
+The orchestrator controls budgets and side effects. The Agent controls design
+strategy inside those boundaries.
 
-- Full and Contract Golden flows preserve canonical status semantics.
-- Failed validation publishes no untrusted product files.
-- Reviewable output does not become accepted without an explicit Work pointer.
-- Deliverables contain only approved accepted-part results.
-- Current Work remains actionable and Run Snapshot remains read-only.
-- Candidate selection preserves old Runs and accepted results and marks downstream stages stale.
-- Automated regression is green.
-- Workflow Cockpit is not marked usable until real-browser action, localization, failure/recovery, Snapshot, 1024px, and mobile checks pass.
+A fixed one-shot adapter call wrapped in episode metadata is not sufficient to
+claim Agentic design.
 
-## Near-term roadmap
+## 8. Assurance modes
 
-1. Close Workflow Cockpit browser and bilingual usability acceptance.
-2. Implement the typed Skill and Knowledge Registry.
-3. Prototype provider-backed bounded `create_part_ir` behind existing validators.
-4. Progress multiple Part Jobs before any assembly-generation claim.
+### Explore
 
-The detailed architecture, contracts, readiness, and milestone sources remain:
+- optimized for rapid concept iteration;
+- permits visible low-risk assumptions;
+- may use the sandboxed CAD program path;
+- requires geometry and export validation;
+- never claims manufacturing release.
 
-- `docs/architecture/cadflow-canonical-product-architecture.md`;
-- `docs/architecture/agent-skill-knowledge.md`;
-- `docs/architecture/bounded-agent-loop-context-broker-and-checkpoints.md`;
-- `docs/workflow_contract.md`;
-- `docs/status/current-product-readiness.md`;
-- `docs/roadmap/milestones.md`.
+### Engineer
+
+- requires explicit functional interfaces and acceptance criteria;
+- applies stricter dimensional, manufacturing, and assembly checks;
+- unresolved material engineering decisions require user input;
+- deliverables state verified and unverified properties separately.
+
+### Release
+
+A future mode. It may be enabled only for declared domains with implemented and
+verified release checks. It must never be inferred from a successful STEP
+export.
+
+Legacy Contract and Full execution modes may remain during migration, but they
+describe execution behavior rather than the user-facing product architecture.
+
+## 9. Trust, lineage, and approval
+
+- Current Work is actionable; Run Snapshot is read-only.
+- Work pointers may change; historical Run evidence may not.
+- Active design lineage and accepted part or assembly results are distinct.
+- File presence is not business status.
+- Candidate execution outputs are untrusted until validation passes.
+- A reviewable result is not an accepted result.
+- Only explicit user acceptance changes accepted-result pointers.
+- Deliverables resolve through accepted-result pointers.
+- Upstream changes mark dependent evidence stale without deleting history.
+- Failed attempts retain diagnostic evidence but do not publish product-looking
+  deliverables.
+
+## 10. Industrial deliverable direction
+
+The target product output is an engineering package, not merely STL.
+
+Progressive deliverables are:
+
+1. validated parametric part and STEP;
+2. multiple accepted parts with stable interfaces;
+3. assembly placement/constraint result and assembly STEP/native file;
+4. BOM and reference-component list;
+5. part and assembly drawings;
+6. declared inspection, tolerance, manufacturing, and release evidence where
+   corresponding checks exist.
+
+CadFlow must distinguish model generation from claims about fit, motion,
+strength, tolerance stack, DFM/DFA, GD&T, FEA, or safety. Unsupported claims
+remain explicit limitations.
+
+## 11. UX requirements
+
+The primary surface must answer:
+
+1. What is the Agent designing now?
+2. What geometry or assembly result exists?
+3. What did the Agent assume or change?
+4. What validation or limitation matters?
+5. Does the user need to decide anything?
+6. What is the recommended next action?
+
+Primary surfaces:
+
+- design conversation and focused questions;
+- live or recent model preview;
+- current candidate and concise alternatives;
+- current Part Jobs and accepted results;
+- validation summary and important limitations;
+- one recommended action.
+
+Secondary or advanced surfaces:
+
+- full artifact lineage;
+- raw JSON and model source;
+- episode events;
+- validator payloads;
+- provider and audit metadata.
+
+## 12. Current implementation reality
+
+The current repository does not yet implement this target architecture.
+
+Implemented foundations worth retaining:
+
+- Workspace, Work, Run, and initial Part Job storage;
+- append-only evidence and explicit accepted-result pointers;
+- deterministic CadQuery execution for a small set of part families;
+- STEP-first output and basic geometry inspection;
+- isolated candidate execution and failure cleanup;
+- controlled artifact access and a tested local console.
+
+Major migration gaps:
+
+- the current CAD IR is a closed part-family selector;
+- the current product Agent Episode is effectively one-shot;
+- provider-backed Agentic design is not product-usable;
+- the UI is organized around the former fixed workflow;
+- Part Job attempts and assembly progression are incomplete;
+- FreeCAD assembly and TechDraw scripts are not integrated deliverables;
+- several execution paths and legacy documents still compete with the target
+  architecture.
+
+## 13. Product acceptance milestones
+
+CadFlow may claim the Agent-first vertical slice only when:
+
+- one provider-backed Design Episode performs more than a fixed adapter call;
+- the Agent can observe validation feedback and choose repair, context, user
+  input, or stop;
+- at least five non-template benchmark parts reach validated STEP output;
+- failed candidates cannot mutate trusted Work state;
+- capability mode and assumptions are visible;
+- the user can accept a result and revise it through a child Run.
+
+CadFlow may claim multi-part assembly only when:
+
+- Part Jobs own multiple attempts and accepted results;
+- an Assembly Job consumes accepted part-result identities;
+- placement or constraint evidence is persisted and validated;
+- an assembly deliverable is produced without implying unsupported fit or
+  motion validation.
+
+CadFlow may claim drawing-package support only when drawing generation is in
+the normal Work flow, tested on accepted results, and included in the
+Deliverable Package.
+
+## 14. Non-goals for the correction phase
+
+The architecture correction does not immediately promise:
+
+- production-ready arbitrary CAD;
+- automatic engineering sign-off;
+- complete surface modeling;
+- robust feature recovery from arbitrary STEP;
+- mesh reverse engineering;
+- full GD&T, FEA, kinematics, or safety release;
+- public cloud or multi-user operation.
+
+The immediate goal is to restore Agent design breadth while preserving trusted
+execution and honest capability boundaries.

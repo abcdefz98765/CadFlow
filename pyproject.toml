@@ -1,7 +1,7 @@
 [project]
 name = "ai_native_cad"
 version = "0.5.0"
-description = "Workflow-first natural-language parametric CAD modeling toolkit"
+description = "Agent-first CAD design workbench with controlled execution and traceable deliverables"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 dependencies = [

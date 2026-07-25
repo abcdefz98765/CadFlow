@@ -1,94 +1,21 @@
-# Fields By Check Level
+# Intent Fields by Assurance Mode
 
-## L0 Playground
+## Explore
 
-Goal: generate a plausible model with traceable assumptions.
+Capture objective, scope, primary geometry or envelope, functions, interfaces,
+units, desired outputs, and visible assumptions. Material, process, and detailed
+tolerances may remain open unless they change the concept.
 
-Required:
+## Engineer
 
-- object goal
-- scope
-- primary dimensions or template defaults
-- functional features
-- unit
-- output formats
+Add material or family, manufacturing process, functional tolerances, explicit
+datums/interfaces, loads or load direction, operating environment, assembly
+clearance, serviceability, and measurable acceptance targets.
 
-Optional or defaulted:
+## Release
 
-- material
-- manufacturing process
-- assembly method
+Require a domain-specific profile covering manufacturing and inspection,
+versioning, supplier/process constraints, applicable standards, hazards,
+verification plan, provenance, and explicit human authorization.
 
-Deferred:
-
-- tolerances
-- roughness/surface finish
-- loads
-- certification
-
-## L1 Maker
-
-Goal: make something a person can print, assemble, and inspect casually.
-
-Required:
-
-- all L0 fields
-- manufacturing process
-- assembly clearance where parts interact
-- serviceability needs
-- reference components for installed modules, sensors, switches, or batteries
-
-Optional:
-
-- material family
-- fastener choice
-- print orientation
-
-Deferred:
-
-- precision tolerances
-- roughness, unless it affects a contact or sliding face
-- certification
-
-## L2 Engineering
-
-Goal: model a mechanical part or assembly whose interfaces and constraints are explicit.
-
-Required:
-
-- material or material family
-- manufacturing process
-- functional tolerances
-- interface definitions
-- loads or load direction
-- operating environment
-
-Optional:
-
-- surface finish by functional face
-- inspection method
-
-## L3 Industrial
-
-Goal: prepare for repeatable manufacturing and review.
-
-Required:
-
-- DFM/DFA constraints
-- inspection method
-- BOM strategy
-- supplier or process constraints when known
-- versioning policy
-
-## L4 Safety Critical
-
-Goal: reserve workflow for controlled, human-approved safety work.
-
-Required:
-
-- applicable standards
-- hazard analysis
-- verification plan
-- human signoff
-
-The system must not automatically release L4 designs.
+CadFlow does not currently provide general Release assurance.

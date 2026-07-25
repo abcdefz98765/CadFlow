@@ -1,114 +1,67 @@
 # Getting Started
 
-CadFlow 现在以 IR-driven、workflow-first 自然语言参数化 CAD 为主线。
+CadFlow is migrating from a workflow-first deterministic CAD application to an
+Agent-first CAD design workbench.
 
-推荐先读：
+Read in this order:
 
-1. `README.md`
-2. `docs/usage.md`
-3. `docs/architecture.md`
-4. `docs/PRD_new.md`
-5. `docs/philosophy.md`
+1. `../../README.md`
+2. `../FINAL-PRD.md`
+3. `../status/current-product-readiness.md`
+4. `../usage.md`
 
-## Install
+The PRD describes the target. Readiness describes what the repository can
+actually do today.
 
-```bash
-pip install -e .
+## Install the current implementation
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev,web]"
+$env:PYTHONPATH = "src"
 ```
 
-## Run the CAD Agent Loop Pipeline
+## Run current tests
 
-Generate the tracked IR examples:
+```powershell
+python -m pytest tests/ -q
+```
 
-```bash
+## Try the current deterministic CAD path
+
+```powershell
 python examples/ir_pipeline/generate_examples.py
 ```
 
-Python API:
+The current CAD IR uses supported `part_type` families and is a compatibility
+implementation, not the target limit of CadFlow's design capability.
 
-```python
-from ai_native_cad.pipeline import run_ir_pipeline
+## Start the current browser console
 
-result = run_ir_pipeline({
-    "part_type": "mounting_plate",
-    "part_name": "mounting_plate",
-    "unit": "mm",
-    "dimensions": {"length": 80, "width": 40, "thickness": 5},
-    "features": {"holes": {"diameter": 5, "positions": "corner_4"}, "chamfer": 1},
-    "outputs": ["step", "stl"],
-})
-print(result["status"])
-print(result["output_dir"])
+```powershell
+.\scripts\start_nicegui_console.ps1
 ```
 
-输出：
+This opens the legacy Workflow Console. It is useful for inspecting existing
+Work/Run behavior but is not the target Agent Workbench UX.
+
+## Describe a design objective
+
+A useful design request states purpose, interfaces, important dimensions,
+manufacturing preference, evaluation needs, and what may be explored:
 
 ```text
-outputs/<part_name>/
-  input_ir.json
-  model.py
-  model.step
-  model.stl
-  report.json
-  report.md
-  preview.png
-  agent_trace.json
-  logs/runtime.json
+Design a compact wall-mounted enclosure for this controller board.
+Keep the cable ports accessible, use four removable screws, and target FDM
+printing. Show two mounting strategies, explain assumptions, and produce the
+parts, assembly, BOM, and drawings when the design is accepted.
 ```
 
-## Run the Legacy Workflow
+The target Agent should clarify only decisions that materially affect the
+design, then explore and evaluate geometry through controlled tools. That
+general Agentic loop is roadmap work and must not be inferred from the current
+template examples.
 
-One-command demo:
-
-```bash
-python examples/workflow/mounting_plate_demo.py
-```
-
-Python API:
-
-```python
-from ai_native_cad import run_workflow
-
-result = run_workflow(
-    "Generate an 80x40x5 mounting plate with four M4 clearance holes.",
-    output_dir="runs/mounting_plate_demo",
-)
-print(result.status)
-print(result.output_dir)
-```
-
-输出：
-
-```text
-runs/mounting_plate_demo/
-  input.md
-  requirement.json
-  plan.md
-  model.py
-  review.md
-  exports/
-  logs/
-    run.json
-    generation.json
-```
-
-## Run the Legacy Demo
-
-```bash
-python examples/workflow/mounting_plate_demo.py
-python examples/parts/mounting_plate/model.py
-```
-
-The demo writes generated CAD files next to its own `model.py`. For real user
-projects, pass an explicit `output_dir` to `run_workflow`.
-
-## User Input Pattern
-
-描述用途、关键尺寸、功能特征、制造倾向和优先级即可。不要把 CadQuery 操作步骤推给用户。
-
-示例：
-
-```text
-生成一个 80x40x5 mm 的安装板，四角 M4 通孔，孔中心离边 8mm。
-优先保证孔位和板厚准确，倒角可以简化。输出 STEP/STL，并写出假设。
-```
+See `../usage.md` for current APIs, artifacts, execution modes, environment
+variables, and troubleshooting.

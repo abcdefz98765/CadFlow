@@ -2,44 +2,49 @@
 
 ## Status and authority
 
-This document is the canonical product-architecture baseline for CadFlow.
+This document is the canonical target architecture for CadFlow.
 
-It defines:
+Status date: 2026-07-25.
 
-- the Workspace / Work / Run object model;
-- the user-facing workflow checkpoints;
-- the responsibility of each stage;
-- the relationship between agent reasoning, deterministic execution, artifacts, reviews, and lineage;
-- the boundaries that UI and implementation changes must preserve.
+CadFlow is migrating from a fixed workflow-first single-part product to an
+Agent-first CAD design workbench. This document defines the target. The current
+implementation gap is recorded in:
 
-When another document, implementation shortcut, test fixture, or UI layout conflicts with this document, do not silently invent a new interpretation. Resolve the conflict explicitly and update this document, the relevant contracts, migrations, tests, roadmap, and readiness status together.
+- `../status/current-product-readiness.md`
+- `../roadmap/milestones.md`
+- `../tasks/task-board.md`
 
-## Product objective
+No implementation, test fixture, legacy document, UI layout, or Golden example
+may silently redefine this architecture.
 
-CadFlow turns a natural-language engineering request into reviewable, traceable CAD results.
+## Architectural objective
 
-The product is not merely:
+CadFlow should maximize Agent freedom in design reasoning while constraining:
 
-- a text-to-template lookup;
-- a raw artifact browser;
-- a fixed linear script;
-- a browser CAD editor;
-- an unbounded autonomous coding agent.
+- context access;
+- side effects;
+- execution environment;
+- resource budgets;
+- trusted publication;
+- lineage mutation;
+- engineering claims;
+- user acceptance.
 
-The intended product loop is:
+The core boundary is:
 
-    user intent
-      -> structured engineering understanding
-      -> design and assembly planning
-      -> selected part or assembly task
-      -> agent-proposed structured CAD contract
-      -> deterministic validation and CAD execution
-      -> user review and acceptance
-      -> revision or rework when needed
+```text
+Agent chooses design actions and candidate strategy
+  -> CadFlow brokers context and tools
+  -> candidate executes in isolation
+  -> local services inspect and validate evidence
+  -> user accepts a reviewable result
+  -> accepted results feed assembly and deliverables
+```
 
-The natural-language experience may become conversational and agentic, but all trusted results remain represented by structured contracts, artifacts, reviews, and lineage.
+The product must not confuse a controlled side-effect boundary with a closed
+design space.
 
-## Canonical object model
+## Canonical product objects
 
 ### Workspace
 
@@ -47,766 +52,593 @@ A Workspace is the local product container.
 
 It owns:
 
-- workspace configuration;
-- the Work index;
-- provider/model/runtime settings that are safe to persist;
-- workspace-scoped run storage;
-- product examples and local operational metadata.
+- workspace identity and safe storage root;
+- Work index;
+- provider, model, runtime, and assurance-mode configuration safe to persist;
+- optional examples and operational metadata.
 
-A Workspace is not one design task and is not one execution attempt.
-
-Canonical relationship:
-
-    Workspace
-      -> many Works
-      -> workspace configuration
-      -> run storage and indexes
+A Workspace contains many Works. It is not one design task or execution
+attempt.
 
 ### Work
 
-A Work is one mutable, user-visible engineering task or project.
+A Work is one mutable user-facing engineering objective.
 
-Examples:
+It owns or references:
 
-- design a desktop robot arm;
-- revise an enclosure;
-- generate and review one mounting bracket;
-- continue a multi-part product design across several attempts.
-
-A Work owns or references:
-
-- title, description, and current product intent;
-- root and active-lineage pointers;
-- all Runs associated with the task;
+- title, description, and current intent;
+- active design lineage;
+- all associated Runs;
 - Part Jobs;
-- candidate-selection state and versioned user overrides;
+- an optional Assembly Job;
 - accepted part-result pointers;
-- current review state and recommended next action;
-- product-level status and readiness summaries.
+- an accepted assembly-result pointer when one exists;
+- deliverable packages;
+- current assumptions, unresolved decisions, and recommended action.
 
-A Work is mutable because the user may:
-
-- clarify a requirement;
-- select another candidate;
-- approve a result;
-- request revision;
-- create a rework attempt;
-- choose which result is currently accepted.
-
-Work state must never rewrite historical execution evidence.
+Work mutation changes pointers and current decisions. It never rewrites
+historical Run evidence.
 
 ### Run
 
-A Run is one append-only execution attempt and audit record.
+A Run is one append-only attempt and audit record.
 
-A Run contains or references:
+A Run may contain:
 
-- the prompt or revision request that started the attempt;
-- structured stage artifacts;
-- agent episode records;
-- validator observations;
-- deterministic CAD outputs;
-- reports and review evidence;
-- parent/child lineage metadata.
+- the prompt or revision request that initiated it;
+- compact accepted context snapshots;
+- one or more bounded Agent Episodes;
+- design candidates and candidate source;
+- structured contracts or model programs;
+- validator and execution observations;
+- geometry, reports, drawings, or assembly artifacts;
+- parent/child lineage and comparison evidence.
 
 Run rules:
 
-- existing execution artifacts are never edited in place;
-- user edits are stored as versioned override artifacts, not replacements of originals;
-- review records are append-only;
-- an alternate execution or rework attempt creates a new Run;
-- a Run Snapshot is read-only in the UI;
-- `latest attempt` is audit information and does not automatically become the accepted or active result.
+- historical execution evidence is immutable;
+- edits create versioned artifacts or child Runs;
+- a failed Run remains inspectable;
+- a newer Run is not automatically accepted;
+- Run Snapshot is read-only.
 
 ### Part Job
 
-A Part Job is the Work-level task for one intended part.
+A Part Job is the Work-level identity of one intended part.
 
-A Part Job may have:
+It owns:
 
-- a part id and engineering role;
-- preserved assembly context;
-- multiple candidate concepts;
-- multiple child Runs or attempts;
-- one currently accepted result pointer;
-- no accepted result yet.
+- stable part id, role, and purpose;
+- functional interfaces and assembly context;
+- accepted constraints and assumptions;
+- zero or more attempt Run ids;
+- reviewable candidate results;
+- one accepted-result pointer or no accepted result.
 
-Part Jobs allow future multi-part Works to have sibling accepted results without forcing every accepted part to be the single active-lineage leaf.
+Creating an attempt does not accept it. Accepting another part does not replace
+this Part Job's accepted result.
 
-### Canonical relationship
+### Assembly Job
 
-    Workspace
-      -> Work A
-           -> root Run
-           -> active workflow / rework lineage
-           -> Part Job: upper_link
-                -> child Run attempt 1
-                -> child Run attempt 2
-                -> accepted result pointer
-           -> Part Job: lower_link
-                -> child Runs
-                -> accepted result pointer
-           -> Work-level reviews and deliverables
-      -> Work B
-           -> its own Runs and Part Jobs
+An Assembly Job is an optional Work-level identity for assembling accepted part
+results and reference components.
 
-## Active lineage and accepted results
+It owns:
 
-These are distinct concepts.
+- assembly intent;
+- exact accepted part-result inputs;
+- reference-component identities or envelopes;
+- placement, joint, mate, fastener, clearance, and serviceability intent;
+- attempt Run ids;
+- assembly observations;
+- one accepted assembly-result pointer or no accepted result.
 
-### Active lineage
+Changing a part accepted-result pointer marks dependent assembly attempts stale.
+It does not mutate them.
 
-The active lineage identifies the workflow/rework path currently being advanced and shown by Current Work.
+### Deliverable Package
+
+A Deliverable Package is a versioned Work artifact derived from accepted
+results.
+
+It records:
+
+- exact accepted part and assembly inputs;
+- included files;
+- verification evidence;
+- unverified or unsupported claims;
+- creation Run and timestamp;
+- supersession relationship when regenerated.
+
+A package cannot contain failed or merely reviewable candidates as final
+deliverables.
+
+## Lineage and acceptance
+
+### Active design lineage
+
+The active lineage identifies the design or rework path currently being
+advanced.
 
 It answers:
 
-- which root attempt is active;
-- which rework branch is current;
-- which Run should receive the next workflow action;
-- which lineage is aggregated into the Current Work view.
+- which root and child Runs form the current attempt path;
+- which Run receives the next design action;
+- which observations and candidates belong to the current session.
 
-### Accepted part results
+### Accepted results
 
-`accepted_part_results` identifies the user-approved result for each part id.
+Accepted pointers identify user-approved results:
 
-It answers:
+- `accepted_part_results[part_id]`;
+- optional accepted assembly result;
+- accepted deliverable package when supported.
 
-- which child Run result is approved for `upper_link`;
-- which child Run result is approved for `base`;
-- whether a part has no approved result yet.
+Accepted results may belong to sibling Runs. Therefore:
 
-Multiple accepted part results may be sibling Runs. Therefore:
+- accepted result does not have to equal the active-lineage leaf;
+- approval should not implicitly rewrite active lineage;
+- starting a new revision does not remove the prior accepted result;
+- only explicit user acceptance changes an accepted-result pointer.
 
-- accepted result does not always equal active-lineage leaf;
-- creating a child Run does not automatically accept it;
-- selecting another candidate does not delete earlier accepted results;
-- only an explicit user approval updates an accepted result pointer.
+### Current Work and Run Snapshot
 
-## Current Work and Run Snapshot
+Current Work is the actionable aggregate over Work decisions, Part Jobs,
+Assembly Job, accepted results, and active lineage.
 
-### Current Work
+Run Snapshot is an immutable audit view of one attempt. It may offer navigation,
+comparison, or an explicit "start revision" action, but it cannot mutate the
+historical Run.
 
-Current Work is the actionable, aggregated product view over the active lineage and Work-level decisions.
+## Canonical user journey
 
-It may show information originating from several Runs, but every item must preserve provenance.
+The user-facing product has four phases:
 
-It is the only normal place for workflow mutations.
+```text
+Intent -> Design -> Build & Evaluate -> Accept & Deliver
+```
 
-### Run Snapshot
+The phases are stable. Internal checkpoints are capability-driven and may be
+compact, repeated, or omitted when they add no user decision.
 
-Run Snapshot is one immutable audit view.
-
-It shows what that Run knew and produced. It does not pretend to be the complete current Work.
-
-Normal write actions are disabled. A user may return to Current Work, compare results, or explicitly create a new rework attempt.
-
-## Canonical workflow
-
-The user-facing Workflow represents trusted product checkpoints. It does not display every model call, context request, validator retry, or repair turn.
-
-Canonical current workflow:
-
-    Prompt / Requirement Input
-      -> Requirement
-      -> Clarification, when required
-      -> Planning / Design Brief
-      -> Assembly Plan and Candidate Parts
-      -> Explicit Part Selection
-      -> Part Request
-      -> Part Review
-      -> Reviewed Handoff
-      -> CAD IR Draft
-      -> CAD IR Validation and Part Modeling
-      -> Part Result Review
-      -> User Approval / Accepted Part Result
-      -> Work-level Workflow Review
-      -> Rework or next Part Job
-      -> Deliverables
-
-For a simple single-part request, Planning and Assembly Plan may be compact, but their responsibilities remain distinct.
-
-For Contract mode, CAD IR may validate while deterministic CAD execution is intentionally skipped. This is `contract_complete` or `execution_skipped`, not a failure.
-
-For Full mode, validated CAD IR proceeds to deterministic CAD execution and may produce STEP/STL.
-
-## Stage responsibilities
-
-### 1. Prompt / Requirement Input
+### Intent
 
 Purpose:
 
-- capture the user's original natural-language goal;
-- start or revise a Work through an explicit Run.
+- capture the user's goal and desired deliverables;
+- identify important constraints, references, risk, and assurance mode;
+- ask only material clarification questions.
 
-Input:
+Inputs:
 
-- user prompt;
-- optional prior accepted Work context for revision.
+- user prompt or revision request;
+- optional accepted Work context or reference files.
 
-Output:
+Outputs:
 
-- immutable prompt artifact;
-- root or revision Run identity.
+- immutable input artifact;
+- active intent summary;
+- assumptions and focused unresolved decisions;
+- initial design objective.
 
 User decision:
 
-- submit, cancel, or revise the prompt.
+- answer a material question;
+- accept a visible low-risk assumption;
+- change the goal;
+- begin design.
 
 Must not:
 
-- silently generate all parts;
-- overwrite an earlier prompt;
-- treat browser state as the source of truth.
+- require complete specifications for low-risk exploration;
+- silently invent safety-critical information;
+- choose a supported template as a substitute for the requested object.
 
-### 2. Requirement
-
-Purpose:
-
-- convert the prompt into a structured engineering requirement contract;
-- identify scope, goals, constraints, assumptions, missing information, and risk.
-
-Input:
-
-- prompt;
-- approved prior context when revising.
-
-Output:
-
-- active requirement artifact;
-- assumptions;
-- missing or risky fields;
-- flow decision: proceed, clarify, or block safely.
-
-User decision:
-
-- approve the interpreted requirement;
-- answer focused clarification questions;
-- override a controlled field;
-- return to prompt.
-
-Must not:
-
-- invent critical dimensions without exposing assumptions;
-- choose final geometry;
-- execute CAD.
-
-### 3. Clarification, conditional
+### Design
 
 Purpose:
 
-- collect only the information needed to resolve material ambiguity or risk.
-
-Input:
-
-- unresolved requirement fields and focused questions.
-
-Output:
-
-- append-only clarification artifact;
-- a new active requirement version.
-
-User decision:
-
-- answer, accept an assumption, or stop.
-
-Must not:
-
-- become a generic chat transcript;
-- overwrite the original requirement artifact.
-
-### 4. Planning / Design Brief
-
-Purpose:
-
-- translate the accepted requirement into an engineering approach;
-- define design goals, constraints, candidate strategies, and capability boundaries.
-
-Input:
-
-- active accepted requirement.
-
-Output:
-
-- design brief or planning artifact;
-- candidate approaches and concise trade-offs;
-- route toward single-part, multi-part, reference-only, or unsupported scope.
-
-User decision:
-
-- inspect or approve the approach;
-- request revision when the route is wrong.
-
-Must not:
-
-- be reduced to a filename list;
-- silently select unrelated templates;
-- claim CAD generation.
-
-### 5. Assembly Plan and Candidate Parts
-
-Purpose:
-
-- decompose an assembly-level request into generated candidates and reference-only components;
-- preserve interfaces and assembly context;
-- identify a selected candidate for the current part pipeline.
-
-Input:
-
-- planning result;
-- active requirement.
-
-Output:
-
-- assembly plan;
-- candidate part list;
-- reference component list;
-- selected candidate;
-- interface and dependency context.
-
-User decision:
-
-- inspect candidates;
-- explicitly choose another supported candidate;
-- return to planning when decomposition is wrong.
-
-Changing the selected candidate:
-
-- writes a validated, versioned override;
-- preserves the original plan;
-- preserves old Runs and accepted results;
-- marks affected downstream stages stale;
-- recommends creating a new Part Request.
-
-Must not:
-
-- select a candidate merely because its node was opened;
-- treat reference-only components as generated parts;
-- automatically start CAD generation.
-
-### 6. Part Request
-
-Purpose:
-
-- create the scoped task contract for exactly one selected part.
-
-Input:
-
-- active assembly plan;
-- selected candidate;
-- preserved assembly context.
-
-Output:
-
-- `part_create_request` describing the intended part, role, constraints, interfaces, and requested result scope.
-
-User decision:
-
-- inspect the request;
-- continue to Part Review;
-- return to Assembly Plan.
-
-Must not:
-
-- generate the part;
-- discard assembly context;
-- automatically approve the request.
-
-### 7. Part Review
-
-Purpose:
-
-- evaluate whether the Part Request is coherent and ready for modeling.
-
-Input:
-
-- Part Request;
-- relevant requirement and assembly context.
-
-Output:
-
-- Part Request Review;
-- approved, needs revision, or blocked conclusion;
-- concise issues and assumptions.
-
-User decision:
-
-- approve the request;
-- request changes;
-- block or return upstream.
-
-Must not:
-
-- substitute for final model-result review;
-- create CAD.
-
-### 8. Reviewed Handoff
-
-Purpose:
-
-- freeze the approved modeling brief and context passed into the CAD-generation episode.
-
-Input:
-
-- approved Part Request;
-- Part Review;
-- preserved assembly context.
-
-Output:
-
-- reviewed part handoff;
-- explicit part id, scope, assumptions, interfaces, and capability mode.
-
-User decision:
-
-- inspect the handoff;
-- proceed to CAD IR Draft;
-- return upstream when it is incorrect.
-
-Must not:
-
-- be regenerated from unrelated defaults;
-- lose the source part intent.
-
-### 9. CAD IR Draft
-
-Purpose:
-
-- let the bounded agent episode propose a structured, reviewable CAD contract.
-
-Input:
-
-- Reviewed Handoff;
-- compact context envelope;
-- allowlisted context requested through the Context Broker.
-
-Output:
-
-- CAD IR draft;
-- assumptions and normalization summary;
-- episode records and contract submissions.
+- let the Agent understand, decompose, and explore the design;
+- create meaningful candidate strategies;
+- define parameters, datums, interfaces, and acceptance targets;
+- prepare executable geometry or assembly candidates.
+
+Inputs:
+
+- accepted intent;
+- allowlisted Work context;
+- selected knowledge and tools;
+- prior candidate and observation summaries when revising.
+
+Outputs may include:
+
+- design brief;
+- candidate concepts and trade-offs;
+- Part Jobs and optional Assembly Job;
+- geometry-contract candidates;
+- sandboxed model-program candidates;
+- explicit assumptions and unresolved decisions.
 
 Agent freedom:
 
-- request relevant context;
-- compare candidate geometry strategies;
-- submit or repair structured contracts;
-- ask the user for missing information;
+- request semantic context;
+- propose and compare candidates;
+- create or patch design artifacts;
+- select a geometry strategy;
+- ask the user;
 - stop safely.
 
-System constraints:
+User decision appears only when:
 
-- no arbitrary shell, Python, or direct CadQuery execution;
-- no bypass of CAD IR validation;
-- bounded steps, context requests, submissions, repairs, tools, and time.
-
-### 10. CAD IR Validation and Part Modeling
-
-Purpose:
-
-- validate the proposed CAD IR;
-- execute deterministic CAD generation only when the contract is valid.
-
-Input:
-
-- CAD IR draft;
-- validator feedback;
-- execution mode.
-
-Output in Full mode:
-
-- validated `input_ir`;
-- deterministic execution report;
-- STEP/STL when supported and successful.
-
-Output in Contract mode:
-
-- validated `input_ir`;
-- explicit `execution_skipped` / `contract_complete` state;
-- no STEP/STL expected.
-
-Output on safe block:
-
-- preserved best draft;
-- typed validation failure;
-- repair, user-input, or development options;
-- no invalid CAD output.
+- topology, interfaces, manufacturing route, material risk, or acceptance
+  criteria require it;
+- the user wants to choose among materially different alternatives;
+- a consequential Work pointer will change.
 
 Must not:
 
-- treat missing templates as the product-level terminal reason before an agent attempt;
-- replace unknown intent with an unrelated fallback part;
-- claim strength, fit, motion, or assembly validation unless those checks ran.
+- treat a fixed template catalogue as the available design space;
+- hide a product-changing assumption;
+- claim that a design proposal is generated or validated geometry.
 
-### 11. Part Result Review
+### Build & Evaluate
 
 Purpose:
 
-- assess one generated or contract-complete child result against the Reviewed Handoff.
+- execute a design candidate in isolation;
+- measure and inspect geometry;
+- validate requested outputs and declared properties;
+- let the Agent repair from structured observations within budgets.
 
-Input:
+Inputs:
 
-- Reviewed Handoff;
-- child Run result;
-- validation and execution reports;
-- product artifacts.
+- selected geometry contract or sandboxed model program;
+- exact parameters and context manifest;
+- execution policy and assurance mode.
 
-Output:
+Outputs:
 
-- Part Result Review;
-- scope and limitations;
-- accepted-for-preview, needs revision, blocked, skipped, or failed result semantics.
+- candidate source and execution record;
+- STEP-first geometry products when successful;
+- inspection and validation reports;
+- drawings or assembly artifacts when the operation supports them;
+- best candidate and structured failure evidence;
+- typed stop reason.
 
-User decision:
+Agent freedom:
 
-- inspect artifacts;
-- approve the result;
-- request revision;
-- leave it unaccepted.
+- request execution;
+- inspect observations;
+- repair the contract or model program;
+- change candidate strategy;
+- request additional context;
+- ask the user;
+- stop safely.
+
+System authority:
+
+- Tool Broker controls execution and side effects;
+- validators decide what can be published as reviewable;
+- Work pointers and acceptance remain outside the Agent Episode.
 
 Must not:
 
-- automatically update `accepted_part_results`;
-- imply full assembly generation from one part;
-- show Contract mode as a missing-output error.
+- run provider content with unrestricted host authority;
+- publish failed candidate files as Work products;
+- fabricate successful validation or unsupported engineering claims;
+- continue without budgets.
 
-### 12. User Approval / Accepted Part Result
-
-Purpose:
-
-- record the user's explicit acceptance of a part result.
-
-Input:
-
-- a reviewable Part Result Review and its child Run.
-
-Output:
-
-- append-only approval review;
-- Work-level accepted result pointer for the part id.
-
-Effect:
-
-- updates Work state only;
-- does not rewrite the child Run or STEP/STL;
-- does not automatically accept sibling parts;
-- does not claim assembly completion.
-
-### 13. Work-level Workflow Review
+### Accept & Deliver
 
 Purpose:
 
-- summarize the current Work lineage, accepted results, missing results, limitations, risks, and valid next actions.
+- present the result, important evidence, and limitations;
+- record explicit acceptance;
+- continue to another Part Job, Assembly Job, revision, or deliverable package.
 
-Input:
+Inputs:
 
-- active lineage;
-- Part Jobs and accepted pointers;
-- stage reviews;
-- artifact availability and diagnostics.
+- validated reviewable candidate;
+- comparison and relevant evidence;
+- current accepted-result pointers.
 
-Output:
+Outputs:
 
-- work-level review artifacts;
-- plain-language conclusion;
-- recommended next action.
-
-User decision:
-
-- accept the current scope;
-- continue with another Part Job;
-- request rework;
-- inspect deliverables.
+- append-only user decision;
+- updated accepted-result pointer when approved;
+- next Work recommendation;
+- optional Assembly Job attempt or Deliverable Package.
 
 Must not:
 
-- inherit an upstream block as its own execution failure when the review itself completed;
-- pretend a deterministic heuristic is an independent LLM judgment;
-- generate CAD.
+- equate reviewable with accepted;
+- accept sibling parts or assembly implicitly;
+- claim complete assembly from one part;
+- include unaccepted candidates in final deliverables.
 
-### 14. Rework
+## Internal checkpoint model
 
-Purpose:
+Internal checkpoints provide trust and recovery without becoming a mandatory
+wizard:
 
-- create a traceable new attempt from an explicit review decision.
+- `intent_snapshot`;
+- `clarification_decision`;
+- `design_brief`;
+- `candidate_set`;
+- `part_job_definition`;
+- `assembly_job_definition`;
+- `geometry_candidate`;
+- `execution_request`;
+- `validation_observation`;
+- `reviewable_result`;
+- `acceptance_decision`;
+- `assembly_result`;
+- `deliverable_package`.
 
-Input:
+Rules:
 
-- stage review with `needs_revision`;
-- target rework checkpoint;
-- requested changes;
-- accepted upstream context.
+- a checkpoint exists because it establishes a trust boundary, durable decision,
+  or recovery point;
+- a provider call, context request, retry, or repair turn is an episode event,
+  not a user-facing phase;
+- legacy artifact names may map into these checkpoints during migration;
+- UI stages must be derived from domain state, not from recursive filename
+  discovery.
 
-Output:
+## Geometry candidate paths
 
-- child rework Run;
-- parent/child lineage;
-- new stage artifacts and comparisons where supported.
+### Structured feature and assembly graph
 
-User decision:
+The target structured representation is extensible and operation-based.
 
-- confirm consequential rework;
-- compare attempts;
-- accept or reject the new result.
+It must evolve beyond a flat `part_type + dimensions + features` object and
+support:
 
-Must not:
+- parameters, expressions, and units;
+- datums, planes, axes, and coordinate systems;
+- sketches and constraints;
+- ordered features and boolean operations;
+- reusable feature patterns;
+- named interfaces and functional references;
+- manufacturing and inspection intent;
+- assembly components, placements, joints, mates, and degrees of freedom.
 
-- modify the historical parent Run;
-- silently switch active lineage on failed execution;
-- run an unbounded loop.
+Backends declare which operations they support. Unsupported operations produce
+typed capability observations rather than unrelated fallback geometry.
 
-### 15. Deliverables
+### Sandboxed model program
 
-Purpose:
+An Agent may submit CAD source as an untrusted model candidate when:
 
-- present accepted products and their review scope.
+- the selected skill and operation allow it;
+- the Tool Broker uses an isolated execution profile;
+- source, dependencies, parameters, and outputs are captured;
+- imports and filesystem access are constrained;
+- network access is disabled by default;
+- resource limits are enforced;
+- local geometry and artifact validators run before publication.
 
-Input:
+The model program may target an allowlisted CAD API such as CadQuery or
+build123d. It may not contain arbitrary workflow mutations, credentials,
+external process control, or unrestricted I/O.
 
-- accepted part-result pointers;
-- validated output artifacts;
-- work-level review.
+### Publication boundary
 
-Output:
+Both paths follow:
 
-- controlled preview and download actions;
-- explicit distinction between generated parts, reference components, contract-only results, and missing deliverables.
+```text
+candidate proposal
+  -> contract/source validation
+  -> isolated execution
+  -> geometry inspection
+  -> result validation
+  -> reviewable result or typed safe block
+```
 
-Must not:
+No candidate becomes accepted automatically.
 
-- expose arbitrary files;
-- present unapproved attempts as accepted deliverables;
-- claim a full assembly deliverable before one exists.
+## Agent Episode architecture
 
-## Stage state dimensions
+A bounded episode receives:
 
-Do not collapse all meanings into one `status` string.
+- an objective;
+- compact accepted context;
+- selected skill and knowledge;
+- declared actions and tools;
+- execution and context budgets;
+- current observations.
 
-A stage may need separate dimensions:
+Initial action vocabulary:
 
-- `execution_status`: not_started, ready, running, completed, skipped, blocked, failed;
-- `result_status`: draft, contract_complete, generated, ready_for_review, accepted_for_preview, stale;
-- `user_review_status`: not_reviewed, approved, needs_revision, blocked;
-- `attention`: none, in_progress, required;
-- `capability_mode`: deterministic_fallback, agentic, contract, full.
+- `request_context`;
+- `ask_user`;
+- `propose_candidates`;
+- `create_contract`;
+- `patch_contract`;
+- `create_model_program`;
+- `patch_model_program`;
+- `request_execution`;
+- `inspect_observation`;
+- `create_part_jobs`;
+- `propose_assembly`;
+- `request_deliverables`;
+- `stop`.
 
-Example:
+The Agent chooses actions. The orchestrator:
 
-    Workflow Review
-      execution_status = completed
-      result_status = ready_for_review
-      user_review_status = not_reviewed
-      limitation = full assembly not generated
+- validates action contracts;
+- enforces budgets;
+- brokers tools;
+- persists concise events;
+- returns observations;
+- stops on policy or resource violation.
 
-Do not render the upstream limitation as `Workflow Review = blocked`.
+An implementation that always requests one fixed context, submits once,
+validates once, and stops on failure is deterministic orchestration, not an
+Agentic episode.
 
-## Agent architecture within the workflow
+## Assurance and claims
 
-Agents operate inside checkpoint transitions; they do not replace the product workflow.
+### Explore
 
-The canonical agent boundary is:
+Allows rapid candidate iteration and visible low-risk assumptions. It requires
+safe execution and geometry validation but does not imply manufacturing
+readiness.
 
-    objective and compact context
-      -> bounded agent episode
-      -> allowlisted context/tool actions
-      -> structured contract submission
-      -> deterministic validation
-      -> deterministic execution or typed safe block
-      -> persisted concise evidence
+### Engineer
 
-The Workflow records trusted results and user decisions. Advanced diagnostics may show concise episode events, but private chain-of-thought is neither required nor persisted.
+Requires explicit functional interfaces, acceptance criteria, and stricter
+checks. Missing material engineering information requires user input or a typed
+limitation.
 
-## UI architecture implications
+### Release
 
-The primary Workflow page must answer:
+Future and domain-specific. It requires implemented release checks and explicit
+user authorization. A successful export is never sufficient.
 
-1. What is the current Work trying to create?
-2. What checkpoint is current?
-3. What result exists now?
-4. What limitation materially matters?
-5. Does the user need to decide anything?
-6. What is the one recommended next action?
-7. What visible change proves that action succeeded?
+Every report separates:
 
-The UI should derive from the canonical stage responsibilities rather than from whatever files happen to exist.
+- verified;
+- assumed;
+- unverified;
+- unsupported;
+- not requested.
 
-Primary surfaces:
+## Part and assembly progression
 
-- Current Work conclusion;
-- recommended next action;
-- stable Workflow checkpoint graph;
-- selected checkpoint detail;
-- relevant artifacts and review;
-- Parts and accepted results;
-- Run history and immutable snapshots.
+### Part progression
 
-Advanced surfaces:
+```text
+Part Job
+  -> design attempts
+  -> validated reviewable result
+  -> explicit accepted part result
+  -> revision or assembly input
+```
 
-- full provenance;
-- raw JSON;
-- validator payloads;
-- episode events;
-- action audit metadata;
-- internal ids and diagnostic codes.
+Each attempt is a Run. The Part Job stores all attempt references, not only one
+current run id.
 
-## Architecture invariants
+### Assembly progression
 
-The following require an explicit architecture change, not an incidental implementation edit:
+```text
+accepted part results + reference components
+  -> Assembly Job candidate
+  -> placement / constraints / validation
+  -> reviewable assembly result
+  -> explicit accepted assembly result
+```
 
-1. Workspace contains Works; a Work contains/references Runs and Part Jobs.
-2. Work is mutable; Run execution evidence is append-only and historical artifacts are not overwritten.
-3. Current Work is actionable; Run Snapshot is read-only.
-4. User prompt enters through an explicit root or revision Run.
-5. Requirement, Planning, Assembly Plan, Part pipeline, Review, Rework, and Deliverables have distinct responsibilities.
-6. Workflow nodes are trusted checkpoints, not every internal agent step.
-7. Agent output reaches CAD only through validated structured contracts.
-8. Deterministic execution remains authoritative for CAD files and validation claims.
-9. Candidate inspection and candidate selection are different operations.
-10. Changing upstream accepted input marks dependent downstream evidence stale.
-11. Creating a result does not automatically approve it.
-12. Accepted part results are explicit Work pointers and may belong to sibling Runs.
-13. Rework creates a new Run and preserves the parent.
-14. Contract mode does not expect STEP/STL and is not a failure.
-15. A single generated part is not a complete assembly.
-16. Reference-only components are not generated deliverables.
-17. User-visible state must reflect real workflow postconditions.
-18. Architecture, contracts, projections, tests, UX, roadmap, and readiness documentation must remain synchronized.
+Assembly validation must distinguish:
+
+- placement facts;
+- bounding-box heuristics;
+- geometric interference checks;
+- joint or degree-of-freedom checks;
+- fit or tolerance checks;
+- motion checks.
+
+It may claim only checks that actually ran.
+
+## Deliverables
+
+A Deliverable Package may include:
+
+- accepted part STEP files;
+- accepted assembly STEP or native assembly file;
+- BOM;
+- PDF/SVG drawings;
+- preview meshes and images;
+- design, validation, and limitation reports.
+
+Drawing generation is a product capability, not an orphan utility script. A
+drawing is deliverable only when:
+
+- it references an accepted result;
+- generation completed through an allowlisted tool;
+- its source model identity is recorded;
+- dimensions and annotations are labeled as generated or verified;
+- failures and omissions are visible.
+
+## UX implications
+
+The primary product surface is a design workbench.
+
+Default information order:
+
+1. current design objective;
+2. current geometry or assembly preview;
+3. Agent progress, assumptions, and concise decisions;
+4. one recommended user action;
+5. validation summary and important limitations;
+6. Part Jobs, alternatives, and accepted results;
+7. history, raw artifacts, and diagnostics.
+
+The UI must not:
+
+- make internal artifact handoffs the main navigation;
+- require a manual approval screen for every low-risk internal checkpoint;
+- expose a template catalogue as if it were Agent capability;
+- infer trusted state from file presence;
+- expose arbitrary paths, secrets, or unrestricted execution.
+
+## Migration from the former architecture
+
+The current implementation still contains:
+
+- a fixed fifteen-checkpoint Workflow Cockpit;
+- flat closed-family CAD IR;
+- effectively one-shot `create_part_ir` episode behavior;
+- file-discovery-based Work projection;
+- incomplete Part Job attempt ownership;
+- disconnected FreeCAD assembly and TechDraw helpers;
+- multiple create and execution entry points.
+
+Migration rules:
+
+1. preserve existing Runs and artifacts as immutable legacy evidence;
+2. add explicit schema versions and compatibility projections;
+3. do not reinterpret legacy deterministic output as Agentic;
+4. consolidate execution behind one orchestrator;
+5. implement first-class Part Job attempts before multi-part claims;
+6. expose the four-phase workbench only when its actions have real handlers;
+7. keep the legacy console available as Diagnostics during transition.
 
 ## Architecture change protocol
 
-Before changing any of the following, state the proposed architecture delta explicitly:
+An architecture change must state:
 
-- Workspace / Work / Run / Part Job ownership;
-- stage names or stage order;
-- stage input/output responsibilities;
-- active-lineage semantics;
-- accepted-result semantics;
-- artifact mutability;
-- candidate-selection semantics;
-- review and rework semantics;
-- agent execution boundaries;
-- CAD validation or execution authority.
+- affected product objects;
+- affected user phase and internal checkpoint;
+- input, output, and user decision;
+- Agent freedom added or removed;
+- side-effect and trust boundary;
+- migration impact;
+- visible success and failure recovery.
 
-Required work for an approved architecture change:
+Synchronize:
 
-- update this document;
-- update contracts and view models;
-- assess existing data and migration compatibility;
-- update automated tests;
-- update the Workflow UX specification;
-- update milestone, task-board, and product-readiness status;
-- perform a real user-journey check.
+- this document;
+- `docs/FINAL-PRD.md`;
+- `docs/workflow_contract.md`;
+- Agent, skill, and knowledge contracts;
+- projections and tests when implementation changes;
+- UX specification;
+- roadmap, task board, and readiness.
 
-Do not let a UI convenience, Golden fixture, local fallback, or one-off bug fix silently redefine the architecture.
+Documentation may define a target before implementation only when readiness and
+tasks explicitly mark the implementation as nonconforming or pending.
 
 ## Required implementation self-check
 
-Before reporting a task complete, answer:
+Before reporting product work complete, answer:
 
-- Which canonical object does this change affect: Workspace, Work, Run, or Part Job?
-- Which workflow checkpoint owns the behavior?
-- What is the stage input, output, and user decision?
-- Does the change preserve Run history and Work-pointer semantics?
-- Does it preserve active-lineage versus accepted-result separation?
-- Does the Agent remain behind structured contracts and validation?
-- Does the UI show the current checkpoint and one valid next action?
-- Were architecture, UX, readiness, roadmap, and tests synchronized?
+- Which Work, Run, Part Job, Assembly Job, or Deliverable Package changed?
+- Which of the four user phases owns the behavior?
+- Which internal trust checkpoint is created or consumed?
+- What design choice remains with the Agent?
+- What side effect remains under CadFlow authority?
+- Can failed or unaccepted output appear as a deliverable?
+- Does the change preserve historical evidence and accepted pointers?
+- What automated and manual evidence exists?
+- Which target capability remains unimplemented?

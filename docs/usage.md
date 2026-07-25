@@ -1,18 +1,19 @@
 # Usage
 
-## Recommended Workflow
+## Scope of this guide
 
-自然语言 CAD 任务按下面的阶段推进：
+This file documents commands and behavior that exist in the current
+implementation. It is not the target product workflow. The Agent-first target is
+defined in `FINAL-PRD.md`; the implementation gap is tracked in
+`status/current-product-readiness.md`.
+
+The current compatibility pipeline advances through:
 
 ```text
-input -> requirement -> planning -> part_modeling -> assembly -> review -> outputs
+input -> requirement -> planning -> part_modeling -> review -> outputs
 ```
 
-用户只需要描述工程目标、关键尺寸、功能特征、制造倾向和优先级。系统负责把描述转成结构化需求、建模计划、参数化代码和审查报告。
-
-Requirement 阶段负责澄清需求、识别候选零件/参考组件和缺失信息。Planning 阶段负责设计分析、workflow routing、接口/基准、风险和确认 gate。Part Modeling 再进入模板选择、参数化和单零件生成闭环。
-
-当前推荐的新单零件 prompt 路径先经过结构化 handoff gates：
+The current supported single-part prompt path uses structured handoff gates:
 
 ```text
 prompt
@@ -38,7 +39,7 @@ Requirement gate 返回 `ask_user` 或 `return_to_requirement` 时，Planning �
 这个流程不是聊天 UI，也不会把浏览器状态、provider raw response、API key 或
 chat transcript 写入公开 artifact。
 
-CAD Agent Loop 本身仍是 IR-first：
+The current CAD Agent Loop remains legacy IR-first:
 
 ```text
 input_ir.json
@@ -419,6 +420,16 @@ Prompt pipeline 还应输出或保留：
 
 ## Check Levels
 
-当前只真正支持 `L0 Playground`。`L1 Maker` 会输出报告框架，提醒后续需要补最小壁厚、悬垂、支撑和 STL 可打印性检查。
+当前代码仍使用 legacy `L0`–`L4` 字段：只真正支持 `L0 Playground`。
+`L1 Maker` 会输出报告框架，提醒后续需要补最小壁厚、悬垂、支撑和 STL
+可打印性检查。
 
 `L2/L3/L4` 是架构预留，不代表当前可以自动完成工程放行。
+
+目标产品对用户采用 `Explore / Engineer / Release` assurance：
+
+- 当前 L0 能力大致属于 Explore；
+- Engineer 需要明确接口、材料、工艺、公差、载荷和实际测量证据；
+- Release 是未来的领域专用验证配置，不能从 L2/L3/L4 标签自动推导。
+
+权威规则见 `../policies/check_levels.md`。

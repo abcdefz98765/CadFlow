@@ -1,51 +1,48 @@
-# Check Levels
+# Assurance Policy
 
-## L0 Playground
+Assurance controls required context, evaluation, and permitted claims. It does
+not constrain which geometry strategy an Agent may explore.
 
-Supported now.
+## Explore
 
-- model generated
-- exports created
-- basic geometry validation
-- report records files and obvious failures
-- requirement may use template defaults when assumptions are recorded
+Purpose: concepts and rapid iteration.
 
-## L1 Maker
+- visible assumptions are allowed;
+- primary geometry and export checks run where supported;
+- missing engineering inputs are recorded;
+- output is not manufacturing or release evidence.
 
-Scaffold only.
+Legacy mapping: approximately L0 Playground and early L1 Maker.
 
-- minimum wall thickness
-- overhang/support risk
-- STL printability
-- maker-oriented warnings
-- manufacturing process should be known before real L1 checks run
-- assembly clearances and installed reference components should be recorded
+## Engineer
 
-## L2 Engineering
+Purpose: a reviewable engineering candidate.
 
-Reserved.
+Required as applicable:
 
-- material
-- manufacturing process
-- functional tolerances
-- interface definitions
-- loads or load direction
-- operating environment
+- material and manufacturing process;
+- explicit interfaces, datums, and functional tolerances;
+- loads or load directions and operating environment;
+- acceptance targets and requested measurements;
+- assembly clearances and serviceability intent;
+- deterministic checks supported for the relevant domain.
 
-## L3 Industrial
+Legacy mapping: approximately L2 Engineering and selected L3 Industrial fields.
 
-Reserved.
+## Release
 
-- DFM/DFA constraints
-- inspection method
-- BOM strategy
-- supplier/process constraints
+Purpose: a domain-specific package for formal human release.
 
-## L4 Safety Critical
+Release is not a generic switch. It requires a declared validation profile,
+inspection and manufacturing plan, complete provenance, all configured checks,
+and explicit human authorization.
 
-Reserved. No automatic release or safety-critical approval is provided.
+Legacy L3/L4 fields may inform a Release profile, but CadFlow does not currently
+provide general industrial or safety-critical release.
 
-- applicable standards
-- hazard analysis
-- verification plan
-- explicit human signoff
+## Claim rule
+
+Every conclusion distinguishes measured, assumed, unverified, skipped, blocked,
+and failed evidence. STEP creation, an Agent statement, or a numeric score never
+implies fit, motion, strength, tolerance, DFM/DFA, GD&T, FEA, safety, or release
+validation.

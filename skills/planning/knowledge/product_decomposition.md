@@ -1,8 +1,10 @@
 # Product Decomposition
 
-Product decomposition is owned by the Planning Skill.
+Product decomposition is owned by the Design Skill.
 
-Requirement may identify scope hints, user-stated components, and missing topology decisions, but Planning decides the engineering decomposition used by the Assembly Plan and downstream Part Jobs.
+Intent may identify scope hints, user-stated components, and missing topology
+decisions, but Design decides the engineering decomposition used by Part Jobs
+and Assembly Jobs.
 
 ## Outputs
 
@@ -10,7 +12,7 @@ Requirement may identify scope hints, user-stated components, and missing topolo
 - generated candidate parts;
 - reference-only components;
 - interfaces and dependencies;
-- selected or recommended candidate;
+- alternatives and selected or recommended concept;
 - generation order and preserved assembly context;
 - risks and user decisions required before a stable plan exists.
 
@@ -21,9 +23,12 @@ Requirement may identify scope hints, user-stated components, and missing topolo
 - Reference components are purchased, existing, or context-only items represented for fit and interface reasoning.
 - Preserve service access, wiring, motion, fastening, and replacement intent.
 - Expose alternatives and trade-offs when more than one decomposition is plausible.
-- Return to Requirement when the missing decision belongs to user intent rather than engineering planning.
+- Ask a focused user question when the missing decision belongs to user intent
+  rather than engineering strategy.
 - Do not treat current backend templates as the complete product design space.
 
 ## Handoff
 
-The accepted decomposition is recorded in Planning and, for assembly scope, `assembly_plan.json`. Explicit candidate selection then creates one scoped Part Request.
+The active decomposition is recorded as design state. It may create or revise
+multiple Part Job proposals and an Assembly Job proposal. Only explicit user
+action accepts Part or Assembly results.

@@ -1,91 +1,40 @@
-# Planning Skill
+# Design Skill
 
-## Role
+Compatibility directory: `planning/`.
 
-Owned by the Planning Agent.
+## Responsibility
 
-Canonical checkpoints:
+Explore an engineering solution, compare meaningful alternatives, decompose
+parts and interfaces, and choose a reasoned next candidate.
 
-- accepted Requirement -> Planning / Design Brief;
-- Planning -> Assembly Plan and Candidate Parts when decomposition is required.
+## Actions
 
-## Purpose
-
-Translate the accepted Requirement into an engineering route, design strategy, and reviewable decomposition before CAD IR is created.
-
-Planning owns functional decomposition, candidate/reference distinction, interface intent, datums, dependencies, risks, and concise alternatives.
-
-It does not own requirement elicitation, detailed CAD IR synthesis, or backend-specific geometry execution.
-
-## Inputs
-
-- active accepted Requirement;
-- accepted assumptions and clarification results;
-- check level and product scope;
-- relevant shared engineering vocabulary.
+- inspect allowlisted Intent and accepted Work context;
+- choose single-part, multi-part, assembly, or reference-only scope;
+- propose and compare concepts;
+- define functions, datums, interfaces, dependencies, and evaluation targets;
+- create or revise Part Job and Assembly Job proposals;
+- request Geometry, Evaluation, or focused user input.
 
 ## Outputs
 
-Depending on the route:
-
-- `design_brief.json`;
-- `planning_artifact.json`;
-- candidate plan artifacts where supported;
-- `assembly_plan.json` for assembly or multi-part scope;
-- candidate parts and reference-only components;
-- selected or recommended candidate;
-- interfaces, dependencies, datums, risks, and capability boundaries;
-- planning gate state.
-
-## Allowed context
-
-Shared:
-
-- requirement and planning contracts;
-- interface and reference-component vocabulary;
-- shared manufacturing and check-level policy.
-
-Private knowledge:
-
-- decomposition patterns;
-- interface-planning heuristics;
-- candidate comparison guidance;
-- datum, dependency, serviceability, and risk heuristics.
-
-Runtime context:
-
-- active Requirement and accepted clarifications;
-- relevant prior planning review or user override when revising.
-
-## Behavior
-
-- Decide whether the request is single-part, assembly, multi-part, reference-only, or unsupported.
-- Produce alternatives when meaningful and expose concise trade-offs.
-- Separate generated candidates from reference-only components.
-- Preserve functional interfaces and assembly context for downstream Part Jobs.
-- Define the current selected or recommended candidate explicitly.
-- Return to Requirement when an upstream product decision is missing.
-- State capability boundaries without treating current backend support as the entire product design space.
+Design Briefs, concept alternatives, interface definitions, candidate Part
+Jobs, Assembly Job intent, decisions, assumptions, and recommended next action.
+Legacy `planning_artifact.json` and `assembly_plan.json` remain readable.
 
 ## Boundaries
 
-Must not:
+The skill does not treat current backend templates as the design space, run
+uncontrolled code, claim unperformed checks, or accept its own recommendation.
+It may choose a geometry strategy but delegates candidate realization through
+the Tool Broker.
 
-- re-parse the prompt as a substitute for the accepted Requirement;
-- generate detailed CAD IR;
-- emit Python, CadQuery, or shell commands;
-- silently choose an unrelated template because it is supported;
-- claim that planning artifacts are generated CAD;
-- perform final strength, motion, fit, tolerance-stack, or assembly validation.
+## Current gap
 
-## Handoff
-
-For a single-part route, Planning hands an accepted part strategy toward CAD IR preparation.
-
-For assembly or multi-part scope, Planning produces the Assembly Plan. Explicit candidate selection then leads to a Part Request for exactly one Part Job.
+Current planning is predominantly a fixed checkpoint. Target behavior requires a
+provider-controlled episode with candidate comparison and tool observations.
 
 ## References
 
-- `../../docs/architecture/cadflow-canonical-product-architecture.md`
 - `../../docs/architecture/agent-skill-knowledge.md`
-- `../../docs/workflow_contract.md`
+- `../../docs/architecture/bounded-agent-loop-context-broker-and-checkpoints.md`

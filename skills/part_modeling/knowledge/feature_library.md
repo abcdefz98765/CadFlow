@@ -16,4 +16,5 @@ Common feature intents:
 - hinge pin
 - gasket groove
 
-Feature knowledge describes reusable design intent before it becomes backend-specific CAD operations.
+Feature knowledge describes reusable design intent before it becomes
+backend-specific CAD operations. The list is illustrative, not a closed enum.

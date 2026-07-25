@@ -1,82 +1,38 @@
 # Revision Skill
 
-## Role
+## Responsibility
 
-Owned by the Revision Agent.
+Turn an explicit change objective and parent result into one or more traceable
+child-Run candidates.
 
-Canonical checkpoint:
+## Actions
 
-- accepted parent result + explicit user change request -> revision child Run.
-
-## Purpose
-
-Translate a user-requested change into structured revision intent and a safe revision plan while preserving parent artifacts and lineage.
-
-## Inputs
-
-- user revision prompt;
-- sanitized parent Run context;
-- accepted parent CAD IR and result metadata when available;
-- explicit revision scope and check level;
-- previous revision feedback when retrying.
+- inspect allowlisted parent context;
+- choose feature-graph, model-program, legacy CAD IR, assembly, or deliverable
+  revision strategy;
+- propose patches and expected checks;
+- build through controlled tools;
+- compare before and after;
+- respond to observations, ask one focused question, or stop safely.
 
 ## Outputs
 
-- `revision_request.json`;
-- `change_intent.json`;
-- `revision_plan.json`;
-- structured patch proposal where supported;
-- typed blocked or user-input-required outcome when no safe structured change exists;
-- parent/child lineage metadata after deterministic execution.
-
-## Allowed context
-
-Shared:
-
-- revision and lineage contracts;
-- CAD IR field vocabulary;
-- immutable Run and explicit-approval policy.
-
-Private knowledge:
-
-- supported change-intent patterns;
-- safe field-path and patch guidance;
-- revision strategy selection;
-- comparison and before/after reporting rules.
-
-Runtime context:
-
-- selected parent Run and accepted result;
-- parent `input_ir.json` and relevant reports;
-- prior revision submissions and validator feedback.
-
-## Behavior
-
-- Preserve the user's requested change separately from system repair changes.
-- Prefer explicit field-level patches when the source model is CadFlow-native.
-- Record before/after values where possible.
-- Ask or block when the requested edit cannot be represented safely.
-- Create a child Run for execution and comparison.
-- Keep external STEP/STL as reference-only unless an explicit supported import/edit path exists.
+Revision objective, strategy, candidate patches, child Run lineage, build and
+evaluation evidence, comparison, and typed stop reason where applicable.
 
 ## Boundaries
 
-Must not:
+Never overwrite the parent, silently change unrelated accepted decisions,
+execute outside the Tool Broker, promise feature recovery from STEP/mesh, or
+replace an accepted-result pointer automatically.
 
-- overwrite the parent Run;
-- silently regenerate everything without a structured change record;
-- execute provider-generated code;
-- claim robust feature recovery from STEP or mesh files;
-- accept an unsupported free-form edit by fabricating a patch;
-- automatically replace the accepted result without user approval.
+## Current gap
 
-## Handoff
-
-A validated revision plan and patch enter deterministic revision execution. The child Run records lineage, comparison, reports, and products or a typed safe block.
+Current support is limited mainly to selected legacy CAD IR field patches. The
+target includes feature-graph, sandboxed model-program, assembly, and
+deliverable revisions.
 
 ## References
 
-- `../../docs/architecture/cadflow-canonical-product-architecture.md`
-- `../../docs/architecture/agent-skill-knowledge.md`
 - `../../docs/architecture/revision-workflow.md`
 - `../../docs/workflow_contract.md`

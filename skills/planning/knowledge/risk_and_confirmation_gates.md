@@ -1,26 +1,12 @@
-# Risk And Confirmation Gates
+# Question and Assumption Guidance
 
-Planning decides whether a missing decision can proceed as an L0 assumption or
-must return to the user before generation.
+Ask the user when a missing decision changes part count, topology, installed
+component envelope, motion/travel, retention method, service access, functional
+interfaces, manufacturing route, load-bearing intent, safety, or acceptance.
 
-## Pause For Confirmation
+Continue in Explore mode with a visible, reversible assumption for cosmetic
+edge treatment, non-critical proportions, provisional layout, or output
+preference when a later geometry review can correct it cheaply.
 
-Pause when missing information changes:
-
-- part count or topology
-- installed component envelope
-- moving interface or travel
-- fastening or retention method
-- wire, cable, sensor, or service access route
-- safety, load-bearing, or manufacturing-critical intent
-
-## Continue With Warning
-
-In L0, Planning may continue with assumptions for:
-
-- cosmetic fillets and chamfers
-- non-critical visual proportions
-- default export formats
-- provisional template choice when the user only needs a rough concept
-
-All assumptions must appear in `plan.md` and the downstream review.
+Do not select a supported template merely to avoid asking or exploring. Prefer a
+concept candidate whose assumptions are explicit.

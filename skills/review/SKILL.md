@@ -1,101 +1,43 @@
-# Review Skill
+# Evaluation Skill
 
-## Role
+Compatibility directory: `review/`.
 
-Owned by the Review Agent.
+## Responsibility
 
-Canonical review scopes:
+Interpret build evidence, run allowlisted checks, compare candidates, and tell
+the user what is measured, assumed, unverified, failed, or blocked.
 
-- Part Request Review;
-- Part Result Review;
-- Work-level Workflow Review.
+## Actions
 
-User approval is a separate explicit Work-level action and is never owned by the Review Agent.
-
-## Purpose
-
-Interpret structured evidence, reports, and limitations into a concise, scoped review conclusion that helps the user decide whether to proceed, revise, block, or inspect further.
-
-## Inputs
-
-Depending on scope:
-
-- Part Request and accepted upstream context;
-- Reviewed Handoff and child result artifacts;
-- report and trace summaries;
-- Work active lineage, Part Jobs, accepted-result pointers, reviews, and artifact availability;
-- requested check level.
+- inspect exact candidate and accepted-context evidence;
+- request geometry, interference, dimensional, export, or policy checks;
+- compare alternatives against current objectives;
+- explain limitations and recommend revise, accept, inspect, or stop;
+- identify the smallest useful next question or experiment.
 
 ## Outputs
 
-- structured review explanation;
-- scope-specific review artifact;
-- status, limitations, warnings, and recommended next action;
-- clear distinction between verified, assumed, unverified, skipped, blocked, and failed evidence.
-
-## Allowed context
-
-Shared:
-
-- review status vocabulary;
-- check-level policy;
-- CAD IR, product, lineage, and approval contract summaries needed to interpret evidence.
-
-Private knowledge:
-
-- evidence interpretation rules;
-- part request readiness criteria;
-- part result completeness criteria;
-- Work-level conclusion and limitation presentation;
-- user-facing review language.
-
-Runtime context:
-
-- the exact artifacts and reports for the reviewed scope;
-- relevant validator and execution observations;
-- prior user Stage Reviews where applicable.
-
-## Behavior
-
-### Part Request Review
-
-Determine whether the selected part task is coherent and ready for CAD IR work.
-
-### Part Result Review
-
-Determine what one child result produced, whether it matches the Reviewed Handoff within available evidence, and which limitations remain.
-
-### Work-level Workflow Review
-
-Summarize the active Work lineage, Part Jobs, accepted results, missing results, risks, limitations, and valid next action.
-
-Across all scopes:
-
-- explain meaning before raw diagnostic codes;
-- do not treat artifact presence alone as proof of intent match;
-- keep scope explicit;
-- preserve Contract-mode semantics;
-- state when evidence is insufficient.
+Scoped evaluation artifacts, candidate comparison, assurance status,
+limitations, and a recommended next action.
 
 ## Boundaries
 
-Must not:
+Evaluation does not mutate geometry as a hidden side effect, accept results,
+expose secrets or absolute paths, infer success from file presence, or promote a
+single part as a complete assembly.
 
-- automatically approve a stage or part result;
-- update `accepted_part_results`;
-- edit generated products;
-- rerun CAD as a hidden side effect;
-- expose raw logs, provider responses, secrets, or absolute paths;
-- claim full assembly completion from a single-part result;
-- claim strength, fit, motion, tolerance, or production validation without corresponding checks.
+## Assurance
 
-## Handoff
+Claims must identify the evidence tier: exploratory, engineering, or release.
+Release wording is allowed only when all configured release checks actually
+passed.
 
-A review conclusion is presented to the user. The user may approve, request revision, block, inspect evidence, or continue to the next canonical checkpoint.
+## Current gap
+
+Current reviews are checkpoint-oriented summaries. Target Evaluation is callable
+inside a design episode and can guide Agent-selected revision.
 
 ## References
 
-- `../../docs/architecture/cadflow-canonical-product-architecture.md`
 - `../../docs/architecture/agent-skill-knowledge.md`
-- `../../docs/workflow_contract.md`
 - `../../policies/check_levels.md`

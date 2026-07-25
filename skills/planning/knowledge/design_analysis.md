@@ -1,23 +1,16 @@
-# Design Analysis
+# Design Analysis Guidance
 
-Planning turns structured requirements into an engineering approach before
-modeling starts.
+Before building, reason about:
 
-## Analyze
+- objective, functions, and the user's real acceptance criteria;
+- single-part, multi-part, assembly, and reference-component boundaries;
+- alternative concepts and their main trade-offs;
+- functional datums, interfaces, motion, access, and serviceability;
+- manufacturing and material implications;
+- dependency order and revision cost;
+- which measurements or experiments would reduce the most uncertainty;
+- assumptions that could invalidate the design.
 
-- product scope: single part, multi-part assembly, or unclear
-- primary function and user-facing behavior
-- functional datums and reference faces
-- interfaces between generated parts and reference components
-- manufacturing bias when known
-- dependency order between parts
-- risks created by assumptions or missing information
-
-## Output Expectations
-
-`plan.md` should explain why the workflow route was chosen, which parts or
-templates should be generated first, which interfaces must be preserved, and
-which checks downstream steps should run.
-
-Do not hide unresolved decisions. Either route them back to Requirement or mark
-them as L0 assumptions that Review must report.
+Analysis should produce a concise decision and next experiment, not a long form
+that the user must approve field by field. Keep unresolved material decisions
+visible and ask only the most consequential question.

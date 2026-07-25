@@ -1,55 +1,142 @@
 # CadFlow Task Board
 
-## Done
+Status date: 2026-07-25.
 
-- [x] Define canonical Workspace / Work / Run / Part Job architecture.
-- [x] Add Current Work active-lineage view and immutable Run Snapshot.
-- [x] Unify Workflow graph, selected-stage detail, artifact contracts, and action targets in the v2 page view model.
-- [x] Implement Candidate Detail and explicit `Use This Part Next` with validated Assembly Plan override.
-- [x] Add downstream stale projection while preserving old Runs and accepted results.
-- [x] Add append-only Stage Reviews and Work-level accepted part-result pointers.
-- [x] Add persistent action pending/success/failure lifecycle and selected postcondition verification.
-- [x] Add bounded deterministic `create_part_ir` Episode and scripted dynamic action tests.
-- [x] Consolidate current architecture documents and remove superseded milestone architecture.
-- [x] Define logical agents, skills, shared knowledge, skill-private knowledge, Work context, and Run observations.
-- [x] Separate accepted input, execution, result, agent review, user approval, and capability-mode state.
-- [x] Isolate CAD candidate execution and remove product-positioned model files after terminal validation failure.
-- [x] Restrict Work Deliverables to explicit approved `accepted_part_results`; keep unapproved outputs reviewable.
+The ordered roadmap is `docs/roadmap/milestones.md`. Execution starts at
+`docs/tasks/agent-start-here.md`. Do not pull later UI, assembly, or assurance
+work ahead of the current milestone without an explicit architecture decision.
 
-## Current — Workflow Cockpit usability gate
+## M0 — Documentation correction
 
-- [x] Define bilingual Guidance Contract fields and move default audit/action metadata to expandable Action Details / Advanced.
-- [ ] Click every visible enabled action in a real browser and record PASS/FAIL.
-- [ ] Verify Chinese labels, Hover, dialogs, validation, pending, success, failure, and disabled reasons.
-- [ ] Verify at least one deliberate action failure and recovery path.
-- [ ] Complete the stale -> rebuild -> Part Result Review -> user approval Full Golden journey.
-- [ ] Verify Contract Golden does not offer STEP/STL or part-result approval and does not appear blocked.
-- [ ] Complete 1024px responsive acceptance.
-- [ ] Capture current desktop, candidate, review, failure, Snapshot, 1024px, and mobile screenshots.
-- [ ] Store release acceptance evidence outside the product artifact tree, with scenario and viewport metadata.
-- [ ] Mark Workflow Cockpit MVP usable only after the manual gate passes.
+- [x] Reframe CadFlow as an Agent-first CAD design workbench.
+- [x] Preserve Workspace / Work / Run / Part Job and explicit acceptance.
+- [x] Add Assembly Job and Deliverable Package target objects.
+- [x] Replace the fixed user workflow with four phases.
+- [x] Define structured feature-graph and sandboxed model-program paths.
+- [x] Define Agent-selected actions, Context Broker, and Tool Broker authority.
+- [x] Rewrite PRD, canonical architecture, workflow contract, Agent architecture,
+  roadmap, task board, and readiness.
+- [x] Move old Workflow Cockpit work out of the current product milestone.
+- [x] Complete repository-wide link and terminology checks.
+- [x] Remove competing legacy PRD, architecture, roadmap, and milestone files.
 
-### Navigation and guidance acceptance follow-up
+## M1 — Runtime consolidation and domain model
 
-- [x] Restore Work → Workflow navigation with an event-safe page callback and strict page-id contract.
-- [ ] Recapture valid Chinese Guidance evidence after the current semantic and navigation changes.
-- [ ] Select and verify the Contract Golden flow, Run Snapshot, and 390–430px layout before closing the usability gate.
+- [ ] Write an architecture decision for the one product orchestrator.
+- [ ] Inventory all current create, reviewed-part, revision, text, and IR entry
+  points and classify product, compatibility, evaluation, or removable.
+- [ ] Define schema-versioned Work, Part Job, Assembly Job, and Deliverable
+  Package records.
+- [ ] Change Part Job from one `run_id` to ordered attempt references.
+- [ ] Keep accepted-result pointers separate from active design lineage.
+- [ ] Add explicit artifact ids, trust roles, and source references.
+- [ ] Replace recursive filename-driven product state with manifest/artifact
+  references.
+- [ ] Add a legacy Run compatibility projector.
+- [ ] Preserve current failure isolation and path-safety behavior.
+- [ ] Keep the full deterministic regression suite green.
 
-## Next — Typed Skill and Knowledge Registry
+## M2 — Agentic design vertical slice
 
-- [ ] Define typed skill metadata: skill id, logical role, checkpoint, operations, contracts, context keys, tools, and stop reasons.
-- [ ] Define knowledge registry metadata: id, owner, layer, source, version, and allowed skills.
-- [ ] Enforce shared versus skill-private knowledge access.
-- [ ] Remove duplicate inline skill/knowledge sources from provider context assembly.
-- [ ] Fail fast on missing, duplicate, or unauthorized skill/knowledge definitions.
-- [ ] Add selected skill and knowledge ids to safe episode/provider traces.
-- [ ] Keep deterministic Agent Adapter and Golden outputs stable.
+### Registry and episode
 
-## Later
+- [ ] Define the minimal `design_part` skill contract.
+- [ ] Implement a typed registry for actions, tools, context, knowledge, budgets,
+  and stop reasons used by that skill.
+- [ ] Remove duplicate runtime prompt text for the selected vertical slice.
+- [ ] Implement provider-selected actions rather than a fixed proposer sequence.
+- [ ] Persist concise actions, observations, candidates, and budget use.
 
-- [ ] Prototype provider-backed bounded `create_part_ir` after both gates above.
-- [ ] Add user-facing Run comparison details.
-- [ ] Expand structured inline interventions where canonical checkpoints require them.
-- [ ] Add Agentic Planning candidates and Requirement clarification episodes.
-- [ ] Add multiple Part Job progression before any full assembly claim.
-- [ ] Add Assembly Agent execution only after accepted sibling part results and deterministic assembly validation exist.
+### Context Broker
+
+- [ ] Supply active intent, Part Job, interfaces, accepted constraints, previous
+  candidates, and observations through semantic keys.
+- [ ] Reject arbitrary paths and unrelated Work context.
+- [ ] Record provenance and trust role for supplied context.
+
+### Tool Broker and sandbox
+
+- [ ] Choose the first supported model-program API: CadQuery or build123d.
+- [ ] Define allowlisted imports and prohibited APIs.
+- [ ] Implement isolated candidate directory and execution worker.
+- [ ] Disable network access.
+- [ ] Block subprocess, shell, dynamic dependency installation, and writes
+  outside candidate storage.
+- [ ] Enforce time, memory, process, and output-size limits.
+- [ ] Capture source, parameters, stdout/stderr, outputs, and exit state.
+- [ ] Return structured observations to the Agent.
+
+### Publication and UX slice
+
+- [ ] Reuse STEP-first geometry inspection and output validation.
+- [ ] Publish only locally validated candidates as reviewable results.
+- [ ] Show capability mode, assumptions, observations, and one next action.
+- [ ] Require explicit user acceptance.
+- [ ] Support revision as a child Run.
+
+### Benchmarks
+
+- [ ] Define at least five non-template part prompts.
+- [ ] Include brackets or mechanisms that cannot be solved by adding a new
+  current `part_type` mapping.
+- [ ] Require at least two observation-driven repairs.
+- [ ] Require at least one focused user question.
+- [ ] Add sandbox violation tests.
+- [ ] Record provider/model and deterministic validator evidence separately.
+
+## M3 — Feature-graph geometry contract
+
+- [ ] Write v2 schema for parameters, datums, sketches, and ordered features.
+- [ ] Implement extrude, revolve, holes, pockets, booleans, fillet/chamfer, and
+  patterns.
+- [ ] Add named interfaces and functional references.
+- [ ] Declare backend capabilities by operation.
+- [ ] Build deterministic executor and validator.
+- [ ] Add legacy CAD IR migration adapter.
+- [ ] Add feature-level revision and comparison.
+- [ ] Benchmark feature graph against the sandboxed model-program path.
+
+## M4 — Multi-part and assembly
+
+- [ ] Support multiple accepted Part Jobs in one Work.
+- [ ] Define exact accepted-result inputs for Assembly Job.
+- [ ] Add placements, mates, joints, fasteners, reference components, and
+  clearances.
+- [ ] Integrate assembly execution.
+- [ ] Generate native assembly and/or assembly STEP.
+- [ ] Generate BOM.
+- [ ] Mark assembly stale when an accepted part changes.
+- [ ] Separate bounding-box heuristics from real geometric validation.
+- [ ] Add a three-generated-part assembly acceptance example.
+
+## M5 — Deliverables and drawings
+
+- [ ] Define Deliverable Package manifest.
+- [ ] Integrate `scripts/freecad_techdraw.py` through a controlled tool.
+- [ ] Generate PDF/SVG drawings from accepted part results.
+- [ ] Add assembly drawing or exploded-view support where feasible.
+- [ ] Record dimension and annotation provenance.
+- [ ] Package accepted STEP, assembly, BOM, drawings, and reports.
+- [ ] Test drawing failure independently from model acceptance.
+
+## M6 — Workbench UX
+
+- [ ] Define the four-phase page/view-model contract.
+- [ ] Put design conversation and geometry preview first.
+- [ ] Show candidate alternatives and observation-driven repair.
+- [ ] Show Part Jobs, accepted results, and assembly readiness.
+- [ ] Move the fixed Workflow graph to compatibility/Diagnostics.
+- [ ] Preserve Current Work and Run Snapshot boundaries.
+- [ ] Verify pending, success, failure, and recovery in a real browser.
+- [ ] Verify Chinese and English primary flows.
+- [ ] Verify desktop, 1024px, and 390–430px layouts.
+
+## Preserved regression responsibilities
+
+- [ ] Historical Runs remain immutable.
+- [ ] Failed candidates publish no trusted product files.
+- [ ] Reviewable is distinct from accepted.
+- [ ] Accepted part results may be sibling Runs.
+- [ ] Contract-mode legacy examples remain honestly labeled.
+- [ ] Local services bind to `127.0.0.1` by default.
+- [ ] Public exposure remains explicit and off by default.

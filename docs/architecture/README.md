@@ -1,6 +1,7 @@
 # CadFlow Architecture Index
 
-This directory contains only current architecture. Git history preserves superseded designs and milestone corrections; do not keep competing current definitions in separate documents.
+This directory contains the Agent-first target architecture. Git history
+preserves the superseded fixed workflow-first design.
 
 ## Canonical product architecture
 
@@ -8,34 +9,38 @@ This directory contains only current architecture. Git history preserves superse
 
 This is the authority for:
 
-- Workspace / Work / Run / Part Job;
+- Workspace / Work / Run / Part Job / Assembly Job / Deliverable Package;
 - active lineage and accepted results;
 - Current Work and Run Snapshot;
-- canonical checkpoint order;
-- stage responsibility and product invariants.
+- four user phases and internal trust checkpoints;
+- structured and sandboxed geometry candidate paths;
+- product invariants and migration rules.
 
 No specialized document may redefine these concepts.
 
 ## Specialized architecture
 
-- `agent-skill-knowledge.md` — logical agents, skill contracts, shared/private knowledge, Work context, and Run observations.
-- `bounded-agent-loop-context-broker-and-checkpoints.md` — bounded episode orchestration, Context Broker, actions, budgets, and typed stops.
-- `web-workflow-console.md` — local Web Console layers, view models, safe actions, artifacts, feedback, localization, and security.
+- `agent-skill-knowledge.md` — logical Agents, skills, tools, knowledge, runtime context, and provider boundaries.
+- `bounded-agent-loop-context-broker-and-checkpoints.md` — provider-selected episodes, Context Broker, Tool Broker, sandbox, budgets, and typed stops.
+- `web-workflow-console.md` — Agent Workbench Web target and legacy NiceGUI migration boundary.
 - `revision-workflow.md` — structured child-Run revision, patches, comparison, and external-source boundaries.
 
 ## Related current contracts
 
-- `../workflow_contract.md` — structured checkpoint artifact handoffs.
+- `../workflow_contract.md` — artifact trust roles, candidate lifecycle, lineage,
+  and compatibility contracts.
 - `../ux/product-usability-principles.md` — user relevance, guidance, progressive disclosure, and feedback.
-- `../ux/workflow-cockpit-design-spec.md` — current Workflow Cockpit UX specification.
+- `../ux/workflow-cockpit-design-spec.md` — Agent Workbench UX target; filename retained temporarily for compatibility.
 - `../status/current-product-readiness.md` — implemented, verified, and usable capability status.
 
 ## Documentation rules
 
-- Add a specialized architecture document only when it owns a stable technical concern that is not already covered.
+- Add a specialized architecture document only when it owns a stable technical
+  concern not already covered.
 - Do not create architecture files merely to record one milestone, correction, implementation pass, or screenshot review.
 - Update an existing authority instead of appending a second competing definition.
-- Remove superseded architecture from the current tree after its content is absorbed; Git retains history.
+- Remove superseded architecture after its content is absorbed; Git retains
+  history.
 - Roadmap and readiness belong under `docs/roadmap/` and `docs/status/`, not in architecture documents.
 - Detailed API usage and commands belong in `docs/usage.md`.
 - Implementation details belong near code or contracts when they are not architectural invariants.

@@ -1,66 +1,77 @@
 # Product Positioning
 
-CadFlow is an AI-assisted natural-language CAD workflow system.
+CadFlow is an Agent-first CAD design workbench.
 
-CadFlow is natural-language first for users and structured-workflow first internally. Users describe CAD intent in plain language, while CadFlow converts that intent into auditable requirement, planning, CAD IR, generation, validation, repair, and review artifacts.
+The user describes an engineering goal, then collaborates with an Agent that can
+explore alternatives, create geometry candidates, execute them through
+controlled tools, inspect results, repair failures, and progress accepted parts
+into assemblies and deliverables.
 
-The default user experience should be natural language first. Internal workflow artifacts are visible for transparency, but users should not need to understand them to generate a model.
+## Product value
 
-CadFlow's product direction is iterative CAD workflow, not one-shot
-Text-to-CAD. Users often do not know complete requirements at the beginning, and
-many workflows should start from an existing generated or imported model. The
-system should support unclear intent, explicit assumptions, exploratory drafts,
-focused confirmation, revision prompts, child runs, and old/new comparison.
+CadFlow combines:
 
-## CadFlow Is
+- capable Agent-driven design;
+- parametric CAD generation;
+- isolated execution;
+- measured validation;
+- immutable attempt history;
+- explicit accepted results;
+- assembly and engineering deliverable progression.
 
-- An AI-assisted natural-language CAD workflow system.
-- A workflow-first CAD agent scaffold.
-- A STEP-first parametric CAD generation pipeline.
-- A system for traceable CAD generation, validation, repair, and review.
-- A future iterative model revision workflow for CadFlow-native runs and limited
-  external reference geometry.
+The user should not have to manually operate internal Requirement, Planning,
+Handoff, CAD IR, and Review artifacts in the normal path.
 
-## CadFlow Is Not
+## CadFlow is
 
-- A browser CAD editor.
-- A mesh generation system.
-- A prompt-to-STL toy.
-- A production-ready CAD engineer replacement.
-- A full FreeCAD or SolidWorks replacement.
-- A cloud SaaS platform in the current stage.
-- A robust STEP feature-recovery engine.
-- A parametric reverse-engineering system for STL or OBJ meshes.
+- a design collaboration environment;
+- a tool-using CAD Agent runtime;
+- a STEP-first part and assembly pipeline;
+- a system for traceable exploration, repair, revision, and acceptance;
+- a future source of BOM and drawing packages derived from accepted results.
 
-## Product Boundary
+## CadFlow is not
 
-CadFlow separates understanding, deterministic execution, and review:
+- a template catalogue presented as AI;
+- a mandatory artifact wizard;
+- a raw Run browser;
+- an unrestricted autonomous coding environment;
+- a promise of engineering release from successful geometry export;
+- a complete commercial CAD replacement;
+- a general STEP or mesh reverse-engineering system.
 
-- LLM/Agent: understanding, planning, repair advice, and explanations.
-- CadFlow Python API: deterministic execution through validated contracts.
-- Web UI: operation, visualization, artifact review, and trace inspection.
-- CadQuery/STEP: CAD backend and artifact output.
+## Product boundary
 
-The user should not manually write CAD IR or operate the requirement, planning, and IR stages during the default workflow. Those artifacts exist for audit, debugging, review, and advanced inspection.
+The Agent owns design strategy.
 
-## Requirement Uncertainty
+CadFlow owns:
 
-CadFlow should not require perfect up-front requirements for low-risk
-exploration. For L0 Playground and some early L1 Maker workflows, it may proceed
-with explicit assumptions. Those assumptions must be written into artifacts,
-shown to the user, and available for later revision.
+- context and tool authorization;
+- isolated candidate execution;
+- validation and measurement;
+- trusted artifact publication;
+- lineage and accepted-result pointers;
+- claim boundaries.
 
-For L2/L3/L4 workflows, CadFlow must not silently invent engineering-critical
-details. Material, load, tolerance, safety, fit, and certification fields should
-block or require focused confirmation when missing.
+The user owns:
 
-## Revision Positioning
+- material engineering decisions when assumptions are unsafe;
+- explicit result acceptance;
+- final manufacturing or release authorization.
 
-The first revision workflow should prioritize CadFlow-native parent runs because
-they preserve requirement, planning, IR, source, validation, report, and trace
-artifacts. Revisions should create child runs with structured patches and
-lineage instead of overwriting the parent.
+## Progressive assurance
 
-External STEP files are useful as reference geometry but usually lack full
-modeling history. STL and OBJ files should be treated as mesh references, not
-reliable editable CAD sources.
+Explore mode supports rapid concept iteration with visible assumptions.
+
+Engineer mode requires more complete interfaces, acceptance targets, and local
+evidence.
+
+Release mode is future and domain-specific. It cannot be inferred from a STEP,
+drawing, score, or Agent statement.
+
+## Current reality
+
+The current codebase is a tested deterministic single-part workflow foundation.
+The Agent-first design loop, sandboxed model-program path, feature-graph IR,
+multi-part assembly, and drawing package are target capabilities under active
+migration.

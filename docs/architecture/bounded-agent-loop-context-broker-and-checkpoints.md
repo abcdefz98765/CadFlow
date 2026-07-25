@@ -1,309 +1,364 @@
-# Bounded Agent Episodes and Context Broker
+# Bounded Design Episodes, Context Broker, and Tool Broker
 
 ## Authority and scope
 
-This document defines how CadFlow allows agent reasoning inside canonical checkpoint transitions.
+This document defines how CadFlow gives an Agent meaningful design freedom
+inside controlled context, tool, execution, and publication boundaries.
 
-The checkpoint order and stage responsibilities remain owned by:
+Read with:
 
 - `cadflow-canonical-product-architecture.md`
-
-Logical agents, skills, and knowledge ownership are defined by:
-
 - `agent-skill-knowledge.md`
+- `../workflow_contract.md`
 
 ## Executive rule
 
-Workflow is a set of trusted checkpoints and user decisions, not a script for every reasoning step.
+CadFlow constrains authority, not design thought.
 
-CadFlow should constrain side effects, accepted contracts, tools, budgets, persistence, and approval while allowing bounded freedom in:
+The Agent may choose how to investigate, model, compare, execute, inspect, and
+repair a design. CadFlow controls:
 
-- interpretation;
-- context requests;
-- candidate comparison;
-- structured proposal;
-- validator-driven repair;
-- asking the user;
-- safe stopping.
+- what context can be retrieved;
+- which tools can be called;
+- where candidate code can run;
+- budgets and stop conditions;
+- what evidence is persisted;
+- what becomes reviewable or accepted.
 
-    accepted checkpoint input
-      -> bounded agent episode
-      -> structured proposal
-      -> local validation
-      -> accepted checkpoint output or typed safe block
+```text
+accepted objective and compact context
+  -> Agent chooses an action
+  -> Context Broker or Tool Broker responds
+  -> Agent observes and chooses again
+  -> reviewable result or typed stop
+```
 
 ## Runtime layers
 
-    Work Workflow
-      -> Episode Orchestrator
-           -> Context Broker
-           -> skill/proposer or provider adapter
-           -> Tool Broker
-           -> contract validators
-      -> deterministic pipeline
-      -> immutable Run artifacts and Work pointers
-
-The orchestrator owns state transitions and budgets. The agent chooses from allowlisted actions. The deterministic pipeline owns execution.
+```text
+Work / Part Job / Assembly Job
+  -> Episode Orchestrator
+       -> Skill Registry
+       -> Context Broker
+       -> Provider Adapter
+       -> Tool Broker
+            -> isolated execution worker
+            -> contract validators
+            -> geometry inspectors
+            -> assembly and drawing tools
+  -> publication validator
+  -> immutable Run evidence
+  -> explicit Work acceptance
+```
 
 ## Episode contract
 
-Suggested provider-independent interface:
+```text
+run_design_episode(
+    objective,
+    context_envelope,
+    capabilities,
+    budget,
+) -> AgentEpisodeResult
+```
 
-    run_agent_episode(
-        objective,
-        context_envelope,
-        capabilities,
-        budget,
-    ) -> AgentEpisodeResult
+Core types:
 
-Core contracts:
+- `AgentObjective`;
+- `ContextEnvelope`;
+- `AgentCapabilities`;
+- `EpisodeBudget`;
+- `AgentAction`;
+- `SystemObservation`;
+- `CandidateReference`;
+- `AgentEpisodeResult`.
 
-- `AgentObjective` — operation and product-scoped goal;
-- `ContextEnvelope` — compact initial accepted context;
-- `AgentCapabilities` — allowlisted actions, tools, and context keys;
-- `EpisodeBudget` — limits on steps, context, submissions, repairs, tools, and time;
-- `AgentAction` — one typed agent choice;
-- `AgentEpisodeResult` — accepted submission or typed stop outcome.
-
-## Allowlisted actions
+## Agent actions
 
 Initial action vocabulary:
 
-- `request_context` — request one semantic context item;
-- `ask_user` — stop at a structured user-decision checkpoint;
-- `propose_candidates` — provide concise alternatives where the skill allows it;
-- `submit_contract` — submit a structured artifact proposal;
-- `request_validation` — ask the system to validate the current proposal;
-- `repair_contract` — submit a revision based on structured observations;
-- `stop` — end with a typed reason.
+- `request_context`;
+- `ask_user`;
+- `propose_candidates`;
+- `create_contract`;
+- `patch_contract`;
+- `create_model_program`;
+- `patch_model_program`;
+- `request_validation`;
+- `request_execution`;
+- `inspect_artifact`;
+- `create_part_jobs`;
+- `propose_assembly`;
+- `request_deliverables`;
+- `stop`.
 
-Unknown actions are rejected.
+Each action requires a skill declaration and typed payload.
 
-Agents cannot directly:
+Unknown or undeclared actions are rejected.
 
-- write arbitrary files;
-- browse arbitrary paths;
-- execute shell, Python, or CadQuery;
-- mutate Work pointers;
-- approve results;
-- bypass validators;
-- declare STEP/STL generation from text alone.
+## Real Agentic behavior
 
-## Episode states
+An Agentic episode must let the provider choose at least:
 
-    created
-      -> gathering_context
-      -> proposing
-      -> awaiting_validation
-      -> repairing
-      -> user_input_required
-      -> completed
-      -> safely_blocked
-      -> failed
+- which allowed action to take next;
+- which semantic context to request;
+- which candidate strategy to pursue;
+- whether to repair, change strategy, ask the user, or stop after an
+  observation.
 
-The system records concise actions and observations. It does not require or persist private chain-of-thought.
+The following sequence is deterministic orchestration, not Agentic design:
+
+```text
+request one fixed context
+  -> call adapter once
+  -> validate once
+  -> stop on failure
+```
+
+It may remain as an offline fallback but must be labeled accordingly.
 
 ## Context Broker
 
-The Context Broker selects dynamic Work/Run context. It is not the static knowledge selector and is not a filesystem browser.
+The Context Broker resolves semantic Work and Run context.
 
 Responsibilities:
 
 - build a compact initial envelope;
-- resolve accepted active-lineage artifacts;
-- avoid superseded or unrelated Runs by default;
-- provide semantic context keys instead of paths;
+- resolve accepted Work decisions;
+- provide Part Job and Assembly Job context;
+- exclude superseded or unrelated attempts by default;
 - summarize large artifacts;
-- attach source Work, Run, Stage, and source type;
-- enforce context-request budgets;
+- enforce access and token budgets;
+- attach provenance and trust role;
 - reject arbitrary paths and private data.
 
-Initial semantic keys may include:
+Example semantic keys:
 
-- `requirement_active`;
-- `requirement_clarification`;
-- `planning_active`;
-- `assembly_plan`;
-- `selected_part_request`;
-- `reviewed_part_handoff`;
-- `accepted_part_result`;
-- `previous_cad_ir_attempts`;
-- `previous_validation_feedback`;
+- `intent_active`;
+- `accepted_constraints`;
+- `part_job`;
+- `part_interfaces`;
+- `assembly_job`;
+- `accepted_part_results`;
 - `reference_component_summary`;
-- `user_stage_review`.
+- `previous_candidates`;
+- `previous_validation_observations`;
+- `previous_geometry_measurements`;
+- `user_acceptance_or_revision`;
 
-Example context item:
+Static skill knowledge is selected separately by the Skill Registry.
 
-    {
-      "context_key": "assembly_plan",
-      "source_work_id": "...",
-      "source_run_id": "...",
-      "source_stage_id": "assembly_plan",
-      "source_type": "accepted_active_lineage",
-      "summary": {}
-    }
+## Tool Broker
 
-Static skill knowledge is selected separately according to `agent-skill-knowledge.md`.
+The Tool Broker is the only route from Agent action to side effects.
 
-## Observations and repair
+Responsibilities:
 
-System observations are distinct from agent actions.
+- validate action and tool input;
+- select the execution profile;
+- create an isolated candidate directory;
+- enforce import, filesystem, network, process, and resource policy;
+- capture source, parameters, logs, outputs, and exit state;
+- invoke local validators and inspectors;
+- return a structured observation;
+- prevent candidate code from mutating Work state.
+
+Tool categories:
+
+- validate structured geometry contract;
+- execute feature graph;
+- execute sandboxed CadQuery/build123d model program;
+- inspect STEP or native geometry;
+- compare candidates or revisions;
+- execute assembly placement/constraints;
+- generate drawings and BOM;
+- package accepted deliverables.
+
+## Sandboxed execution profile
+
+The initial model-program profile must provide:
+
+- dedicated writable directory;
+- read-only or copied declared inputs;
+- no network;
+- no credential or environment exposure;
+- allowlisted Python modules and CAD APIs;
+- blocked subprocess and shell APIs;
+- time, memory, output-size, and process-count limits;
+- captured stdout/stderr without secrets;
+- deterministic cleanup or quarantine;
+- explicit generated-file allowlist.
+
+On platforms where the required isolation cannot be enforced, the model-program
+action is unavailable. The system must not silently run with host authority.
+
+## Candidate lifecycle
+
+```text
+proposed
+  -> source_or_contract_validated
+  -> queued
+  -> executing
+  -> execution_completed
+  -> inspected
+  -> result_validated
+  -> reviewable
+```
+
+Failure states:
+
+- contract rejected;
+- sandbox policy rejected;
+- execution failed;
+- geometry invalid;
+- output incomplete;
+- inspection unsupported;
+- budget exhausted.
+
+Only `reviewable` candidates may be presented for acceptance.
+
+## Observations
+
+System observations are separate from Agent actions.
 
 Examples:
 
-    {"event_type":"agent_action","action":"submit_contract"}
+```json
+{
+  "event_type": "system_observation",
+  "observation": "execution_failed",
+  "candidate_id": "candidate_003",
+  "codes": ["boolean_operation_failed"],
+  "repairable": true
+}
+```
 
-    {
-      "event_type":"system_observation",
-      "observation":"validation_failed",
-      "codes":["hole_edge_margin_too_small"],
-      "repairable":true
-    }
+```json
+{
+  "event_type": "system_observation",
+  "observation": "geometry_measured",
+  "candidate_id": "candidate_004",
+  "measurements": {
+    "solid_count": 1,
+    "volume_mm3": 12840.4
+  }
+}
+```
 
-After an observation, the agent may repair, ask the user, request context, or stop. The orchestrator must not fabricate an agent decision.
+The Agent may repair, change strategy, ask, request context, or stop. The
+orchestrator does not invent the decision.
 
 ## Budgets
 
-Every episode is bounded by operation-specific configuration.
+Every episode declares operation-specific limits:
 
-A `create_part_ir` baseline may limit:
+- total actions;
+- context requests and bytes;
+- candidate submissions;
+- contract or program patches;
+- execution calls;
+- inspection calls;
+- wall-clock time;
+- candidate storage;
+- provider retries.
 
-- total steps;
-- context requests;
-- contract submissions;
-- repair attempts;
-- tool calls;
-- wall-clock time.
-
-Budget exhaustion preserves the best structured draft and observations, then stops with `budget_exhausted`. Unvalidated contracts never execute CAD.
+Budget exhaustion preserves the best candidate and observations, then stops
+with `budget_exhausted`.
 
 ## Typed stop reasons
 
-Supported outcomes include:
+Initial stop outcomes:
 
-- `completed`;
+- `completed_with_reviewable_result`;
 - `user_input_required`;
 - `unsupported_capability`;
 - `insufficient_context`;
 - `validation_exhausted`;
+- `execution_exhausted`;
+- `sandbox_unavailable`;
 - `budget_exhausted`;
-- `provider_failure`.
+- `provider_failure`;
+- `policy_blocked`;
 
-A safe block preserves evidence and exposes a valid next user or development decision.
+A stop result includes a concise recovery action.
 
-## Episode artifacts
+## Persistence
 
-Each episode should remain auditable without storing raw reasoning.
+Suggested Run layout:
 
-Suggested artifacts:
+```text
+episodes/<episode_id>/
+  objective.json
+  capabilities.json
+  context_manifest.json
+  events.jsonl
+  candidates/
+  observations/
+  result.json
+```
 
-    agent_episode.json
-    context_manifest.json
-    agent_events.jsonl
-    contract_submissions/
-    validation_feedback/
-    agent_result.json
-
-Record:
+Persist:
 
 - objective and capability mode;
-- Work/Run/part lineage;
-- selected skill and knowledge ids;
-- context requested and provenance;
-- concise action summaries;
-- contract submissions;
-- validator observations;
+- selected skill, knowledge, actions, and tools;
+- context provenance;
+- candidate contract or source;
+- validation and execution observations;
 - repair summaries;
-- accepted submission id;
-- stop reason and budget use.
+- budget use and stop reason.
 
-Do not store raw chain-of-thought, secrets, arbitrary provider payloads, or unrestricted transcripts.
+Do not persist:
 
-## Deterministic and agentic modes
+- private chain-of-thought;
+- secrets;
+- raw unrestricted provider traffic;
+- undeclared environment state;
+- arbitrary repository content.
 
-### Deterministic
+## Deterministic fallback
 
-Use for:
+Deterministic adapters remain useful for:
 
-- CI and tests;
-- reproducible Golden examples;
-- offline operation;
-- explicit fallback;
-- stable regression baselines.
+- tests and CI;
+- offline examples;
+- stable regression baselines;
+- explicit fallback.
 
-Label it clearly as deterministic fallback or deterministic mode.
+They use the same validators and publication boundary, but must be labeled
+`deterministic_fallback`.
 
-### Agentic
+Fallback must not replace unknown intent with unrelated geometry or be reported
+as Agentic design.
 
-Use for:
+## Current implementation gap
 
-- ambiguous or unknown real tasks;
-- context retrieval;
-- candidate comparison;
-- structured user questions;
-- validation-driven repair.
+Implemented:
 
-Both modes submit the same structured contracts to the same validators and deterministic execution boundary.
+- initial episode types and budgets;
+- allowlisted context keys;
+- structured validation observations;
+- deterministic proposer compatibility;
+- isolated deterministic candidate execution in the existing CAD pipeline.
 
-A provider failure may produce a typed failure or an explicitly configured deterministic fallback. It must not be silently represented as agentic reasoning.
+Not implemented:
 
-## Current implementation
+- provider-selected multi-action Design Episode;
+- Tool Broker for untrusted model programs;
+- sandbox enforcement profile;
+- feature-graph geometry contract;
+- Agentic assembly and drawing tools;
+- real branching repair behavior in the product path.
 
-Implemented for `create_part_ir`:
+## Acceptance tests
 
-- provider-independent episode contracts;
-- semantic Context Broker;
-- allowlisted actions and typed stop reasons;
-- step/context/submission/repair budgets;
-- dynamic scripted sequences in tests;
-- validator observations returned to the proposer;
-- episode lineage and audit artifacts;
-- deterministic proposer compatibility.
+The first Agentic vertical slice must prove:
 
-Not yet usable as product capability:
-
-- provider-backed agentic `create_part_ir`;
-- production knowledge registry and typed skill manifest;
-- agentic Planning and Requirement episodes;
-- fully accepted multi-part or assembly loops.
-
-## Next architecture step
-
-Before provider-backed `create_part_ir` is promoted from prototype:
-
-1. finish Workflow Cockpit manual usability acceptance;
-2. implement the typed skill/knowledge registry described in `agent-skill-knowledge.md`;
-3. connect one provider-backed proposer supporting only context request, structured contract submission, ask-user, repair, and stop;
-4. preserve existing deterministic Golden behavior and validators;
-5. expose capability mode and typed failure clearly in artifacts and UI.
-
-Do not mix this step with new CAD families, full assembly generation, or arbitrary code execution.
-
-## Tests
-
-Protect:
-
-- unknown action rejection;
-- all budgets and timeout;
-- active-lineage context selection;
-- superseded context exclusion;
-- arbitrary-path rejection;
-- context affecting subsequent proposer behavior;
-- system observation versus agent action separation;
-- invalid contract never executing CAD;
-- typed stop reasons;
-- episode lineage and accepted submission;
-- selected skill/knowledge ids;
-- no raw chain-of-thought artifact;
-- deterministic Golden compatibility.
-
-## Invariants
-
-1. Agents operate inside canonical checkpoint transitions.
-2. Orchestrator controls state and budgets.
-3. Context Broker supplies dynamic accepted context only.
-4. Static knowledge follows declared skill ownership.
-5. Agents propose; local validators and deterministic services decide what executes.
-6. Run artifacts remain immutable and auditable.
-7. Human approval remains explicit.
-8. Failure preserves evidence and never fabricates CAD success.
+- the provider chooses different valid action sequences for different states;
+- requested context changes subsequent action;
+- a failed validation can lead to repair or strategy change;
+- the Agent can ask the user and resume in a new episode;
+- sandbox policy violations fail closed;
+- candidate code cannot write outside its directory or access the network;
+- invalid geometry never becomes reviewable;
+- successful reviewable output still requires explicit user acceptance;
+- episode evidence contains no private reasoning or secrets.

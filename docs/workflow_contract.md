@@ -1,334 +1,520 @@
-# Workflow Artifact Contract
+# CadFlow Design and Artifact Contract
 
 ## Authority
 
-This document defines the current structured handoffs between CadFlow checkpoints.
+This document defines durable handoffs, artifacts, and trust transitions for the
+Agent-first CadFlow product.
 
-It does not define the product object model or reorder workflow stages. Those responsibilities belong to:
+Product objects and user phases are defined by:
 
 - `architecture/cadflow-canonical-product-architecture.md`
 
-Agent behavior and knowledge ownership belong to:
+Agent behavior and knowledge ownership are defined by:
 
 - `architecture/agent-skill-knowledge.md`
+- `architecture/bounded-agent-loop-context-broker-and-checkpoints.md`
 
-## General rules
+## Core rule
 
-CadFlow advances through structured artifacts, not by repeatedly re-reading the original prompt.
+Artifacts establish trust, recovery, and lineage. They do not prescribe a fixed
+user-facing wizard.
 
-Each checkpoint must:
+A Work normally progresses through:
 
-- consume accepted upstream artifacts;
-- validate input sufficiency for its own responsibility;
-- preserve source intent and provenance;
-- write a structured output or a typed safe block;
-- avoid filling decisions owned by another checkpoint;
-- expose assumptions and missing information instead of hiding them;
-- preserve immutable Run evidence.
+```text
+Intent
+  -> Design
+  -> Build & Evaluate
+  -> Accept & Deliver
+```
 
-Natural language enters at explicit user-input or revision boundaries. Deterministic CAD execution consumes validated CAD IR.
+Within Design and Build & Evaluate, the Agent may repeat context, proposal,
+execution, inspection, and repair actions without creating a new user-visible
+stage for every turn.
 
-## Canonical handoff sequence
+## Artifact trust roles
 
-    prompt.txt
-      -> requirement.json or requirement_vN.json
-      -> planning_artifact.json / design_brief.json
-      -> assembly_plan.json when decomposition is required
-      -> part_create_request.json
-      -> part_request_review.json
-      -> reviewed_part_handoff.json
-      -> part_execution_request.json
-      -> cad_ir_draft.json
-      -> input_ir.json after validation
-      -> child Run model/report artifacts in Full mode
-      -> part_result_review.json
-      -> append-only user review and Work accepted-result pointer
-      -> workflow_review.json / workflow_review.md
-      -> rework child Run when explicitly requested
+Every artifact has one role:
 
-Simple single-part flows may use a compact planning path, but artifact responsibility remains unchanged.
+- `accepted_input` — an explicit Work decision or accepted upstream result;
+- `candidate` — an untrusted design contract, model program, or assembly
+  proposal;
+- `observation` — validator, execution, inspection, or comparison evidence;
+- `reviewable_result` — a locally validated result available for user review;
+- `accepted_result` — a result reached through an explicit Work pointer;
+- `deliverable` — an accepted-result-derived file in a versioned package;
+- `diagnostic` — blocked or failed attempt evidence.
 
-## Prompt
+File presence does not determine the role.
 
-`prompt.txt` preserves the original user input for one root or revision Run.
+## Common artifact envelope
+
+New durable artifacts should expose:
+
+```json
+{
+  "artifact_type": "design_candidate",
+  "schema_version": 1,
+  "work_id": "...",
+  "run_id": "...",
+  "part_job_id": null,
+  "assembly_job_id": null,
+  "phase": "design",
+  "checkpoint": "geometry_candidate",
+  "trust_role": "candidate",
+  "source_artifact_ids": [],
+  "created_at": "...",
+  "content": {}
+}
+```
+
+Large binary files may use a metadata record plus a controlled relative
+artifact identity.
+
+The envelope must not expose secrets, provider payloads, unrestricted paths, or
+private reasoning.
+
+## Intent artifacts
+
+### Input
+
+Primary artifact:
+
+- `intent_input.json` for new Runs;
+- legacy `prompt.txt` remains readable during migration.
+
+Records:
+
+- original user request;
+- requested output scope;
+- optional references;
+- assurance mode;
+- revision parent when applicable.
+
+### Intent snapshot
+
+Primary artifact:
+
+- `intent_snapshot.json`.
+
+Records:
+
+- concise object goal;
+- known constraints and interfaces;
+- assumptions;
+- unresolved material decisions;
+- focused questions;
+- recommendation to design, ask, or stop.
+
+Legacy `requirement.json`, clarification artifacts, and accepted requirement
+overrides map into this checkpoint during migration.
 
 Rules:
 
-- never overwrite an earlier prompt;
-- downstream stages consume structured artifacts rather than treating prompt text as authoritative;
-- a revision request starts a new child Run or explicit revision record.
+- original input is immutable;
+- low-risk exploration may proceed with visible assumptions;
+- engineering-critical missing information requires a question or limitation;
+- no supported template may replace unknown intent.
 
-## Requirement
+## Design artifacts
+
+### Design brief
+
+Primary artifact:
+
+- `design_brief.json`.
+
+Records:
+
+- design objective;
+- functional requirements;
+- constraints and priorities;
+- candidate strategies and trade-offs;
+- intended manufacturing route;
+- validation targets;
+- relevant capability limitations.
+
+### Candidate set
+
+Primary artifact:
+
+- `candidate_set.json`.
+
+Each candidate records:
+
+- stable candidate id;
+- concept summary;
+- part or assembly scope;
+- parameters and interfaces;
+- execution path: structured contract or sandboxed model program;
+- assumptions and known risks;
+- reason it differs from other candidates.
+
+Candidate inspection is read-only. Selecting a strategy or result is an
+explicit episode or user action depending on consequence.
+
+### Part Job definitions
+
+Primary Work artifact:
+
+- `part_jobs.json` or equivalent first-class Work records.
+
+Each Part Job records:
+
+- stable part id and role;
+- interface context;
+- attempt Run ids;
+- current design attempt when applicable;
+- accepted-result pointer;
+- stale dependencies.
+
+Legacy Assembly Plan, Part Request, Part Review, and Reviewed Handoff artifacts
+may supply migration context. New Part Jobs must not require those as separate
+user approvals unless risk or policy requires it.
+
+### Assembly Job definition
+
+Primary Work artifact:
+
+- `assembly_job.json`.
+
+Records:
+
+- exact accepted part-result inputs;
+- reference components;
+- placements, joints, mates, fasteners, and clearance intent;
+- assembly validation targets;
+- attempt Runs and accepted assembly pointer.
+
+## Geometry candidate contracts
+
+### Structured geometry candidate
+
+Primary artifact:
+
+- `geometry_contract.json`.
+
+Target representation:
+
+- typed parameters and units;
+- coordinate frames and datums;
+- sketches and constraints;
+- ordered features and boolean operations;
+- named interfaces and functional features;
+- manufacturing and inspection intent.
+
+Legacy `cad_ir_draft.json` and `input_ir.json` map to this artifact role but
+remain limited closed-family contracts until the v2 feature graph is
+implemented.
+
+### Sandboxed model-program candidate
 
 Primary artifacts:
 
-- `requirement.json`;
-- `requirement_clarification.json`, when user answers are required;
-- `requirement_vN.json`, when an accepted clarification or override creates a new active requirement version.
+- `model_program_manifest.json`;
+- `candidate_model.py` or another allowlisted source format.
 
-The requirement contract records:
+The manifest records:
 
-- scope and object goal;
-- constraints and known dimensions;
+- target CAD API and version;
+- entry point;
+- parameter values;
+- allowed imports and tools;
+- expected outputs;
+- source hash;
+- execution profile;
+- source context and candidate id.
+
+The source is untrusted. It may be executed only through the Tool Broker in an
+isolated candidate directory.
+
+Forbidden:
+
+- credentials and environment inspection;
+- network access unless a future operation explicitly allows it;
+- arbitrary subprocess or shell control;
+- writes outside the candidate directory;
+- Work or Run pointer mutation;
+- dynamic dependency installation;
+- self-declared validation success.
+
+## Execution request
+
+Primary artifact:
+
+- `execution_request.json`.
+
+Records:
+
+- exact candidate artifact id and hash;
+- target backend;
+- execution profile;
+- output contract;
+- resource budgets;
+- validation plan;
+- source Work, Run, Part Job, or Assembly Job.
+
+The request is created by CadFlow after action validation. Candidate source
+cannot grant itself execution authority.
+
+## Episode artifacts
+
+A bounded Agent Episode records:
+
+```text
+agent_episode.json
+context_manifest.json
+agent_events.jsonl
+candidates/
+observations/
+agent_result.json
+```
+
+Record:
+
+- objective and assurance mode;
+- selected skill and knowledge ids;
+- allowed actions and tools;
+- requested context and provenance;
+- concise action summaries;
+- candidate submissions;
+- validator and execution observations;
+- repair summaries;
+- budgets used;
+- final result or typed stop.
+
+Do not record private chain-of-thought, secrets, unrestricted transcripts, or
+raw provider payloads.
+
+## Build and evaluation artifacts
+
+Candidate execution occurs in an isolated staging directory.
+
+Possible outputs:
+
+- generated model source;
+- STEP;
+- STL or preview mesh;
+- native backend file;
+- geometry measurements;
+- feature and interface inspection;
+- execution log;
+- structured validation result.
+
+Before publication, CadFlow verifies:
+
+- source and execution identity;
+- non-empty and valid geometry;
+- expected solid/body count;
+- requested bounding or dimensional targets where implemented;
+- expected exports;
+- declared features or interfaces where inspection supports them;
+- path and output policy;
+- absence of prohibited side effects.
+
+Successful publication creates:
+
+- `reviewable_result.json`;
+- controlled product artifacts inside the Run.
+
+Final failure creates diagnostic evidence only. Product-looking files remain in
+isolated candidate storage or are removed according to retention policy.
+
+## Observation contract
+
+Observations are system evidence, not Agent decisions.
+
+Example:
+
+```json
+{
+  "observation_type": "geometry_validation_failed",
+  "candidate_id": "candidate_002",
+  "codes": ["hole_edge_margin_too_small"],
+  "measurements": {},
+  "repairable": true,
+  "owner": "local_validator"
+}
+```
+
+After an observation the Agent chooses to:
+
+- repair;
+- change strategy;
+- request context;
+- ask the user;
+- stop.
+
+The orchestrator must not fabricate that choice.
+
+## Reviewable result
+
+Primary artifact:
+
+- `reviewable_result.json`.
+
+Records:
+
+- exact candidate and execution identity;
+- output artifacts;
+- measured and validated facts;
 - assumptions;
-- missing or risky information;
-- focused clarification questions;
-- flow decision: proceed, clarify, or block safely.
+- unverified or unsupported claims;
+- comparison with the prior accepted result when revising;
+- recommended next action.
 
-The original requirement artifact remains immutable.
+A reviewable result is not accepted.
 
-## Planning and design brief
+Legacy `part_result_review.json` may map to this role.
 
-Primary artifacts:
+## Acceptance
 
-- `design_brief.json`, when the detailed design-planner path is used;
-- `planning_artifact.json`;
-- candidate-plan artifacts where the selected pipeline supports them.
+Acceptance records are append-only:
 
-Planning records:
+```text
+reviews/<scope>/acceptance_NNN.json
+```
 
-- engineering route and scope;
-- design goals and capability boundaries;
-- candidate strategies and concise trade-offs;
-- selected or proposed part route;
-- interface, datum, dependency, and risk summaries;
-- gate state and unresolved upstream decisions.
+An explicit acceptance may update:
 
-Planning does not execute CAD or claim generated outputs.
+- `accepted_part_results[part_job_id]`;
+- the accepted Assembly Job result;
+- an accepted Deliverable Package pointer.
 
-## Assembly Plan and candidate selection
+Acceptance:
 
-Primary artifacts:
+- does not rewrite the Run;
+- does not automatically change active design lineage;
+- does not accept sibling results;
+- does not imply engineering release;
+- records the accepted evidence and known limitations.
 
-- `assembly_plan.json`;
-- optional human-readable `assembly_plan.md`;
-- validated versioned overrides under the controlled edit location;
-- candidate-selection metadata.
+## Revision
 
-The Assembly Plan records:
+A revision creates a child Run from an explicit parent result.
 
-- generated candidate parts;
-- reference-only components;
-- selected candidate;
-- interfaces and preserved assembly context;
-- unsupported or blocked candidates.
+Preferred artifacts:
 
-Opening a candidate is read-only. Explicit selection writes a validated override, preserves the original plan and old Runs, keeps accepted results, and marks dependent checkpoints stale.
+```text
+revision_request.json
+change_intent.json
+revision_plan.json
+candidate patch or new candidate
+comparison.json
+lineage.json
+```
 
-## Part Request
+A revision may patch:
 
-Primary artifact:
+- a structured feature graph;
+- a sandboxed model program;
+- declared parameters;
+- an Assembly Job definition.
 
-- `part_create_request.json`.
+It must preserve requested changes separately from validator-driven repairs.
+Creating a successful revision does not automatically replace the accepted
+result.
 
-It scopes exactly one selected part and records:
+## Assembly artifacts
 
-- part id and engineering role;
-- intended result scope;
-- constraints and interfaces;
-- preserved assembly context;
-- assumptions and blocked reasons.
+Assembly candidates consume exact accepted part-result identities.
 
-It does not create CAD.
+Possible artifacts:
 
-## Part Review
+- `assembly_candidate.json`;
+- `assembly_execution_request.json`;
+- placement and constraint source;
+- native assembly file;
+- `assembly.step`;
+- `assembly_validation.json`;
+- `assembly_reviewable_result.json`.
 
-Primary artifact:
+Reports must distinguish:
 
-- `part_request_review.json`.
+- placement validation;
+- bounding-box heuristics;
+- actual geometric interference;
+- constraint or degree-of-freedom checks;
+- fit, tolerance, or motion checks.
 
-It evaluates whether the Part Request is coherent and ready for modeling.
+Only checks that ran may be claimed.
 
-Result semantics include:
+## Deliverable Package
 
-- approved;
-- needs revision;
-- blocked.
+Primary manifest:
 
-This is a review of the modeling request, not a review of generated geometry.
+- `deliverable_package.json`.
 
-## Reviewed Handoff
+May reference:
 
-Primary artifact:
+- accepted part STEP;
+- accepted assembly STEP or native file;
+- STL and preview assets;
+- BOM;
+- PDF/SVG drawings;
+- validation and limitation reports.
 
-- `reviewed_part_handoff.json`.
+Every item records:
 
-It freezes the approved part brief and the context passed to the CAD-generation episode.
-
-It must preserve:
-
-- source part id and role;
-- accepted scope;
-- relevant constraints and interfaces;
-- assembly context;
-- assumptions;
-- capability mode and provenance.
-
-## Part execution request
-
-Primary artifact:
-
-- `part_execution_request.json`.
-
-This is the local, sanitized execution envelope derived from the Reviewed Handoff. It identifies exactly one part and the allowed CAD IR operation.
-
-It is not provider-generated code and does not authorize arbitrary execution.
-
-## CAD IR draft and validation
-
-Primary artifacts:
-
-- `cad_ir_draft.json`;
-- bounded Agent Episode artifacts;
-- structured validation feedback;
-- `input_ir.json` only after local validation succeeds.
-
-Flow:
-
-    reviewed_part_handoff
-      -> bounded create_part_ir episode
-      -> cad_ir_draft
-      -> validate_input_ir_draft / validate_ir
-      -> validated input_ir or typed safe block
-
-Rules:
-
-- the agent may propose or repair structured CAD IR;
-- local validators decide whether it is executable;
-- provider-generated Python, shell, or CadQuery cannot bypass CAD IR;
-- no unrelated fallback part may replace the reviewed intent;
-- validation failure preserves the best draft and evidence;
-- invalid CAD IR does not produce STEP/STL.
-
-## Part Modeling
-
-Full mode consumes validated `input_ir.json` and may write:
-
-- `model.py` as a generated implementation artifact;
-- `model.step`;
-- `model.stl` when requested;
-- `report.json` and `report.md`;
-- `agent_trace.json`;
-- `logs/runtime.json`.
-
-Contract mode writes validated `input_ir.json` and explicit `contract_complete` or `execution_skipped` status. STEP/STL are not expected.
-
-Candidate execution is isolated from the Run product directory. Candidate files
-become Run-level product files only after the selected candidate passes local
-validation. If execution or validation ultimately fails, CadFlow preserves the
-CAD IR, structured report, trace, and validation evidence, but does not leave
-`model.py`, STEP, STL, or preview files in the product location.
-
-Part Modeling does not approve its own result or claim assembly completion.
-
-## Part Result Review
-
-Primary artifact:
-
-- `part_result_review.json`.
-
-It compares one child result with the Reviewed Handoff and records:
-
-- part id and child Run;
-- product artifact availability;
-- result scope;
-- validation and execution status;
-- limitations;
-- accepted-for-preview, needs-revision, blocked, skipped, or failed semantics.
-
-Creating this artifact does not update the Work accepted-result pointer.
-
-## User review and accepted result
-
-Stage reviews are append-only:
-
-    reviews/<stage>/review_NNN.json
-
-A latest `stage_review.json` materialization may remain for compatibility with the explicit rework pipeline.
-
-Only explicit user approval updates:
-
-- `accepted_part_results[part_id]` in the Work manifest.
-
-Approval does not modify the child Run or its STEP/STL, accept sibling parts, or imply full assembly completion.
-
-## Artifact trust and product state
-
-File presence is not a business status. Projections keep these concepts
-separate:
-
-- `input_status` — missing, available but unverified, accepted upstream, or stale;
-- `execution_status` — not started, running, completed, skipped, blocked, or failed;
-- `result_status` — not created, generated, contract complete, ready for review, accepted, stale, or no trusted result;
-- `agent_review_status` — the Part Result Review conclusion;
-- `user_review_status` — not reviewed, approved, needs revision, or blocked;
-- `capability_mode` — contract, full, deterministic fallback, or agentic where supported.
-
-User-facing artifact roles are:
-
-- accepted input — active upstream evidence consumed by a checkpoint;
-- attempt output — a validated result available for review but not yet approved;
-- final output — an explicitly approved result referenced by the Work;
-- diagnostic evidence — reports and traces from blocked or failed attempts.
-
-`accepted_for_preview` is an agent/result-review conclusion. It is not user
-approval and does not update `accepted_part_results`.
-
-## Work-level Workflow Review
-
-Primary artifacts:
-
-- `workflow_review.json`;
-- `workflow_review.md`.
-
-The review summarizes:
-
-- active lineage;
-- Part Jobs and accepted results;
-- current checkpoint states;
-- missing results and limitations;
-- relevant risks and valid next actions.
-
-It is a product-level conclusion, not a raw aggregation of internal diagnostics.
-
-## Deliverables
-
-Work-level Deliverables are derived only from explicit approved
-`accepted_part_results` pointers. Reviewable outputs remain available from the
-Part and Run Snapshot surfaces. Failed-attempt artifacts remain diagnostics and
-never appear as Work deliverables.
-
-## Rework and revision
-
-Rework or revision creates a child Run and preserves its parent.
-
-Common artifacts include:
-
-- `revision_request.json`;
-- `change_intent.json`;
-- `revision_plan.json`;
-- `patch.json`;
-- `comparison.json`;
-- `lineage.json`;
-- `revision_report.md`.
-
-Parent artifacts remain immutable. Structured changes record before/after values where possible. Unsupported revisions block safely rather than fabricating a child model.
-
-See `architecture/revision-workflow.md` for the specialized revision contract.
+- human purpose;
+- source accepted result;
+- source Run;
+- generator or tool;
+- validation state;
+- deliverable role.
+
+Drawing output is not trusted solely because a PDF or SVG exists. It must
+reference an accepted model and state which dimensions or annotations are
+generated, measured, or manually reviewed.
+
+## State dimensions
+
+Projections keep these concepts separate:
+
+- `input_status`;
+- `design_status`;
+- `execution_status`;
+- `result_status`;
+- `agent_status`;
+- `user_decision_status`;
+- `assurance_mode`;
+- `capability_mode`;
+- `stale_status`.
+
+Compatibility `status` fields may remain but must not be derived from filenames
+alone.
 
 ## Provenance and path safety
 
-Every projected artifact must preserve:
+Every public artifact reference preserves:
 
-- source Work, Run, and Stage;
-- original or override source type;
-- relative artifact identity;
-- validation status where relevant.
+- source Work and Run;
+- Part Job or Assembly Job where applicable;
+- checkpoint and trust role;
+- original, Agent, user override, validator, or tool source;
+- relative controlled identity;
+- validation status.
 
-Public UI and route contracts use safe ids and allowlisted artifact names. They do not expose arbitrary filesystem paths, secrets, provider payloads, or raw transcripts.
+Public routes and UI use safe ids and allowlisted artifact identities. They do
+not expose arbitrary browsing, absolute paths, secrets, provider payloads, or
+unrestricted model-program execution.
 
-## Compatibility paths
+## Compatibility
 
-Legacy text, normalized-provider, and deterministic example pipelines may remain for tests, migration, evaluation, and fallback.
+The following legacy artifacts remain readable during migration:
 
-They must not redefine the canonical user workflow, silently become the primary product architecture, or claim capabilities beyond their actual artifacts.
+- `prompt.txt`;
+- `requirement*.json`;
+- `planning_artifact.json`;
+- `assembly_plan.json`;
+- `part_create_request.json`;
+- `part_request_review.json`;
+- `reviewed_part_handoff.json`;
+- `part_execution_request.json`;
+- `cad_ir_draft.json`;
+- `input_ir.json`;
+- `part_result_review.json`;
+- `workflow_review.json`.
+
+Compatibility artifacts do not define the target product phases. New code
+should write new contracts or an explicit versioned compatibility projection.

@@ -1,235 +1,229 @@
-# Web Workflow Console Architecture
+# Agent Workbench Web Architecture
 
 ## Authority
 
-This document defines the current technical architecture of the local Web Workflow Console.
+This document defines the target local Web architecture and migration boundary
+for the existing NiceGUI Workflow Console.
 
-It does not redefine CadFlow's product objects or checkpoint responsibilities. Those are owned by:
+Read:
 
 - `cadflow-canonical-product-architecture.md`
-
-User-facing information hierarchy and interaction rules are owned by:
-
 - `../ux/product-usability-principles.md`
 - `../ux/workflow-cockpit-design-spec.md`
+- `../status/current-product-readiness.md`
 
-## Responsibility
+## Target responsibility
 
-The Web Console is a local workflow cockpit over CadFlow's file-backed services.
+The Web app is an Agent CAD workbench over CadFlow domain services.
 
 It is responsible for:
 
 - selecting a Workspace and Work;
-- projecting Current Work from the active lineage;
-- showing immutable Run Snapshots;
-- rendering workflow checkpoints, Parts, History, reviews, and artifacts;
-- collecting controlled user input and confirmation;
-- dispatching allowlisted backend actions;
-- showing pending, verified success, and failure feedback.
+- starting or continuing a Design Episode;
+- showing focused conversation and Agent activity;
+- showing part and assembly previews;
+- presenting candidates, observations, and limitations;
+- managing Part Jobs and Assembly Job;
+- collecting explicit acceptance and revision decisions;
+- opening accepted-result-derived deliverables;
+- showing History and immutable Run Snapshots;
+- exposing legacy Workflow and raw evidence under Diagnostics.
 
 It is not:
 
-- a browser CAD editor or geometry kernel;
+- the source of Work or Run truth;
+- a browser-side geometry kernel;
+- an unrestricted provider terminal;
 - a general filesystem browser;
-- an arbitrary Python, shell, or CadQuery execution surface;
-- a second source of workflow truth;
-- a provider transcript or debug console as the primary experience.
+- an automatic engineering-release authority.
 
-## Runtime layers
+## Target runtime layers
 
-    NiceGUI presentation
-      -> workflow page view model
-      -> Work and stage projections
-      -> WorkflowConsoleActions / WorkflowConsoleBackend
-      -> StageRunner or bounded Agent Episode
-      -> contract and policy validation
-      -> deterministic CAD / review / revision pipelines
-      -> file-backed artifacts, Work manifest, and lineage
+```text
+Agent Workbench presentation
+  -> Workbench view model
+  -> Work / Part Job / Assembly Job domain services
+  -> Episode Orchestrator
+       -> Context Broker
+       -> Tool Broker
+       -> provider adapter
+  -> candidate execution and validators
+  -> artifact and accepted-pointer store
+```
 
-Authority flows downward. Presentation code must not infer or mutate business state independently.
+Presentation code does not infer business state from filenames, CSS, selected
+tabs, or local browser state.
 
-## Sources of truth
+## Domain sources of truth
 
-- Workspace configuration and the Work index live in the Workspace.
-- Mutable product decisions and pointers live in the Work manifest.
-- Execution evidence and outputs live in immutable Run artifacts.
-- User edits live in validated, versioned override artifacts.
-- Reviews are append-only; compatibility materializations may exist only for an established pipeline consumer.
-- Browser component state is temporary interaction state only.
+- Workspace manifest and configuration;
+- Work manifest and explicit object references;
+- Part Job attempt lists and accepted-result pointers;
+- Assembly Job attempts and accepted-result pointer;
+- immutable Run artifact index;
+- Deliverable Package manifests;
+- append-only user decisions.
 
-The console may build sanitized projections and indexes. It must not create a parallel workflow database or treat the selected browser tab as authoritative state.
+Recursive artifact discovery is compatibility behavior only.
 
-## Current Work and Run Snapshot
+## Primary view model
 
-### Current Work
+The target Workbench view model provides:
 
-Current Work is the default actionable view. It aggregates:
+- Work and phase context;
+- current design objective;
+- recommended action;
+- focused conversation;
+- Agent activity and episode state;
+- current candidate and alternatives;
+- preview contract;
+- validation and limitation summary;
+- Part Jobs;
+- Assembly Job;
+- Deliverable Packages;
+- compact history;
+- advanced diagnostics.
 
-- active root and leaf pointers;
-- accepted upstream artifacts across the active lineage;
-- selected candidate and active overrides;
-- Part Jobs and accepted result pointers;
-- current checkpoint states;
-- recommended next action;
-- deliverables and limitations.
+Every action declares:
 
-Every projected artifact retains source Run and stage provenance.
+- action key and localized meaning;
+- target Work, Part Job, Assembly Job, Run, or candidate;
+- required confirmation or input;
+- whether it invokes an Agent or tool;
+- expected visible postcondition;
+- recovery behavior.
 
-### Run Snapshot
+## Action lifecycle
 
-Run Snapshot renders one immutable execution attempt exactly as recorded.
+```text
+idle
+  -> confirming
+  -> pending
+  -> episode or domain action
+  -> observation / result
+  -> refreshed projection
+  -> postcondition verification
+  -> succeeded or failed
+```
 
-Normal mutations are disabled. The user may inspect artifacts, return to Current Work, compare attempts, or explicitly create a new rework attempt.
+Long Agent Episodes may emit compact progress events without exposing raw
+provider traffic or private reasoning.
 
-`latest_attempt_run_id` is audit information. It must not silently choose Current Work state.
+Duplicate execution and acceptance actions are rejected.
 
-## View-model boundary
+## Preview boundary
 
-`workflow_page_view_model.py` is the presentation contract for the primary Workflow route.
+Preview contracts use controlled product artifacts.
 
-The view model owns:
+They identify:
 
-- `current_work` versus `run_snapshot` mode;
-- active lineage summary;
-- graph topology and node semantics;
-- selected-stage causal detail;
-- artifact view contracts;
-- action targets, categories, availability, and expected postconditions;
-- action inventory for verification.
+- candidate, reviewable, accepted, or diagnostic state;
+- source Run and Part/Assembly Job;
+- model type and available viewer;
+- measurements;
+- comparison target where supported;
+- limitations.
 
-The renderer must not recompute business status from filenames, CSS classes, the currently selected Run, or local component state.
+The browser never receives arbitrary filesystem paths.
 
-The primary Workflow route uses one v2 rendering and action-dispatch path. Legacy renderers may remain only as isolated compatibility helpers and must not be reachable from the main route.
+## Tool and provider boundary
 
-## Action boundary
+The Web app may:
 
-Every visible action is one of:
+- start an episode;
+- answer a structured Agent question;
+- request stop;
+- invoke allowlisted domain actions.
 
-- navigation;
-- structured input;
-- workflow command;
-- disabled future action.
+It may not:
 
-An enabled action must declare:
+- send arbitrary shell or Python to the host;
+- grant a provider direct filesystem or process access;
+- bypass the Tool Broker;
+- mark provider claims as validator facts;
+- accept results without a user action.
 
-- action key and category;
-- target Work, Run, Stage, and part where applicable;
-- whether it creates a Run;
-- whether it updates Work pointers or active lineage;
-- required form or confirmation;
-- expected user-visible postcondition;
-- localized label, help text, and disabled reason.
+## Current NiceGUI migration
 
-The action target comes from the action contract. A page-level `selected_run_id` must not be used as a universal mutation target.
+The existing `ai_native_cad.workflow_console` remains operational during
+migration.
 
-## Runtime action lifecycle
+Classify current surfaces:
 
-Consequential actions use a shared lifecycle:
+- Workspace and Work selection — preserve and adapt;
+- Current Work / Run Snapshot — preserve;
+- controlled artifact viewer — preserve under Advanced/Diagnostics;
+- action pending and postcondition verification — preserve;
+- fixed dot Workflow graph — move to Diagnostics;
+- stage-specific review forms — retain only for legacy Runs;
+- Parts and History — migrate to first-class domain objects;
+- provider configuration — preserve but do not imply Agentic capability.
 
-    idle
-      -> confirming when required
-      -> pending
-      -> backend execution
-      -> refreshed backend projection
-      -> postcondition verification
-      -> succeeded or failed
+The primary route must not switch to the target Workbench until:
 
-Requirements:
-
-- pending feedback appears immediately;
-- duplicate clicks are rejected;
-- long-running work does not silently freeze the interface;
-- success requires postcondition verification, not merely a returned function value;
-- success and failure remain visible in a page-level feedback panel;
-- failure preserves the current Work and user input;
-- the refreshed page shows the changed workflow state and next action.
-
-## Safe backend surface
-
-`WorkflowConsoleBackend` and `WorkflowConsoleActions` are authoritative for local UI operations.
-
-Public operations accept safe ids and allowlisted artifact names. They do not accept arbitrary filesystem paths.
-
-Current action families include:
-
-- requirement clarification and validated overrides;
-- candidate selection through Assembly Plan override;
-- Part Request, Part Review, and Reviewed Handoff;
-- reviewed single-part create;
-- Part Result Review and explicit user approval;
-- append-only Stage Review;
-- Work-level Workflow Review;
-- explicit rework;
-- controlled artifact reads and product downloads.
-
-The reviewed single-part create path remains:
-
-    reviewed_part_handoff
-      -> part_execution_request
-      -> bounded create_part_ir episode / AgentAdapter
-      -> cad_ir_draft
-      -> local CAD IR validation
-      -> deterministic run_ir_pipeline or typed safe block
-
-It does not batch-generate parts, generate a complete assembly, solve assembly constraints, or execute provider-generated code.
+- the M2 Design Episode has a real handler;
+- candidate preview and observation state are available;
+- acceptance has an explicit domain target;
+- legacy Runs remain reachable.
 
 ## Artifact access
 
-Artifact reads and downloads are allowlisted and path-safe.
+Reads and downloads remain allowlisted and path-safe.
 
-User-facing artifact contracts include:
+User-facing artifacts are organized by:
 
-- purpose-oriented display name;
-- filename as secondary metadata;
-- artifact role: accepted input, attempt output, final output, or diagnostic evidence;
-- trust status: accepted, reviewable, validated evidence, or untrusted;
-- source Work, Run, and Stage;
-- original or override source type;
-- validation status;
-- preview and download capability;
-- read-only or controlled-edit state.
+- purpose;
+- trust role;
+- source result;
+- validation state.
 
-JSON, Markdown, and text use controlled viewers. STEP/STL are opened through product preview/download paths. Arbitrary directory browsing is not exposed.
-
-Repeated filenames are grouped by purpose and provenance rather than displayed as indistinguishable rows.
-
-Work Products and Deliverables contain only files reached through explicit
-approved `accepted_part_results` pointers. A STEP/STL file in an unapproved Run
-is reviewable attempt output, not a Work deliverable. Files from a failed Run
-are diagnostic evidence even when retained by legacy data.
-
-## Overrides and reviews
-
-Original Run artifacts remain immutable.
-
-Controlled edits:
-
-- write a versioned override;
-- pass artifact-specific validation;
-- preserve the original artifact;
-- record reason and affected downstream stages;
-- mark dependent stages stale when upstream meaning changes.
-
-Stage reviews are append-only under stage-specific review directories. A latest `stage_review.json` materialization may remain for rework compatibility, but it must not erase history.
-
-Approving a part result updates the Work-level `accepted_part_results` pointer only after an explicit user decision. It does not rewrite the child Run or imply complete assembly generation.
+Raw model source is visible only in Advanced and never directly executable from
+an arbitrary editor action.
 
 ## Localization
 
-When the language switch is present, all primary labels, actions, tooltips, dialogs, pending states, success and failure messages, validation feedback, and disabled reasons use the centralized catalog.
+Primary English and Chinese experiences include:
 
-Internal enums and artifact contents may remain unchanged, but the primary UI must not fall back to backend action names, `Available`, raw enums, or English-only help text in Chinese mode.
+- Agent action summaries;
+- questions and assumptions;
+- candidate and validation state;
+- action consequences;
+- pending, success, failure, and recovery;
+- disabled and unsupported reasons.
 
-## Security defaults
+Backend keys and raw enums are not primary labels.
 
-- Bind local services to `127.0.0.1` by default.
-- Prefer explicitly configured Tailnet access for remote use.
-- Do not enable public exposure or Funnel by default.
-- Do not expose secrets, provider payloads, transcripts, arbitrary paths, or unrestricted execution endpoints.
-- STEP remains the primary CAD product; STL preview is a secondary inspection aid.
+## Security
+
+- bind local services to `127.0.0.1` by default;
+- prefer explicit Tailnet access for remote use;
+- do not enable public exposure by default;
+- do not expose secrets, provider payloads, arbitrary paths, or unrestricted
+  execution;
+- sandbox model-program candidates outside trusted Work product locations;
+- publish only locally validated result artifacts.
 
 ## Verification
 
-Automated tests protect contracts, targets, status projection, immutable Snapshot behavior, localization coverage, and action postconditions.
+Automated tests protect:
 
-A Workflow UI change is not product-usable until the affected journey is also exercised in a real browser. Readiness reporting must distinguish implemented, automated-tested, manually verified, and production-usable.
+- domain action targets;
+- Current Work and Run Snapshot boundaries;
+- path-safe artifact access;
+- episode and candidate state projection;
+- action postconditions;
+- acceptance semantics;
+- localization contracts.
+
+Real-browser checks prove:
+
+- geometry preview priority;
+- focused question and response;
+- pending execution and Agent repair;
+- validation and limitation clarity;
+- reviewable versus accepted result;
+- Part Job and Assembly Job progression;
+- desktop and narrow layouts.
+
+The current legacy console remains `partial` until migrated; passing its
+existing tests does not prove Agent Workbench usability.

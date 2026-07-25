@@ -1,475 +1,309 @@
-# Product Usability and Workflow Guidance Principles
+# Agent Workbench Usability Principles
 
 ## Purpose
 
-This document defines how CadFlow should decide what to show, what to hide, how to guide the user, and how to keep the product Workflow aligned with the real engineering workflow.
+CadFlow should help a user design and verify geometry, not teach the user its
+internal workflow implementation.
 
-CadFlow should not optimize for displaying all available data. It should optimize for helping a user understand the current result, make the next valid decision, and verify what changed.
+The primary experience is:
 
-## Product usability test
+```text
+goal + Agent collaboration + geometry + evidence + decision
+```
 
-A normal user should be able to answer the following without opening Diagnostics:
+Artifacts, checkpoints, Runs, and diagnostics support that experience.
 
-1. What am I trying to create?
-2. What has CadFlow completed?
-3. What has not been completed?
-4. What result is currently accepted?
-5. What requires my review or input?
-6. What should I do next?
-7. What will happen if I click the recommended action?
-8. How will I know whether it succeeded?
+## Primary usability test
 
-If the primary screen cannot answer these questions, adding more fields, badges, artifacts, or buttons usually makes the problem worse.
+Without opening Diagnostics, a user should be able to answer:
 
-## User relevance filter
+1. What is the Agent designing?
+2. What model, part, or assembly exists now?
+3. What did the Agent assume or change?
+4. What has been measured or validated?
+5. What remains unsupported or unresolved?
+6. Does the user need to decide anything?
+7. What is the recommended next action?
+8. What visible result will prove that action succeeded?
 
-Before placing information on the primary surface, classify it.
+## Information order
 
-### Decision-critical
+Default order:
 
-The user needs it to make the current decision.
+1. design objective;
+2. current model or assembly preview;
+3. Agent progress and concise decisions;
+4. focused user question or recommended action;
+5. validation summary and important limitations;
+6. candidate alternatives;
+7. Part Jobs, accepted results, and assembly readiness;
+8. history, raw artifacts, and diagnostics.
 
-Examples:
+Do not put lineage ids, artifact filenames, raw JSON, provider identity, or
+backend action keys ahead of the design result.
 
-- selected candidate;
-- missing required dimension;
-- generated result scope;
-- important limitation;
-- current review state;
-- stale downstream stages;
-- recommended next action.
+## Four phases
 
-Show prominently.
+### Intent
 
-### Verification-critical
+Show:
 
-The user needs it to confirm that an action or result is correct.
+- the goal in the user's language;
+- requested deliverables;
+- important known constraints;
+- focused questions only when required;
+- visible assumptions for low-risk exploration.
 
-Examples:
+Do not present a long requirement form by default.
 
-- accepted part result;
-- selected candidate after an override;
-- generated STEP/STL availability;
-- review saved successfully;
-- source artifact when two results could be confused.
+### Design
 
-Show near the result or action feedback.
+Show:
 
-### Contextual
+- what strategy the Agent is pursuing;
+- current candidate and meaningful alternatives;
+- parameters, interfaces, and trade-offs that matter;
+- model preview as soon as geometry exists;
+- Agent activity in concise action language.
 
-Useful for understanding, but not required for the current decision.
+Do not expand every context request or provider call into a workflow stage.
 
-Examples:
+### Build & Evaluate
 
-- concise agent assumptions;
-- alternative candidates;
-- related artifacts;
-- previous accepted result;
-- short provenance.
+Show:
 
-Show in secondary sections or expandable panels.
+- pending execution immediately;
+- candidate being executed;
+- geometry preview and measured facts;
+- validation failure in user language;
+- whether the Agent is repairing, changing strategy, asking, or stopping.
 
-### Operational / diagnostic
+Do not claim success because a function returned or a file exists.
 
-Primarily useful to developers or advanced troubleshooting.
+### Accept & Deliver
 
-Examples:
+Show:
 
-- backend action name;
-- raw enum values;
-- internal Run identifiers repeated on every row;
-- trace ids;
-- validation payloads;
-- raw JSON;
-- absolute paths;
-- low-level timing and action audit fields.
+- result scope;
+- verified and unverified properties;
+- comparison with the currently accepted result;
+- explicit Accept, Revise, Continue Part, Assemble, or Package actions as
+  applicable;
+- exact deliverable availability.
 
-Keep under Advanced / Diagnostics. Do not use these as the main explanation.
+Acceptance is consequential and explicit.
 
-## Information hierarchy
+## Conversation and activity
 
-The default page order should follow the user's decision process:
+The workbench is conversational but not a raw transcript.
 
-### 1. Current conclusion
+Primary conversation includes:
 
-State what CadFlow has concluded in plain language.
+- user requests and focused answers;
+- concise Agent decisions;
+- important assumptions;
+- candidate summaries;
+- recovery questions.
+
+Secondary activity includes:
+
+- tool calls;
+- context requests;
+- execution events;
+- validator codes;
+- provider metadata.
+
+Private chain-of-thought is never required or displayed.
+
+## Geometry first
+
+When a geometry result exists, preview it prominently.
+
+The user should be able to:
+
+- rotate and inspect;
+- identify the active candidate;
+- view key dimensions or measurements;
+- compare before/after or candidate A/B when useful;
+- understand whether the preview is part, assembly, reference, or diagnostic.
+
+A placeholder image must not appear to be a real render.
+
+## Candidate design
+
+Alternatives are useful only when they differ materially.
+
+Each candidate shows:
+
+- concept;
+- why it exists;
+- important trade-off;
+- current execution/validation state;
+- whether it is selected, reviewable, or accepted.
+
+Avoid generating three cosmetically different candidates merely to populate a
+comparison UI.
+
+## Agent action language
 
 Good:
 
-- One generic upper-link concept part was generated successfully.
-- The CAD IR contract is valid, but CAD execution was intentionally skipped.
-- The selected candidate changed to lower_link; downstream part stages are now stale.
+- Inspecting the failed fillet and preparing a simpler edge treatment.
+- Comparing a bent-sheet bracket with a machined block strategy.
+- The servo interface is underspecified; asking for the mounting pattern.
 
 Poor:
 
-- completed
-- ready_for_review
-- upper_link, accepted_for_preview
+- `repair_contract`
+- `stage_8 completed`
+- `route selected`
+- `adapter returned`
 
-### 2. Current limitation or scope
+## User decisions
 
-Only show limitations that materially affect the user's interpretation.
+Require user input when:
 
-Examples:
+- a missing decision changes topology or interfaces;
+- material, load, tolerance, safety, or acceptance scope is consequential;
+- materially different strategies need user preference;
+- an accepted result or active Work pointer will change;
+- assembly or deliverable generation has important consequences.
 
-- This is not a complete robot-arm assembly.
-- Strength and motion were not validated.
-- Contract mode does not produce STEP/STL.
+Do not require manual approval for every internal artifact in Explore mode.
 
-Do not repeat every warning from every upstream stage.
+## Action lifecycle
 
-### 3. Recommended next action
+Every write or execution action uses:
 
-There should normally be one clearly recommended action.
+```text
+idle
+  -> confirming when consequential
+  -> pending
+  -> Agent or backend activity
+  -> refreshed domain state
+  -> verified success or failure
+```
 
-It should say what the user is trying to accomplish, not expose an internal method name.
+Requirements:
 
-Good:
+- immediate pending feedback;
+- duplicate-action protection;
+- progress without exposing raw logs;
+- success only after visible postcondition verification;
+- persistent failure with recovery;
+- preserved user input.
 
-- Review this stage
-- Create the part request
-- Inspect the CAD IR draft
-- Select this part for the next step
+## Trust language
 
-Poor:
+Use explicit terms:
 
-- save_stage_review
-- reviewed_handoff
-- run_rework
+- candidate;
+- execution passed;
+- geometry validated;
+- reviewable;
+- accepted;
+- deliverable;
+- unverified;
+- unsupported.
 
-### 4. Causal detail
+Do not collapse them into `completed`.
 
-Use the sequence:
+## Parts and assembly
 
-- USER INPUT
-- AGENT INTERPRETATION / DECISION
-- AGENT OUTPUT
+The Part Job surface shows:
 
-Each block should explain meaning, not merely list fields.
+- role and interface;
+- attempt count;
+- current candidate;
+- accepted result;
+- stale dependencies;
+- recommended action.
 
-### 5. Evidence and artifacts
+The Assembly Job surface shows:
 
-Show only the artifacts that substantiate the current conclusion or enable the next decision.
+- exact accepted part inputs;
+- reference components;
+- placements and constraints;
+- validation scope;
+- assembly result and limitations.
 
-### 6. Advanced detail
+A single part must never look like a complete assembly.
 
-Place raw contracts, complete provenance, diagnostics, traces, and audit fields here.
+## Deliverables
 
-## Workflow guidance model
+Present deliverables by human purpose:
 
-Each visible stage should answer:
+- Upper-link STEP;
+- Accepted assembly STEP;
+- Assembly BOM;
+- Upper-link drawing PDF;
+- Validation summary.
 
-- Purpose: why this stage exists.
-- Entry condition: what must already be true.
-- Result: what this stage produces.
-- Review: whether a user decision is required.
-- Next: what normally follows.
-- Failure/recovery: what the user can do when it cannot proceed.
+Filename and provenance are secondary.
 
-Example:
+Only accepted-result-derived files appear as final deliverables.
 
-### Assembly Plan
+## Current Work and Run Snapshot
 
-Purpose:
-Break the assembly request into generated candidates and reference-only components.
+Current Work is actionable.
 
-Entry condition:
-An accepted requirement and planning result exist.
+Run Snapshot is immutable and audit-oriented.
 
-Result:
-A selected candidate and preserved assembly context.
-
-Review:
-The user may inspect candidates or explicitly change the selected candidate.
-
-Next:
-Create a Part Request for the selected candidate.
-
-Failure/recovery:
-Edit the requirement or plan when the candidate split is incorrect.
-
-## Checkpoints versus internal agent steps
-
-The Workflow graph represents trusted product checkpoints.
-
-It should not expand every internal model call, context request, validation retry, or repair attempt into a primary workflow node.
-
-Internal agent episode events belong in an expandable trace.
-
-The user-facing Workflow should remain stable even as the Agent becomes more capable.
-
-## Action design
-
-### Primary action
-
-One action should dominate when one next step is recommended.
-
-### Secondary actions
-
-Use for legitimate alternatives that do not deserve equal weight.
-
-Examples:
-
-- inspect artifact;
-- choose another candidate;
-- refresh review.
-
-### Review decisions
-
-Approve, Needs Revision, and Blocked belong in a dedicated review interaction, not mixed indiscriminately with navigation and debug actions.
-
-### Dangerous or consequential actions
-
-Require confirmation when an action:
-
-- changes an accepted upstream decision;
-- marks downstream stages stale;
-- creates a new Run;
-- updates an accepted pointer;
-- starts a long-running CAD execution;
-- initiates rework.
-
-The confirmation should describe only consequences the user cares about.
-
-Do not lead with internal implementation details such as exact metadata filenames.
-
-## Hover and help text
-
-Hover text is a compact explanation, not a substitute for information architecture.
-
-A useful Hover normally contains:
-
-- one sentence describing the action;
-- one sentence describing the important result;
-- a short note when it creates a Run, changes Current Work, or is disabled.
-
-Example:
-
-Select this candidate for the next part workflow. CadFlow will preserve the original plan, mark downstream stages stale, and recommend creating a new Part Request. Existing Runs and accepted results are retained.
-
-Do not include all of the following by default:
-
-- full Work id;
-- full Run id;
-- target Stage id;
-- backend action;
-- action category;
-- expected postcondition object;
-- audit timestamps.
-
-Those belong in Action Details or Diagnostics.
-
-## Action feedback
-
-Every write action should produce feedback at three moments.
-
-### Immediate
-
-The interface acknowledges the click and shows pending state.
-
-### Final
-
-The interface clearly shows success or failure.
-
-### Verified result
-
-The relevant page state visibly changes.
-
-Examples:
-
-- selected candidate label changes;
-- downstream nodes become stale;
-- review status becomes Approved;
-- accepted result appears in Parts;
-- a new Run appears in lineage.
-
-A success toast without a visible state change is insufficient.
-
-## Artifact presentation
-
-Artifacts should be presented by purpose, not only filename.
-
-Good:
-
-- Active Assembly Plan
-- Reviewed Part Handoff
-- CAD IR Draft
-- Part Result Review
-- Work-level Review
-
-The filename can remain as secondary metadata.
-
-When repeated filenames exist, distinguish them by role first and provenance second.
-
-Example:
-
-- Root workflow report
-- Upper-link child result report
-- Rework attempt report
-
-Do not render four indistinguishable `report.json` entries.
-
-## Candidate parts
-
-A candidate node should support two distinct concepts:
-
-### Inspect candidate
-
-Read-only. Explains role, support status, selection state, interfaces, current pipeline state, and limitations.
-
-### Select candidate
-
-Explicit write action. Requires confirmation and explains stale consequences.
-
-Clicking the node itself must not silently change the selected candidate.
-
-Reference-only components may be inspected but may not offer generation or selection actions.
-
-## Reviews
-
-Agent review and user review are different concepts.
-
-### Agent review
-
-CadFlow assesses evidence, completeness, validation, risks, and confidence.
-
-### User review
-
-The user decides whether to:
-
-- approve;
-- request revision;
-- mark blocked.
-
-The UI must not make the user appear responsible for assigning an engineering score that should be produced by deterministic validation or the review agent.
-
-## Copywriting rules
-
-Prefer concrete language:
-
-- what happened;
-- what it means;
-- what remains incomplete;
-- what to do next.
-
-Avoid unexplained internal terms:
-
-- active lineage leaf;
-- materialization;
-- adapter operation;
-- route selected;
-- projection unavailable;
-- stage_count.
-
-When an internal term is necessary, introduce it with a user-facing explanation.
-
-## Empty, blocked, stale, and skipped states
-
-### Empty
-
-Explain what has not started and how to start it.
-
-### Blocked
-
-Explain the blocking category:
-
-- missing user input;
-- missing prerequisite;
-- invalid override;
-- validation failure;
-- unsupported capability;
-- unexpected runtime failure.
-
-Offer only valid recovery choices.
-
-### Stale
-
-Explain which upstream decision changed and what must be regenerated or reviewed.
-
-### Skipped
-
-Explain whether it is intentional.
-
-Contract mode `execution_skipped` is a successful contract outcome, not a failure.
+The user may inspect, compare, or start an explicit revision from a Snapshot.
+Normal mutation controls remain unavailable.
 
 ## Localization
 
-Localization includes meaning, not only labels.
+When a language switch exists, the following switch consistently:
 
-The Chinese UI must also localize:
-
-- action consequences;
+- Agent action summaries;
+- questions and assumptions;
+- action labels and consequences;
+- pending, success, failure, and recovery;
+- validation and limitation explanations;
 - disabled reasons;
-- state explanations;
-- confirmation details;
-- validation errors;
-- success/failure feedback;
-- empty and skipped explanations.
+- empty and unsupported states.
 
-Do not concatenate translated labels with untranslated sentences into a mixed-language primary surface.
+Internal enums and model source may remain stable, but they must not become
+untranslated primary explanations.
 
-## Product readiness review
+## Diagnostics
 
-For every significant UI or Workflow change, review the affected journey with this table:
+Advanced/Diagnostics may contain:
 
-| Question | Required evidence |
-| --- | --- |
-| Can the user identify the current state? | Screenshot or browser verification |
-| Is the recommended next action obvious? | One primary action in the relevant state |
-| Does the action explain its consequence? | Label, concise help, or confirmation |
-| Is pending state visible? | Runtime verification |
-| Is success/failure explicit? | Runtime verification |
-| Is the postcondition visible? | Refreshed state verification |
-| Are nonessential details hidden? | Primary/Advanced inspection |
-| Are artifacts directly inspectable? | Viewer verification |
-| Does the Workflow match backend semantics? | Projection and browser verification |
-| Are both languages coherent? | English and Chinese browser verification |
-| Were docs synchronized? | Relevant documentation diff |
+- full lineage;
+- raw contracts;
+- model-program source;
+- validator payloads;
+- episode events;
+- execution logs;
+- provider identity;
+- audit metadata.
 
-## Anti-patterns
+Never expose arbitrary filesystem browsing, secrets, or unrestricted execution.
 
-Avoid:
+## Legacy Workflow Cockpit
 
-- adding a card for every available data structure;
-- placing every action on the same visual level;
-- using Hover to expose the full backend contract;
-- showing raw JSON as the default success result;
-- using tests as proof that a user understands the page;
-- presenting a deterministic fallback as full agentic capability;
-- mixing Current Work and historical Run Snapshot actions;
-- showing a selected stage as failed because an upstream limitation exists;
-- hiding important consequences only in a tooltip;
-- assuming more provenance always improves clarity;
-- adding workflow stages that represent implementation functions rather than user-visible checkpoints.
+During migration the existing Workflow Cockpit remains a compatibility and
+diagnostic surface.
 
-## Completion checklist
+Do not invest in additional stage cards, graph states, or review forms unless
+required for:
 
-Before completing a UI or Workflow task:
+- preserving safe operation;
+- supporting migration;
+- fixing a release-blocking bug;
+- exposing a real new Agent-first capability.
 
-- Confirm the user goal and checkpoint.
-- Remove information unrelated to the current decision.
-- State the current conclusion in plain language.
-- Provide at most one dominant recommended action.
-- Explain important action consequences.
-- Show pending, success, failure, and verified postcondition.
-- Make relevant artifacts directly inspectable.
-- Keep debug data under Advanced.
-- Verify Work/Run and stale/accepted semantics.
-- Verify Chinese and English experiences.
-- Update readiness, roadmap, task board, usage, architecture, or UX documents as applicable.
-- Report what was not manually verified.
+## Definition of done
 
-## Workflow guidance and information reduction gate
+A workbench change is complete only when:
 
-Each visible Workflow stage projection provides a localized Guidance Contract:
-purpose, current conclusion, why it matters, whether a user decision is
-required, decision summary, one recommended next action, expected result,
-normal next stage, blocked reason, recovery action, and limitations. These
-fields explain the user's engineering workflow; they do not expose action keys,
-Run ids, artifact paths, or backend state as the explanation.
-
-The selected-stage primary order is: current conclusion, user decision,
-recommended action, expected result, user input, agent interpretation, agent
-output, related review and evidence, alternatives, then Advanced. Action hover
-remains concise. Full action targets, internal action keys, expected
-postconditions, and audit metadata stay available in expandable Action Details.
+- the design result is visible;
+- Agent activity is understandable;
+- the recommended action is clear;
+- pending, success, failure, and recovery are exercised;
+- trust state and limitations are honest;
+- relevant geometry or deliverables can be inspected;
+- Current Work and Run Snapshot semantics remain correct;
+- automated and real-browser verification are reported separately.
