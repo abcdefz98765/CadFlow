@@ -40,6 +40,8 @@ Current directories are retained during migration:
 - `review/` — compatibility name for Evaluation and evidence explanation.
 - `revision/` — child-Run change intent and candidate revision.
 - `assembly/` — Assembly Job planning, placement, constraints, and checks.
+- `design_part/` — M2 provider-selected structured-contract episode contract;
+  version 0.1 exposes validation only and no CAD execution authority.
 
 Target additions still required by the roadmap:
 

@@ -369,14 +369,23 @@ Current code provides:
 - a bounded episode state machine;
 - a deterministic one-shot proposer around `create_part_ir`;
 - deterministic template-backed CAD execution.
+- a typed `design_part` v0.1 runtime skill definition;
+- a provider-selected structured-contract episode preview in which the
+  provider may request semantic context, create or patch a candidate, react to
+  validator observations, ask the user, or stop;
+- context provenance, trust roles, Work filtering, and byte/request budgets for
+  that preview.
 
 It does not yet provide:
 
-- a real provider-driven action loop;
-- typed runtime skill/tool/knowledge registry;
+- product routing from `WorkOrchestrator` into the provider-selected episode;
 - sandboxed model-program execution;
 - feature-graph CAD IR;
 - Agentic assembly or deliverable episodes.
+
+The preview validates only the legacy structured CAD IR compatibility
+contract. It has no execution or publication tool and is not production-usable
+Agentic CAD design.
 
 No current deterministic fallback may be presented as these target
 capabilities.

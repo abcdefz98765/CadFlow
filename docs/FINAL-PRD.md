@@ -1,6 +1,6 @@
 # FINAL PRD: CadFlow Agent CAD Workbench
 
-Status date: 2026-07-27.
+Status date: 2026-08-01.
 
 Status: target product baseline. The repository is migrating from the former
 workflow-first single-part product to this Agent-first architecture. Capability
@@ -375,11 +375,16 @@ Implemented foundations worth retaining:
 - STEP-first output and basic geometry inspection;
 - isolated candidate execution and failure cleanup;
 - controlled artifact access and a tested local console.
+- an internal `design_part` v0.1 typed skill registry and provider-selected
+  structured-contract episode preview with semantic context and local
+  validation observations.
 
 Major migration gaps:
 
 - the current CAD IR is a closed part-family selector;
 - the current product Agent Episode is effectively one-shot;
+- the new provider-selected episode preview is not yet routed through the
+  product `WorkOrchestrator` and has no sandboxed execution tool;
 - provider-backed Agentic design is not product-usable;
 - the UI is organized around the former fixed workflow;
 - ordered Part Job attempts and the deterministic product `WorkOrchestrator`

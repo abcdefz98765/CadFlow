@@ -311,6 +311,16 @@ Record:
 Do not record private chain-of-thought, secrets, unrestricted transcripts, or
 raw provider payloads.
 
+M2 currently implements an internal `design_part` v0.1 episode preview. Its
+typed registry allows semantic context requests, structured compatibility
+contract creation/patching, local validation, focused questions, and typed
+stops. Context manifest entries record Work, Run, Part Job, checkpoint, trust
+role, and compact summary. Request and byte budgets are enforced.
+
+This preview has no execution tool. A validated `cad_ir_draft` remains a
+candidate contract; it is not geometry, a reviewable result, or an accepted
+result.
+
 ## Build and evaluation artifacts
 
 Candidate execution occurs in an isolated staging directory.

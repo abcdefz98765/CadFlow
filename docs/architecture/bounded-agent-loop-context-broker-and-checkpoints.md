@@ -339,15 +339,25 @@ Implemented:
 - structured validation observations;
 - deterministic proposer compatibility;
 - isolated deterministic candidate execution in the existing CAD pipeline.
+- `design_part` v0.1 typed capability registry;
+- an explicit provider-selected structured-contract loop with context choice,
+  contract creation/patching, validation observation, focused questions, and
+  typed stops;
+- semantic context provenance, trust role, Work identity checks, and request/
+  byte budgets.
 
 Not implemented:
 
-- provider-selected multi-action Design Episode;
+- product-integrated provider-selected design-to-execution Episode;
 - Tool Broker for untrusted model programs;
 - sandbox enforcement profile;
 - feature-graph geometry contract;
 - Agentic assembly and drawing tools;
 - real branching repair behavior in the product path.
+
+The current provider-selected loop is an internal preview. It can branch after
+contract-validator observations, but it cannot request CAD execution and does
+not publish a reviewable result.
 
 ## Acceptance tests
 

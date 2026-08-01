@@ -1,6 +1,6 @@
 # CadFlow Task Board
 
-Status date: 2026-07-27.
+Status date: 2026-08-01.
 
 The ordered roadmap is `docs/roadmap/milestones.md`. Execution starts at
 `docs/tasks/agent-start-here.md`. Do not pull later UI, assembly, or assurance
@@ -58,19 +58,27 @@ work ahead of the current milestone without an explicit architecture decision.
 
 ### Registry and episode
 
-- [ ] Define the minimal `design_part` skill contract.
-- [ ] Implement a typed registry for actions, tools, context, knowledge, budgets,
+- [x] Define the minimal `design_part` skill contract.
+- [x] Implement a typed registry for actions, tools, context, knowledge, budgets,
   and stop reasons used by that skill.
-- [ ] Remove duplicate runtime prompt text for the selected vertical slice.
-- [ ] Implement provider-selected actions rather than a fixed proposer sequence.
-- [ ] Persist concise actions, observations, candidates, and budget use.
+- [x] Remove duplicate runtime prompt text for the selected vertical slice.
+  - The new action request is compiled from the typed registry; legacy provider
+    operations retain compatibility prompt assembly.
+- [x] Implement provider-selected actions rather than a fixed proposer sequence.
+  - Internal structured-contract preview only; product routing remains open.
+- [x] Persist concise actions, observations, candidates, and budget use.
 
 ### Context Broker
 
-- [ ] Supply active intent, Part Job, interfaces, accepted constraints, previous
+- [x] Supply active intent, Part Job, interfaces, accepted constraints, previous
   candidates, and observations through semantic keys.
-- [ ] Reject arbitrary paths and unrelated Work context.
-- [ ] Record provenance and trust role for supplied context.
+- [x] Reject arbitrary paths and unrelated Work context.
+- [x] Record provenance and trust role for supplied context.
+- [x] Keep the complete regression suite green for package 1.
+  - 2026-08-01: `558 passed, 2 skipped`.
+- [x] Complete scripted-provider file-level acceptance for package 1.
+  - Validated contract evidence was persisted; no STEP/CAD product was
+    generated or claimed.
 
 ### Tool Broker and sandbox
 

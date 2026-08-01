@@ -1,6 +1,6 @@
 # Runtime Entry-Point Inventory
 
-Status date: 2026-07-27.
+Status date: 2026-08-01.
 
 Scope: every current product-facing or public Python entry point that creates a
 Work/Run, accepts a prompt, creates or executes CAD IR, performs the
@@ -39,7 +39,7 @@ record the implemented orchestrator boundary.
 | `run_text_pipeline` | prompt → requirement → CAD IR → deterministic execution | compatibility | Preserve supported-family fallback; future product calls it only through a compatibility adapter. |
 | `StageRunner.run_text_pipeline` and `run_stage(..., "text_pipeline")` | Console wrapper over `run_text_pipeline` | compatibility | Keep for legacy Workflow Diagnostics. |
 | `run_agent_create_pipeline` | prompt → adapter planning → CAD IR → execution | compatibility | Name does not imply Agentic design; keep honestly labeled one-shot orchestration. |
-| `run_provider_create_pipeline` | provider-backed prompt create | evaluation | Manual/provider evaluation only until the M2 Agentic loop exists. |
+| `run_provider_create_pipeline` | provider-backed prompt create | evaluation | Manual/provider evaluation only until the M2 loop is product-integrated. |
 | `run_provider_normalized_create_pipeline` | provider normalization plus deterministic CAD IR | removable | Freeze and migrate evaluation callers; do not add product dependencies. |
 | `run_provider_normalized_design_create_pipeline` | normalized design/assembly evaluation | evaluation | Keep only for opt-in quality evaluation; it does not generate an Assembly Job. |
 | `CADWorkflow.run` / `run_workflow` | older prompt workflow | compatibility | Preserve library compatibility; no target-product state authority. |
@@ -60,6 +60,7 @@ record the implemented orchestrator boundary.
 | `DesignPlannerFakeAgentAdapter.generate_candidate_plans` / conversion to IR | deterministic plan-to-IR | compatibility | Retain for supported-family regression. |
 | `AgentAdapter.create_part_ir` implementations | reviewed handoff → one legacy CAD IR | compatibility | Retain as one-shot M1 behavior; not a real Agentic Design Episode. |
 | `run_create_part_ir_episode` | fixed request/submit/validate episode | compatibility | Preserve for regression; M2 replaces the proposer behavior, not M1. |
+| `run_design_part_episode` | provider-selected structured-contract episode preview | evaluation | M2 internal preview; no CAD execution, publication, or Work authority until routed through `WorkOrchestrator` and Tool Broker. |
 | `ir_from_file`, `ir_from_planning_artifact` | legacy CAD IR constructors | compatibility | Retain for old examples and migrations. |
 | `runner.run_part` | old `part_type` dynamic builder path | removable | Freeze; migrate callers to the deterministic IR compatibility executor. |
 | `CADGenerator.build` | old workflow CAD builder | compatibility | Retain only through `CADWorkflow`. |

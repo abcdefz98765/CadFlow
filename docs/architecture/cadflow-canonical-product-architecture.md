@@ -4,7 +4,7 @@
 
 This document is the canonical target architecture for CadFlow.
 
-Status date: 2026-07-27.
+Status date: 2026-08-01.
 
 CadFlow is migrating from a fixed workflow-first single-part product to an
 Agent-first CAD design workbench. This document defines the target. The current
@@ -604,6 +604,12 @@ runtime through one compatibility port. Legacy Run metadata is translated by
 an explicit read-only projector; target product trust and acceptance are
 resolved from manifest pointers and artifact references. This is runtime
 consolidation, not Agentic design or Assembly generation.
+
+The first M2 package adds a typed `design_part` v0.1 capability registry and an
+internal provider-selected structured-contract loop. It demonstrates semantic
+context choice, validation-observation branching, focused user questions, and
+budgeted evidence. It is not yet a product path and exposes no CAD execution or
+model-program authority, so it does not satisfy the M2 vertical-slice gate.
 
 Migration rules:
 

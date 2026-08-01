@@ -15,6 +15,11 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
+from ai_native_cad.agents.registry import (
+    RUNTIME_SKILL_REGISTRY,
+    SkillDefinition,
+)
+
 
 class StopReason(str, Enum):
     """The only terminal outcomes an episode may record."""
@@ -26,6 +31,7 @@ class StopReason(str, Enum):
     VALIDATION_EXHAUSTED = "validation_exhausted"
     BUDGET_EXHAUSTED = "budget_exhausted"
     PROVIDER_FAILURE = "provider_failure"
+    POLICY_BLOCKED = "policy_blocked"
 
 
 class UnknownAgentActionError(ValueError):
@@ -38,6 +44,8 @@ class EpisodeContractError(ValueError):
 
 ALLOWLISTED_ACTIONS = frozenset({
     "request_context",
+    "create_contract",
+    "patch_contract",
     "submit_contract",
     "request_validation",
     "repair_contract",
@@ -46,6 +54,12 @@ ALLOWLISTED_ACTIONS = frozenset({
 })
 
 CONTEXT_KEYS = frozenset({
+    "intent_active",
+    "part_job",
+    "part_interfaces",
+    "previous_candidates",
+    "previous_validation_observations",
+    "user_acceptance_or_revision",
     "requirement_active",
     "assembly_plan",
     "reviewed_part_handoff",
@@ -71,27 +85,54 @@ class AgentObjective:
 @dataclass(frozen=True)
 class AgentCapabilities:
     capability_mode: str = "deterministic_fallback"
+    skill_id: str = "legacy_create_part_ir"
+    skill_version: str = "0.1.0"
     allowed_actions: frozenset[str] = ALLOWLISTED_ACTIONS
+    allowed_context_keys: frozenset[str] = CONTEXT_KEYS
+    allowed_contract_types: frozenset[str] = frozenset({"cad_ir_draft"})
+    allowed_stop_reasons: frozenset[str] = frozenset(
+        reason.value for reason in StopReason if reason != StopReason.COMPLETED
+    )
     direct_code_execution: bool = False
 
     def __post_init__(self) -> None:
         if not self.allowed_actions <= ALLOWLISTED_ACTIONS:
             raise ValueError("agent capabilities include an action outside the allowlist")
+        if not self.allowed_context_keys <= CONTEXT_KEYS:
+            raise ValueError("agent capabilities include an unknown context key")
         if self.direct_code_execution:
             raise ValueError("agent episodes cannot enable direct code execution")
+
+    @classmethod
+    def for_skill(
+        cls,
+        skill: SkillDefinition,
+        *,
+        capability_mode: str,
+    ) -> "AgentCapabilities":
+        return cls(
+            capability_mode=capability_mode,
+            skill_id=skill.skill_id,
+            skill_version=skill.version,
+            allowed_actions=skill.allowed_actions,
+            allowed_context_keys=skill.allowed_context_keys,
+            allowed_contract_types=skill.output_contract_types,
+            allowed_stop_reasons=skill.stop_reasons,
+        )
 
 
 @dataclass(frozen=True)
 class EpisodeBudget:
     max_steps: int = 8
     max_context_requests: int = 4
+    max_context_bytes: int = 65_536
     max_contract_submissions: int = 3
     max_repair_attempts: int = 2
     timeout_seconds: float = 180.0
 
     def __post_init__(self) -> None:
         if any(value < 0 for value in (
-            self.max_steps, self.max_context_requests,
+            self.max_steps, self.max_context_requests, self.max_context_bytes,
             self.max_contract_submissions, self.max_repair_attempts,
         )) or self.timeout_seconds < 0:
             raise ValueError("episode budgets must be non-negative")
@@ -111,7 +152,12 @@ class ContextEnvelope:
     def as_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
-            "objective": {"operation": self.objective.operation, "summary": self.objective.summary},
+            "objective": {
+                "operation": self.objective.operation,
+                "summary": self.objective.summary,
+                "work_id": self.objective.work_id,
+                "checkpoint": self.objective.checkpoint,
+            },
             "workflow": dict(self.workflow),
             "accepted_decisions": list(self.accepted_decisions),
             "selected_part": dict(self.selected_part),
@@ -154,6 +200,19 @@ class AgentAction:
             raise EpisodeContractError("action assumptions must be a list of strings")
         if not isinstance(questions, list) or not all(isinstance(item, dict) for item in questions):
             raise EpisodeContractError("ask_user questions must be a list of objects")
+        if action == "ask_user" and (
+            not questions
+            or any(
+                not isinstance(item.get("field"), str)
+                or not item.get("field")
+                or not isinstance(item.get("question"), str)
+                or not item.get("question")
+                for item in questions
+            )
+        ):
+            raise EpisodeContractError(
+                "ask_user requires focused field and question values"
+            )
         if contract is not None and not isinstance(contract, dict):
             raise EpisodeContractError("contract must be an object")
         return cls(
@@ -178,6 +237,9 @@ class ContextItem:
     summary: dict[str, Any]
     content: dict[str, Any] = field(repr=False)
     active: bool = True
+    work_id: str | None = None
+    part_job_id: str | None = None
+    trust_role: str = "accepted_input"
 
     def manifest_entry(self) -> dict[str, Any]:
         return {
@@ -185,6 +247,10 @@ class ContextItem:
             "source_run_id": self.source_run_id,
             "source_stage_id": self.source_stage_id,
             "source_type": self.source_type,
+            "work_id": self.work_id,
+            "part_job_id": self.part_job_id,
+            "source_checkpoint": self.source_stage_id,
+            "trust_role": self.trust_role,
             "summary": self.summary,
             "raw_artifact_available": bool(self.content),
         }
@@ -200,23 +266,43 @@ class ContextBroker:
     def available_keys(self) -> tuple[str, ...]:
         return tuple(sorted(self._items))
 
-    def resolve(self, context_key: str) -> ContextItem:
+    def resolve(
+        self,
+        context_key: str,
+        *,
+        allowed_keys: frozenset[str] | None = None,
+        expected_work_id: str | None = None,
+    ) -> ContextItem:
         if context_key not in CONTEXT_KEYS:
             raise EpisodeContractError("context requests must use an allowlisted semantic context key")
+        if allowed_keys is not None and context_key not in allowed_keys:
+            raise EpisodeContractError("active skill does not allow this semantic context key")
         item = self._items.get(context_key)
         if item is None:
             raise EpisodeContractError(f"active lineage does not provide context: {context_key}")
+        if (
+            expected_work_id is not None
+            and item.work_id is not None
+            and item.work_id != expected_work_id
+        ):
+            raise EpisodeContractError(
+                "semantic context belongs to an unrelated Work"
+            )
         return item
 
 
 @dataclass(frozen=True)
 class AgentEpisodeResult:
     episode_id: str
+    operation: str
+    skill_id: str
+    skill_version: str
     status: str
     stop_reason: StopReason
     capability_mode: str
     step_count: int
     context_request_count: int
+    context_byte_count: int
     contract_submission_count: int
     repair_attempt_count: int
     final_contract: dict[str, Any] | None
@@ -227,12 +313,14 @@ class AgentEpisodeResult:
         return {
             "schema_version": 1,
             "episode_id": self.episode_id,
-            "operation": "create_part_ir",
+            "operation": self.operation,
+            "skill": {"id": self.skill_id, "version": self.skill_version},
             "mode": self.capability_mode,
             "capability_mode": self.capability_mode,
             "status": self.status,
             "step_count": self.step_count,
             "context_request_count": self.context_request_count,
+            "context_byte_count": self.context_byte_count,
             "contract_submission_count": self.contract_submission_count,
             "repair_attempt_count": self.repair_attempt_count,
             "stop_reason": self.stop_reason.value,
@@ -319,7 +407,7 @@ class EpisodeOrchestrator:
     def run(self, supplier: ActionSupplier) -> AgentEpisodeResult:
         started = time.monotonic()
         episode_id = uuid4().hex
-        steps = context_requests = submissions = repairs = 0
+        steps = context_requests = context_bytes = submissions = repairs = 0
         draft: dict[str, Any] | None = None
         feedback: dict[str, Any] | None = None
         state = "created"
@@ -328,9 +416,13 @@ class EpisodeOrchestrator:
         def finish(reason: StopReason, *, validated: bool = False) -> AgentEpisodeResult:
             status = "completed" if reason == StopReason.COMPLETED and validated else "safely_blocked"
             result = AgentEpisodeResult(
-                episode_id=episode_id, status=status, stop_reason=reason,
+                episode_id=episode_id, operation=self.objective.operation,
+                skill_id=self.capabilities.skill_id,
+                skill_version=self.capabilities.skill_version,
+                status=status, stop_reason=reason,
                 capability_mode=self.capabilities.capability_mode, step_count=steps,
                 context_request_count=context_requests, contract_submission_count=submissions,
+                context_byte_count=context_bytes,
                 repair_attempt_count=repairs, final_contract=draft,
                 validation_feedback=feedback, validated=validated,
             )
@@ -345,11 +437,26 @@ class EpisodeOrchestrator:
                 self.writer.event({"step": steps, "observation": "step_budget_exhausted"})
                 return finish(StopReason.BUDGET_EXHAUSTED)
 
-            action = AgentAction.from_value(supplier({
-                "state": state, "context_envelope": self.context_envelope.as_dict(),
-                "supplied_context": supplied_context, "draft": draft,
+            provider_state = {
+                "state": state,
+                "context_envelope": self.context_envelope.as_dict(),
+                "supplied_context": supplied_context,
+                "draft": draft,
                 "validation_feedback": feedback,
-            }))
+            }
+            try:
+                supplied_action = supplier(provider_state)
+            except Exception as exc:
+                self.writer.event(
+                    {
+                        "event_type": "system_observation",
+                        "step": steps,
+                        "observation": "provider_failure",
+                        "error_type": type(exc).__name__,
+                    }
+                )
+                return finish(StopReason.PROVIDER_FAILURE)
+            action = AgentAction.from_value(supplied_action)
             if action.action not in self.capabilities.allowed_actions:
                 raise UnknownAgentActionError(f"action is not enabled for this episode: {action.action}")
             steps += 1
@@ -360,25 +467,54 @@ class EpisodeOrchestrator:
                     return finish(StopReason.BUDGET_EXHAUSTED)
                 if not action.context_key:
                     raise EpisodeContractError("request_context requires context_key")
-                item = self.context_broker.resolve(action.context_key)
+                item = self.context_broker.resolve(
+                    action.context_key,
+                    allowed_keys=self.capabilities.allowed_context_keys,
+                    expected_work_id=self.objective.work_id,
+                )
+                item_bytes = len(
+                    json.dumps(item.content, sort_keys=True).encode("utf-8")
+                )
+                if context_bytes + item_bytes > self.budget.max_context_bytes:
+                    self.writer.event(
+                        {
+                            "step": steps,
+                            "action": action.action,
+                            "context_key": item.context_key,
+                            "observation": "context_byte_budget_exhausted",
+                        }
+                    )
+                    return finish(StopReason.BUDGET_EXHAUSTED)
                 context_requests += 1
+                context_bytes += item_bytes
                 self.writer.add_context(item)
                 supplied_context.append({**item.manifest_entry(), "content": item.content})
                 self.writer.event({"event_type": "agent_action", "step": steps, "action": action.action, "context_key": item.context_key, "reason": action.reason})
                 state = "gathering_context"
                 continue
 
-            if action.action in {"submit_contract", "repair_contract"}:
+            if action.action in {
+                "create_contract",
+                "patch_contract",
+                "submit_contract",
+                "repair_contract",
+            }:
                 if submissions >= self.budget.max_contract_submissions:
                     self.writer.event({"step": steps, "action": action.action, "observation": "submission_budget_exhausted"})
                     return finish(StopReason.BUDGET_EXHAUSTED)
-                if action.action == "repair_contract":
+                is_repair = action.action in {"patch_contract", "repair_contract"}
+                if is_repair:
                     if repairs >= self.budget.max_repair_attempts:
                         self.writer.event({"step": steps, "action": action.action, "observation": "repair_budget_exhausted"})
                         return finish(StopReason.BUDGET_EXHAUSTED)
                     repairs += 1
-                if action.contract_type != "cad_ir_draft" or not isinstance(action.contract, dict):
-                    raise EpisodeContractError("create_part_ir submissions must be cad_ir_draft objects")
+                if (
+                    action.contract_type not in self.capabilities.allowed_contract_types
+                    or not isinstance(action.contract, dict)
+                ):
+                    raise EpisodeContractError(
+                        "submitted contract type is not enabled for this episode"
+                    )
                 _reject_execution_fields(action.contract)
                 submissions += 1
                 draft = action.contract
@@ -387,9 +523,9 @@ class EpisodeOrchestrator:
                     "event_type": "agent_action", "step": steps, "action": action.action, "contract_type": action.contract_type,
                     "proposal_summary": action.summary or _contract_summary(draft),
                     "assumptions": list(action.assumptions),
-                    **({"repair_summary": action.summary or _contract_summary(draft)} if action.action == "repair_contract" else {}),
+                    **({"repair_summary": action.summary or _contract_summary(draft)} if is_repair else {}),
                 })
-                state = "repairing" if action.action == "repair_contract" else "proposing"
+                state = "repairing" if is_repair else "proposing"
                 continue
 
             if action.action == "request_validation":
@@ -421,6 +557,10 @@ class EpisodeOrchestrator:
                 reason = action.stop_reason or StopReason.INSUFFICIENT_CONTEXT
                 if reason == StopReason.COMPLETED:
                     raise EpisodeContractError("only a successful validator result may complete an episode")
+                if reason.value not in self.capabilities.allowed_stop_reasons:
+                    raise EpisodeContractError(
+                        "stop reason is not enabled for the active skill"
+                    )
                 self.writer.event({"step": steps, "action": action.action, "stop_reason": reason.value, "reason": action.reason})
                 return finish(reason)
 
@@ -451,6 +591,25 @@ class DeterministicCreatePartIRProposer:
             self._phase += 1
             return AgentAction(action="request_validation", reason="Validate the submitted CAD IR through the existing validator.")
         return AgentAction(action="stop", stop_reason=StopReason.VALIDATION_EXHAUSTED, reason="No repair proposer is enabled in minimal Phase 1.")
+
+
+class ProviderSelectedDesignPartSupplier:
+    """Ask a provider adapter to choose every next design_part action."""
+
+    def __init__(self, adapter: Any, skill: SkillDefinition) -> None:
+        choose = getattr(adapter, "choose_design_action", None)
+        if not callable(choose):
+            raise TypeError(
+                "provider-selected design requires choose_design_action"
+            )
+        self.adapter = adapter
+        self.skill = skill
+
+    def __call__(self, state: dict[str, Any]) -> AgentAction | dict[str, Any]:
+        return self.adapter.choose_design_action(
+            state=state,
+            skill_manifest=self.skill.manifest(),
+        )
 
 
 def build_create_part_ir_context(
@@ -494,23 +653,175 @@ def run_create_part_ir_episode(
 ) -> AgentEpisodeResult:
     envelope, broker = build_create_part_ir_context(handoff, run_id=artifact_dir.name, execution_request=execution_request)
 
-    def validate(contract: dict[str, Any]) -> dict[str, Any]:
-        # The pipeline's existing validator remains the authority.
-        from ai_native_cad.agents.validation import validate_input_ir_draft
-        from ai_native_cad.cad_ir.validator import validate_ir
-
-        feedback = validate_ir(contract)
-        if not feedback["valid"]:
-            return feedback
-        validate_input_ir_draft(contract)
-        return feedback
-
     orchestrator = EpisodeOrchestrator(
         objective=envelope.objective, context_envelope=envelope, context_broker=broker,
         capabilities=AgentCapabilities(), budget=budget or EpisodeBudget(),
-        validate_contract=validate, artifact_dir=artifact_dir,
+        validate_contract=_validate_cad_ir_contract, artifact_dir=artifact_dir,
     )
     return orchestrator.run(DeterministicCreatePartIRProposer(adapter, handoff, adapter_context))
+
+
+def build_design_part_context(
+    handoff: dict[str, Any],
+    *,
+    run_id: str,
+) -> tuple[ContextEnvelope, ContextBroker]:
+    """Project a reviewed legacy handoff into target semantic context keys."""
+    part_id = str(handoff.get("part_id") or "reviewed_part")
+    work_id = (
+        handoff.get("work_id")
+        if isinstance(handoff.get("work_id"), str)
+        else None
+    )
+    preserved = handoff.get("preserved_assembly_context")
+    preserved = preserved if isinstance(preserved, dict) else {}
+    interfaces = handoff.get("interface_constraints")
+    interfaces = interfaces if isinstance(interfaces, list) else []
+    source_type = "accepted_active_lineage"
+    items = [
+        ContextItem(
+            "intent_active",
+            run_id,
+            "intent_snapshot",
+            source_type,
+            {"part_id": part_id, "part_brief": _short_text(handoff.get("part_brief"))},
+            {"part_id": part_id, "part_brief": handoff.get("part_brief")},
+            work_id=work_id,
+            part_job_id=part_id,
+        ),
+        ContextItem(
+            "part_job",
+            run_id,
+            "part_job",
+            source_type,
+            {"part_id": part_id, "status": handoff.get("status")},
+            {
+                "part_id": part_id,
+                "status": handoff.get("status"),
+                "role": handoff.get("role"),
+                "preserved_context": preserved,
+            },
+            work_id=work_id,
+            part_job_id=part_id,
+        ),
+        ContextItem(
+            "part_interfaces",
+            run_id,
+            "part_interfaces",
+            source_type,
+            {"part_id": part_id, "interface_count": len(interfaces)},
+            {"part_id": part_id, "interfaces": interfaces},
+            work_id=work_id,
+            part_job_id=part_id,
+        ),
+        ContextItem(
+            "previous_candidates",
+            run_id,
+            "geometry_candidate",
+            "episode_observation",
+            {"candidate_count": 0},
+            {},
+            work_id=work_id,
+            part_job_id=part_id,
+            trust_role="observation",
+        ),
+        ContextItem(
+            "previous_validation_observations",
+            run_id,
+            "contract_validation",
+            "episode_observation",
+            {"observation_count": 0},
+            {},
+            work_id=work_id,
+            part_job_id=part_id,
+            trust_role="observation",
+        ),
+        ContextItem(
+            "user_acceptance_or_revision",
+            run_id,
+            "user_decision",
+            source_type,
+            {"review_status": handoff.get("status")},
+            {"review_status": handoff.get("status")},
+            work_id=work_id,
+            part_job_id=part_id,
+        ),
+    ]
+    broker = ContextBroker(items)
+    envelope = ContextEnvelope(
+        objective=AgentObjective(
+            "design_part",
+            f"Design a structured candidate for {part_id}",
+            work_id=work_id,
+            checkpoint="geometry_candidate",
+        ),
+        workflow={
+            "checkpoint": "geometry_candidate",
+            "active_root_run_id": run_id,
+            "active_leaf_run_id": run_id,
+            "source_handoff": "reviewed_part_handoff.json",
+        },
+        accepted_decisions=("The selected Part Job handoff is active.",),
+        selected_part={"part_id": part_id, "review_status": handoff.get("status")},
+        constraints=(
+            "Only a structured CAD IR compatibility candidate is enabled.",
+            "No CAD execution or model-program source is enabled.",
+        ),
+        previous_attempts=(),
+        available_context=broker.available_keys,
+    )
+    return envelope, broker
+
+
+def run_design_part_episode(
+    *,
+    adapter: Any,
+    handoff: dict[str, Any],
+    artifact_dir: Path,
+    budget: EpisodeBudget | None = None,
+    validate_contract: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> AgentEpisodeResult:
+    """Run the first provider-selected M2 action loop without CAD execution."""
+    skill = RUNTIME_SKILL_REGISTRY.for_operation("design_part")
+    envelope, broker = build_design_part_context(
+        handoff,
+        run_id=artifact_dir.name,
+    )
+    limits = skill.budget
+    episode_budget = budget or EpisodeBudget(
+        max_steps=limits.max_steps,
+        max_context_requests=limits.max_context_requests,
+        max_context_bytes=limits.max_context_bytes,
+        max_contract_submissions=limits.max_contract_submissions,
+        max_repair_attempts=limits.max_repair_attempts,
+        timeout_seconds=limits.timeout_seconds,
+    )
+    orchestrator = EpisodeOrchestrator(
+        objective=envelope.objective,
+        context_envelope=envelope,
+        context_broker=broker,
+        capabilities=AgentCapabilities.for_skill(
+            skill,
+            capability_mode="provider_selected_structured_contract_preview",
+        ),
+        budget=episode_budget,
+        validate_contract=validate_contract or _validate_cad_ir_contract,
+        artifact_dir=artifact_dir,
+    )
+    return orchestrator.run(ProviderSelectedDesignPartSupplier(adapter, skill))
+
+
+def _validate_cad_ir_contract(contract: dict[str, Any]) -> dict[str, Any]:
+    # Existing local validators remain the authority for this compatibility
+    # contract.  No CAD execution occurs in this episode.
+    from ai_native_cad.agents.validation import validate_input_ir_draft
+    from ai_native_cad.cad_ir.validator import validate_ir
+
+    feedback = validate_ir(contract)
+    if not feedback["valid"]:
+        return feedback
+    validate_input_ir_draft(contract)
+    return feedback
 
 
 def _reject_execution_fields(value: Any, path: str = "") -> None:

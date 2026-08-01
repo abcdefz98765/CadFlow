@@ -1,6 +1,6 @@
 # CadFlow Target Milestones
 
-Status date: 2026-07-27.
+Status date: 2026-08-01.
 
 This roadmap implements the Agent-first target in `docs/FINAL-PRD.md`.
 
@@ -127,6 +127,26 @@ Out of scope:
 - full feature-graph IR;
 - batch assembly;
 - release-grade engineering validation.
+
+Status:
+
+- in progress;
+- first internal package implemented on 2026-08-01:
+  - `design_part` v0.1 skill contract and typed registry;
+  - provider-selected semantic context, contract creation/patching,
+    validation, focused-question, and stop actions;
+  - validation-observation-driven repair behavior;
+  - Work/Run/Part/checkpoint/trust context provenance and request/byte budgets;
+  - deterministic fallback remains a separate, explicitly labeled path;
+- full regression suite remains green at `558 passed, 2 skipped`;
+- scripted-provider file-level acceptance confirmed three provider-selected
+  actions, provenance-safe episode evidence, local validation, and zero CAD
+  product output;
+- this package validates a structured legacy CAD IR candidate only. It is not
+  routed through the product `WorkOrchestrator`, cannot execute CAD, and cannot
+  publish a reviewable result;
+- M2 remains unaccepted pending Tool Broker/sandbox enforcement, product
+  routing, STEP-first execution/inspection/publication, and the benchmark gate.
 
 ## M3 — General structured geometry contract
 

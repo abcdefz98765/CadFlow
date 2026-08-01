@@ -1,6 +1,6 @@
 # Agent Implementation Start Here
 
-Status date: 2026-07-27.
+Status date: 2026-08-01.
 
 This is the execution entry point after the documentation correction. It does
 not replace the PRD, architecture, roadmap, or task board.
@@ -22,8 +22,10 @@ choosing the easiest implementation.
 ## Current execution scope
 
 M1 runtime consolidation and domain foundations passed acceptance on
-2026-07-27. The next milestone is M2, but it must not be started as an
-incidental extension of M1 work.
+2026-07-27. M2 is now in progress. Its first internal package implements the
+`design_part` typed registry and provider-selected structured-contract preview;
+Tool Broker sandboxing, product routing, execution/publication, and benchmark
+acceptance remain open.
 
 In particular, do not begin later work by:
 
@@ -34,7 +36,7 @@ In particular, do not begin later work by:
 - claiming Assembly Job, drawings, or Agentic design before implementation and
   verification exist.
 
-## First work package
+## M1 first work package
 
 Status: completed on 2026-07-25. M1 then passed implementation and usage
 acceptance on 2026-07-27. The accepted decision, inventory, record contracts,
@@ -56,6 +58,22 @@ Produce one reviewable change set that:
    immutable Run evidence, and manifest-based product state.
 
 Do not combine this work package with the Agent sandbox or new Workbench UI.
+
+## Current M2 work package
+
+The current reviewable package is deliberately narrower than the full M2 gate:
+
+1. one `design_part` skill version;
+2. one typed registry rather than a general plugin platform;
+3. provider-selected semantic context and structured-contract actions;
+4. local validation observations and provider-selected patch/question/stop;
+5. request, byte, submission, repair, time, and step budgets;
+6. concise provenance-safe episode evidence;
+7. no CAD/model-program execution or product publication.
+
+The next package must connect the episode through `WorkOrchestrator` and add an
+enforceable Tool Broker execution boundary. Do not expose source execution
+until the sandbox profile fails closed on this Windows environment.
 
 ## Change discipline
 

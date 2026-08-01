@@ -1,6 +1,6 @@
 # Current Product Readiness
 
-Status date: 2026-07-27.
+Status date: 2026-08-01.
 
 This document distinguishes the Agent-first target architecture from the
 currently implemented deterministic product and the accepted M1 runtime
@@ -66,6 +66,23 @@ Workbench and does not execute provider-generated model programs.
 - `create_part_ir` episode artifacts;
 - validator observations.
 
+## M2 internal preview — implemented, not production usable
+
+- `design_part` v0.1 typed registry for actions, context, tools, knowledge,
+  budgets, output contracts, prohibitions, and stop reasons.
+- Provider-selected next actions for semantic context, structured contract
+  creation/patching, local validation, focused user questions, and typed stop.
+- Observation-driven contract repair in a bounded episode.
+- Context Work/Run/Part/checkpoint/trust provenance, unrelated-Work rejection,
+  and request/byte budgets.
+- Concise episode actions, submissions, observations, budget use, and result
+  artifacts without private reasoning or raw provider traffic.
+
+This preview is not connected to the product `WorkOrchestrator`. Its only tool
+is structured-contract validation. It cannot execute CAD, publish a reviewable
+result, or update acceptance, so it must not be described as production
+Agentic CAD design.
+
 The product `create_part_ir` path currently follows a fixed proposer sequence:
 one fixed context request, one adapter submission, one validation request, and
 no real provider-selected repair loop. It must be labeled deterministic or
@@ -90,7 +107,7 @@ one-shot orchestration, not Agentic design.
 
 ## Not implemented
 
-- Agent-selected multi-action Design Episode.
+- Product-integrated provider-selected design-to-execution Episode.
 - Tool Broker for untrusted model programs.
 - Enforced sandbox profile for provider-generated CAD source.
 - General feature-graph geometry contract.
@@ -122,7 +139,7 @@ architecture:
 
 - fixed fifteen-checkpoint primary Workflow;
 - flat closed-family CAD IR;
-- deterministic fixed-action episode behavior;
+- deterministic fixed-action behavior in the current product path;
 - legacy Workflow Console stage/availability presentation outside the new
   manifest-derived product projection;
 - hard-coded capability labeling in reviewed-part results;
@@ -135,18 +152,25 @@ These are migration tasks, not accepted target behavior.
 ## Verification state
 
 - Automated verified: all test files passed in exhaustive shards with
-  `550 passed, 2 skipped` on 2026-07-27.
+  `558 passed, 2 skipped` on 2026-08-01.
+- The M1 acceptance baseline was `550 passed, 2 skipped` on 2026-07-27.
 - New contract tests cover ordered Part Job attempt history, acceptance-pointer
   separation, immutable Run evidence, v1 projection, schema definitions,
   manifest-only product state, orchestrator routing, and retry idempotency.
 - Golden contract and full-mode tests remain green; the two skipped tests are
   opt-in/environment-gated checks, not M1 failures.
+- M2 package tests prove provider-selected action sequences, context-dependent
+  behavior, observation-driven patching, focused user questions, knowledge
+  isolation, unrelated-Work rejection, byte/request/action/repair budgets,
+  forbidden execution-field rejection, and provider-failure redaction.
+  Provider-visible action state is also tested for secret and local-path
+  redaction.
 - Verified meaning: the M1 runtime/contracts and the existing deterministic
   workflow, console contracts, safety boundaries, failure isolation, and
   compatibility behavior are internally consistent.
-- Not proven by those tests: Agent design breadth, provider-selected actions,
-  sandbox security, non-template geometry success, multi-part assembly, or
-  drawing-package usability.
+- Not proven by those tests: real external-provider design quality,
+  product-routed provider actions, sandbox security, non-template geometry
+  success, multi-part assembly, or drawing-package usability.
 - Manually verified for this package:
   - Golden Desktop Robot Arm contract mode passed;
   - full mode passed and produced STEP, STL, and preview output;
@@ -154,12 +178,22 @@ These are migration tasks, not accepted target behavior.
   - accepting the earlier `single_part_upper_link` result registered explicit
     STEP/STL/preview artifact ids and left active root and leaf unchanged;
   - the returned completion came from `work_orchestrator`.
+- Manually verified for the M2 internal package with a scripted provider:
+  - the provider selected `request_context`, `create_contract`, and
+    `request_validation` across three calls;
+  - the episode persisted skill `design_part` v0.1.0, `part_job` provenance,
+    and `accepted_input` trust role;
+  - local contract validation passed;
+  - no `model.step` or other CAD product was created, matching the declared
+    no-execution boundary.
+- A real external provider and product-routed episode have not been manually
+  verified.
 - No new UI was implemented, so this package did not require a new Workbench
   visual acceptance.
 - Manual browser verification: incomplete for the latest legacy Workflow
   Cockpit.
-- Target architecture verification: M1 passed. M2 and later milestone claims
-  remain unverified.
+- Target architecture verification: M1 passed. The first M2 internal package is
+  contract-tested; M2 acceptance and later milestone claims remain unverified.
 
 ## Current risks
 
@@ -177,8 +211,9 @@ These are migration tasks, not accepted target behavior.
 
 ## Current milestone
 
-M0 and M1 are complete. The next milestone is M2, the first provider-backed
-Agentic design vertical slice. It has not started in this package.
+M0 and M1 are complete. M2 is in progress: its provider-selected
+structured-contract preview exists, while the execution/publication vertical
+slice remains unimplemented.
 
 Later milestones remain:
 

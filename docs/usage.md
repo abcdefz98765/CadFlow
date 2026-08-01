@@ -249,6 +249,38 @@ a validated STEP artifact exists. The action registers controlled artifact
 references and updates the accepted-result pointer without advancing active
 design lineage.
 
+## Evaluate the M2 provider-selected design preview
+
+`run_design_part_episode` is an internal evaluation API for the first M2
+package. It asks an injected JSON-contract provider to choose each next action,
+while CadFlow enforces the registered `design_part` capability, semantic
+context, budgets, and local structured-contract validation.
+
+```python
+from pathlib import Path
+
+from ai_native_cad.agents import (
+    JsonContractAgentAdapter,
+    run_design_part_episode,
+)
+
+adapter = JsonContractAgentAdapter(your_injected_json_client)
+result = run_design_part_episode(
+    adapter=adapter,
+    handoff=reviewed_part_handoff,
+    artifact_dir=Path("outputs/design_part_preview"),
+)
+print(result.stop_reason.value, result.validated)
+```
+
+The injected client receives registry-compiled JSON action requests. Allowed
+actions are `request_context`, `create_contract`, `patch_contract`,
+`request_validation`, `ask_user`, and `stop`.
+
+This API does not execute provider source or CAD. A validated `cad_ir_draft` is
+candidate evidence only. Do not present it as STEP, reviewable geometry,
+accepted output, sandboxed execution, or general/non-template CAD capability.
+
 The Console presents workflow summaries and final STEP, STL, and preview
 deliverables. Raw JSON, agent traces, runtime logs, and generated scripts stay
 in the local run directory for developer inspection.
