@@ -46,12 +46,13 @@ Current directories are retained during migration:
 
 Target additions still required by the roadmap:
 
-- a model-program skill for sandboxed allowlisted CAD source;
+- runtime registration and sandboxed execution for the model-program skill;
 - a deliverables skill for accepted-result-derived drawings, BOMs, and packages.
 
-The runtime now includes a narrow CadFlow Tool Broker and a fail-closed Windows
-model-program capability gate. This does not make the target model-program
-skill executable: no enforceable sandbox worker is registered.
+The runtime now includes a narrow CadFlow Tool Broker, a CadQuery v1 AST-only
+source validator, and a fail-closed Windows model-program capability gate. This
+does not make the target model-program skill executable: no runtime skill or
+enforceable sandbox worker is registered.
 
 ## Skill contract
 

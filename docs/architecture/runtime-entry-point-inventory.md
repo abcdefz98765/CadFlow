@@ -62,6 +62,7 @@ record the implemented orchestrator boundary.
 | `AgentAdapter.create_part_ir` implementations | reviewed handoff → one legacy CAD IR | compatibility | Retain as one-shot M1 behavior; not a real Agentic Design Episode. |
 | `run_create_part_ir_episode` | fixed request/submit/validate episode | compatibility | Preserve for regression; M2 replaces the proposer behavior, not M1. |
 | `run_design_part_episode` | provider-selected structured-contract episode preview | evaluation service | Called through the target-product `AgentDesignPort` for validation-only evidence and remains directly usable for evaluation; no CAD execution or publication authority. |
+| `validate_cadquery_model_program_source` / Tool Broker `validate_model_program_source` | CadQuery v1 untrusted source static policy | internal validation service | AST-only allowlist/prohibition check; returns hash, metrics, and sanitized codes without source retention, import, bytecode compilation, execution, Work authority, or publication. |
 | `ir_from_file`, `ir_from_planning_artifact` | legacy CAD IR constructors | compatibility | Retain for old examples and migrations. |
 | `runner.run_part` | old `part_type` dynamic builder path | removable | Freeze; migrate callers to the deterministic IR compatibility executor. |
 | `CADGenerator.build` | old workflow CAD builder | compatibility | Retain only through `CADWorkflow`. |

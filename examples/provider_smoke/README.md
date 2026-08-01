@@ -57,6 +57,21 @@ python examples/provider_smoke/work_design_episode_eval.py
   lineage, accepted pointers, and deliverable state remain unchanged; no
   `model.py`, STEP, STL, or preview is created.
 
+## CadQuery v1 Static Model-Program Policy Acceptance
+
+```bash
+python examples/provider_smoke/model_program_policy_eval.py
+```
+
+- Verifies: the Broker-owned AST validator accepts an allowlisted CadQuery v1
+  source contract, rejects filesystem/network source patterns without echoing
+  source, and starts no side effect.
+- Also verifies: a statically valid source still receives
+  `sandbox_unavailable` from the separate execution gate and creates no
+  candidate directory.
+- Does not verify: bytecode compilation, source import, CAD execution, Windows
+  isolation, geometry correctness, reviewable publication, or provider quality.
+
 ## Basic Provider Smoke
 
 ### `parse_requirement_smoke.py`

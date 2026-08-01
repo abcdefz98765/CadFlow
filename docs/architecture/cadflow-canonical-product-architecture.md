@@ -631,6 +631,15 @@ Deliverable Packages. A validated contract remains candidate evidence: this
 package adds no CAD execution, reviewable publication, acceptance mutation, or
 production-usable Agentic design claim.
 
+The fourth M2 package selects `cadquery_v1` as the first model-program API and
+adds a CadFlow-owned, AST-only source-policy validator through the Tool Broker.
+It enforces versioned imports, callable surface, `build_model(parameters)`
+entrypoint shape, prohibited syntax, source size, and AST size, and emits only
+source hash, metrics, and typed violations. It does not retain, bytecode-compile,
+import, or execute source. Static policy success is a prerequisite only; the
+independent Windows execution capability remains unavailable, so no candidate
+directory, process, geometry, publication, or Work mutation follows.
+
 Migration rules:
 
 1. preserve existing Runs and artifacts as immutable legacy evidence;

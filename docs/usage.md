@@ -334,6 +334,41 @@ assert capability["capability"]["available"] is False
 assert "sandbox_unavailable" in capability["capability"]["reason_codes"]
 ```
 
+CadQuery v1 is the first selected model-program source API. Static policy can be
+checked locally without writing, importing, bytecode-compiling, or executing the
+source:
+
+```python
+from ai_native_cad.agents import (
+    CADQUERY_MODEL_PROGRAM_API,
+    MODEL_PROGRAM_SOURCE_TOOL,
+    CadFlowToolBroker,
+)
+
+source = """\
+import cadquery as cq
+
+def build_model(parameters):
+    width = float(parameters["width"])
+    return cq.Workplane("XY").box(width, 20.0, 5.0)
+"""
+
+observation = CadFlowToolBroker().invoke(
+    MODEL_PROGRAM_SOURCE_TOOL,
+    skill_id="model_program",
+    payload={"api_id": CADQUERY_MODEL_PROGRAM_API, "source": source},
+)
+assert observation.success is True
+assert observation.output["executed"] is False
+assert observation.output["source_retained"] is False
+```
+
+The static observation contains a source SHA-256, metrics, policy manifest, and
+typed codes; it does not echo the source. The authoritative contract is
+`policies/model_program_cadquery_v1.md`. This tool is not registered as a
+provider Episode action and a successful result does not make execution
+available.
+
 Calling the unavailable model-program tool returns a structured
 `sandbox_unavailable` observation with `side_effect_started=false`. It does not
 write source, create a candidate directory, invoke the current deterministic
@@ -350,6 +385,17 @@ $env:PYTHONPATH = "src"
 The command creates no durable output. Its JSON summary must report
 `passed=true`, `available=false`, `sandbox_unavailable`,
 `side_effect_started=false`, and `candidate_directory_created=false`.
+
+Repeat the CadQuery v1 static-policy acceptance check with:
+
+```powershell
+$env:PYTHONPATH = "src"
+.venv-cadflow\Scripts\python.exe examples\provider_smoke\model_program_policy_eval.py
+```
+
+Its summary must report `passed=true`, allowlisted source accepted, forbidden
+source rejected with sanitized codes, `source_retained=false`, and a separate
+execution result of `sandbox_unavailable` with no candidate directory.
 
 Repeat the validation-only WorkOrchestrator acceptance check with:
 

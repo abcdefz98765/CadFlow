@@ -1,7 +1,7 @@
 """CadFlow-owned tool authority for bounded Agent Episodes.
 
-This module intentionally implements only the local structured-contract
-validation tool.  The model-program tool is represented so its execution
+This module implements local structured-contract validation and pure AST source
+policy validation. The model-program execution tool is represented so its
 profile can be inspected, but it fails closed before any source is written or
 process is started because this repository has no enforceable Windows sandbox.
 """
@@ -13,8 +13,16 @@ from dataclasses import asdict, dataclass
 from types import MappingProxyType
 from typing import Any, Callable
 
+from ai_native_cad.agents.model_program_policy import (
+    CADQUERY_MODEL_PROGRAM_API,
+    MODEL_PROGRAM_SOURCE_POLICY_CODES,
+    cadquery_model_program_policy_manifest,
+    validate_cadquery_model_program_source,
+)
+
 
 STRUCTURED_CONTRACT_TOOL = "validate_structured_contract"
+MODEL_PROGRAM_SOURCE_TOOL = "validate_model_program_source"
 MODEL_PROGRAM_TOOL = "execute_model_program"
 WINDOWS_MODEL_PROGRAM_PROFILE = "windows_model_program_v0"
 
@@ -171,6 +179,34 @@ MODEL_PROGRAM_DEFINITION = ToolDefinition(
     ),
 )
 
+MODEL_PROGRAM_SOURCE_DEFINITION = ToolDefinition(
+    tool_id=MODEL_PROGRAM_SOURCE_TOOL,
+    allowed_skill_ids=frozenset({"model_program"}),
+    execution_profile="local_pure_source_validation_v1",
+    input_contract="model_program_source_validation_request_v1",
+    output_contract="model_program_source_validation_observation_v1",
+    filesystem_policy="no_filesystem_access",
+    network_policy="no_network_access",
+    process_policy="ast_parse_only_no_bytecode_import_or_execution",
+    resource_limits=("source_bytes", "ast_nodes"),
+    persisted_evidence=(
+        "api id",
+        "source hash",
+        "static policy codes",
+        "sanitized source metrics",
+    ),
+    failure_codes=(
+        frozenset(
+            {
+                "invalid_source_contract",
+                "source_validation_exception",
+                "unsupported_model_program_api",
+            }
+        )
+        | MODEL_PROGRAM_SOURCE_POLICY_CODES
+    ),
+)
+
 
 def detect_model_program_sandbox_capability() -> SandboxCapability:
     """Report the real current capability; never infer safety from a subprocess.
@@ -212,6 +248,7 @@ class CadFlowToolBroker:
         self._definitions = MappingProxyType(
             {
                 STRUCTURED_CONTRACT_TOOL: STRUCTURED_CONTRACT_DEFINITION,
+                MODEL_PROGRAM_SOURCE_TOOL: MODEL_PROGRAM_SOURCE_DEFINITION,
                 MODEL_PROGRAM_TOOL: MODEL_PROGRAM_DEFINITION,
             }
         )
@@ -309,7 +346,69 @@ class CadFlowToolBroker:
                 observation_type="unsupported_capability",
                 code="tool_not_implemented",
             )
+        if tool_id == MODEL_PROGRAM_SOURCE_TOOL:
+            return self._invoke_model_program_source_validator(definition, payload)
         return self._invoke_structured_contract_validator(definition, payload)
+
+    def _invoke_model_program_source_validator(
+        self,
+        definition: ToolDefinition,
+        payload: dict[str, Any],
+    ) -> ToolObservation:
+        if (
+            set(payload) != {"api_id", "source"}
+            or not isinstance(payload.get("api_id"), str)
+            or not isinstance(payload.get("source"), str)
+        ):
+            return _blocked_observation(
+                definition.tool_id,
+                execution_profile=definition.execution_profile,
+                observation_type="source_validation_rejected",
+                code="invalid_source_contract",
+            )
+        if payload.get("api_id") != CADQUERY_MODEL_PROGRAM_API:
+            return _blocked_observation(
+                definition.tool_id,
+                execution_profile=definition.execution_profile,
+                observation_type="source_validation_rejected",
+                code="unsupported_model_program_api",
+                output={
+                    "valid": False,
+                    "supported_api_ids": [CADQUERY_MODEL_PROGRAM_API],
+                    "source_retained": False,
+                },
+            )
+        try:
+            result = validate_cadquery_model_program_source(payload["source"])
+        except Exception:
+            return _blocked_observation(
+                definition.tool_id,
+                execution_profile=definition.execution_profile,
+                observation_type="source_validation_failed",
+                code="source_validation_exception",
+                output={
+                    "valid": False,
+                    "source_retained": False,
+                },
+            )
+        success = result["valid"] is True
+        return ToolObservation(
+            tool_id=definition.tool_id,
+            success=success,
+            observation_type=(
+                "source_validation_passed"
+                if success
+                else "source_validation_failed"
+            ),
+            codes=tuple(result["codes"]),
+            output={
+                **result,
+                "policy": cadquery_model_program_policy_manifest(),
+                "source_retained": False,
+            },
+            execution_profile=definition.execution_profile,
+            side_effect_started=False,
+        )
 
     def _invoke_structured_contract_validator(
         self,
@@ -454,6 +553,8 @@ __all__ = [
     "CadFlowToolBroker",
     "MODEL_PROGRAM_TOOL",
     "MODEL_PROGRAM_DEFINITION",
+    "MODEL_PROGRAM_SOURCE_TOOL",
+    "MODEL_PROGRAM_SOURCE_DEFINITION",
     "REQUIRED_MODEL_PROGRAM_CONTROLS",
     "STRUCTURED_CONTRACT_TOOL",
     "STRUCTURED_CONTRACT_DEFINITION",

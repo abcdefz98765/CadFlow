@@ -353,11 +353,16 @@ Implemented:
   process side effects when that profile is unavailable;
 - a validation-only `WorkOrchestrator` route through a typed `AgentDesignPort`
   for an owned Part Job attempt, with append-only Run evidence, idempotent
-  request replay, and typed Work artifact references.
+  request replay, and typed Work artifact references;
+- a selected `cadquery_v1` source contract and Broker-owned AST-only validation
+  tool with versioned import, call, entrypoint, syntax, and size policy;
+- a strict separation between static source-policy success and the unavailable
+  OS-enforced execution capability.
 
 Not implemented:
 
 - product-integrated provider-selected design-to-execution Episode;
+- runtime `model_program` skill registration and Agent source actions;
 - Tool Broker execution worker for untrusted model programs;
 - enforceable Windows sandbox profile (the implemented gate reports it
   unavailable);

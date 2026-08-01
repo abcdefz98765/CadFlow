@@ -253,6 +253,25 @@ The manifest records:
 The source is untrusted. It may be executed only through the Tool Broker in an
 isolated candidate directory.
 
+The first selected source API is `cadquery_v1`. Its static contract requires
+one `build_model(parameters)` entrypoint and permits only the versioned
+`cadquery`/`math`, builtin, CadQuery constructor, and fluent-method allowlists
+defined in `policies/model_program_cadquery_v1.md`. Before any future execution
+request, `validate_model_program_source` performs AST-only policy validation in
+the Tool Broker. Its observation contains the API id, source SHA-256, metrics,
+and typed violations, but not the submitted source. It does not write, retain,
+bytecode-compile, import, or execute source.
+
+`cadquery_v1` is the CadFlow policy version, not yet an executable toolchain
+version. The model-program manifest must bind exact CadQuery, Python, OCCT, and
+worker-image versions before the execution capability may report available.
+
+A static pass establishes only `source_or_contract_validated`. It cannot create
+an execution request or advance the candidate to `queued`: the independent
+Windows sandbox capability must also be available. It currently returns
+`sandbox_unavailable`, so the candidate directory and process are never
+created.
+
 Forbidden:
 
 - credentials and environment inspection;

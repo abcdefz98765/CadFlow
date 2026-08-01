@@ -100,7 +100,7 @@ Scope:
 - minimal typed skill/tool/knowledge registry;
 - semantic Context Broker;
 - provider-selected action loop;
-- sandboxed CadQuery or build123d model-program candidate;
+- sandboxed CadQuery v1 model-program candidate;
 - existing STEP-first inspection and publication validators;
 - explicit user acceptance.
 
@@ -168,11 +168,24 @@ Status:
 - scripted-provider product-route acceptance confirmed four registered
   evidence references, exactly three provider calls, idempotent replay,
   unchanged protected Work/Run evidence, and zero CAD or accepted products;
+- fourth internal package implemented on 2026-08-01:
+  - selected `cadquery_v1` as the first model-program source API;
+  - defined the `build_model(parameters)` contract, allowlisted imports/calls,
+    prohibited syntax/authority, and source/AST limits;
+  - routed AST-only validation through the Tool Broker with source hash and
+    sanitized typed observations;
+  - kept source retention, imports, bytecode compilation, execution, candidate
+    directories, product routing, and publication unavailable;
+- package 4 verification passed with `175 passed` targeted and
+  `596 passed, 2 skipped` full-suite results;
+- local file-level acceptance confirmed allowlisted source acceptance,
+  sanitized `socket`/`open` rejection, no source retention, and an independent
+  `sandbox_unavailable` execution block with no candidate directory;
 - this product-routed preview validates a structured legacy CAD IR candidate
   only. It cannot execute CAD or publish a reviewable result;
 - M2 remains unaccepted pending an enforceable sandbox execution worker,
-  design-to-execution routing, STEP-first inspection/publication, and the
-  benchmark gate.
+  runtime model-program Episode actions, design-to-execution routing, STEP-first
+  inspection/publication, and the benchmark gate.
 
 ## M3 — General structured geometry contract
 

@@ -43,6 +43,7 @@ from ai_native_cad.agents.registry import (
     SkillRegistry,
 )
 from ai_native_cad.agents.tool_broker import (
+    MODEL_PROGRAM_SOURCE_TOOL,
     MODEL_PROGRAM_TOOL,
     REQUIRED_MODEL_PROGRAM_CONTROLS,
     STRUCTURED_CONTRACT_TOOL,
@@ -51,6 +52,12 @@ from ai_native_cad.agents.tool_broker import (
     ToolDefinition,
     ToolObservation,
     detect_model_program_sandbox_capability,
+)
+from ai_native_cad.agents.model_program_policy import (
+    CADQUERY_MODEL_PROGRAM_API,
+    CADQUERY_MODEL_PROGRAM_ENTRYPOINT,
+    cadquery_model_program_policy_manifest,
+    validate_cadquery_model_program_source,
 )
 
 __all__ = [
@@ -76,6 +83,9 @@ __all__ = [
     "JsonContractProviderError",
     "JsonProviderEndpoint",
     "KnowledgeDefinition",
+    "CADQUERY_MODEL_PROGRAM_API",
+    "CADQUERY_MODEL_PROGRAM_ENTRYPOINT",
+    "MODEL_PROGRAM_SOURCE_TOOL",
     "MODEL_PROGRAM_TOOL",
     "OpenAICompatibleJsonContractClient",
     "OpenAIResponsesJsonContractClient",
@@ -91,9 +101,11 @@ __all__ = [
     "ToolObservation",
     "build_create_part_ir_context",
     "build_design_part_context",
+    "cadquery_model_program_policy_manifest",
     "detect_model_program_sandbox_capability",
     "make_json_contract_adapter_from_env",
     "run_create_part_ir_episode",
     "run_design_part_episode",
     "validate_adapter_result",
+    "validate_cadquery_model_program_source",
 ]

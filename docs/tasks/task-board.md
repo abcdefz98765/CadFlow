@@ -104,8 +104,20 @@ work ahead of the current milestone without an explicit architecture decision.
   - 2026-08-01: `23 passed` targeted; `565 passed, 2 skipped` full suite.
 - [x] Complete local Windows fail-closed acceptance.
   - `../status/m2-tool-broker-package-acceptance.md`
-- [ ] Choose the first supported model-program API: CadQuery or build123d.
-- [ ] Define allowlisted imports and prohibited APIs.
+- [x] Choose the first supported model-program API: `cadquery_v1`.
+- [x] Define allowlisted imports/calls, the `build_model(parameters)` contract,
+  prohibited APIs/syntax, and source/AST limits.
+- [x] Route pure AST source-policy validation through the Tool Broker without
+  retaining, importing, bytecode-compiling, or executing source.
+- [x] Prove that a static pass does not bypass the independent
+  `sandbox_unavailable` execution gate or create a candidate directory.
+- [x] Verify the CadQuery v1 static-policy package with targeted and full
+  regression tests.
+  - 2026-08-01: `175 passed` targeted; `596 passed, 2 skipped` full suite.
+- [x] Complete local file-level static-policy/fail-closed acceptance.
+  - `../status/m2-cadquery-source-policy-package-acceptance.md`
+- [ ] Bind exact CadQuery, Python, OCCT, and read-only worker-image versions in
+  the execution profile and model-program manifest.
 - [ ] Implement isolated candidate directory and execution worker.
 - [ ] Disable network access.
 - [ ] Block subprocess, shell, dynamic dependency installation, and writes

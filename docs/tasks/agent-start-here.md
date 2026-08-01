@@ -27,8 +27,9 @@ M1 runtime consolidation and domain foundations passed acceptance on
 its second package adds Broker-owned structured validation and an explicit
 fail-closed Windows model-program capability gate; its third package routes an
 owned Part Job attempt through `WorkOrchestrator` for validation and evidence
-registration only. An enforceable sandbox worker, design-to-execution,
-publication, and benchmark acceptance remain open.
+registration only; its fourth package selects CadQuery v1 and adds AST-only
+source-policy validation. Runtime model-program actions, an enforceable sandbox
+worker, design-to-execution, publication, and benchmark acceptance remain open.
 
 In particular, do not begin later work by:
 
@@ -95,11 +96,20 @@ The third internal package adds:
 6. explicit preservation of lineage, acceptance, Assembly, Deliverable, Part
    Job, and Run state.
 
+The fourth internal package adds:
+
+1. `cadquery_v1` as the selected initial model-program API;
+2. a fixed `build_model(parameters)` source contract;
+3. versioned import, call, syntax, entrypoint, source-size, and AST-size policy;
+4. Broker-owned AST-only validation with source hash and sanitized codes;
+5. explicit proof that a static pass does not enable execution or create a
+   candidate directory.
+
 This is not a sandbox implementation or a design-to-execution path. The next
-package should choose the first supported model-program API and define the
-enforceable Windows worker/profile boundary, remaining fail closed until every
-required isolation control is independently verified. Do not route provider
-source into the existing host CadQuery subprocess.
+package should define the enforceable Windows worker/profile and evidence
+protocol, remaining fail closed until every required isolation control is
+independently verified. Do not route provider source into the existing host
+CadQuery subprocess.
 
 ## Change discipline
 

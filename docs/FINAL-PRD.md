@@ -383,7 +383,10 @@ Implemented foundations worth retaining:
   Windows sandbox profile unavailable and fails closed before execution;
 - a validation-only product route from an owned Part Job attempt through
   `WorkOrchestrator` into the provider-selected episode, with idempotent request
-  identity, append-only Run evidence, and typed Work artifact references.
+  identity, append-only Run evidence, and typed Work artifact references;
+- a selected CadQuery v1 model-program source contract and Broker-owned static
+  AST validator with explicit imports, calls, entrypoint, syntax, and size
+  policy; static success grants no execution authority.
 
 Major migration gaps:
 
@@ -391,8 +394,9 @@ Major migration gaps:
 - the current product Agent Episode is effectively one-shot;
 - the product-routed provider-selected episode still stops at structured
   contract validation and has no usable sandboxed execution tool;
-- the model-program Tool Broker entry is capability metadata and a safe block,
-  not an implemented Windows sandbox or source executor;
+- the model-program execution entry remains capability metadata and a safe
+  block; the new static source validator is not a Windows sandbox or source
+  executor;
 - provider-backed Agentic design is not product-usable;
 - the UI is organized around the former fixed workflow;
 - ordered Part Job attempts and the deterministic product `WorkOrchestrator`

@@ -90,13 +90,20 @@ Workbench and does not execute provider-generated model programs.
   request identity, and typed Work candidate/observation/diagnostic references.
 - Protected-state postcondition checks covering active lineage, accepted-result
   pointers, Part Jobs, Assembly Job, Deliverable Packages, and Run ids.
+- `cadquery_v1` selected as the first model-program source API, with a fixed
+  `build_model(parameters)` entrypoint contract. This is a CadFlow policy
+  version; the executable CadQuery/Python/OCCT toolchain is not yet bound.
+- Broker-owned AST-only source validation for allowlisted imports/calls,
+  prohibited syntax/authority, source size, and AST size. Observations retain a
+  source hash and sanitized codes, not source text.
 
 This preview is connected to the product `WorkOrchestrator`, but only for
 validation and evidence registration. Its only tool enabled for the
 `design_part` skill is structured-contract validation. The model-program Broker
-entry is unavailable capability metadata, not execution authority. The preview
-cannot execute CAD, publish a reviewable result, or update acceptance, so it
-must not be described as production Agentic CAD design.
+execution entry is unavailable capability metadata, not execution authority.
+The separate static source validator is not registered as a provider Episode
+action. The preview cannot execute CAD, publish a reviewable result, or update
+acceptance, so it must not be described as production Agentic CAD design.
 
 The product `create_part_ir` path currently follows a fixed proposer sequence:
 one fixed context request, one adapter submission, one validation request, and
@@ -124,6 +131,8 @@ one-shot orchestration, not Agentic design.
 
 - Product-integrated provider-selected design-to-execution Episode and
   reviewable publication.
+- Runtime `model_program` skill registration and provider-selected source
+  creation/patch actions.
 - Tool Broker execution worker for untrusted model programs.
 - Enforced Windows sandbox profile for provider-generated CAD source (the
   implemented capability gate currently reports unavailable).
@@ -169,8 +178,8 @@ These are migration tasks, not accepted target behavior.
 
 ## Verification state
 
-- Automated verified: the complete suite passed with `574 passed, 2 skipped`
-  in 374.51 seconds on 2026-08-01.
+- Automated verified: the complete suite passed with `596 passed, 2 skipped`
+  in 379.72 seconds on 2026-08-01.
 - The M1 acceptance baseline was `550 passed, 2 skipped` on 2026-07-27.
 - New contract tests cover ordered Part Job attempt history, acceptance-pointer
   separation, immutable Run evidence, v1 projection, schema definitions,
@@ -194,6 +203,10 @@ These are migration tasks, not accepted target behavior.
   prompt bytes, mismatched request/path identity rejection, typed artifact
   registration, diagnostic safe blocks, and no duplicate provider call on
   replay.
+- CadQuery v1 source-policy tests prove allowlisted source acceptance, import/
+  call/syntax/entrypoint/size rejection, source redaction, Broker authorization,
+  internal-exception redaction, static-versus-execution capability separation,
+  and no candidate-directory side effect after a static pass.
 - Verified meaning: the M1 runtime/contracts and the existing deterministic
   workflow, console contracts, safety boundaries, failure isolation, and
   compatibility behavior are internally consistent.
@@ -233,6 +246,14 @@ These are migration tasks, not accepted target behavior.
   - no accepted, deliverable, STEP, STL, or model-program product was created;
   - the reproducible record is
     `m2-work-design-episode-package-acceptance.md`.
+- Manually verified for the CadQuery v1 static source-policy package:
+  - allowlisted source passed without import, bytecode compilation, execution,
+    retention, or side effects;
+  - `socket` and `open` source returned sanitized typed rejections;
+  - the subsequent execution request still returned `sandbox_unavailable` and
+    created no candidate directory;
+  - the reproducible record is
+    `m2-cadquery-source-policy-package-acceptance.md`.
 - A real external provider has not been manually verified through the product
   route.
 - No new UI was implemented, so this package did not require a new Workbench

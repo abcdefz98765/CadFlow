@@ -204,6 +204,12 @@ Prohibited:
 
 The local Tool Broker and validators decide publication.
 
+The first selected API contract is `cadquery_v1` with entrypoint
+`build_model(parameters)`. Its current implementation is static policy
+validation only: AST parsing checks allowlisted imports/calls and prohibited
+authority without retaining or executing source. This does not register the
+runtime skill or satisfy the isolated-execution requirement.
+
 ## Knowledge layers
 
 ### Layer 0 — Global policy
@@ -383,7 +389,10 @@ Current code provides:
   returns `sandbox_unavailable` without writing source or starting a process;
 - a typed `AgentDesignPort` used by `WorkOrchestrator` to route an owned Part
   Job attempt into the provider-selected validation episode, persist append-only
-  Run evidence, and register typed candidate/observation/diagnostic references.
+  Run evidence, and register typed candidate/observation/diagnostic references;
+- a versioned CadQuery v1 source policy and Broker-owned AST-only validator that
+  returns source hash, metrics, and sanitized violations without source
+  retention, imports, bytecode compilation, execution, or side effects.
 
 It does not yet provide:
 
@@ -394,9 +403,10 @@ It does not yet provide:
 - Agentic assembly or deliverable episodes.
 
 The product-routed preview validates only the legacy structured CAD IR
-compatibility contract. Its model-program tool entry is unavailable capability
-metadata, not execution authority. It has no CAD execution or publication tool
-and is not production-usable Agentic CAD design.
+compatibility contract. The separate model-program static validator is not
+registered as an Episode action. Its execution tool entry is unavailable
+capability metadata, not execution authority. It has no CAD execution or
+publication tool and is not production-usable Agentic CAD design.
 
 No current deterministic fallback may be presented as these target
 capabilities.
