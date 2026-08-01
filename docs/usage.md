@@ -178,6 +178,77 @@ workspace/
         <run_id>/
 ```
 
+Newly created or subsequently mutated Works use Work manifest schema v2.
+`part_jobs[].attempts` is the canonical ordered attempt history;
+`accepted_part_results` is independent from `active_lineage`; optional
+`assembly_job`, `deliverable_packages`, and `artifact_references` fields are
+present even when empty. Existing schema-v1 Work manifests are projected in
+memory and remain readable. A later successful Work mutation may persist the
+projected v2 manifest, but files inside historical Run directories are not
+rewritten.
+
+M1 Work mutations enter one `WorkOrchestrator`. Existing deterministic Run
+creation and stages are reached through a controlled compatibility adapter.
+The internal route contracts are:
+
+```text
+POST /api/works
+POST /api/works/{work_id}/requirement-run
+POST /api/works/{work_id}/part-runs
+POST /api/works/{work_id}/parts/{part_job_id}/attempts
+```
+
+The last route accepts optional JSON fields `prompt`, `role`, and `run_id`. It
+appends an attempt to `part_jobs[].attempts` and does not change
+`accepted_part_results`. Successful mutation responses include:
+
+```json
+{
+  "orchestration": {
+    "orchestrator": "work_orchestrator",
+    "status": "completed",
+    "command": "create_part_attempt",
+    "phase": "design",
+    "checkpoint": "part_job_attempt",
+    "postcondition": "...",
+    "next_action": "Build and evaluate this attempt"
+  }
+}
+```
+
+The stdlib Web Console bridge invokes these contracts through
+`POST /api/route`. For a later Part Job attempt, send:
+
+```json
+{
+  "route": "create_work_part_attempt",
+  "path_params": {
+    "work_id": "fixture_work",
+    "part_job_id": "clamp"
+  },
+  "body": {
+    "prompt": "Create another clamp attempt.",
+    "run_id": "clamp_attempt_2"
+  }
+}
+```
+
+The equivalent local Python API is:
+
+```python
+attempt = backend.create_work_part_attempt(
+    "fixture_work",
+    "clamp",
+    prompt="Create another clamp attempt.",
+    run_id="clamp_attempt_2",
+)
+```
+
+An accepted part result is changed only by the explicit approval action after
+a validated STEP artifact exists. The action registers controlled artifact
+references and updates the accepted-result pointer without advancing active
+design lineage.
+
 The Console presents workflow summaries and final STEP, STL, and preview
 deliverables. Raw JSON, agent traces, runtime logs, and generated scripts stay
 in the local run directory for developer inspection.

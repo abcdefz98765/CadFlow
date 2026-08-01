@@ -22,8 +22,17 @@ No specialized document may redefine these concepts.
 
 - `agent-skill-knowledge.md` — logical Agents, skills, tools, knowledge, runtime context, and provider boundaries.
 - `bounded-agent-loop-context-broker-and-checkpoints.md` — provider-selected episodes, Context Broker, Tool Broker, sandbox, budgets, and typed stops.
+- `domain-record-contracts.md` — schema-versioned Work, Part Job attempt,
+  Assembly Job definition, Deliverable Package definition, artifact reference,
+  and legacy manifest projection contracts.
+- `runtime-entry-point-inventory.md` — classified runtime migration inventory
+  for the single product orchestrator.
 - `web-workflow-console.md` — Agent Workbench Web target and legacy NiceGUI migration boundary.
 - `revision-workflow.md` — structured child-Run revision, patches, comparison, and external-source boundaries.
+
+Accepted architecture decisions:
+
+- `decisions/0001-single-product-orchestrator.md`
 
 ## Related current contracts
 

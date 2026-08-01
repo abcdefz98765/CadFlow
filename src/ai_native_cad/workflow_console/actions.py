@@ -18,6 +18,7 @@ from ai_native_cad.pipeline.runner import (
 )
 from ai_native_cad.agents.validation import validate_input_ir_draft
 from ai_native_cad.cad_ir.validator import validate_ir
+from ai_native_cad.domain.records import create_artifact_reference
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
 from ai_native_cad.workflow_console.workflow_review import (
     build_workflow_review,
@@ -288,21 +289,76 @@ class WorkflowConsoleActions:
         child_run_id = review.get("child_run") or lineage.get("child_run_id")
         if not isinstance(part_id, str) or not isinstance(child_run_id, str):
             raise ValueError("part result review is missing accepted part lineage")
+        child_path = self._resolve_child_run(run_path, child_run_id)
+        child_metadata = self.backend.read_run_metadata(child_path)
+        downloadable_names = {
+            item.get("name")
+            for item in child_metadata.get("downloadables", [])
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        }
+        artifact_references = [
+            create_artifact_reference(
+                artifact_id=f"artifact:{child_run_id}:{name}",
+                work_id=work_id,
+                run_id=child_run_id,
+                part_job_id=part_id,
+                relative_path=name,
+                phase="build_evaluate",
+                checkpoint="reviewable_result",
+                trust_role="reviewable_result",
+                validation_status="passed",
+            )
+            for name in ("model.step", "model.stl", "preview.png")
+            if name in downloadable_names
+        ]
+        if not any(
+            item["relative_path"] == "model.step" for item in artifact_references
+        ):
+            raise ValueError(
+                "Approve Single Part Result requires a validated STEP artifact"
+            )
+        manifest = self.backend._read_work_manifest(work_id)
+        job = next(
+            (
+                item
+                for item in manifest.get("part_jobs", [])
+                if isinstance(item, dict) and item.get("part_job_id") == part_id
+            ),
+            None,
+        )
+        attempt_ids = {
+            item.get("run_id")
+            for item in (job.get("attempts", []) if isinstance(job, dict) else [])
+            if isinstance(item, dict)
+        }
+        if run_id not in attempt_ids:
+            self.backend._work_orchestrator().register_existing_part_attempt(
+                work_id,
+                part_id,
+                run_id=run_id,
+            )
         review_result = self.save_stage_review(
             run_id, stage="single_part_result", review_status="approved", root=root,
         )
-        manifest = self.backend._read_work_manifest(work_id)
-        accepted = manifest.get("accepted_part_results") if isinstance(manifest.get("accepted_part_results"), dict) else {}
-        accepted[part_id] = {
-            "child_run_id": child_run_id,
-            "review_id": review_result["review_id"],
-            "status": "approved",
+        result_id = f"part_result:{part_id}:{child_run_id}:{review_result['review_id']}"
+        accepted_result = self.backend._work_orchestrator().accept_part_result(
+            work_id,
+            part_job_id=part_id,
+            result_id=result_id,
+            attempt_run_id=run_id,
+            result_run_id=child_run_id,
+            review_id=review_result["review_id"],
+            artifact_references=artifact_references,
+        )
+        accepted = accepted_result["accepted_part_result"]
+        return {
+            "action": "approve_part_result",
+            "part_id": part_id,
+            "accepted_part_result": accepted,
+            "review": review_result,
+            "product_state": accepted_result["product_state"],
+            "orchestration": accepted_result["orchestration"],
         }
-        manifest["accepted_part_results"] = accepted
-        manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self.backend._write_work_manifest(work_id, manifest)
-        self.backend.activate_work_lineage(work_id, parent_run_id=run_id, child_run_id=child_run_id)
-        return {"action": "approve_part_result", "part_id": part_id, "accepted_part_result": accepted[part_id], "review": review_result}
 
     def select_candidate_part(
         self,
@@ -381,11 +437,12 @@ class WorkflowConsoleActions:
             run_path, f"edits/assembly_plan/metadata_{metadata_number:03d}.json"
         )
         metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        manifest["candidate_selection"] = metadata
-        manifest["updated_at"] = created_at
         # accepted_part_results is intentionally retained: accepted outputs can
         # later come from sibling part Runs and are not an active-lineage leaf.
-        self.backend._write_work_manifest(work_id, manifest)
+        selection_result = self.backend._work_orchestrator().select_candidate(
+            work_id,
+            selection=metadata,
+        )
         self._record_action(run_path, {"action": "select_candidate_part", "status": "selected", "success": True, "stage_count": 0})
         return {
             "action": "select_candidate_part",
@@ -395,6 +452,7 @@ class WorkflowConsoleActions:
             "override": override.get("override"),
             "metadata_artifact": f"edits/assembly_plan/metadata_{metadata_number:03d}.json",
             "next_action": "Create Part Request",
+            "orchestration": selection_result["orchestration"],
         }
 
     def apply_requirement_clarification(

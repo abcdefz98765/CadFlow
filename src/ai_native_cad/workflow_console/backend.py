@@ -15,6 +15,7 @@ from ai_native_cad.agents.validation import (
     validate_requirement_draft,
 )
 from ai_native_cad.cad_ir.validator import validate_ir
+from ai_native_cad.domain.records import project_work_record, validate_work_record
 from ai_native_cad.pipeline.runner import PROJECT_ROOT, run_agent_revision_pipeline
 from ai_native_cad.requirements import apply_requirement_clarification
 from ai_native_cad.workflow_console.stage_runner import (
@@ -347,17 +348,12 @@ class WorkflowConsoleBackend:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create a real local Work entity without creating runs or CAD artifacts."""
-        from ai_native_cad.workflow_console.work_index import create_work_manifest
-
-        result = create_work_manifest(
-            self,
+        return self._work_orchestrator().create_work(
             title=title,
             description=description,
             work_id=work_id,
             metadata=metadata,
         )
-        self.invalidate_work_index()
-        return result
 
     def create_golden_example(
         self,
@@ -414,104 +410,43 @@ class WorkflowConsoleBackend:
     ) -> dict[str, Any]:
         """Create the root requirement run inside the owning Work directory."""
         self._require_safe_run_id(work_id)
-        prompt_text = _safe_prompt_text(prompt)
-        manifest = self._read_work_manifest(work_id)
-        if run_id is None:
-            run_id = self._next_workspace_run_id(work_id, f"{work_id}_root")
-        self._require_safe_run_id(run_id)
-        created = self.create_run_by_id(run_id, prompt_text, root=self._work_runs_root(work_id))
-        config = self.read_workspace_config()
-        manifest["root_run_id"] = run_id
-        manifest["current_run_id"] = run_id
-        manifest["active_lineage"] = {
-            "active_root_run_id": run_id,
-            "active_leaf_run_id": run_id,
-            "accepted_run_ids": [run_id],
-            "superseded_run_ids": [],
-            "latest_attempt_run_id": run_id,
-        }
-        manifest["status"] = "active"
-        manifest["advancement_mode"] = config["advancement_mode"]
-        manifest["requirement"] = {
-            "status": "needs_confirmation" if config["advancement_mode"] == "manual_confirm" else "draft",
-            "root_run_id": run_id,
-            "prompt_present": True,
-            "confirmation_required": config["advancement_mode"] == "manual_confirm",
-        }
-        manifest["run_ids"] = _append_unique_strings(manifest.get("run_ids"), [run_id])
-        manifest["updated_at"] = _now_timestamp()
-        stages = []
-        if config["advancement_mode"] == "auto_advance":
-            for stage in ("requirement", "planning"):
-                try:
-                    stage_result = self.run_stage_by_id(run_id, stage, root=self._work_runs_root(work_id))
-                except Exception as exc:
-                    stages.append({"stage": stage, "status": "blocked", "error": type(exc).__name__})
-                    break
-                stages.append({"stage": stage, "status": stage_result["result"].get("stage_status")})
-            manifest["requirement"]["status"] = "confirmed"
-            manifest["requirement"]["confirmation_required"] = False
-        self._write_work_manifest(work_id, manifest)
-        part_runs = self.create_work_part_runs(work_id, auto_only=True) if config["advancement_mode"] == "auto_advance" else {"part_jobs": manifest.get("part_jobs") or [], "created_runs": []}
-        self.invalidate_work_index()
-        return {
-            "work": self.get_work_detail(work_id),
-            "run": created["run"],
-            "stages": stages,
-            "part_runs": part_runs,
-        }
+        if run_id is not None:
+            self._require_safe_run_id(run_id)
+        return self._work_orchestrator().begin_intent(
+            work_id,
+            _safe_prompt_text(prompt),
+            run_id=run_id,
+        )
 
     def create_work_part_runs(self, work_id: str, *, auto_only: bool = False) -> dict[str, Any]:
         """Create file-backed part run containers for planned Work parts."""
         self._require_safe_run_id(work_id)
-        config = self.read_workspace_config()
-        if auto_only and config["advancement_mode"] != "auto_advance":
-            return {"part_jobs": [], "created_runs": []}
-        manifest = self._read_work_manifest(work_id)
-        root_run_id = manifest.get("root_run_id")
-        if not isinstance(root_run_id, str) or not root_run_id:
-            raise ValueError("workflow console Work must have a root run before creating part runs")
-        root_run = self.read_run_metadata_by_id(root_run_id, root=self._work_runs_root(work_id))
-        planned_parts = self._planned_parts_from_run(root_run)
-        if not planned_parts:
-            raise ValueError("workflow console Work has no planned parts to create runs for")
-        existing_jobs = [
-            item for item in manifest.get("part_jobs", [])
-            if isinstance(item, dict) and isinstance(item.get("part_id"), str)
-        ]
-        existing_by_part = {item["part_id"]: item for item in existing_jobs}
-        created_runs = []
-        for part in planned_parts:
-            part_id = part["part_id"]
-            job = existing_by_part.get(part_id)
-            if job and job.get("run_id"):
-                continue
-            run_id = self._next_workspace_run_id(work_id, f"{work_id}_{part_id}")
-            prompt = f"Create part '{part_id}' for Work '{work_id}'."
-            created = self.create_run_by_id(run_id, prompt, root=self._work_runs_root(work_id))
-            created_runs.append(created["run"])
-            existing_by_part[part_id] = {
-                "part_id": part_id,
-                "role": part.get("role"),
-                "status": "incomplete",
-                "run_id": run_id,
-                "source": "assembly_plan",
-            }
-        manifest["part_jobs"] = list(existing_by_part.values())
-        manifest["run_ids"] = _append_unique_strings(
-            manifest.get("run_ids"),
-            [root_run_id, *[item["run_id"] for item in manifest["part_jobs"] if item.get("run_id")]],
+        return self._work_orchestrator().create_planned_part_attempts(
+            work_id,
+            auto_only=auto_only,
         )
-        # Creating a part container is a new attempt, not acceptance of a new
-        # Work lineage. Keep the explicit active pointer unchanged.
-        if created_runs:
-            lineage = manifest.get("active_lineage") if isinstance(manifest.get("active_lineage"), dict) else {}
-            lineage["latest_attempt_run_id"] = created_runs[-1]["run_id"]
-            manifest["active_lineage"] = lineage
-        manifest["updated_at"] = _now_timestamp()
-        self._write_work_manifest(work_id, manifest)
-        self.invalidate_work_index()
-        return {"part_jobs": manifest["part_jobs"], "created_runs": created_runs}
+
+    def create_work_part_attempt(
+        self,
+        work_id: str,
+        part_job_id: str,
+        *,
+        prompt: str | None = None,
+        role: str | None = None,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Append another explicit attempt to one Part Job."""
+        self._require_safe_run_id(work_id)
+        self._require_safe_run_id(part_job_id)
+        if run_id is not None:
+            self._require_safe_run_id(run_id)
+        return self._work_orchestrator().create_part_attempt(
+            work_id,
+            part_job_id,
+            prompt=prompt,
+            role=role,
+            run_id=run_id,
+        )
 
     def get_work_summary(self, work_id: str) -> dict[str, Any]:
         """Return one inferred Work summary."""
@@ -536,14 +471,16 @@ class WorkflowConsoleBackend:
         manifest = _read_json_if_present(path)
         if manifest is None:
             raise FileNotFoundError(f"workflow console Work does not exist: {work_id}")
-        return manifest
+        return project_work_record(manifest)
 
     def _write_work_manifest(self, work_id: str, manifest: dict[str, Any]) -> None:
         self._require_safe_run_id(work_id)
         path = self._work_manifest_path(work_id)
         if not path.exists():
             raise FileNotFoundError(f"workflow console Work does not exist: {work_id}")
-        _write_json(path, manifest)
+        projected = project_work_record(manifest)
+        validate_work_record(projected)
+        _write_json(path, projected)
 
     def activate_work_lineage(
         self,
@@ -558,24 +495,24 @@ class WorkflowConsoleBackend:
         self._require_safe_run_id(parent_run_id)
         if child_run_id:
             self._require_safe_run_id(child_run_id)
-        manifest = self._read_work_manifest(work_id)
-        prior = manifest.get("active_lineage") if isinstance(manifest.get("active_lineage"), dict) else {}
-        prior_active = [item for item in prior.get("accepted_run_ids", []) if isinstance(item, str)]
-        accepted = accepted_run_ids or [parent_run_id]
-        accepted = list(dict.fromkeys([*accepted, *prior_active]))
-        superseded = [item for item in prior_active if item not in accepted and item != parent_run_id]
-        manifest["active_lineage"] = {
-            "active_root_run_id": parent_run_id,
-            "active_leaf_run_id": child_run_id or parent_run_id,
-            "accepted_run_ids": accepted,
-            "superseded_run_ids": list(dict.fromkeys([*prior.get("superseded_run_ids", []), *superseded])),
-            "latest_attempt_run_id": child_run_id or parent_run_id,
-        }
-        manifest["current_run_id"] = parent_run_id
-        manifest["updated_at"] = _now_timestamp()
-        self._write_work_manifest(work_id, manifest)
-        self.invalidate_work_index()
-        return manifest["active_lineage"]
+        result = self._work_orchestrator().advance_lineage(
+            work_id,
+            parent_run_id=parent_run_id,
+            child_run_id=child_run_id,
+        )
+        return result["active_lineage"]
+
+    def _work_orchestrator(self):
+        from ai_native_cad.orchestration import WorkOrchestrator
+        from ai_native_cad.workflow_console.orchestrator_adapters import (
+            WorkflowConsoleDeterministicCompatibility,
+            WorkflowConsoleWorkStore,
+        )
+
+        return WorkOrchestrator(
+            WorkflowConsoleWorkStore(self),
+            WorkflowConsoleDeterministicCompatibility(self),
+        )
 
     def _work_manifest_path(self, work_id: str) -> Path:
         work_dir = self._require_child_path(self._resolve_workspace_path("works"), work_id)

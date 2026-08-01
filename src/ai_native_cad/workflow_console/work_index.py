@@ -6,8 +6,17 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ai_native_cad.domain.records import (
+    WORK_SCHEMA_VERSION,
+    create_work_record,
+    project_work_record,
+)
 from ai_native_cad.workflow_console.artifact_display import filter_artifacts_for_display
 from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, STAGED_ARTIFACT_DIRS
+from ai_native_cad.workflow_console.legacy_product_projector import (
+    PRODUCT_OUTPUT_NAMES,
+    project_legacy_product_references,
+)
 
 DEBUG_WORK_ID = "__debug_runs__"
 DEBUG_WORK_TITLE = "Unclassified / Debug Runs"
@@ -15,7 +24,7 @@ WORKSPACE_WORKS_DIR_NAME = "works"
 LEGACY_WORKS_DIR_NAME = "_works"
 WORKS_DIR_NAME = LEGACY_WORKS_DIR_NAME
 WORK_MANIFEST_NAME = "work_manifest.json"
-WORK_MANIFEST_SCHEMA_VERSION = 1
+WORK_MANIFEST_SCHEMA_VERSION = WORK_SCHEMA_VERSION
 
 
 def list_works(
@@ -142,25 +151,15 @@ def create_work_manifest(
     work_dir.mkdir(parents=True, exist_ok=False)
     backend._require_child_path(work_dir, "runs").mkdir(parents=True, exist_ok=False)
     now = _now_timestamp()
-    manifest = {
-        "schema_version": WORK_MANIFEST_SCHEMA_VERSION,
-        "work_id": work_id,
-        "title": title,
-        "description": description,
-        "status": status,
-        "created_at": now,
-        "updated_at": now,
-        "current_run_id": None,
-        "root_run_id": None,
-        "active_lineage": _empty_active_lineage(),
-        "run_ids": [],
-        "part_jobs": [],
-        "accepted_part_results": {},
-        "candidate_selection": {},
-        "requirement": {"status": "not_started", "root_run_id": None},
-        "advancement_mode": backend.read_workspace_config().get("advancement_mode", "manual_confirm"),
-        "metadata": safe_metadata,
-    }
+    manifest = create_work_record(
+        work_id=work_id,
+        title=title,
+        description=description,
+        status=status,
+        advancement_mode=backend.read_workspace_config().get("advancement_mode", "manual_confirm"),
+        metadata=safe_metadata,
+        created_at=now,
+    )
     manifest_path.write_text(_json_dumps(manifest), encoding="utf-8")
     return {"work": _public_manifest(manifest)}
 
@@ -319,6 +318,10 @@ def _read_json_if_present(path: Path) -> dict[str, Any] | None:
 def _public_manifest(value: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
+    try:
+        value = project_work_record(value)
+    except ValueError:
+        return None
     work_id = value.get("work_id")
     title = value.get("title")
     if not isinstance(work_id, str) or not work_id or not isinstance(title, str) or not title:
@@ -341,6 +344,9 @@ def _public_manifest(value: dict[str, Any] | None) -> dict[str, Any] | None:
         ][:200],
         "part_jobs": _safe_part_jobs(value.get("part_jobs")),
         "accepted_part_results": _safe_accepted_part_results(value.get("accepted_part_results")),
+        "assembly_job": value.get("assembly_job") if isinstance(value.get("assembly_job"), dict) else None,
+        "deliverable_packages": value.get("deliverable_packages") if isinstance(value.get("deliverable_packages"), list) else [],
+        "artifact_references": value.get("artifact_references") if isinstance(value.get("artifact_references"), list) else [],
         "candidate_selection": _safe_candidate_selection(value.get("candidate_selection")),
         "requirement": _safe_requirement_state(value.get("requirement")),
         "advancement_mode": value.get("advancement_mode") if value.get("advancement_mode") in {"manual_confirm", "auto_advance"} else "manual_confirm",
@@ -367,6 +373,9 @@ def _entity_state(work_id: str, manifest: dict[str, Any] | None) -> dict[str, An
         "run_ids": manifest.get("run_ids") or [],
         "part_jobs": manifest.get("part_jobs") or [],
         "accepted_part_results": manifest.get("accepted_part_results") or {},
+        "assembly_job": manifest.get("assembly_job"),
+        "deliverable_packages": manifest.get("deliverable_packages") or [],
+        "artifact_references": manifest.get("artifact_references") or [],
         "candidate_selection": manifest.get("candidate_selection") or {},
         "requirement": manifest.get("requirement") or {},
         "advancement_mode": manifest.get("advancement_mode") or "manual_confirm",
@@ -389,6 +398,10 @@ def _empty_entity_state(work_id: str) -> dict[str, Any]:
         "active_lineage": _empty_active_lineage(),
         "run_ids": [],
         "part_jobs": [],
+        "accepted_part_results": {},
+        "assembly_job": None,
+        "deliverable_packages": [],
+        "artifact_references": [],
         "requirement": {"status": "not_started", "root_run_id": None},
         "advancement_mode": "manual_confirm",
         "metadata": {},
@@ -463,15 +476,44 @@ def _safe_part_jobs(value: Any) -> list[dict[str, Any]]:
     for item in value:
         if not isinstance(item, dict):
             continue
-        part_id = _safe_optional_text(item.get("part_id"), limit=120)
+        part_id = _safe_optional_text(item.get("part_job_id") or item.get("part_id"), limit=120)
         if not part_id:
             continue
-        run_id = _safe_run_ref(item.get("run_id"))
+        attempts = []
+        for index, attempt in enumerate(item.get("attempts", []) if isinstance(item.get("attempts"), list) else [], start=1):
+            if not isinstance(attempt, dict):
+                continue
+            run_id = _safe_run_ref(attempt.get("run_id"))
+            if not run_id:
+                continue
+            attempts.append({
+                "record_type": "part_job_attempt",
+                "schema_version": attempt.get("schema_version") if isinstance(attempt.get("schema_version"), int) else 1,
+                "attempt_id": _safe_optional_text(attempt.get("attempt_id"), limit=160) or f"{part_id}:{index}",
+                "sequence": index,
+                "run_id": run_id,
+                "status": _safe_optional_text(attempt.get("status"), limit=80) or "legacy",
+                "artifact_ids": [
+                    artifact_id for artifact_id in attempt.get("artifact_ids", [])
+                    if isinstance(artifact_id, str) and artifact_id
+                ][:200] if isinstance(attempt.get("artifact_ids"), list) else [],
+                "created_at": _safe_optional_text(attempt.get("created_at"), limit=80),
+            })
+        active_run_id = _safe_run_ref(item.get("active_attempt_run_id"))
         jobs.append({
+            "record_type": "part_job",
+            "schema_version": item.get("schema_version") if isinstance(item.get("schema_version"), int) else 1,
+            "part_job_id": part_id,
             "part_id": part_id,
             "role": _safe_optional_text(item.get("role"), limit=160),
             "status": _safe_optional_text(item.get("status"), limit=80) or "planned",
-            "run_id": run_id,
+            "attempts": attempts,
+            "active_attempt_run_id": active_run_id,
+            # Compatibility projection for the legacy console view only.
+            "run_id": active_run_id,
+            "accepted_result_id": _safe_optional_text(item.get("accepted_result_id"), limit=200),
+            "interface_context": item.get("interface_context") if isinstance(item.get("interface_context"), dict) else {},
+            "stale_dependencies": item.get("stale_dependencies") if isinstance(item.get("stale_dependencies"), list) else [],
             "source": _safe_optional_text(item.get("source"), limit=80) or "manifest",
         })
         if len(jobs) == 200:
@@ -510,18 +552,35 @@ def _safe_active_lineage(value: Any) -> dict[str, Any]:
     return result
 
 
-def _safe_accepted_part_results(value: Any) -> dict[str, dict[str, str]]:
+def _safe_accepted_part_results(value: Any) -> dict[str, dict[str, Any]]:
     if not isinstance(value, dict):
         return {}
-    result: dict[str, dict[str, str]] = {}
+    result: dict[str, dict[str, Any]] = {}
     for part_id, item in value.items():
         if not isinstance(part_id, str) or not part_id or not isinstance(item, dict):
             continue
-        child_run_id = item.get("child_run_id")
+        child_run_id = item.get("run_id") or item.get("child_run_id")
+        attempt_run_id = item.get("attempt_run_id") or child_run_id
         review_id = item.get("review_id")
         status = item.get("status")
-        if all(isinstance(field, str) and field for field in (child_run_id, review_id, status)):
-            result[part_id] = {"child_run_id": child_run_id, "review_id": review_id, "status": status}
+        result_id = item.get("result_id")
+        if all(isinstance(field, str) and field for field in (child_run_id, attempt_run_id, review_id, status, result_id)):
+            result[part_id] = {
+                "record_type": "accepted_part_result",
+                "schema_version": item.get("schema_version") if isinstance(item.get("schema_version"), int) else 1,
+                "result_id": result_id,
+                "part_job_id": part_id,
+                "attempt_run_id": attempt_run_id,
+                "run_id": child_run_id,
+                "child_run_id": child_run_id,
+                "review_id": review_id,
+                "artifact_ids": [
+                    artifact_id for artifact_id in item.get("artifact_ids", [])
+                    if isinstance(artifact_id, str) and artifact_id
+                ][:200] if isinstance(item.get("artifact_ids"), list) else [],
+                "status": status,
+                "accepted_at": _safe_optional_text(item.get("accepted_at"), limit=80),
+            }
     return result
 
 
@@ -635,6 +694,11 @@ def _build_work(
     manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     runs_by_id = {run_id: runs[run_id] for run_id in member_ids if run_id in runs}
+    if manifest is not None:
+        manifest = project_legacy_product_references(
+            manifest,
+            _iter_run_output_records(runs_by_id),
+        )
     latest_run_id = (
         manifest.get("current_run_id")
         if manifest and isinstance(manifest.get("current_run_id"), str) and manifest.get("current_run_id") in runs_by_id
@@ -863,63 +927,66 @@ def _run_lineage_relation(run: dict[str, Any]) -> tuple[str, str | None]:
 
 
 def _build_products(work: dict[str, Any]) -> dict[str, Any]:
-    accepted_results = _dict(work.get("entity_state")).get("accepted_part_results") or {}
-    accepted_run_to_parts: dict[str, list[str]] = {}
-    for part_id, value in (accepted_results.items() if isinstance(accepted_results, dict) else ()):
+    entity_state = _dict(work.get("entity_state"))
+    accepted_results = entity_state.get("accepted_part_results") or {}
+    artifacts = [
+        item
+        for item in entity_state.get("artifact_references", [])
+        if isinstance(item, dict)
+    ]
+    accepted_parts_by_artifact: dict[str, list[str]] = {}
+    for part_id, value in (
+        accepted_results.items() if isinstance(accepted_results, dict) else ()
+    ):
         accepted = _dict(value)
-        run_id = _accepted_run_id(accepted)
-        if accepted.get("status") == "approved" and run_id:
-            accepted_run_to_parts.setdefault(run_id, []).append(str(part_id))
+        if accepted.get("status") != "approved":
+            continue
+        for artifact_id in accepted.get("artifact_ids", []):
+            if isinstance(artifact_id, str):
+                accepted_parts_by_artifact.setdefault(artifact_id, []).append(str(part_id))
 
-    accepted_artifacts: dict[tuple[str, str], dict[str, Any]] = {}
-    supporting_artifacts: dict[tuple[str, str], dict[str, Any]] = {}
-    accepted_downloads: dict[tuple[str, str], dict[str, Any]] = {}
-    reviewable_downloads: dict[tuple[str, str], dict[str, Any]] = {}
+    accepted_downloads: list[dict[str, Any]] = []
+    reviewable_downloads: list[dict[str, Any]] = []
+    supporting_artifacts: list[dict[str, Any]] = []
     failed_attempt_output_count = 0
     untrusted_output_count = 0
-    for record in _iter_run_output_records(work["runs_by_id"]):
-        run_id = str(record.get("run_id") or "")
-        status = _status_value(record.get("status"))
-        accepted_parts = accepted_run_to_parts.get(run_id, [])
-        downloads = [name for name in record.get("downloadables", []) if name in {"model.step", "model.stl", "preview.png"}]
-        for name in record.get("artifacts", []):
-            supporting_artifacts[(run_id, name)] = {
+    for artifact in artifacts:
+        artifact_id = artifact.get("artifact_id")
+        name = artifact.get("relative_path")
+        run_id = artifact.get("run_id")
+        if not all(isinstance(value, str) and value for value in (artifact_id, name, run_id)):
+            continue
+        trust_role = artifact.get("trust_role")
+        parts = accepted_parts_by_artifact.get(artifact_id, [])
+        if name in PRODUCT_OUTPUT_NAMES:
+            item = {
+                "artifact_id": artifact_id,
                 "name": name,
                 "source_run_id": run_id,
-                "trust_status": "evidence",
-                "collapsed": True,
-                "read_on_demand": True,
+                "available": True,
+                "trust_status": "accepted" if parts else trust_role,
             }
-        if accepted_parts:
-            for name in record.get("artifacts", []):
-                accepted_artifacts[(run_id, name)] = {
+            if parts:
+                item["part_ids"] = parts
+                accepted_downloads.append(item)
+            elif trust_role == "reviewable_result":
+                item["trust_status"] = "reviewable"
+                reviewable_downloads.append(item)
+            elif trust_role == "diagnostic":
+                failed_attempt_output_count += 1
+            else:
+                untrusted_output_count += 1
+        else:
+            supporting_artifacts.append(
+                {
+                    "artifact_id": artifact_id,
                     "name": name,
                     "source_run_id": run_id,
-                    "part_ids": accepted_parts,
-                    "trust_status": "accepted",
+                    "trust_status": trust_role,
                     "collapsed": True,
                     "read_on_demand": True,
                 }
-            for name in downloads:
-                accepted_downloads[(run_id, name)] = {
-                    "name": name,
-                    "source_run_id": run_id,
-                    "part_ids": accepted_parts,
-                    "available": True,
-                    "trust_status": "accepted",
-                }
-        elif _attempt_status_is_failed(status):
-            failed_attempt_output_count += len(downloads)
-        elif _attempt_status_is_reviewable(status):
-            for name in downloads:
-                reviewable_downloads[(run_id, name)] = {
-                    "name": name,
-                    "source_run_id": run_id,
-                    "available": True,
-                    "trust_status": "reviewable",
-                }
-        else:
-            untrusted_output_count += len(downloads)
+            )
     return {
         "artifact_state": {
             "accepted_deliverable_count": len(accepted_downloads),
@@ -927,14 +994,14 @@ def _build_products(work: dict[str, Any]) -> dict[str, Any]:
             "failed_attempt_output_count": failed_attempt_output_count,
             "untrusted_output_count": untrusted_output_count,
         },
-        "accepted_deliverables": list(accepted_downloads.values()),
-        "reviewable_outputs": list(reviewable_downloads.values()),
+        "accepted_deliverables": accepted_downloads,
+        "reviewable_outputs": reviewable_downloads,
         "failed_attempt_outputs_are_diagnostics": True,
-        "supporting_artifacts": filter_artifacts_for_display(list(supporting_artifacts.values())),
+        "supporting_artifacts": filter_artifacts_for_display(supporting_artifacts),
         # Compatibility fields now have strict semantics: Work Products and
         # Deliverables contain only explicitly accepted results.
-        "human_facing": filter_artifacts_for_display(list(accepted_artifacts.values())),
-        "downloadables": list(accepted_downloads.values()),
+        "human_facing": list(accepted_downloads),
+        "downloadables": list(accepted_downloads),
         "artifacts_secondary_by_default": True,
     }
 

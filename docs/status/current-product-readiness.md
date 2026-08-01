@@ -1,9 +1,10 @@
 # Current Product Readiness
 
-Status date: 2026-07-25.
+Status date: 2026-07-27.
 
 This document distinguishes the Agent-first target architecture from the
-currently implemented workflow-first product.
+currently implemented deterministic product and the accepted M1 runtime
+foundation.
 
 ## Target status
 
@@ -16,13 +17,25 @@ The authoritative target is now:
 - first-class Part Job attempts and Assembly Job;
 - accepted-result-derived STEP, assembly, BOM, and drawing packages.
 
-This target is documented, not implemented.
+This target is documented. Its M1 runtime and domain foundation is implemented;
+the Agentic design runtime and later-milestone product surfaces are not.
 
 ## Implemented and usable now
 
 - Local Workspace and Work creation.
 - Append-only Run storage and active-lineage pointers.
-- Initial Part Job and accepted part-result records.
+- Work-manifest v2 with ordered Part Job attempt records.
+- Explicit accepted part-result pointers separated from active design lineage.
+- Typed artifact references and manifest-only product-state projection.
+- Schema-versioned Assembly Job and Deliverable Package definitions.
+- Read-only v1 Work-manifest compatibility projection that preserves Run
+  evidence.
+- One top-level `WorkOrchestrator` for target-product Work mutations.
+- One typed deterministic compatibility port for current Run creation and
+  stage execution.
+- Explicit read-only projection of legacy Run metadata into artifact
+  references before product-state rendering.
+- Backend/API creation of later attempts for the same Part Job.
 - Deterministic prompt and CAD IR pipelines.
 - Eight supported deterministic CAD IR part families.
 - STEP-first generation for supported families.
@@ -35,7 +48,13 @@ This target is documented, not implemented.
 
 Production-usable scope:
 
-- local deterministic supported-family single-part generation and review.
+- local deterministic supported-family single-part generation and review;
+- local manifest-backed Work/Intent creation, ordered Part Job attempts,
+  explicit accepted-result changes, and accepted artifact projection through
+  the existing backend/API and Workflow Console actions.
+
+This is a deterministic local product scope. It is not the Agent-first
+Workbench and does not execute provider-generated model programs.
 
 ## Implemented but not Agentic
 
@@ -54,10 +73,11 @@ one-shot orchestration, not Agentic design.
 
 ## Partial or migration-only
 
-- Work / Part Job projection: Part Jobs do not yet own complete ordered attempt
-  histories.
-- Current Work state: parts of the projection still infer state through file
-  discovery and compatibility heuristics.
+- Work / Part Job projection: v2 manifests own ordered attempt histories, while
+  legacy evidence with incomplete ownership remains compatibility-projected.
+- Current Work presentation: the target product projection is manifest and
+  artifact-reference based. Legacy stage/availability presentation still reads
+  sanitized Run metadata through an explicit compatibility boundary.
 - Provider usage: different entry points do not consistently use the configured
   adapter.
 - Revision: narrow field-level native CAD IR patches only.
@@ -75,8 +95,7 @@ one-shot orchestration, not Agentic design.
 - Enforced sandbox profile for provider-generated CAD source.
 - General feature-graph geometry contract.
 - Non-template general CAD design capability.
-- First-class Part Job attempt lists.
-- Assembly Job with accepted input identities.
+- Executable Assembly Job flow with accepted input identities.
 - Integrated assembly STEP or native assembly deliverable.
 - Integrated BOM and drawing package.
 - Agent-first four-phase workbench UI.
@@ -98,30 +117,49 @@ migration.
 
 ## Architecture conformance gaps
 
-The following current behavior does not conform to the target architecture:
+The following current behavior still does not conform to the target
+architecture:
 
 - fixed fifteen-checkpoint primary Workflow;
 - flat closed-family CAD IR;
 - deterministic fixed-action episode behavior;
-- product-state inference from artifact filenames;
-- singular Part Job `run_id` storage;
+- legacy Workflow Console stage/availability presentation outside the new
+  manifest-derived product projection;
 - hard-coded capability labeling in reviewed-part results;
-- multiple competing create and execution paths;
+- multiple compatibility/evaluation entry points remain callable outside
+  product authority;
 - disconnected assembly and drawing utilities.
 
 These are migration tasks, not accepted target behavior.
 
 ## Verification state
 
-- Automated verified: full suite reports `541 passed, 2 skipped`.
-- Verified meaning: the current deterministic workflow, console contracts,
-  safety boundaries, and compatibility behavior are internally consistent.
+- Automated verified: all test files passed in exhaustive shards with
+  `550 passed, 2 skipped` on 2026-07-27.
+- New contract tests cover ordered Part Job attempt history, acceptance-pointer
+  separation, immutable Run evidence, v1 projection, schema definitions,
+  manifest-only product state, orchestrator routing, and retry idempotency.
+- Golden contract and full-mode tests remain green; the two skipped tests are
+  opt-in/environment-gated checks, not M1 failures.
+- Verified meaning: the M1 runtime/contracts and the existing deterministic
+  workflow, console contracts, safety boundaries, failure isolation, and
+  compatibility behavior are internally consistent.
 - Not proven by those tests: Agent design breadth, provider-selected actions,
   sandbox security, non-template geometry success, multi-part assembly, or
   drawing-package usability.
+- Manually verified for this package:
+  - Golden Desktop Robot Arm contract mode passed;
+  - full mode passed and produced STEP, STL, and preview output;
+  - a real Golden Work retained two `upper_link` attempts;
+  - accepting the earlier `single_part_upper_link` result registered explicit
+    STEP/STL/preview artifact ids and left active root and leaf unchanged;
+  - the returned completion came from `work_orchestrator`.
+- No new UI was implemented, so this package did not require a new Workbench
+  visual acceptance.
 - Manual browser verification: incomplete for the latest legacy Workflow
   Cockpit.
-- Target architecture verification: not started.
+- Target architecture verification: M1 passed. M2 and later milestone claims
+  remain unverified.
 
 ## Current risks
 
@@ -139,14 +177,16 @@ These are migration tasks, not accepted target behavior.
 
 ## Current milestone
 
-M0 documentation correction is complete. Current implementation work begins at:
+M0 and M1 are complete. The next milestone is M2, the first provider-backed
+Agentic design vertical slice. It has not started in this package.
 
-1. runtime and domain-model consolidation;
-2. first provider-backed Agentic design vertical slice;
-3. feature-graph geometry contract;
-4. multi-Part Job and Assembly Job progression;
-5. integrated Deliverable Package and drawings;
-6. Agent-first workbench UX.
+Later milestones remain:
+
+1. M2 provider-selected bounded design loop and enforceable execution boundary;
+2. M3 feature-graph/model-program geometry paths;
+3. M4 multi-Part Job and Assembly Job progression;
+4. M5 integrated Deliverable Package and drawings;
+5. M6 Agent-first workbench UX.
 
 See:
 

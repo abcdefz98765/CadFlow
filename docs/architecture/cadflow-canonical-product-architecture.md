@@ -4,7 +4,7 @@
 
 This document is the canonical target architecture for CadFlow.
 
-Status date: 2026-07-25.
+Status date: 2026-07-27.
 
 CadFlow is migrating from a fixed workflow-first single-part product to an
 Agent-first CAD design workbench. This document defines the target. The current
@@ -589,10 +589,21 @@ The current implementation still contains:
 - a fixed fifteen-checkpoint Workflow Cockpit;
 - flat closed-family CAD IR;
 - effectively one-shot `create_part_ir` episode behavior;
-- file-discovery-based Work projection;
-- incomplete Part Job attempt ownership;
+- legacy stage/availability presentation derived from sanitized Run metadata;
+- incomplete Part Job ownership in historical v1 evidence;
 - disconnected FreeCAD assembly and TechDraw helpers;
-- multiple create and execution entry points.
+- multiple compatibility/evaluation entry points outside target-product
+  authority.
+
+M1 now provides a Work-manifest v2 domain foundation:
+ordered Part Job attempts, acceptance separated from active lineage,
+schema-versioned Assembly Job and Deliverable Package definitions, typed
+artifact references, and v1 compatibility projection. One `WorkOrchestrator`
+owns the target-product mutation path and invokes the existing deterministic
+runtime through one compatibility port. Legacy Run metadata is translated by
+an explicit read-only projector; target product trust and acceptance are
+resolved from manifest pointers and artifact references. This is runtime
+consolidation, not Agentic design or Assembly generation.
 
 Migration rules:
 

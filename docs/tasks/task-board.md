@@ -1,6 +1,6 @@
 # CadFlow Task Board
 
-Status date: 2026-07-25.
+Status date: 2026-07-27.
 
 The ordered roadmap is `docs/roadmap/milestones.md`. Execution starts at
 `docs/tasks/agent-start-here.md`. Do not pull later UI, assembly, or assurance
@@ -22,19 +22,37 @@ work ahead of the current milestone without an explicit architecture decision.
 
 ## M1 — Runtime consolidation and domain model
 
-- [ ] Write an architecture decision for the one product orchestrator.
-- [ ] Inventory all current create, reviewed-part, revision, text, and IR entry
+- [x] Write an architecture decision for the one product orchestrator.
+  - `../architecture/decisions/0001-single-product-orchestrator.md`
+- [x] Inventory all current create, reviewed-part, revision, text, and IR entry
   points and classify product, compatibility, evaluation, or removable.
-- [ ] Define schema-versioned Work, Part Job, Assembly Job, and Deliverable
+  - `../architecture/runtime-entry-point-inventory.md`
+- [x] Define schema-versioned Work, Part Job, Assembly Job, and Deliverable
   Package records.
-- [ ] Change Part Job from one `run_id` to ordered attempt references.
-- [ ] Keep accepted-result pointers separate from active design lineage.
-- [ ] Add explicit artifact ids, trust roles, and source references.
-- [ ] Replace recursive filename-driven product state with manifest/artifact
+  - `../architecture/domain-record-contracts.md`
+- [x] Change Part Job from one `run_id` to ordered attempt references.
+- [x] Keep accepted-result pointers separate from active design lineage.
+- [x] Add explicit artifact ids, trust roles, and source references.
+- [x] Implement one top-level `WorkOrchestrator` and one deterministic
+  compatibility port for the existing pipeline.
+- [x] Route target-product Work mutations through the orchestrator:
+  Work creation, Intent, Part Job attempts, candidate selection, lineage, and
+  accepted-result pointers.
+- [x] Replace recursive filename-driven product state with manifest/artifact
   references.
-- [ ] Add a legacy Run compatibility projector.
-- [ ] Preserve current failure isolation and path-safety behavior.
-- [ ] Keep the full deterministic regression suite green.
+  - [x] Add the manifest-only target projector and its contract tests.
+  - [x] Isolate legacy Run metadata translation in an explicit read-only
+    compatibility projector; filename presence alone assigns no trust.
+- [x] Add a legacy Work/Run-reference compatibility projector.
+- [x] Add contract tests for ordered attempts, acceptance/lineage separation,
+  immutable Run evidence, and manifest-only product state.
+- [x] Preserve current failure isolation and path-safety behavior.
+- [x] Keep the full deterministic regression suite green.
+  - 2026-07-27: `550 passed, 2 skipped`.
+- [x] Complete M1 usage acceptance.
+  - Golden contract and full modes passed.
+  - One real Part Job retained two attempts and accepted the older reviewable
+    result without changing active root/leaf or rewriting Run evidence.
 
 ## M2 — Agentic design vertical slice
 

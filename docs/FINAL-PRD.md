@@ -1,6 +1,6 @@
 # FINAL PRD: CadFlow Agent CAD Workbench
 
-Status date: 2026-07-25.
+Status date: 2026-07-27.
 
 Status: target product baseline. The repository is migrating from the former
 workflow-first single-part product to this Agent-first architecture. Capability
@@ -365,7 +365,11 @@ The current repository does not yet implement this target architecture.
 
 Implemented foundations worth retaining:
 
-- Workspace, Work, Run, and initial Part Job storage;
+- Workspace, Work, Run, Work-manifest v2, and ordered Part Job attempt storage;
+- schema-versioned Assembly Job and Deliverable Package definitions plus typed
+  artifact references;
+- a v1 Work-manifest compatibility projector that does not rewrite Run
+  evidence;
 - append-only evidence and explicit accepted-result pointers;
 - deterministic CadQuery execution for a small set of part families;
 - STEP-first output and basic geometry inspection;
@@ -378,10 +382,11 @@ Major migration gaps:
 - the current product Agent Episode is effectively one-shot;
 - provider-backed Agentic design is not product-usable;
 - the UI is organized around the former fixed workflow;
-- Part Job attempts and assembly progression are incomplete;
+- ordered Part Job attempts and the deterministic product `WorkOrchestrator`
+  are implemented; normal Assembly Job progression remains incomplete;
 - FreeCAD assembly and TechDraw scripts are not integrated deliverables;
-- several execution paths and legacy documents still compete with the target
-  architecture.
+- compatibility/evaluation execution paths remain callable outside product
+  authority, and the current UI remains a legacy workflow surface.
 
 ## 13. Product acceptance milestones
 

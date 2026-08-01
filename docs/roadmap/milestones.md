@@ -1,6 +1,6 @@
 # CadFlow Target Milestones
 
-Status date: 2026-07-25.
+Status date: 2026-07-27.
 
 This roadmap implements the Agent-first target in `docs/FINAL-PRD.md`.
 
@@ -59,6 +59,32 @@ Acceptance:
   rewriting history;
 - product state comes from manifests and artifact references;
 - existing deterministic Golden and failure-isolation tests remain green.
+
+Status:
+
+- accepted on 2026-07-27 for the M1 deterministic product scope;
+- first work package completed on 2026-07-25:
+  - accepted ADR for one product Work orchestrator;
+  - classified runtime entry-point inventory;
+  - Work-manifest v2 and nested domain-record v1 contracts;
+  - ordered Part Job attempt mutation and acceptance/lineage separation;
+  - manifest-only product-state projector;
+  - v1 Work-manifest compatibility projector;
+  - contract tests for attempt history, pointer separation, immutable Run
+    evidence, and manifest-based state;
+- one `WorkOrchestrator` now owns target-product Work creation, Intent Run
+  ownership, ordered Part Job attempts, candidate selection, active-lineage
+  changes, and accepted-result pointer changes;
+- the deterministic workflow is isolated behind one typed compatibility port;
+- legacy Run summaries are translated by an explicit, read-only compatibility
+  projector before the target product view consumes artifact references;
+- full deterministic suite is green at `550 passed, 2 skipped`;
+- contract and full Golden Desktop Robot Arm acceptance both passed;
+- a real Work acceptance retained two `upper_link` attempts, accepted the
+  earlier reviewable result, registered STEP/STL/preview references, and left
+  active root and leaf unchanged;
+- this accepts M1 only. It does not accept Agentic design, a model-program
+  sandbox, Assembly generation, a new Workbench, or any new `part_type`.
 
 ## M2 — First real Agentic design vertical slice
 

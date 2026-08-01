@@ -114,6 +114,13 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="Create part run containers for one Work after split confirmation.",
     ),
     RouteSpec(
+        name="create_work_part_attempt",
+        method="POST",
+        path="/api/works/{work_id}/parts/{part_job_id}/attempts",
+        backend_operation="create_work_part_attempt",
+        description="Append another explicit Run attempt to one Part Job.",
+    ),
+    RouteSpec(
         name="read_provider_config",
         method="GET",
         path="/workflow/provider",
@@ -493,6 +500,22 @@ def _create_work_part_runs(
     return backend.create_work_part_runs(_require_value(path_params, "work_id"))
 
 
+def _create_work_part_attempt(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    return backend.create_work_part_attempt(
+        _require_value(path_params, "work_id"),
+        _require_value(path_params, "part_job_id"),
+        prompt=body.get("prompt"),
+        role=body.get("role"),
+        run_id=body.get("run_id"),
+    )
+
+
 def _read_run_metadata(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -759,6 +782,7 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "read_work": _read_work,
     "create_work_requirement_run": _create_work_requirement_run,
     "create_work_part_runs": _create_work_part_runs,
+    "create_work_part_attempt": _create_work_part_attempt,
     "read_provider_config": _read_provider_config,
     "configure_provider": _configure_provider,
     "test_provider_connection": _test_provider_connection,
@@ -792,6 +816,7 @@ def _success_status_code(route_name: str) -> int:
         "create_golden_example",
         "create_work_requirement_run",
         "create_work_part_runs",
+        "create_work_part_attempt",
         "run_revision",
         "record_gate_decision",
         "apply_requirement_clarification",

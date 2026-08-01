@@ -1,6 +1,6 @@
 # Agent Implementation Start Here
 
-Status date: 2026-07-25.
+Status date: 2026-07-27.
 
 This is the execution entry point after the documentation correction. It does
 not replace the PRD, architecture, roadmap, or task board.
@@ -21,10 +21,11 @@ choosing the easiest implementation.
 
 ## Current execution scope
 
-The current milestone is M1: runtime consolidation and domain foundations.
+M1 runtime consolidation and domain foundations passed acceptance on
+2026-07-27. The next milestone is M2, but it must not be started as an
+incidental extension of M1 work.
 
-Do not begin M2 or later work until the relevant M1 acceptance conditions pass.
-In particular, do not start by:
+In particular, do not begin later work by:
 
 - polishing the legacy Workflow Console;
 - adding another product-specific `part_type`;
@@ -34,6 +35,12 @@ In particular, do not start by:
   verification exist.
 
 ## First work package
+
+Status: completed on 2026-07-25. M1 then passed implementation and usage
+acceptance on 2026-07-27. The accepted decision, inventory, record contracts,
+orchestrator, compatibility port/projector, and verification are linked from
+the M1 task board. Do not reinterpret that acceptance as permission to add the
+M2 sandbox or Agentic design path.
 
 Produce one reviewable change set that:
 

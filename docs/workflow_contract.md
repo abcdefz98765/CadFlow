@@ -74,6 +74,31 @@ artifact identity.
 The envelope must not expose secrets, provider payloads, unrestricted paths, or
 private reasoning.
 
+## Implemented domain manifest records
+
+The implemented M1 runtime uses:
+
+- Work manifest schema v2;
+- nested Part Job, Part Job attempt, accepted part result, Assembly Job
+  definition, Deliverable Package definition, and artifact-reference schema v1;
+- an explicit v1-to-v2 compatibility projector;
+- one top-level `WorkOrchestrator`;
+- one typed deterministic compatibility port for existing Run behavior.
+
+The concrete fields and migration behavior are defined in
+`architecture/domain-record-contracts.md`.
+
+Part Job attempt order is stored in `part_jobs[].attempts`; a singular legacy
+`run_id` is not canonical product state. Accepted part-result pointers remain
+in `accepted_part_results` and do not update active design lineage.
+
+The M1 `project_product_state` contract consumes only manifest pointers and
+artifact ids. It does not receive a directory or filename list. Older Run
+summaries pass through an explicit read-only compatibility projector that
+creates in-memory observation, diagnostic, candidate, or reviewable references
+from already-sanitized metadata. Filename presence alone never creates an
+accepted result; only an explicit accepted-result pointer does.
+
 ## Intent artifacts
 
 ### Input
