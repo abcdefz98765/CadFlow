@@ -374,18 +374,25 @@ Current code provides:
   provider may request semantic context, create or patch a candidate, react to
   validator observations, ask the user, or stop;
 - context provenance, trust roles, Work filtering, and byte/request budgets for
-  that preview.
+  that preview;
+- a typed CadFlow Tool Broker catalog whose tool definitions declare skill
+  authorization, input/output contracts, execution profile, side-effect
+  policies, limits, persisted evidence, and failure codes;
+- Broker-owned invocation of the local legacy CAD IR compatibility validator;
+- a Windows model-program capability gate that enumerates required controls and
+  returns `sandbox_unavailable` without writing source or starting a process.
 
 It does not yet provide:
 
 - product routing from `WorkOrchestrator` into the provider-selected episode;
-- sandboxed model-program execution;
+- an enforceable Windows sandbox or any provider model-program execution;
 - feature-graph CAD IR;
 - Agentic assembly or deliverable episodes.
 
 The preview validates only the legacy structured CAD IR compatibility
-contract. It has no execution or publication tool and is not production-usable
-Agentic CAD design.
+contract. Its model-program tool entry is unavailable capability metadata, not
+execution authority. It has no CAD execution or publication tool and is not
+production-usable Agentic CAD design.
 
 No current deterministic fallback may be presented as these target
 capabilities.

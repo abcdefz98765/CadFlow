@@ -611,6 +611,16 @@ context choice, validation-observation branching, focused user questions, and
 budgeted evidence. It is not yet a product path and exposes no CAD execution or
 model-program authority, so it does not satisfy the M2 vertical-slice gate.
 
+The second M2 package establishes a CadFlow-owned Tool Broker catalog and
+routes the preview's local structured-contract validation through it. Tool
+definitions declare skill authorization, input/output contracts, execution
+profile, filesystem/network/process policy, evidence, limits, and failure
+codes. An explicit model-program capability record enumerates every required
+isolation control and reports the current Windows profile unavailable. A
+model-program request therefore returns `sandbox_unavailable` before candidate
+storage or process startup. This is a fail-closed capability gate, not a
+sandbox implementation, CAD execution path, or publication boundary.
+
 Migration rules:
 
 1. preserve existing Runs and artifacts as immutable legacy evidence;

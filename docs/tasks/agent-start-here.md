@@ -24,8 +24,10 @@ choosing the easiest implementation.
 M1 runtime consolidation and domain foundations passed acceptance on
 2026-07-27. M2 is now in progress. Its first internal package implements the
 `design_part` typed registry and provider-selected structured-contract preview;
-Tool Broker sandboxing, product routing, execution/publication, and benchmark
-acceptance remain open.
+its second package adds Broker-owned structured validation and an explicit
+fail-closed Windows model-program capability gate. An enforceable sandbox
+worker, product routing, execution/publication, and benchmark acceptance remain
+open.
 
 In particular, do not begin later work by:
 
@@ -59,9 +61,9 @@ Produce one reviewable change set that:
 
 Do not combine this work package with the Agent sandbox or new Workbench UI.
 
-## Current M2 work package
+## Completed M2 internal packages
 
-The current reviewable package is deliberately narrower than the full M2 gate:
+The first internal package was deliberately narrower than the full M2 gate:
 
 1. one `design_part` skill version;
 2. one typed registry rather than a general plugin platform;
@@ -71,9 +73,22 @@ The current reviewable package is deliberately narrower than the full M2 gate:
 6. concise provenance-safe episode evidence;
 7. no CAD/model-program execution or product publication.
 
-The next package must connect the episode through `WorkOrchestrator` and add an
-enforceable Tool Broker execution boundary. Do not expose source execution
-until the sandbox profile fails closed on this Windows environment.
+The second internal package adds:
+
+1. one typed CadFlow Tool Broker catalog;
+2. Broker-owned local structured-contract validation;
+3. declared filesystem, network, process, resource, evidence, and failure
+   policies per tool;
+4. an explicit Windows model-program capability gate that enumerates missing
+   controls;
+5. a `sandbox_unavailable` safe block before source write, candidate-directory
+   creation, or process startup.
+
+This is not a sandbox implementation. The next package should connect the
+provider-selected episode through `WorkOrchestrator` without adding execution
+authority, or implement and independently verify an enforceable Windows
+sandbox worker before enabling model-program actions. Do not route provider
+source into the existing host CadQuery subprocess.
 
 ## Change discipline
 

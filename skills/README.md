@@ -41,12 +41,17 @@ Current directories are retained during migration:
 - `revision/` — child-Run change intent and candidate revision.
 - `assembly/` — Assembly Job planning, placement, constraints, and checks.
 - `design_part/` — M2 provider-selected structured-contract episode contract;
-  version 0.1 exposes validation only and no CAD execution authority.
+  version 0.1 exposes Broker-owned validation only and no CAD execution
+  authority.
 
 Target additions still required by the roadmap:
 
 - a model-program skill for sandboxed allowlisted CAD source;
 - a deliverables skill for accepted-result-derived drawings, BOMs, and packages.
+
+The runtime now includes a narrow CadFlow Tool Broker and a fail-closed Windows
+model-program capability gate. This does not make the target model-program
+skill executable: no enforceable sandbox worker is registered.
 
 ## Skill contract
 

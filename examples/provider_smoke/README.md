@@ -23,6 +23,23 @@ All scripts print sanitized status metadata. They must not print API keys,
 provider messages, raw provider response bodies, local absolute paths, runtime
 logs, or transcripts.
 
+## Local Tool Broker Gate Acceptance
+
+```bash
+python examples/provider_smoke/tool_broker_gate_eval.py
+```
+
+- Verifies: Broker-owned structured-contract validation and the current
+  platform's fail-closed model-program capability gate.
+- Does not verify: an enforceable sandbox, provider-source execution, geometry,
+  publication, or production Agentic design.
+- Real provider: no; this is a local authority-boundary acceptance.
+- Durable outputs: none. A temporary parent directory is used, and the asserted
+  candidate directory must never be created.
+- Expected Windows result: validation passes, model-program capability is
+  unavailable, the code is `sandbox_unavailable`, and
+  `side_effect_started=false`.
+
 ## Basic Provider Smoke
 
 ### `parse_requirement_smoke.py`

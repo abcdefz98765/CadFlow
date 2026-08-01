@@ -77,11 +77,20 @@ Workbench and does not execute provider-generated model programs.
   and request/byte budgets.
 - Concise episode actions, submissions, observations, budget use, and result
   artifacts without private reasoning or raw provider traffic.
+- CadFlow-owned Tool Broker definitions for structured validation and the
+  future model-program execution boundary.
+- Broker authorization and invocation for local structured-contract validation,
+  with typed observations and persisted `tool_broker_manifest.json` evidence.
+- Explicit Windows model-program capability gate that enumerates all required
+  controls and returns `sandbox_unavailable` before source, candidate-directory,
+  or process side effects.
 
 This preview is not connected to the product `WorkOrchestrator`. Its only tool
-is structured-contract validation. It cannot execute CAD, publish a reviewable
-result, or update acceptance, so it must not be described as production
-Agentic CAD design.
+enabled for the `design_part` skill is structured-contract validation. The
+model-program Broker entry is unavailable capability metadata, not execution
+authority. The preview cannot execute CAD, publish a reviewable result, or
+update acceptance, so it must not be described as production Agentic CAD
+design.
 
 The product `create_part_ir` path currently follows a fixed proposer sequence:
 one fixed context request, one adapter submission, one validation request, and
@@ -108,8 +117,9 @@ one-shot orchestration, not Agentic design.
 ## Not implemented
 
 - Product-integrated provider-selected design-to-execution Episode.
-- Tool Broker for untrusted model programs.
-- Enforced sandbox profile for provider-generated CAD source.
+- Tool Broker execution worker for untrusted model programs.
+- Enforced Windows sandbox profile for provider-generated CAD source (the
+  implemented capability gate currently reports unavailable).
 - General feature-graph geometry contract.
 - Non-template general CAD design capability.
 - Executable Assembly Job flow with accepted input identities.
@@ -151,8 +161,8 @@ These are migration tasks, not accepted target behavior.
 
 ## Verification state
 
-- Automated verified: all test files passed in exhaustive shards with
-  `558 passed, 2 skipped` on 2026-08-01.
+- Automated verified: the complete suite passed with `565 passed, 2 skipped`
+  on 2026-08-01.
 - The M1 acceptance baseline was `550 passed, 2 skipped` on 2026-07-27.
 - New contract tests cover ordered Part Job attempt history, acceptance-pointer
   separation, immutable Run evidence, v1 projection, schema definitions,
@@ -165,6 +175,11 @@ These are migration tasks, not accepted target behavior.
   forbidden execution-field rejection, and provider-failure redaction.
   Provider-visible action state is also tested for secret and local-path
   redaction.
+- M2 Tool Broker tests prove skill authorization, strict input contracts,
+  prohibited execution-field rejection, validator-failure redaction, typed
+  observations, required sandbox-control completeness, Windows capability
+  reporting, and no candidate-directory side effect on an unavailable
+  model-program request.
 - Verified meaning: the M1 runtime/contracts and the existing deterministic
   workflow, console contracts, safety boundaries, failure isolation, and
   compatibility behavior are internally consistent.
@@ -186,6 +201,14 @@ These are migration tasks, not accepted target behavior.
   - local contract validation passed;
   - no `model.step` or other CAD product was created, matching the declared
     no-execution boundary.
+- Manually verified for the Tool Broker package on Windows:
+  - Broker-owned structured-contract validation passed;
+  - model-program capability reported `available=false` and
+    `sandbox_unavailable`;
+  - `side_effect_started=false` and the requested candidate directory was not
+    created;
+  - the reproducible record is
+    `m2-tool-broker-package-acceptance.md`.
 - A real external provider and product-routed episode have not been manually
   verified.
 - No new UI was implemented, so this package did not require a new Workbench
@@ -212,8 +235,9 @@ These are migration tasks, not accepted target behavior.
 ## Current milestone
 
 M0 and M1 are complete. M2 is in progress: its provider-selected
-structured-contract preview exists, while the execution/publication vertical
-slice remains unimplemented.
+structured-contract preview, validation Tool Broker, and fail-closed Windows
+capability gate exist, while the sandbox execution/publication vertical slice
+remains unimplemented.
 
 Later milestones remain:
 

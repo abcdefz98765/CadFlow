@@ -82,6 +82,15 @@ work ahead of the current milestone without an explicit architecture decision.
 
 ### Tool Broker and sandbox
 
+- [x] Implement a typed CadFlow-owned Tool Broker catalog.
+- [x] Route `design_part` structured-contract validation through Broker
+  authorization and structured observations.
+- [x] Add an explicit Windows model-program capability gate that fails closed
+  before source, candidate-directory, or process side effects.
+- [x] Verify the Tool Broker package with targeted and full regression tests.
+  - 2026-08-01: `23 passed` targeted; `565 passed, 2 skipped` full suite.
+- [x] Complete local Windows fail-closed acceptance.
+  - `../status/m2-tool-broker-package-acceptance.md`
 - [ ] Choose the first supported model-program API: CadQuery or build123d.
 - [ ] Define allowlisted imports and prohibited APIs.
 - [ ] Implement isolated candidate directory and execution worker.

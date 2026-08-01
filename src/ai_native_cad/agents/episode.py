@@ -19,6 +19,10 @@ from ai_native_cad.agents.registry import (
     RUNTIME_SKILL_REGISTRY,
     SkillDefinition,
 )
+from ai_native_cad.agents.tool_broker import (
+    STRUCTURED_CONTRACT_TOOL,
+    CadFlowToolBroker,
+)
 
 
 class StopReason(str, Enum):
@@ -336,9 +340,15 @@ class ActionSupplier(Protocol):
 class EpisodeArtifactWriter:
     """Persists the reviewable episode record, never unrestricted transcripts."""
 
-    def __init__(self, output_dir: Path, envelope: ContextEnvelope) -> None:
+    def __init__(
+        self,
+        output_dir: Path,
+        envelope: ContextEnvelope,
+        tool_broker_manifest: dict[str, Any],
+    ) -> None:
         self.output_dir = output_dir
         self.envelope = envelope
+        self.tool_broker_manifest = tool_broker_manifest
         self.events: list[dict[str, Any]] = []
         self.context_manifest: list[dict[str, Any]] = []
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -373,6 +383,10 @@ class EpisodeArtifactWriter:
         episode["lineage"] = lineage
         _write_json(self.output_dir / "agent_episode.json", episode)
         _write_json(self.output_dir / "context_manifest.json", {"schema_version": 1, "items": self.context_manifest})
+        _write_json(
+            self.output_dir / "tool_broker_manifest.json",
+            self.tool_broker_manifest,
+        )
         events_path = self.output_dir / "agent_events.jsonl"
         events_path.write_text("".join(json.dumps(item, sort_keys=True) + "\n" for item in self.events), encoding="utf-8")
         _write_json(self.output_dir / "agent_result.json", {
@@ -393,16 +407,51 @@ class EpisodeOrchestrator:
         context_broker: ContextBroker,
         capabilities: AgentCapabilities,
         budget: EpisodeBudget,
-        validate_contract: Callable[[dict[str, Any]], dict[str, Any]],
+        validate_contract: Callable[[dict[str, Any]], dict[str, Any]] | None,
         artifact_dir: Path,
+        *,
+        tool_broker: CadFlowToolBroker | None = None,
     ) -> None:
         self.objective = objective
         self.context_envelope = context_envelope
         self.context_broker = context_broker
         self.capabilities = capabilities
         self.budget = budget
-        self.validate_contract = validate_contract
-        self.writer = EpisodeArtifactWriter(artifact_dir, context_envelope)
+        if tool_broker is not None and validate_contract is not None:
+            raise ValueError(
+                "provide either a Tool Broker or a compatibility validator, not both"
+            )
+        self._validate_contract = validate_contract
+        self.tool_broker = tool_broker or CadFlowToolBroker(
+            structured_contract_validator=validate_contract
+        )
+        self.writer = EpisodeArtifactWriter(
+            artifact_dir,
+            context_envelope,
+            self.tool_broker.manifest(active_skill_id=capabilities.skill_id),
+        )
+
+    @property
+    def validate_contract(
+        self,
+    ) -> Callable[[dict[str, Any]], dict[str, Any]] | None:
+        """Compatibility hook; validation still executes through Tool Broker."""
+
+        return self._validate_contract
+
+    @validate_contract.setter
+    def validate_contract(
+        self,
+        validator: Callable[[dict[str, Any]], dict[str, Any]] | None,
+    ) -> None:
+        self._validate_contract = validator
+        self.tool_broker = CadFlowToolBroker(
+            structured_contract_validator=validator
+        )
+        if hasattr(self, "writer"):
+            self.writer.tool_broker_manifest = self.tool_broker.manifest(
+                active_skill_id=self.capabilities.skill_id
+            )
 
     def run(self, supplier: ActionSupplier) -> AgentEpisodeResult:
         started = time.monotonic()
@@ -531,17 +580,28 @@ class EpisodeOrchestrator:
             if action.action == "request_validation":
                 if draft is None:
                     raise EpisodeContractError("request_validation requires a submitted contract")
-                try:
-                    feedback = self.validate_contract(draft)
-                except Exception:
-                    feedback = {"valid": False, "errors": [{"code": "validation_exception"}]}
+                observation = self.tool_broker.invoke(
+                    STRUCTURED_CONTRACT_TOOL,
+                    skill_id=self.capabilities.skill_id,
+                    payload={
+                        "contract_type": "cad_ir_draft",
+                        "contract": draft,
+                    },
+                )
+                feedback = observation.output
                 if not isinstance(feedback, dict) or not isinstance(feedback.get("valid"), bool):
-                    raise EpisodeContractError("validator must return structured feedback with a valid boolean")
+                    raise EpisodeContractError(
+                        "Tool Broker must return structured validation feedback"
+                    )
                 self.writer.feedback(submissions, feedback)
                 self.writer.event({
                     "event_type": "system_observation", "step": steps, "action": action.action,
+                    "owner": "cadflow_tool_broker",
+                    "tool_id": observation.tool_id,
+                    "execution_profile": observation.execution_profile,
+                    "side_effect_started": observation.side_effect_started,
                     "validator_feedback": _feedback_summary(feedback),
-                    "codes": _feedback_summary(feedback)["codes"],
+                    "codes": list(observation.codes),
                     "observation": "validation_passed" if feedback["valid"] else "validation_failed",
                 })
                 if feedback["valid"]:
@@ -656,7 +716,7 @@ def run_create_part_ir_episode(
     orchestrator = EpisodeOrchestrator(
         objective=envelope.objective, context_envelope=envelope, context_broker=broker,
         capabilities=AgentCapabilities(), budget=budget or EpisodeBudget(),
-        validate_contract=_validate_cad_ir_contract, artifact_dir=artifact_dir,
+        validate_contract=None, artifact_dir=artifact_dir,
     )
     return orchestrator.run(DeterministicCreatePartIRProposer(adapter, handoff, adapter_context))
 
@@ -780,6 +840,7 @@ def run_design_part_episode(
     artifact_dir: Path,
     budget: EpisodeBudget | None = None,
     validate_contract: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    tool_broker: CadFlowToolBroker | None = None,
 ) -> AgentEpisodeResult:
     """Run the first provider-selected M2 action loop without CAD execution."""
     skill = RUNTIME_SKILL_REGISTRY.for_operation("design_part")
@@ -805,23 +866,11 @@ def run_design_part_episode(
             capability_mode="provider_selected_structured_contract_preview",
         ),
         budget=episode_budget,
-        validate_contract=validate_contract or _validate_cad_ir_contract,
+        validate_contract=validate_contract,
         artifact_dir=artifact_dir,
+        tool_broker=tool_broker,
     )
     return orchestrator.run(ProviderSelectedDesignPartSupplier(adapter, skill))
-
-
-def _validate_cad_ir_contract(contract: dict[str, Any]) -> dict[str, Any]:
-    # Existing local validators remain the authority for this compatibility
-    # contract.  No CAD execution occurs in this episode.
-    from ai_native_cad.agents.validation import validate_input_ir_draft
-    from ai_native_cad.cad_ir.validator import validate_ir
-
-    feedback = validate_ir(contract)
-    if not feedback["valid"]:
-        return feedback
-    validate_input_ir_draft(contract)
-    return feedback
 
 
 def _reject_execution_fields(value: Any, path: str = "") -> None:

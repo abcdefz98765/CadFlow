@@ -289,6 +289,7 @@ A bounded Agent Episode records:
 ```text
 agent_episode.json
 context_manifest.json
+tool_broker_manifest.json
 agent_events.jsonl
 candidates/
 observations/
@@ -320,6 +321,13 @@ role, and compact summary. Request and byte budgets are enforced.
 This preview has no execution tool. A validated `cad_ir_draft` remains a
 candidate contract; it is not geometry, a reviewable result, or an accepted
 result.
+
+`request_validation` is now authorized and invoked by the CadFlow Tool Broker.
+The broker manifest records the active skill's allowed tool definitions and the
+current model-program sandbox capability. On Windows that capability is
+explicitly unavailable; a model-program request is blocked before source is
+written, a candidate directory is created, or a process starts. This evidence
+does not claim that sandboxed execution exists.
 
 ## Build and evaluation artifacts
 

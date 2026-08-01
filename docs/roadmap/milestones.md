@@ -142,11 +142,26 @@ Status:
 - scripted-provider file-level acceptance confirmed three provider-selected
   actions, provenance-safe episode evidence, local validation, and zero CAD
   product output;
+- second internal package implemented on 2026-08-01:
+  - CadFlow-owned typed Tool Broker catalog;
+  - structured-contract validation routed through Broker authorization;
+  - tool execution-profile, filesystem/network/process, evidence, limit, and
+    failure-code declarations;
+  - explicit Windows model-program capability gate with all required controls
+    reported missing;
+  - `sandbox_unavailable` returned before candidate-directory or process side
+    effects;
+- package 2 verification passed with `23 passed` targeted and
+  `565 passed, 2 skipped` full-suite results;
+- local Windows acceptance confirmed Broker-owned validation plus
+  `available=false`, `sandbox_unavailable`, `side_effect_started=false`, and no
+  candidate-directory creation;
 - this package validates a structured legacy CAD IR candidate only. It is not
   routed through the product `WorkOrchestrator`, cannot execute CAD, and cannot
   publish a reviewable result;
-- M2 remains unaccepted pending Tool Broker/sandbox enforcement, product
-  routing, STEP-first execution/inspection/publication, and the benchmark gate.
+- M2 remains unaccepted pending an enforceable sandbox execution worker,
+  product routing, STEP-first execution/inspection/publication, and the
+  benchmark gate.
 
 ## M3 — General structured geometry contract
 

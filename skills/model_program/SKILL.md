@@ -30,8 +30,11 @@ has no acceptance authority and may not bypass the Tool Broker or sandbox.
 
 ## Current gap
 
-This is a target skill contract. The enforceable sandbox profile and runtime
-routing are not yet implemented.
+This is a target skill contract. CadFlow now has a typed Tool Broker definition
+and an explicit Windows capability gate for the future execution tool. The gate
+enumerates the required controls and returns `sandbox_unavailable` before any
+source write or process start. The enforceable sandbox profile, execution
+worker, runtime skill registration, and product routing are not implemented.
 
 ## References
 

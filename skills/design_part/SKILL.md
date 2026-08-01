@@ -25,7 +25,8 @@ make that closed schema the target geometry architecture.
 - `stop`
 
 The provider chooses the next action. CadFlow validates the action, resolves
-context, enforces budgets, invokes validators, and persists concise evidence.
+context, enforces budgets, asks the Tool Broker to invoke validators, and
+persists concise evidence.
 
 ## Semantic context
 
@@ -44,6 +45,11 @@ provider traffic, and repository snapshots are prohibited.
 Allowed tool in version `0.1.0`:
 
 - `validate_structured_contract`
+
+This tool is implemented as an in-process, no-filesystem, no-network local
+validator behind the CadFlow Tool Broker. The Broker checks the active skill,
+input contract, prohibited execution fields, and structured result before the
+observation is returned.
 
 Allowed output contract:
 
@@ -81,9 +87,10 @@ candidate, not geometry, a reviewable result, or an accepted result.
 ## Validation and handoff
 
 Only the local structured-contract validators decide whether a submission is
-valid. This skill stops after a validated compatibility contract or a typed
-safe block. Controlled execution and geometry publication remain later M2
-work behind the Tool Broker and sandbox.
+valid, and they are invoked through the Tool Broker. This skill stops after a
+validated compatibility contract or a typed safe block. The Broker's Windows
+model-program capability gate currently reports `sandbox_unavailable`;
+controlled execution and geometry publication remain later M2 work.
 
 ## Knowledge
 

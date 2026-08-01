@@ -377,14 +377,19 @@ Implemented foundations worth retaining:
 - controlled artifact access and a tested local console.
 - an internal `design_part` v0.1 typed skill registry and provider-selected
   structured-contract episode preview with semantic context and local
-  validation observations.
+  validation observations;
+- a CadFlow-owned Tool Broker for that preview's structured-contract validator,
+  plus an explicit model-program capability gate that reports the current
+  Windows sandbox profile unavailable and fails closed before execution.
 
 Major migration gaps:
 
 - the current CAD IR is a closed part-family selector;
 - the current product Agent Episode is effectively one-shot;
 - the new provider-selected episode preview is not yet routed through the
-  product `WorkOrchestrator` and has no sandboxed execution tool;
+  product `WorkOrchestrator` and has no usable sandboxed execution tool;
+- the model-program Tool Broker entry is capability metadata and a safe block,
+  not an implemented Windows sandbox or source executor;
 - provider-backed Agentic design is not product-usable;
 - the UI is organized around the former fixed workflow;
 - ordered Part Job attempts and the deterministic product `WorkOrchestrator`

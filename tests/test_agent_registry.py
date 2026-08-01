@@ -158,6 +158,26 @@ def test_provider_selects_context_contract_and_validation_actions(tmp_path):
     assert context_manifest["items"][0]["work_id"] == "fixture_work"
     assert context_manifest["items"][0]["part_job_id"] == "clamp"
     assert context_manifest["items"][0]["trust_role"] == "accepted_input"
+    tool_manifest = json.loads(
+        (tmp_path / "tool_broker_manifest.json").read_text(encoding="utf-8")
+    )
+    assert tool_manifest["broker"] == "cadflow_tool_broker"
+    assert [item["tool_id"] for item in tool_manifest["allowed_tools"]] == [
+        "validate_structured_contract"
+    ]
+    assert tool_manifest["model_program_capability"]["available"] is False
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "agent_events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    validation_event = next(
+        event for event in events if event.get("observation") == "validation_passed"
+    )
+    assert validation_event["owner"] == "cadflow_tool_broker"
+    assert validation_event["tool_id"] == "validate_structured_contract"
+    assert validation_event["side_effect_started"] is False
 
 
 def test_provider_repairs_after_observation_and_receives_feedback(tmp_path):

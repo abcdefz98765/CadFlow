@@ -254,7 +254,8 @@ design lineage.
 `run_design_part_episode` is an internal evaluation API for the first M2
 package. It asks an injected JSON-contract provider to choose each next action,
 while CadFlow enforces the registered `design_part` capability, semantic
-context, budgets, and local structured-contract validation.
+context, budgets, and CadFlow Tool Broker-owned local structured-contract
+validation.
 
 ```python
 from pathlib import Path
@@ -280,6 +281,41 @@ actions are `request_context`, `create_contract`, `patch_contract`,
 This API does not execute provider source or CAD. A validated `cad_ir_draft` is
 candidate evidence only. Do not present it as STEP, reviewable geometry,
 accepted output, sandboxed execution, or general/non-template CAD capability.
+
+Each episode now writes `tool_broker_manifest.json`. It records the active
+skill's allowed tool definitions and the model-program sandbox capability gate.
+On the current Windows implementation, the gate reports unavailable and lists
+the missing enforcement controls.
+
+The capability can be inspected without providing source or starting a process:
+
+```python
+from ai_native_cad.agents import (
+    MODEL_PROGRAM_TOOL,
+    CadFlowToolBroker,
+)
+
+capability = CadFlowToolBroker().capability(MODEL_PROGRAM_TOOL)
+assert capability["capability"]["available"] is False
+assert "sandbox_unavailable" in capability["capability"]["reason_codes"]
+```
+
+Calling the unavailable model-program tool returns a structured
+`sandbox_unavailable` observation with `side_effect_started=false`. It does not
+write source, create a candidate directory, invoke the current deterministic
+CadQuery host subprocess, or publish artifacts. There is no command, setting,
+or environment variable that enables provider model-program execution yet.
+
+Repeat the local acceptance check with:
+
+```powershell
+$env:PYTHONPATH = "src"
+.venv-cadflow\Scripts\python.exe examples\provider_smoke\tool_broker_gate_eval.py
+```
+
+The command creates no durable output. Its JSON summary must report
+`passed=true`, `available=false`, `sandbox_unavailable`,
+`side_effect_started=false`, and `candidate_directory_created=false`.
 
 The Console presents workflow summaries and final STEP, STL, and preview
 deliverables. Raw JSON, agent traces, runtime logs, and generated scripts stay

@@ -344,13 +344,20 @@ Implemented:
   contract creation/patching, validation observation, focused questions, and
   typed stops;
 - semantic context provenance, trust role, Work identity checks, and request/
-  byte budgets.
+  byte budgets;
+- a CadFlow-owned Tool Broker catalog and brokered local structured-contract
+  validation observations;
+- an explicit Windows model-program capability gate covering filesystem,
+  environment, network, subprocess, dependency, resource, and output controls;
+- fail-closed `sandbox_unavailable` observations before candidate-directory or
+  process side effects when that profile is unavailable.
 
 Not implemented:
 
 - product-integrated provider-selected design-to-execution Episode;
-- Tool Broker for untrusted model programs;
-- sandbox enforcement profile;
+- Tool Broker execution worker for untrusted model programs;
+- enforceable Windows sandbox profile (the implemented gate reports it
+  unavailable);
 - feature-graph geometry contract;
 - Agentic assembly and drawing tools;
 - real branching repair behavior in the product path.
@@ -358,6 +365,10 @@ Not implemented:
 The current provider-selected loop is an internal preview. It can branch after
 contract-validator observations, but it cannot request CAD execution and does
 not publish a reviewable result.
+
+The existing deterministic CadQuery executor is not sandbox evidence: it uses
+the host Python executable and inherits the host environment. The capability
+gate deliberately excludes it from provider-source authority.
 
 ## Acceptance tests
 
