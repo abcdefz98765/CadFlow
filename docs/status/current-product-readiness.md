@@ -66,7 +66,7 @@ Workbench and does not execute provider-generated model programs.
 - `create_part_ir` episode artifacts;
 - validator observations.
 
-## M2 internal preview — implemented, not production usable
+## M2 validation preview — implemented, not production usable
 
 - `design_part` v0.1 typed registry for actions, context, tools, knowledge,
   budgets, output contracts, prohibitions, and stop reasons.
@@ -84,13 +84,19 @@ Workbench and does not execute provider-generated model programs.
 - Explicit Windows model-program capability gate that enumerates all required
   controls and returns `sandbox_unavailable` before source, candidate-directory,
   or process side effects.
+- Typed `AgentDesignPort` and `WorkOrchestrator` route for an existing Part Job
+  attempt, with ownership checks before provider invocation.
+- Append-only episode evidence under the owning Run, path-safe idempotent
+  request identity, and typed Work candidate/observation/diagnostic references.
+- Protected-state postcondition checks covering active lineage, accepted-result
+  pointers, Part Jobs, Assembly Job, Deliverable Packages, and Run ids.
 
-This preview is not connected to the product `WorkOrchestrator`. Its only tool
-enabled for the `design_part` skill is structured-contract validation. The
-model-program Broker entry is unavailable capability metadata, not execution
-authority. The preview cannot execute CAD, publish a reviewable result, or
-update acceptance, so it must not be described as production Agentic CAD
-design.
+This preview is connected to the product `WorkOrchestrator`, but only for
+validation and evidence registration. Its only tool enabled for the
+`design_part` skill is structured-contract validation. The model-program Broker
+entry is unavailable capability metadata, not execution authority. The preview
+cannot execute CAD, publish a reviewable result, or update acceptance, so it
+must not be described as production Agentic CAD design.
 
 The product `create_part_ir` path currently follows a fixed proposer sequence:
 one fixed context request, one adapter submission, one validation request, and
@@ -116,7 +122,8 @@ one-shot orchestration, not Agentic design.
 
 ## Not implemented
 
-- Product-integrated provider-selected design-to-execution Episode.
+- Product-integrated provider-selected design-to-execution Episode and
+  reviewable publication.
 - Tool Broker execution worker for untrusted model programs.
 - Enforced Windows sandbox profile for provider-generated CAD source (the
   implemented capability gate currently reports unavailable).
@@ -149,7 +156,8 @@ architecture:
 
 - fixed fifteen-checkpoint primary Workflow;
 - flat closed-family CAD IR;
-- deterministic fixed-action behavior in the current product path;
+- deterministic fixed-action behavior in the current `create_part_ir`
+  compatibility product path;
 - legacy Workflow Console stage/availability presentation outside the new
   manifest-derived product projection;
 - hard-coded capability labeling in reviewed-part results;
@@ -161,8 +169,8 @@ These are migration tasks, not accepted target behavior.
 
 ## Verification state
 
-- Automated verified: the complete suite passed with `565 passed, 2 skipped`
-  on 2026-08-01.
+- Automated verified: the complete suite passed with `574 passed, 2 skipped`
+  in 374.51 seconds on 2026-08-01.
 - The M1 acceptance baseline was `550 passed, 2 skipped` on 2026-07-27.
 - New contract tests cover ordered Part Job attempt history, acceptance-pointer
   separation, immutable Run evidence, v1 projection, schema definitions,
@@ -180,11 +188,17 @@ These are migration tasks, not accepted target behavior.
   observations, required sandbox-control completeness, Windows capability
   reporting, and no candidate-directory side effect on an unavailable
   model-program request.
+- M2 product-route tests prove Part Job attempt ownership, provider-selected
+  validation routing, path-safe idempotency, conflicting request rejection,
+  tampered evidence rejection, protected Work state, immutable original Run
+  prompt bytes, mismatched request/path identity rejection, typed artifact
+  registration, diagnostic safe blocks, and no duplicate provider call on
+  replay.
 - Verified meaning: the M1 runtime/contracts and the existing deterministic
   workflow, console contracts, safety boundaries, failure isolation, and
   compatibility behavior are internally consistent.
-- Not proven by those tests: real external-provider design quality,
-  product-routed provider actions, sandbox security, non-template geometry
+- Not proven by those tests: real external-provider design quality or
+  product-route interoperability, sandbox security, non-template geometry
   success, multi-part assembly, or drawing-package usability.
 - Manually verified for this package:
   - Golden Desktop Robot Arm contract mode passed;
@@ -209,8 +223,18 @@ These are migration tasks, not accepted target behavior.
     created;
   - the reproducible record is
     `m2-tool-broker-package-acceptance.md`.
-- A real external provider and product-routed episode have not been manually
-  verified.
+- Manually verified for the validation-only WorkOrchestrator package with a
+  scripted provider:
+  - the product route registered four candidate/observation references after
+    exactly three provider-selected calls;
+  - exact replay reused persisted evidence without another provider call or
+    Work manifest rewrite;
+  - protected Work state and original Run prompt bytes remained unchanged;
+  - no accepted, deliverable, STEP, STL, or model-program product was created;
+  - the reproducible record is
+    `m2-work-design-episode-package-acceptance.md`.
+- A real external provider has not been manually verified through the product
+  route.
 - No new UI was implemented, so this package did not require a new Workbench
   visual acceptance.
 - Manual browser verification: incomplete for the latest legacy Workflow

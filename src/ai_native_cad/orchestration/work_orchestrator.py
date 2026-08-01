@@ -7,6 +7,7 @@ programs.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,11 +16,15 @@ from ai_native_cad.domain.records import (
     advance_active_lineage,
     append_part_attempt,
     begin_work_intent,
+    create_artifact_reference,
     project_product_state,
     record_candidate_selection,
     register_artifact_references,
 )
 from ai_native_cad.orchestration.ports import (
+    AgentDesignPort,
+    DesignPartEpisodeOutcome,
+    DesignPartEpisodeRequest,
     DeterministicCompatibilityPort,
     WorkStorePort,
 )
@@ -32,9 +37,11 @@ class WorkOrchestrator:
         self,
         store: WorkStorePort,
         deterministic: DeterministicCompatibilityPort,
+        design: AgentDesignPort | None = None,
     ) -> None:
         self.store = store
         self.deterministic = deterministic
+        self.design = design
 
     def create_work(
         self,
@@ -303,6 +310,147 @@ class WorkOrchestrator:
             ),
         }
 
+    def run_part_design_episode(
+        self,
+        work_id: str,
+        part_job_id: str,
+        *,
+        request_id: str,
+        attempt_run_id: str | None = None,
+        objective: str | None = None,
+    ) -> dict[str, Any]:
+        """Append one validation-only Design Episode to an owned attempt Run."""
+
+        if self.design is None:
+            raise ValueError("Agent Design port is unavailable")
+        work = self.store.read_work(work_id)
+        job = next(
+            (
+                item
+                for item in work.get("part_jobs", [])
+                if isinstance(item, dict)
+                and item.get("part_job_id") == part_job_id
+            ),
+            None,
+        )
+        if job is None:
+            raise ValueError(f"Work has no Part Job: {part_job_id}")
+        run_id = attempt_run_id or job.get("active_attempt_run_id")
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError("Part Job has no active attempt Run")
+        attempt_run_ids = {
+            item.get("run_id")
+            for item in job.get("attempts", [])
+            if isinstance(item, dict)
+        }
+        if run_id not in attempt_run_ids:
+            raise ValueError("Design Episode must target an owned Part Job attempt")
+        design_objective = objective or work.get("description") or (
+            f"Design Part Job '{part_job_id}' for Work '{work_id}'."
+        )
+        request = DesignPartEpisodeRequest(
+            request_id=request_id,
+            work_id=work_id,
+            run_id=run_id,
+            part_job_id=part_job_id,
+            objective=design_objective,
+            role=job.get("role") if isinstance(job.get("role"), str) else None,
+            interface_context=deepcopy(
+                job.get("interface_context")
+                if isinstance(job.get("interface_context"), dict)
+                else {}
+            ),
+            accepted_result_id=(
+                job.get("accepted_result_id")
+                if isinstance(job.get("accepted_result_id"), str)
+                else None
+            ),
+        )
+        protected_before = _protected_work_state(work)
+        outcome = self.design.run_part_design_episode(request)
+        if not outcome.artifacts:
+            raise RuntimeError("Agent Design port returned no durable Run evidence")
+        _validate_design_outcome(request, outcome, work)
+
+        timestamp = _now()
+        references = [
+            create_artifact_reference(
+                artifact_id=artifact.artifact_id,
+                work_id=work_id,
+                run_id=run_id,
+                part_job_id=part_job_id,
+                relative_path=artifact.relative_path,
+                phase="design",
+                checkpoint=artifact.checkpoint,
+                trust_role=artifact.trust_role,
+                source_artifact_ids=list(artifact.source_artifact_ids),
+                validation_status=artifact.validation_status,
+                created_at=timestamp,
+            )
+            for artifact in outcome.artifacts
+        ]
+        registered = register_artifact_references(
+            work,
+            references,
+            updated_at=timestamp,
+        )
+        if _protected_work_state(registered) != protected_before:
+            raise RuntimeError(
+                "Design Episode routing attempted to mutate protected Work state"
+            )
+        existing_ids = {
+            item.get("artifact_id")
+            for item in work.get("artifact_references", [])
+            if isinstance(item, dict)
+        }
+        new_ids = {
+            reference["artifact_id"]
+            for reference in references
+            if reference["artifact_id"] not in existing_ids
+        }
+        persisted = registered if new_ids else work
+        if new_ids:
+            self.store.write_work(work_id, persisted)
+            self.store.invalidate_projection()
+        persisted_by_id = {
+            item["artifact_id"]: item
+            for item in persisted.get("artifact_references", [])
+            if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)
+        }
+        persisted_references = [
+            persisted_by_id[reference["artifact_id"]]
+            for reference in references
+        ]
+        status = "completed" if outcome.validated else "blocked"
+        if outcome.idempotent_replay:
+            postcondition = (
+                f"Design Episode request {request_id} returned its existing "
+                "append-only evidence without another provider call or Work mutation."
+            )
+        elif outcome.validated:
+            postcondition = (
+                f"A validated contract candidate for {part_job_id} was appended "
+                f"to Run {run_id}; no CAD execution or acceptance mutation occurred."
+            )
+        else:
+            postcondition = (
+                f"A typed Design Episode block for {part_job_id} was appended "
+                f"to Run {run_id}; no CAD execution or acceptance mutation occurred."
+            )
+        return {
+            "episode": outcome.as_dict(),
+            "artifact_references": persisted_references,
+            "product_state": project_product_state(persisted),
+            "orchestration": _completion(
+                command="run_part_design_episode",
+                phase="design",
+                checkpoint="contract_validation",
+                status=status,
+                postcondition=postcondition,
+                next_action=_design_episode_next_action(outcome.stop_reason),
+            ),
+        }
+
     def accept_part_result(
         self,
         work_id: str,
@@ -477,6 +625,60 @@ def _completion(
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _protected_work_state(work: dict[str, Any]) -> dict[str, Any]:
+    return deepcopy(
+        {
+            "active_lineage": work.get("active_lineage"),
+            "accepted_part_results": work.get("accepted_part_results"),
+            "assembly_job": work.get("assembly_job"),
+            "deliverable_packages": work.get("deliverable_packages"),
+            "part_jobs": work.get("part_jobs"),
+            "run_ids": work.get("run_ids"),
+        }
+    )
+
+
+def _validate_design_outcome(
+    request: DesignPartEpisodeRequest,
+    outcome: DesignPartEpisodeOutcome,
+    work: dict[str, Any],
+) -> None:
+    if outcome.request_id != request.request_id:
+        raise RuntimeError("Agent Design port returned a mismatched request id")
+    expected_prefix = f"episodes/design_part/{request.request_id}/"
+    artifact_ids = [artifact.artifact_id for artifact in outcome.artifacts]
+    if len(set(artifact_ids)) != len(artifact_ids):
+        raise RuntimeError("Agent Design port returned duplicate artifact ids")
+    existing_ids = {
+        item.get("artifact_id")
+        for item in work.get("artifact_references", [])
+        if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)
+    }
+    allowed_source_ids = existing_ids | set(artifact_ids)
+    for artifact in outcome.artifacts:
+        if not artifact.relative_path.startswith(expected_prefix):
+            raise RuntimeError(
+                "Agent Design port evidence must stay under the request directory"
+            )
+        if any(
+            source_id not in allowed_source_ids
+            for source_id in artifact.source_artifact_ids
+        ):
+            raise RuntimeError(
+                "Agent Design port returned an unknown source artifact id"
+            )
+
+
+def _design_episode_next_action(stop_reason: str) -> str:
+    if stop_reason == "completed":
+        return "Review the validated contract candidate; CAD execution remains unavailable"
+    if stop_reason == "user_input_required":
+        return "Answer the focused question, then start a new Design Episode request"
+    if stop_reason == "unsupported_capability":
+        return "Configure a provider that supports design_part actions"
+    return "Inspect the typed Episode diagnostic, then retry with a new request id"
 
 
 def _stage_succeeded(value: Any) -> bool:

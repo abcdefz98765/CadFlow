@@ -26,7 +26,10 @@ make that closed schema the target geometry architecture.
 
 The provider chooses the next action. CadFlow validates the action, resolves
 context, enforces budgets, asks the Tool Broker to invoke validators, and
-persists concise evidence.
+persists concise evidence. The product route enters through `WorkOrchestrator`
+and a typed `AgentDesignPort` for an existing owned Part Job attempt. A
+path-safe request id makes exact retries idempotent and conflicting reuse fails
+closed.
 
 ## Semantic context
 
@@ -90,7 +93,9 @@ Only the local structured-contract validators decide whether a submission is
 valid, and they are invoked through the Tool Broker. This skill stops after a
 validated compatibility contract or a typed safe block. The Broker's Windows
 model-program capability gate currently reports `sandbox_unavailable`;
-controlled execution and geometry publication remain later M2 work.
+controlled execution and geometry publication remain later M2 work. Product
+routing registers only candidate, observation, or diagnostic evidence and may
+not change lineage, acceptance, Assembly, or Deliverable state.
 
 ## Knowledge
 

@@ -25,9 +25,10 @@ M1 runtime consolidation and domain foundations passed acceptance on
 2026-07-27. M2 is now in progress. Its first internal package implements the
 `design_part` typed registry and provider-selected structured-contract preview;
 its second package adds Broker-owned structured validation and an explicit
-fail-closed Windows model-program capability gate. An enforceable sandbox
-worker, product routing, execution/publication, and benchmark acceptance remain
-open.
+fail-closed Windows model-program capability gate; its third package routes an
+owned Part Job attempt through `WorkOrchestrator` for validation and evidence
+registration only. An enforceable sandbox worker, design-to-execution,
+publication, and benchmark acceptance remain open.
 
 In particular, do not begin later work by:
 
@@ -84,10 +85,20 @@ The second internal package adds:
 5. a `sandbox_unavailable` safe block before source write, candidate-directory
    creation, or process startup.
 
-This is not a sandbox implementation. The next package should connect the
-provider-selected episode through `WorkOrchestrator` without adding execution
-authority, or implement and independently verify an enforceable Windows
-sandbox worker before enabling model-program actions. Do not route provider
+The third internal package adds:
+
+1. a typed `AgentDesignPort` and validation-only `WorkOrchestrator` command;
+2. Part Job attempt ownership checks before provider invocation;
+3. append-only episode evidence below the owning Run;
+4. idempotent request replay and conflicting request-id rejection;
+5. typed candidate, observation, or diagnostic Work artifact references;
+6. explicit preservation of lineage, acceptance, Assembly, Deliverable, Part
+   Job, and Run state.
+
+This is not a sandbox implementation or a design-to-execution path. The next
+package should choose the first supported model-program API and define the
+enforceable Windows worker/profile boundary, remaining fail closed until every
+required isolation control is independently verified. Do not route provider
 source into the existing host CadQuery subprocess.
 
 ## Change discipline

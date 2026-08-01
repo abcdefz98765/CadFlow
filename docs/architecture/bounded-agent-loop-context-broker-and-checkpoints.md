@@ -350,7 +350,10 @@ Implemented:
 - an explicit Windows model-program capability gate covering filesystem,
   environment, network, subprocess, dependency, resource, and output controls;
 - fail-closed `sandbox_unavailable` observations before candidate-directory or
-  process side effects when that profile is unavailable.
+  process side effects when that profile is unavailable;
+- a validation-only `WorkOrchestrator` route through a typed `AgentDesignPort`
+  for an owned Part Job attempt, with append-only Run evidence, idempotent
+  request replay, and typed Work artifact references.
 
 Not implemented:
 
@@ -362,9 +365,10 @@ Not implemented:
 - Agentic assembly and drawing tools;
 - real branching repair behavior in the product path.
 
-The current provider-selected loop is an internal preview. It can branch after
-contract-validator observations, but it cannot request CAD execution and does
-not publish a reviewable result.
+The current provider-selected loop is a product-routed validation preview. It
+can branch after contract-validator observations and persist evidence under the
+owning attempt Run, but it cannot request CAD execution and does not publish a
+reviewable result.
 
 The existing deterministic CadQuery executor is not sandbox evidence: it uses
 the host Python executable and inherits the host environment. The capability

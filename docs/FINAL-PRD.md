@@ -380,14 +380,17 @@ Implemented foundations worth retaining:
   validation observations;
 - a CadFlow-owned Tool Broker for that preview's structured-contract validator,
   plus an explicit model-program capability gate that reports the current
-  Windows sandbox profile unavailable and fails closed before execution.
+  Windows sandbox profile unavailable and fails closed before execution;
+- a validation-only product route from an owned Part Job attempt through
+  `WorkOrchestrator` into the provider-selected episode, with idempotent request
+  identity, append-only Run evidence, and typed Work artifact references.
 
 Major migration gaps:
 
 - the current CAD IR is a closed part-family selector;
 - the current product Agent Episode is effectively one-shot;
-- the new provider-selected episode preview is not yet routed through the
-  product `WorkOrchestrator` and has no usable sandboxed execution tool;
+- the product-routed provider-selected episode still stops at structured
+  contract validation and has no usable sandboxed execution tool;
 - the model-program Tool Broker entry is capability metadata and a safe block,
   not an implemented Windows sandbox or source executor;
 - provider-backed Agentic design is not product-usable;

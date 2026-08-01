@@ -621,6 +621,16 @@ model-program request therefore returns `sandbox_unavailable` before candidate
 storage or process startup. This is a fail-closed capability gate, not a
 sandbox implementation, CAD execution path, or publication boundary.
 
+The third M2 package adds a typed `AgentDesignPort` and routes one owned Part
+Job attempt through `WorkOrchestrator` into the provider-selected episode. The
+route writes append-only evidence below that attempt Run, binds retries to a
+path-safe request id and canonical request fingerprint, and registers only
+typed candidate, observation, or diagnostic artifact references. It explicitly
+preserves active lineage, accepted-result pointers, Assembly Job state, and
+Deliverable Packages. A validated contract remains candidate evidence: this
+package adds no CAD execution, reviewable publication, acceptance mutation, or
+production-usable Agentic design claim.
+
 Migration rules:
 
 1. preserve existing Runs and artifacts as immutable legacy evidence;

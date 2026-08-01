@@ -65,8 +65,21 @@ work ahead of the current milestone without an explicit architecture decision.
   - The new action request is compiled from the typed registry; legacy provider
     operations retain compatibility prompt assembly.
 - [x] Implement provider-selected actions rather than a fixed proposer sequence.
-  - Internal structured-contract preview only; product routing remains open.
+  - The provider-selected loop is product-routed for validation only; CAD
+    execution and publication remain open.
 - [x] Persist concise actions, observations, candidates, and budget use.
+- [x] Route an owned Part Job attempt through `WorkOrchestrator` and a typed
+  `AgentDesignPort` without granting execution or publication authority.
+- [x] Bind path-safe request ids to canonical request fingerprints and replay
+  persisted results without a second provider invocation or Work rewrite.
+- [x] Register only typed candidate/observation/diagnostic artifact references
+  and prove lineage, acceptance, Assembly, Deliverable, Part Job, and Run state
+  remain unchanged.
+- [x] Verify the validation-only product route with targeted and full regression
+  tests.
+  - 2026-08-01: `156 passed` targeted; `574 passed, 2 skipped` full suite.
+- [x] Complete scripted-provider file-level acceptance for the product route.
+  - `../status/m2-work-design-episode-package-acceptance.md`
 
 ### Context Broker
 

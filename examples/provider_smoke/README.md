@@ -40,6 +40,23 @@ python examples/provider_smoke/tool_broker_gate_eval.py
   unavailable, the code is `sandbox_unavailable`, and
   `side_effect_started=false`.
 
+## WorkOrchestrator Design Episode Acceptance
+
+```bash
+python examples/provider_smoke/work_design_episode_eval.py
+```
+
+- Verifies: a scripted provider-selected `design_part` Episode routes through
+  `WorkOrchestrator`, appends evidence under the owned Part Job attempt Run,
+  registers controlled candidate/observation references, and replays the same
+  request idempotently.
+- Does not verify: a real external provider, CAD execution, STEP output,
+  reviewable publication, acceptance, or non-template design quality.
+- Durable outputs: none; the acceptance uses a temporary Workspace.
+- Required invariants: original Run prompt bytes, Part Job history, active
+  lineage, accepted pointers, and deliverable state remain unchanged; no
+  `model.py`, STEP, STL, or preview is created.
+
 ## Basic Provider Smoke
 
 ### `parse_requirement_smoke.py`

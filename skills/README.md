@@ -41,8 +41,8 @@ Current directories are retained during migration:
 - `revision/` — child-Run change intent and candidate revision.
 - `assembly/` — Assembly Job planning, placement, constraints, and checks.
 - `design_part/` — M2 provider-selected structured-contract episode contract;
-  version 0.1 exposes Broker-owned validation only and no CAD execution
-  authority.
+  version 0.1 is product-routed through `WorkOrchestrator` for Broker-owned
+  validation and evidence only, with no CAD execution authority.
 
 Target additions still required by the roadmap:
 

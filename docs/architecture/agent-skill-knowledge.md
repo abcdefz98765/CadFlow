@@ -380,19 +380,23 @@ Current code provides:
   policies, limits, persisted evidence, and failure codes;
 - Broker-owned invocation of the local legacy CAD IR compatibility validator;
 - a Windows model-program capability gate that enumerates required controls and
-  returns `sandbox_unavailable` without writing source or starting a process.
+  returns `sandbox_unavailable` without writing source or starting a process;
+- a typed `AgentDesignPort` used by `WorkOrchestrator` to route an owned Part
+  Job attempt into the provider-selected validation episode, persist append-only
+  Run evidence, and register typed candidate/observation/diagnostic references.
 
 It does not yet provide:
 
-- product routing from `WorkOrchestrator` into the provider-selected episode;
+- product-integrated provider-selected design-to-execution and reviewable
+  publication;
 - an enforceable Windows sandbox or any provider model-program execution;
 - feature-graph CAD IR;
 - Agentic assembly or deliverable episodes.
 
-The preview validates only the legacy structured CAD IR compatibility
-contract. Its model-program tool entry is unavailable capability metadata, not
-execution authority. It has no CAD execution or publication tool and is not
-production-usable Agentic CAD design.
+The product-routed preview validates only the legacy structured CAD IR
+compatibility contract. Its model-program tool entry is unavailable capability
+metadata, not execution authority. It has no CAD execution or publication tool
+and is not production-usable Agentic CAD design.
 
 No current deterministic fallback may be presented as these target
 capabilities.

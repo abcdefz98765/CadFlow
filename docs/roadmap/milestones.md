@@ -156,11 +156,22 @@ Status:
 - local Windows acceptance confirmed Broker-owned validation plus
   `available=false`, `sandbox_unavailable`, `side_effect_started=false`, and no
   candidate-directory creation;
-- this package validates a structured legacy CAD IR candidate only. It is not
-  routed through the product `WorkOrchestrator`, cannot execute CAD, and cannot
-  publish a reviewable result;
+- third internal package implemented on 2026-08-01:
+  - typed `AgentDesignPort` and validation-only `WorkOrchestrator` command for an
+    owned Part Job attempt;
+  - append-only Run evidence, idempotent request replay, and typed Work
+    candidate/observation/diagnostic references;
+  - explicit protected-state checks that preserve lineage, acceptance,
+    Assembly Job, Deliverable Packages, Part Jobs, and Run identities;
+- package 3 verification passed with `156 passed` targeted and
+  `574 passed, 2 skipped` full-suite results;
+- scripted-provider product-route acceptance confirmed four registered
+  evidence references, exactly three provider calls, idempotent replay,
+  unchanged protected Work/Run evidence, and zero CAD or accepted products;
+- this product-routed preview validates a structured legacy CAD IR candidate
+  only. It cannot execute CAD or publish a reviewable result;
 - M2 remains unaccepted pending an enforceable sandbox execution worker,
-  product routing, STEP-first execution/inspection/publication, and the
+  design-to-execution routing, STEP-first inspection/publication, and the
   benchmark gate.
 
 ## M3 — General structured geometry contract

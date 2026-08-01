@@ -196,10 +196,11 @@ POST /api/works
 POST /api/works/{work_id}/requirement-run
 POST /api/works/{work_id}/part-runs
 POST /api/works/{work_id}/parts/{part_job_id}/attempts
+POST /api/works/{work_id}/parts/{part_job_id}/design-episodes
 ```
 
-The last route accepts optional JSON fields `prompt`, `role`, and `run_id`. It
-appends an attempt to `part_jobs[].attempts` and does not change
+The Part Job attempt route accepts optional JSON fields `prompt`, `role`, and
+`run_id`. It appends an attempt to `part_jobs[].attempts` and does not change
 `accepted_part_results`. Successful mutation responses include:
 
 ```json
@@ -244,6 +245,39 @@ attempt = backend.create_work_part_attempt(
 )
 ```
 
+To route a provider-selected validation episode for an existing Part Job
+attempt, send a path-safe `request_id` and optionally select an owned
+`attempt_run_id` and objective override:
+
+```json
+{
+  "route": "run_work_part_design_episode",
+  "path_params": {
+    "work_id": "fixture_work",
+    "part_job_id": "clamp"
+  },
+  "body": {
+    "request_id": "clamp_design_001",
+    "attempt_run_id": "clamp_attempt_2",
+    "objective": "Design the clamp around the accepted interfaces."
+  }
+}
+```
+
+The local Python equivalent is
+`backend.run_work_part_design_episode("fixture_work", "clamp",
+request_id="clamp_design_001", attempt_run_id="clamp_attempt_2")`.
+The attempt must already belong to that Part Job. Evidence is appended below
+`runs/<run_id>/episodes/design_part/<request_id>/` and registered in the Work as
+typed candidate, observation, or diagnostic references. Repeating the exact
+request returns persisted evidence without a second provider call or Work
+rewrite; reusing the id with different input is rejected.
+
+This route performs structured-contract validation only. It does not execute
+CAD, create STEP/STL/model-program products, publish a reviewable result, modify
+active lineage or accepted-result pointers, or add deliverables. It has no
+Workbench UI action yet.
+
 An accepted part result is changed only by the explicit approval action after
 a validated STEP artifact exists. The action registers controlled artifact
 references and updates the accepted-result pointer without advancing active
@@ -251,8 +285,8 @@ design lineage.
 
 ## Evaluate the M2 provider-selected design preview
 
-`run_design_part_episode` is an internal evaluation API for the first M2
-package. It asks an injected JSON-contract provider to choose each next action,
+`run_design_part_episode` remains the lower-level evaluation API behind the M2
+preview. It asks an injected JSON-contract provider to choose each next action,
 while CadFlow enforces the registered `design_part` capability, semantic
 context, budgets, and CadFlow Tool Broker-owned local structured-contract
 validation.
@@ -316,6 +350,18 @@ $env:PYTHONPATH = "src"
 The command creates no durable output. Its JSON summary must report
 `passed=true`, `available=false`, `sandbox_unavailable`,
 `side_effect_started=false`, and `candidate_directory_created=false`.
+
+Repeat the validation-only WorkOrchestrator acceptance check with:
+
+```powershell
+$env:PYTHONPATH = "src"
+.venv-cadflow\Scripts\python.exe examples\provider_smoke\work_design_episode_eval.py
+```
+
+Its summary must report `passed=true`, one idempotent replay, exactly three
+scripted provider calls, four registered evidence references, unchanged
+protected Work state and original Run prompt bytes, and zero accepted,
+deliverable, STEP, STL, or model-program products.
 
 The Console presents workflow summaries and final STEP, STL, and preview
 deliverables. Raw JSON, agent traces, runtime logs, and generated scripts stay

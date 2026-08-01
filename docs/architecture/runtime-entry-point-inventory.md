@@ -27,6 +27,7 @@ record the implemented orchestrator boundary.
 | `create_work_requirement_run` / `POST /api/works/{work_id}/requirement-run` | Legacy console | target product | Thin adapter to `WorkOrchestrator.begin_intent`; manifest owns the Run reference. |
 | `create_work_part_runs` / `POST /api/works/{work_id}/part-runs` | Legacy console | target product | Thin adapter that appends first-class Part Job attempts. |
 | `create_work_part_attempt` / `POST /api/works/{work_id}/parts/{part_job_id}/attempts` | Backend/API | target product | Appends a later ordered attempt through `WorkOrchestrator.create_part_attempt`; acceptance is unchanged. |
+| `run_work_part_design_episode` / `POST /api/works/{work_id}/parts/{part_job_id}/design-episodes` | Backend/API | target product | Routes an owned attempt through `WorkOrchestrator` and `AgentDesignPort` for validation-only provider-selected evidence; no CAD execution, reviewable publication, lineage change, or acceptance authority. |
 | `WorkflowConsoleBackend.create_golden_example` / example API route | Legacy console | evaluation | Keep opt-in; it must not become a product create path. |
 | `WorkflowConsoleBackend.create_run_by_id` / `POST /workflow/runs/{run_id}` | Low-level console/developer run | compatibility | Isolate behind compatibility/diagnostics; it has no Work ownership by itself. |
 | `StageRunner.create_run` | Stage runner | compatibility | Same low-level Run creation path; no new product callers. |
@@ -60,7 +61,7 @@ record the implemented orchestrator boundary.
 | `DesignPlannerFakeAgentAdapter.generate_candidate_plans` / conversion to IR | deterministic plan-to-IR | compatibility | Retain for supported-family regression. |
 | `AgentAdapter.create_part_ir` implementations | reviewed handoff → one legacy CAD IR | compatibility | Retain as one-shot M1 behavior; not a real Agentic Design Episode. |
 | `run_create_part_ir_episode` | fixed request/submit/validate episode | compatibility | Preserve for regression; M2 replaces the proposer behavior, not M1. |
-| `run_design_part_episode` | provider-selected structured-contract episode preview | evaluation | M2 internal preview; no CAD execution, publication, or Work authority until routed through `WorkOrchestrator` and Tool Broker. |
+| `run_design_part_episode` | provider-selected structured-contract episode preview | evaluation service | Called through the target-product `AgentDesignPort` for validation-only evidence and remains directly usable for evaluation; no CAD execution or publication authority. |
 | `ir_from_file`, `ir_from_planning_artifact` | legacy CAD IR constructors | compatibility | Retain for old examples and migrations. |
 | `runner.run_part` | old `part_type` dynamic builder path | removable | Freeze; migrate callers to the deterministic IR compatibility executor. |
 | `CADGenerator.build` | old workflow CAD builder | compatibility | Retain only through `CADWorkflow`. |

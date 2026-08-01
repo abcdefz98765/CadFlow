@@ -448,6 +448,29 @@ class WorkflowConsoleBackend:
             run_id=run_id,
         )
 
+    def run_work_part_design_episode(
+        self,
+        work_id: str,
+        part_job_id: str,
+        *,
+        request_id: str,
+        attempt_run_id: str | None = None,
+        objective: str | None = None,
+    ) -> dict[str, Any]:
+        """Route one validation-only Design Episode through WorkOrchestrator."""
+
+        for value in (work_id, part_job_id, request_id):
+            self._require_safe_run_id(value)
+        if attempt_run_id is not None:
+            self._require_safe_run_id(attempt_run_id)
+        return self._work_orchestrator().run_part_design_episode(
+            work_id,
+            part_job_id,
+            request_id=request_id,
+            attempt_run_id=attempt_run_id,
+            objective=_safe_prompt_text(objective) if objective is not None else None,
+        )
+
     def get_work_summary(self, work_id: str) -> dict[str, Any]:
         """Return one inferred Work summary."""
         from ai_native_cad.workflow_console.work_index import get_work_summary_from_index
@@ -505,6 +528,7 @@ class WorkflowConsoleBackend:
     def _work_orchestrator(self):
         from ai_native_cad.orchestration import WorkOrchestrator
         from ai_native_cad.workflow_console.orchestrator_adapters import (
+            WorkflowConsoleAgentDesign,
             WorkflowConsoleDeterministicCompatibility,
             WorkflowConsoleWorkStore,
         )
@@ -512,6 +536,7 @@ class WorkflowConsoleBackend:
         return WorkOrchestrator(
             WorkflowConsoleWorkStore(self),
             WorkflowConsoleDeterministicCompatibility(self),
+            WorkflowConsoleAgentDesign(self),
         )
 
     def _work_manifest_path(self, work_id: str) -> Path:

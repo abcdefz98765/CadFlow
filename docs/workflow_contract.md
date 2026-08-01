@@ -312,7 +312,8 @@ Record:
 Do not record private chain-of-thought, secrets, unrestricted transcripts, or
 raw provider payloads.
 
-M2 currently implements an internal `design_part` v0.1 episode preview. Its
+M2 currently implements a product-routed, validation-only `design_part` v0.1
+episode preview. Its
 typed registry allows semantic context requests, structured compatibility
 contract creation/patching, local validation, focused questions, and typed
 stops. Context manifest entries record Work, Run, Part Job, checkpoint, trust
@@ -321,6 +322,22 @@ role, and compact summary. Request and byte budgets are enforced.
 This preview has no execution tool. A validated `cad_ir_draft` remains a
 candidate contract; it is not geometry, a reviewable result, or an accepted
 result.
+
+`WorkOrchestrator.run_part_design_episode` accepts only an existing attempt Run
+owned by the named Part Job. A typed `AgentDesignPort` appends the episode below
+`runs/<run_id>/episodes/design_part/<request_id>/` and writes
+`product_route_result.json`. The path-safe `request_id` is bound to a canonical
+request fingerprint: an exact replay returns the persisted outcome without a
+second provider call or Work rewrite, while reuse with different input is
+rejected. Incomplete or unreadable prior evidence fails closed and requires a
+new request id.
+
+The orchestrator registers only declared candidate, observation, or diagnostic
+artifact references. It verifies that active lineage, accepted-result pointers,
+Part Job ownership, Assembly Job state, Deliverable Packages, and Run ids remain
+unchanged. This route grants no execution, reviewable-publication, deliverable,
+or acceptance authority. Provider, policy, and unsupported-adapter failures are
+persisted as typed diagnostic route evidence and cannot become product output.
 
 `request_validation` is now authorized and invoked by the CadFlow Tool Broker.
 The broker manifest records the active skill's allowed tool definitions and the

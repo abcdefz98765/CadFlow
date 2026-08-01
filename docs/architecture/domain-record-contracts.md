@@ -205,11 +205,21 @@ fabricated into stronger trust.
 `WorkOrchestrator` is the only target-product coordinator that persists Work
 mutations. Its current M1 commands own Work creation, Intent Run ownership,
 planned and later Part Job attempts, candidate selection, active-lineage
-changes, legacy attempt adoption, and accepted-result pointer changes.
+changes, legacy attempt adoption, and accepted-result pointer changes. Its M2
+validation-only design command also registers typed evidence produced for an
+existing owned Part Job attempt; it is prohibited from changing lineage,
+acceptance, Assembly Job, Deliverable Package, Part Job, or Run identity state.
 
 The current deterministic execution service is reached through
 `DeterministicCompatibilityPort`. Low-level workflow/evaluation entry points
 remain callable for compatibility but do not establish target product state.
+
+The provider-selected validation episode is reached through `AgentDesignPort`.
+The concrete file adapter appends evidence under the owned attempt Run and
+binds a path-safe request id to a canonical fingerprint. Exact retries replay
+persisted evidence; conflicting reuse and incomplete evidence fail closed. The
+orchestrator, not the port or provider, owns Work artifact-reference
+registration and verifies protected state after every outcome.
 
 The legacy Workflow Console projector may translate already-sanitized Run
 metadata into in-memory artifact references for old Runs. It never writes

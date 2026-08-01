@@ -725,6 +725,7 @@ def build_design_part_context(
     handoff: dict[str, Any],
     *,
     run_id: str,
+    objective_summary: str | None = None,
 ) -> tuple[ContextEnvelope, ContextBroker]:
     """Project a reviewed legacy handoff into target semantic context keys."""
     part_id = str(handoff.get("part_id") or "reviewed_part")
@@ -811,7 +812,7 @@ def build_design_part_context(
     envelope = ContextEnvelope(
         objective=AgentObjective(
             "design_part",
-            f"Design a structured candidate for {part_id}",
+            objective_summary or f"Design a structured candidate for {part_id}",
             work_id=work_id,
             checkpoint="geometry_candidate",
         ),
@@ -841,12 +842,15 @@ def run_design_part_episode(
     budget: EpisodeBudget | None = None,
     validate_contract: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     tool_broker: CadFlowToolBroker | None = None,
+    run_id: str | None = None,
+    objective_summary: str | None = None,
 ) -> AgentEpisodeResult:
     """Run the first provider-selected M2 action loop without CAD execution."""
     skill = RUNTIME_SKILL_REGISTRY.for_operation("design_part")
     envelope, broker = build_design_part_context(
         handoff,
-        run_id=artifact_dir.name,
+        run_id=run_id or artifact_dir.name,
+        objective_summary=objective_summary,
     )
     limits = skill.budget
     episode_budget = budget or EpisodeBudget(

@@ -121,6 +121,16 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="Append another explicit Run attempt to one Part Job.",
     ),
     RouteSpec(
+        name="run_work_part_design_episode",
+        method="POST",
+        path="/api/works/{work_id}/parts/{part_job_id}/design-episodes",
+        backend_operation="run_work_part_design_episode",
+        description=(
+            "Append one provider-selected validation-only Design Episode to "
+            "an owned Part Job attempt Run."
+        ),
+    ),
+    RouteSpec(
         name="read_provider_config",
         method="GET",
         path="/workflow/provider",
@@ -516,6 +526,22 @@ def _create_work_part_attempt(
     )
 
 
+def _run_work_part_design_episode(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    return backend.run_work_part_design_episode(
+        _require_value(path_params, "work_id"),
+        _require_value(path_params, "part_job_id"),
+        request_id=_require_value(body, "request_id"),
+        attempt_run_id=body.get("attempt_run_id"),
+        objective=body.get("objective"),
+    )
+
+
 def _read_run_metadata(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -783,6 +809,7 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "create_work_requirement_run": _create_work_requirement_run,
     "create_work_part_runs": _create_work_part_runs,
     "create_work_part_attempt": _create_work_part_attempt,
+    "run_work_part_design_episode": _run_work_part_design_episode,
     "read_provider_config": _read_provider_config,
     "configure_provider": _configure_provider,
     "test_provider_connection": _test_provider_connection,
@@ -817,6 +844,7 @@ def _success_status_code(route_name: str) -> int:
         "create_work_requirement_run",
         "create_work_part_runs",
         "create_work_part_attempt",
+        "run_work_part_design_episode",
         "run_revision",
         "record_gate_decision",
         "apply_requirement_clarification",
