@@ -129,8 +129,8 @@ work ahead of the current milestone without an explicit architecture decision.
   primitive.
 - [x] Verify the attested worker, isolation controls, limits, evidence, and
   Broker observation on the current Windows/WSL2 host.
-  - 2026-08-02: `53 passed` targeted; `620 passed, 2 skipped` full suite with
-    live WSL2 integration enabled.
+  - 2026-08-02: `53 passed` targeted; after the STEP re-import upgrade,
+    `621 passed, 2 skipped` full suite with live WSL2 integration enabled.
   - `../status/m2-wsl2-model-program-sandbox-package-acceptance.md`
 - [ ] Register provider-selected model-program actions and let an Episode
   consume execution observations.

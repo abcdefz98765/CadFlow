@@ -14,11 +14,11 @@ M2.
 - Dedicated distro: `CadFlow-Sandbox-CQ-v1`.
 - Profile: `wsl2_cadquery_v1`.
 - Profile digest:
-  `f3edf915b3417eb7a6c887e3bf7c73ac3023663df3290b2891b48b40e7fa86a3`.
+  `0116438c5854c9a38d8bf7bf396fdc770c30f6cc2802ba62629ad4ed2b80fca4`.
 - Toolchain digest:
   `26d9a74b393b25f1d2a5a25f9a4fecda873b790b42c1b27840b229e064a19b1f`.
 - Acceptance probe attestation digest:
-  `35847b394ab11060b5045b5cf329b8885bd0b0fffb22c51bd3c9300c525a6acf`.
+  `4f91ad473b251b3fa9e8c563ae8fcef6202757bd0b7b8a5f95b4c10d037b43d0`.
 - Toolchain: Python 3.10.12, CadQuery 2.7.0, cadquery-ocp
   7.8.1.1.post1.
 
@@ -41,7 +41,8 @@ Every recorded probe returned `true`:
 - private network and socket creation denied;
 - subprocess, shell, pip/dynamic install, and fork denied;
 - `NoNewPrivileges` active;
-- CPU, memory, zero-swap, task-count, and output limits active.
+- CPU, memory, zero-swap, task-count, and output limits active;
+- exported STEP re-import and corrupt-STEP rejection active.
 
 The seccomp profile returns `ENOSYS` for `clone3`, allowing glibc pthreads to
 fall back to `clone`; the fallback permits only `CLONE_THREAD`. Process-style
@@ -60,10 +61,12 @@ bore through the fixed CadQuery worker.
 - Parameter SHA-256:
   `227358f00734174439954a0d785e0207c402450c0e750a9621b64f9074b8fb28`.
 - STEP SHA-256:
-  `480491adc1c9fecba2e1bc3ea439bd0a99d54e31a97fde6e8ec7ccebbe51a35c`.
+  `c89513ea967c3d5ac5ba2828753b7f53fdbfaa940c4e9038d9704d9cd14a6bcb`.
 - STEP size: 28,033 bytes.
-- Geometry: valid, one solid, bounding box 42.0 x 36.37306695894643 x
-  8.0.
+- Geometry: valid, one solid, 9 faces, one cylindrical face, volume
+  8657.074863772952 mm3, bounding box 42.0 x 36.37306695894643 x 8.0.
+- The worker re-imported the exported STEP and matched solid count, bounding
+  box within 0.01 mm, and volume within the declared absolute/relative limits.
 
 The Broker evidence bound:
 
@@ -107,14 +110,18 @@ F:\Tools\PowerShell\7\pwsh.exe -NoProfile -Command `
 
 Targeted result: `53 passed in 46.76s`.
 
-Full regression with the live sandbox explicitly enabled: `620 passed, 2
-skipped in 516.16s`.
+Post-export re-import profile upgrade: `32 passed in 40.49s` targeted,
+including live execution, active probes, resource limits, Broker protocol
+checks, and STEP re-import evidence.
+
+Full regression with the live sandbox explicitly enabled after the re-import
+upgrade: `621 passed, 2 skipped in 519.80s`.
 
 ## Capability statement
 
 - Implemented: dedicated pinned worker, active attestation, enforced execution
-  controls, fixed protocol, STEP export, and Broker candidate/diagnostic
-  observations.
+  controls, fixed protocol, STEP export/re-import comparison, and Broker
+  candidate/diagnostic observations.
 - Automated verified: manifest/tamper tests, contract/unit tests, live attack
   probes, real STEP execution, resource exhaustion, archive/evidence checks,
   and targeted regression.

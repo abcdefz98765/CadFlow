@@ -73,6 +73,12 @@ The resulting internal execution observation remains `candidate` or
 `design_part`/`WorkOrchestrator` cannot request this tool in the current
 product path.
 
+Before a successful archive is returned, the trusted worker re-imports its
+exported STEP and requires a valid non-empty solid, unchanged solid count,
+bounding-box agreement within 0.01 mm, and volume agreement within fixed
+absolute/relative limits. Missing or inconsistent re-import evidence is a
+typed invalid-output/protocol failure and cannot become product evidence.
+
 This policy constrains authority, not part type. It must evolve through
 versioned API decisions and non-template benchmarks rather than new closed
 geometry families.

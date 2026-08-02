@@ -26,6 +26,9 @@ import seccomp
 MAX_REQUEST_BYTES = 98_304
 MAX_LOG_BYTES = 262_144
 MAX_OUTPUT_BYTES = 67_108_864
+BBOX_TOLERANCE_MM = 0.01
+VOLUME_ABSOLUTE_TOLERANCE_MM3 = 0.01
+VOLUME_RELATIVE_TOLERANCE = 1e-6
 ALLOWED_BUILTINS = {
     name: getattr(builtins, name)
     for name in (
@@ -182,10 +185,9 @@ def run_model(request: dict) -> int:
         shape = model.val() if isinstance(model, cq.Workplane) else model
         if not isinstance(shape, cq.Shape):
             raise ModelProgramOutputError("build_model returned an unsupported result")
-        solids = shape.Solids()
-        if not shape.isValid() or not solids:
+        source_geometry = geometry_summary(shape)
+        if not source_geometry["valid"] or source_geometry["solid_count"] < 1:
             raise ModelProgramOutputError("build_model returned invalid or non-solid geometry")
-        bounds = shape.BoundingBox()
         trusted_progress("geometry_validated")
         candidate_dir = Path(os.environ["CADFLOW_CANDIDATE_DIR"])
         output_path = candidate_dir / "model.step"
@@ -194,20 +196,24 @@ def run_model(request: dict) -> int:
         output_size = output_path.stat().st_size
         if output_size <= 0 or output_size > MAX_OUTPUT_BYTES:
             raise ModelProgramOutputError("STEP output violates the size contract")
+        reimported_geometry = reimport_and_validate_step(
+            output_path,
+            expected=source_geometry,
+        )
+        trusted_progress("step_reimport_validated")
         observation = {
             "schema_version": 1,
             "success": True,
             "observation_type": "model_program_execution_completed",
             "codes": [],
             "exit_state": "completed",
-            "geometry": {
+            "geometry": source_geometry,
+            "step_reimport": {
                 "valid": True,
-                "solid_count": len(solids),
-                "bounding_box": {
-                    "x": bounds.xlen,
-                    "y": bounds.ylen,
-                    "z": bounds.zlen,
-                },
+                "geometry": reimported_geometry,
+                "bbox_tolerance_mm": BBOX_TOLERANCE_MM,
+                "volume_absolute_tolerance_mm3": VOLUME_ABSOLUTE_TOLERANCE_MM3,
+                "volume_relative_tolerance": VOLUME_RELATIVE_TOLERANCE,
             },
         }
     except MemoryError as exc:
@@ -270,6 +276,7 @@ def run_probe() -> int:
     results["swap_disabled"] = _cgroup_number("memory.swap.max") == 0
     results["process_limit"] = _cgroup_number("pids.max") <= 64
     results["private_network"] = not _has_default_route()
+    results["step_reimport_validation"] = _probe_step_reimport_validation(candidate_dir)
     observation = {
         "schema_version": 1,
         "success": all(results.values()),
@@ -283,6 +290,88 @@ def run_probe() -> int:
         },
     }
     return emit_archive(observation, "", "", None)
+
+
+def geometry_summary(shape: cq.Shape) -> dict:
+    try:
+        bounds = shape.BoundingBox()
+        faces = shape.Faces()
+        solids = shape.Solids()
+        volume = float(shape.Volume())
+        cylindrical_faces = sum(
+            1 for face in faces if face.geomType() == "CYLINDER"
+        )
+    except Exception as exc:
+        raise ModelProgramOutputError("geometry summary failed") from exc
+    return {
+        "valid": bool(shape.isValid()),
+        "solid_count": len(solids),
+        "face_count": len(faces),
+        "cylindrical_face_count": cylindrical_faces,
+        "volume": volume,
+        "bounding_box": {
+            "x": float(bounds.xlen),
+            "y": float(bounds.ylen),
+            "z": float(bounds.zlen),
+        },
+    }
+
+
+def reimport_and_validate_step(output_path: Path, *, expected: dict) -> dict:
+    try:
+        # OCCT can write parser diagnostics directly to the native stdout file
+        # descriptor, bypassing Python's captured stream and corrupting the
+        # tar protocol. Suppress only that native output around trusted import.
+        saved_stdout = os.dup(1)
+        null_stdout = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(null_stdout, 1)
+            imported = cq.importers.importStep(str(output_path))
+        finally:
+            os.dup2(saved_stdout, 1)
+            os.close(saved_stdout)
+            os.close(null_stdout)
+        imported_shape = imported.val()
+    except Exception as exc:
+        raise ModelProgramOutputError("STEP re-import failed") from exc
+    if not isinstance(imported_shape, cq.Shape):
+        raise ModelProgramOutputError("STEP re-import returned an unsupported shape")
+    actual = geometry_summary(imported_shape)
+    if not actual["valid"] or actual["solid_count"] < 1:
+        raise ModelProgramOutputError("STEP re-import returned invalid or non-solid geometry")
+    if actual["solid_count"] != expected["solid_count"]:
+        raise ModelProgramOutputError("STEP re-import changed the solid count")
+    for axis in ("x", "y", "z"):
+        if abs(actual["bounding_box"][axis] - expected["bounding_box"][axis]) > BBOX_TOLERANCE_MM:
+            raise ModelProgramOutputError("STEP re-import changed the bounding box")
+    volume_tolerance = max(
+        VOLUME_ABSOLUTE_TOLERANCE_MM3,
+        abs(expected["volume"]) * VOLUME_RELATIVE_TOLERANCE,
+    )
+    if abs(actual["volume"] - expected["volume"]) > volume_tolerance:
+        raise ModelProgramOutputError("STEP re-import changed the volume")
+    return actual
+
+
+def _probe_step_reimport_validation(candidate_dir: Path) -> bool:
+    valid_path = candidate_dir / "probe-valid.step"
+    corrupt_path = candidate_dir / "probe-corrupt.step"
+    try:
+        model = cq.Workplane("XY").box(7.0, 5.0, 3.0)
+        source = geometry_summary(model.val())
+        cq.exporters.export(model, str(valid_path))
+        reimport_and_validate_step(valid_path, expected=source)
+        corrupt_path.write_bytes(b"ISO-10303-21;\nCORRUPTED\nEND-ISO-10303-21;\n")
+        try:
+            reimport_and_validate_step(corrupt_path, expected=source)
+        except ModelProgramOutputError:
+            return True
+        return False
+    except Exception:
+        return False
+    finally:
+        valid_path.unlink(missing_ok=True)
+        corrupt_path.unlink(missing_ok=True)
 
 
 def safe_import(name: str, globals=None, locals=None, fromlist=(), level: int = 0):

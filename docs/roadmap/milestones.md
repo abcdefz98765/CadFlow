@@ -194,8 +194,9 @@ Status:
   - kept the primitive explicitly disabled by default and outside runtime
     `model_program`, `design_part`, `WorkOrchestrator`, publication, acceptance,
     and Deliverable Package authority;
-- package 5 verification passed with `53 passed` targeted and `620 passed, 2
-  skipped` in the full suite with live WSL2 integration enabled;
+- package 5 verification passed with `53 passed` targeted and, after the STEP
+  re-import upgrade, `621 passed, 2 skipped` in the full suite with live WSL2
+  integration enabled;
 - current-host Windows/WSL2 acceptance recorded all attack probes passing, a
   valid non-template STEP result and its hashes, and unchanged accepted-result
   and Deliverable Package state;

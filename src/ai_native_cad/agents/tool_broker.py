@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import re
 import shutil
 import tarfile
@@ -802,6 +803,7 @@ def _validate_worker_archive(
         step = files.get("model.step")
         if not step or len(step) > MODEL_PROGRAM_LIMITS["output_bytes"]:
             raise ValueError("successful worker archive has no valid STEP")
+        _validate_step_reimport_observation(observation)
     elif "model.step" in files:
         raise ValueError("failed worker archive contains a product-looking output")
     if len(files.get("stdout.txt", b"")) > MODEL_PROGRAM_LIMITS["stdout_bytes"]:
@@ -809,6 +811,37 @@ def _validate_worker_archive(
     if len(files.get("stderr.txt", b"")) > MODEL_PROGRAM_LIMITS["stderr_bytes"]:
         raise ValueError("worker stderr exceeds the limit")
     return files, observation
+
+
+def _validate_step_reimport_observation(observation: dict[str, Any]) -> None:
+    source_geometry = observation.get("geometry")
+    reimport = observation.get("step_reimport")
+    if not isinstance(source_geometry, dict) or not isinstance(reimport, dict):
+        raise ValueError("successful worker observation lacks STEP re-import evidence")
+    imported_geometry = reimport.get("geometry")
+    if reimport.get("valid") is not True or not isinstance(imported_geometry, dict):
+        raise ValueError("successful worker observation has invalid STEP re-import evidence")
+    for geometry in (source_geometry, imported_geometry):
+        if geometry.get("valid") is not True:
+            raise ValueError("worker geometry is not valid")
+        solid_count = geometry.get("solid_count")
+        volume = geometry.get("volume")
+        bounds = geometry.get("bounding_box")
+        if not isinstance(solid_count, int) or solid_count < 1:
+            raise ValueError("worker geometry has no solid")
+        if not isinstance(volume, (int, float)) or not math.isfinite(volume) or volume <= 0:
+            raise ValueError("worker geometry has invalid volume")
+        if not isinstance(bounds, dict) or set(bounds) != {"x", "y", "z"}:
+            raise ValueError("worker geometry has invalid bounds")
+        if any(
+            not isinstance(bounds[axis], (int, float))
+            or not math.isfinite(bounds[axis])
+            or bounds[axis] <= 0
+            for axis in ("x", "y", "z")
+        ):
+            raise ValueError("worker geometry has invalid bounds")
+    if imported_geometry["solid_count"] != source_geometry["solid_count"]:
+        raise ValueError("STEP re-import solid count mismatch")
 
 
 def _persist_execution_evidence(

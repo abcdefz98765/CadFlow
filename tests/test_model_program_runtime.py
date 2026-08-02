@@ -97,7 +97,12 @@ def _payload(**overrides) -> dict:
     return value
 
 
-def _archive(*, success: bool = True, extra_member: tarfile.TarInfo | None = None) -> bytes:
+def _archive(
+    *,
+    success: bool = True,
+    extra_member: tarfile.TarInfo | None = None,
+    valid_reimport: bool = True,
+) -> bytes:
     observation = {
         "schema_version": 1,
         "success": success,
@@ -108,8 +113,23 @@ def _archive(*, success: bool = True, extra_member: tarfile.TarInfo | None = Non
         ),
         "codes": [] if success else ["model_program_runtime_error"],
         "exit_state": "completed" if success else "failed",
-        "geometry": {"valid": success, "solid_count": 1 if success else 0},
+        "geometry": {
+            "valid": success,
+            "solid_count": 1 if success else 0,
+            "face_count": 6 if success else 0,
+            "cylindrical_face_count": 0,
+            "volume": 6000.0 if success else 0.0,
+            "bounding_box": {"x": 30.0, "y": 20.0, "z": 10.0},
+        },
     }
+    if success:
+        observation["step_reimport"] = {
+            "valid": valid_reimport,
+            "geometry": dict(observation["geometry"]),
+            "bbox_tolerance_mm": 0.01,
+            "volume_absolute_tolerance_mm3": 0.01,
+            "volume_relative_tolerance": 1e-6,
+        }
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode="w") as archive:
         _add(archive, "observation.json", json.dumps(observation).encode())
@@ -215,6 +235,22 @@ def test_archive_path_traversal_and_symlink_fail_closed(tmp_path) -> None:
         assert observation.codes == ("sandbox_protocol_error",)
         assert observation.side_effect_started is True
     assert not (tmp_path / "escape.step").exists()
+
+
+def test_success_archive_without_valid_step_reimport_fails_closed(tmp_path) -> None:
+    executor = FakeSandboxExecutor(_archive(valid_reimport=False))
+    observation = CadFlowToolBroker(sandbox_executor=executor).invoke(
+        MODEL_PROGRAM_TOOL,
+        skill_id="model_program",
+        payload=_payload(),
+        context=_context(tmp_path),
+    )
+
+    assert observation.success is False
+    assert observation.codes == ("sandbox_protocol_error",)
+    assert observation.output["reviewable"] is False
+    assert observation.output["accepted"] is False
+    assert observation.output["deliverable"] is False
 
 
 def test_failed_worker_result_is_diagnostic_only(tmp_path) -> None:

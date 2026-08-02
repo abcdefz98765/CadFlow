@@ -2,7 +2,7 @@
   "schema_version": 1,
   "profile_id": "wsl2_cadquery_v1",
   "distro_id": "CadFlow-Sandbox-CQ-v1",
-  "profile_digest": "f3edf915b3417eb7a6c887e3bf7c73ac3023663df3290b2891b48b40e7fa86a3",
+  "profile_digest": "0116438c5854c9a38d8bf7bf396fdc770c30f6cc2802ba62629ad4ed2b80fca4",
   "toolchain_digest": "26d9a74b393b25f1d2a5a25f9a4fecda873b790b42c1b27840b229e064a19b1f",
   "rootfs": {
     "distribution": "Ubuntu 22.04",
@@ -47,7 +47,7 @@
     "wall_clock_limit"
   ],
   "installed_files": {
-    "/opt/cadflow/worker.py": "480edba70a333bdb6c11e64b9249755d36b90cbd1010e34ba00c17effe1544bb",
+    "/opt/cadflow/worker.py": "666212f3309ccb0eefbeb5efd0701f7efca8b15f1037312dda186aaf41f37487",
     "/opt/cadflow/probe.py": "b701c9369681a0db469f42f2c6e50872baa4f378d518bfaef99950098ba520df",
     "/opt/cadflow/bin/cadflow-sandbox-launch": "d361ae9ae78761986f8469f722304fc3ab3da5771272d3576a3030b620b5a1d4",
     "/opt/cadflow/requirements-cp310.lock": "055eeb5f691c4ac292505a0abdc84142bfaa047cdeede100a15a54c6a7da0add",

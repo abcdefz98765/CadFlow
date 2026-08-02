@@ -107,6 +107,9 @@ Workbench and does not execute provider-generated model programs.
 - Strict model-program request and trusted invocation-context contracts,
   STEP-only output, archive allowlist/path/symlink/size validation, typed exit
   observations, sanitized logs, and append-only candidate/diagnostic evidence.
+- The sealed worker re-imports each exported STEP and requires valid solid
+  geometry plus bounded solid-count, bounding-box, and volume agreement before
+  a successful execution observation can leave the sandbox.
 
 This preview is connected to the product `WorkOrchestrator`, but only for
 validation and evidence registration. Its only tool enabled for the
@@ -191,7 +194,7 @@ These are migration tasks, not accepted target behavior.
 ## Verification state
 
 - Automated verified: the complete suite passed with the live WSL2 sandbox
-  explicitly enabled at `620 passed, 2 skipped` in 516.16 seconds on
+  explicitly enabled at `621 passed, 2 skipped` in 519.80 seconds on
   2026-08-02.
 - The M1 acceptance baseline was `550 passed, 2 skipped` on 2026-07-27.
 - New contract tests cover ordered Part Job attempt history, acceptance-pointer

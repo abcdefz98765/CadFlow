@@ -65,6 +65,14 @@ def test_attested_profile_and_non_template_step_execution() -> None:
     assert result.success is True
     assert observation["success"] is True
     assert observation["geometry"]["solid_count"] >= 1
+    assert observation["geometry"]["volume"] > 0
+    assert observation["step_reimport"]["valid"] is True
+    assert observation["step_reimport"]["geometry"]["solid_count"] == observation["geometry"]["solid_count"]
+    for axis in ("x", "y", "z"):
+        assert abs(
+            observation["step_reimport"]["geometry"]["bounding_box"][axis]
+            - observation["geometry"]["bounding_box"][axis]
+        ) <= 0.01
     assert files["model.step"].startswith(b"ISO-10303-21")
     assert len(files["model.step"]) < 67_108_864
 

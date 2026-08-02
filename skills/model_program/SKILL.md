@@ -39,7 +39,8 @@ executing source.
 The repository now also contains an internal `wsl2_cadquery_v1` worker profile
 with pinned Python/CadQuery/OCP dependencies, content digests, active
 attestation, seccomp, systemd isolation, resource limits, fixed STEP export,
-and Broker-owned candidate/diagnostic evidence. It is available only after an
+isolated STEP re-import comparison, and Broker-owned candidate/diagnostic
+evidence. It is available only after an
 exact dedicated WSL2 distro passes the trusted startup probe; otherwise the
 Broker remains fail closed.
 
