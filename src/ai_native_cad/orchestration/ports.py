@@ -137,6 +137,11 @@ class DesignPartEpisodeOutcome:
     capability_mode: str
     validated: bool
     artifacts: tuple[DesignEpisodeArtifact, ...]
+    result_kind: str = "structured_contract"
+    output_validated: bool = False
+    candidate_id: str | None = None
+    observation_id: str | None = None
+    execution_succeeded: bool = False
     idempotent_replay: bool = False
     schema_version: int = 1
 
@@ -155,8 +160,16 @@ class DesignPartEpisodeOutcome:
             self.status != "completed" or self.stop_reason != "completed"
         ):
             raise ValueError("validated Design Episode outcome must be completed")
-        if not self.validated and self.status == "completed":
-            raise ValueError("unvalidated Design Episode outcome cannot be completed")
+        if not self.validated and not self.output_validated and self.status == "completed":
+            raise ValueError(
+                "completed Design Episode outcome requires a validated contract or output"
+            )
+        if self.result_kind not in {"structured_contract", "model_program"}:
+            raise ValueError("Design Episode outcome has an invalid result kind")
+        if self.output_validated and self.result_kind != "model_program":
+            raise ValueError("only a model-program outcome may validate output")
+        if self.output_validated and not self.execution_succeeded:
+            raise ValueError("validated model-program output requires execution success")
         if not self.artifacts:
             raise ValueError("Design Episode outcome requires durable evidence")
 
@@ -169,6 +182,11 @@ class DesignPartEpisodeOutcome:
             "stop_reason": self.stop_reason,
             "capability_mode": self.capability_mode,
             "validated": self.validated,
+            "result_kind": self.result_kind,
+            "output_validated": self.output_validated,
+            "candidate_id": self.candidate_id,
+            "observation_id": self.observation_id,
+            "execution_succeeded": self.execution_succeeded,
             "idempotent_replay": self.idempotent_replay,
             "artifacts": [artifact.as_dict() for artifact in self.artifacts],
         }
@@ -191,6 +209,11 @@ class DesignPartEpisodeOutcome:
                 DesignEpisodeArtifact.from_dict(item)
                 for item in value.get("artifacts") or []
             ),
+            result_kind=value.get("result_kind", "structured_contract"),
+            output_validated=value.get("output_validated") is True,
+            candidate_id=value.get("candidate_id"),
+            observation_id=value.get("observation_id"),
+            execution_succeeded=value.get("execution_succeeded") is True,
             idempotent_replay=idempotent_replay,
             schema_version=value.get("schema_version", 1),
         )

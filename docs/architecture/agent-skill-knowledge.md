@@ -375,8 +375,8 @@ Current code provides:
 - a bounded episode state machine;
 - a deterministic one-shot proposer around `create_part_ir`;
 - deterministic template-backed CAD execution.
-- a typed `design_part` v0.1 runtime skill definition;
-- a provider-selected structured-contract episode preview in which the
+- a typed `design_part` v0.2 runtime skill definition;
+- a provider-selected design episode in which the
   provider may request semantic context, create or patch a candidate, react to
   validator observations, ask the user, or stop;
 - context provenance, trust roles, Work filtering, and byte/request budgets for
@@ -397,21 +397,23 @@ Current code provides:
   toolchain, controls, and startup probes are attested before Broker execution;
 - append-only model-program source, parameters, sanitized logs, geometry
   summary, STEP hash/size, and candidate-or-diagnostic execution evidence.
+- a registered CadFlow-owned `model_program` v0.1 delegate with strict
+  complete-source actions, CadFlow-assigned identities, execution/inspection
+  ordering, and separate source/execution/inspection/repair budgets;
+- execution-observation consumption by both the bounded Episode and the owned
+  Part Job attempt product route, without publication or acceptance authority.
 
 It does not yet provide:
 
-- product-integrated provider-selected design-to-execution and reviewable
-  publication;
-- runtime `model_program` skill registration or provider-selected execution
-  actions;
+- reviewable publication of a locally validated provider-selected execution;
 - feature-graph CAD IR;
 - Agentic assembly or deliverable episodes.
 
-The product-routed preview validates only the legacy structured CAD IR
-compatibility contract. The separate model-program static validator and
-attested internal execution primitive are not registered as Episode actions.
-The primitive has CAD execution authority only inside its fixed sandbox and
-has no publication authority; it is not production-usable Agentic CAD design.
+The product-routed Episode can validate the legacy structured CAD IR contract
+or consume the separately attested model-program primitive. The primitive has
+CAD execution authority only inside its fixed sandbox and successful output
+remains non-reviewable candidate evidence. It has no publication or acceptance
+authority and is not production-usable Agentic CAD design.
 
 No current deterministic fallback may be presented as these target
 capabilities.

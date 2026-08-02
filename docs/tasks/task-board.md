@@ -65,8 +65,8 @@ work ahead of the current milestone without an explicit architecture decision.
   - The new action request is compiled from the typed registry; legacy provider
     operations retain compatibility prompt assembly.
 - [x] Implement provider-selected actions rather than a fixed proposer sequence.
-  - The provider-selected loop is product-routed for validation only; CAD
-    execution and publication remain open.
+  - The provider-selected loop is product-routed for contract validation and
+    attested model-program execution; publication remains open.
 - [x] Persist concise actions, observations, candidates, and budget use.
 - [x] Route an owned Part Job attempt through `WorkOrchestrator` and a typed
   `AgentDesignPort` without granting execution or publication authority.
@@ -132,8 +132,16 @@ work ahead of the current milestone without an explicit architecture decision.
   - 2026-08-02: `53 passed` targeted; after the STEP re-import upgrade,
     `621 passed, 2 skipped` full suite with live WSL2 integration enabled.
   - `../status/m2-wsl2-model-program-sandbox-package-acceptance.md`
-- [ ] Register provider-selected model-program actions and let an Episode
+- [x] Register provider-selected model-program actions and let an Episode
   consume execution observations.
+  - `design_part` v0.2 delegates only to CadFlow-owned `model_program` v0.1.
+  - CadFlow assigns candidate/observation/execution/evidence identity; strict
+    create/replace/execute/inspect ordering and budgets are automated-tested.
+  - Successful output remains candidate evidence and requires valid in-sandbox
+    STEP re-import plus observation inspection before completion.
+  - `../status/m2-model-program-episode-package-acceptance.md`
+  - 2026-08-02: `47 passed` targeted; `21 passed` live Episode/WSL targeted;
+    `633 passed, 2 skipped` full suite in 516.74 seconds with live WSL2 enabled.
 - [ ] Route a successful, locally validated candidate through reviewable
   publication while preserving explicit acceptance.
 

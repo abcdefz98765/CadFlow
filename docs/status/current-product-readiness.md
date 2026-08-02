@@ -66,9 +66,9 @@ Workbench and does not execute provider-generated model programs.
 - `create_part_ir` episode artifacts;
 - validator observations.
 
-## M2 validation preview — implemented, not production usable
+## M2 execution-aware preview — implemented, not production usable
 
-- `design_part` v0.1 typed registry for actions, context, tools, knowledge,
+- `design_part` v0.2 typed registry for actions, context, tools, knowledge,
   budgets, output contracts, prohibitions, and stop reasons.
 - Provider-selected next actions for semantic context, structured contract
   creation/patching, local validation, focused user questions, and typed stop.
@@ -110,14 +110,25 @@ Workbench and does not execute provider-generated model programs.
 - The sealed worker re-imports each exported STEP and requires valid solid
   geometry plus bounded solid-count, bounding-box, and volume agreement before
   a successful execution observation can leave the sandbox.
+- Registered CadFlow-owned `model_program` v0.1 delegate with strict complete
+  create/replace submissions, execution of only the current CadFlow-assigned
+  candidate, and inspection of only the latest uninspected observation.
+- Independent limits of 16 actions, four source submissions, three executions,
+  three inspections, and two repairs; repair and completion require inspection
+  of the latest observation.
+- Source/parameter hashes in pre-execution submission evidence and full values
+  only in canonical Broker execution evidence after policy and attestation
+  gates, plus sanitized observation artifacts without raw provider traffic or
+  private reasoning; the provider never supplies path,
+  command, environment, UID, evidence root, candidate, observation, or
+  execution identity.
 
-This preview is connected to the product `WorkOrchestrator`, but only for
-validation and evidence registration. Its only tool enabled for the
-`design_part` skill is structured-contract validation. The model-program Broker
-primitive is internal execution authority only when attested; neither it nor
-the separate static source validator is registered as a provider Episode
-action. The preview cannot execute CAD, publish a reviewable result, or update
-acceptance, so it must not be described as production Agentic CAD design.
+This preview is connected to the product `WorkOrchestrator` for validation,
+attested execution, and evidence registration. The model-program Broker
+primitive remains disabled unless a fresh attestation proves the exact sealed
+profile. Successful STEP output remains candidate/execution-observation
+evidence: the preview cannot publish a reviewable result or update acceptance,
+so it must not be described as production Agentic CAD design.
 
 The product `create_part_ir` path currently follows a fixed proposer sequence:
 one fixed context request, one adapter submission, one validation request, and
@@ -143,13 +154,8 @@ one-shot orchestration, not Agentic design.
 
 ## Not implemented
 
-- Product-integrated provider-selected design-to-execution Episode and
-  reviewable publication.
-- Runtime `model_program` skill registration and provider-selected source
-  creation/patch actions.
-- Provider-selected execution/observation actions in the bounded Episode and
-  `WorkOrchestrator` product route.
-- Geometry inspection and reviewable publication for sandbox candidates.
+- Reviewable publication gate for locally validated sandbox candidates.
+- Explicit review response, acceptance authority, and revision route.
 - Five non-template benchmark acceptance with a real external provider.
 - General feature-graph geometry contract.
 - Non-template general CAD design capability.
@@ -194,7 +200,7 @@ These are migration tasks, not accepted target behavior.
 ## Verification state
 
 - Automated verified: the complete suite passed with the live WSL2 sandbox
-  explicitly enabled at `621 passed, 2 skipped` in 519.80 seconds on
+  explicitly enabled at `633 passed, 2 skipped` in 516.74 seconds on
   2026-08-02.
 - The M1 acceptance baseline was `550 passed, 2 skipped` on 2026-07-27.
 - New contract tests cover ordered Part Job attempt history, acceptance-pointer
@@ -208,6 +214,13 @@ These are migration tasks, not accepted target behavior.
   forbidden execution-field rejection, and provider-failure redaction.
   Provider-visible action state is also tested for secret and local-path
   redaction.
+- Model-program Episode tests prove strict action fields, CadFlow-assigned
+  identity, execution/inspection ordering, observation-driven complete-source
+  replacement, budget accounting, path removal from provider observations,
+  source-free event summaries, and mandatory STEP re-import evidence before
+  completion.
+- The live suite includes the complete provider-selected Episode → Broker →
+  dedicated WSL2 worker → STEP re-import → observation-inspection path.
 - M2 Tool Broker tests prove skill authorization, strict input contracts,
   prohibited execution-field rejection, validator-failure redaction, typed
   observations, required sandbox-control completeness, Windows capability
@@ -233,7 +246,7 @@ These are migration tasks, not accepted target behavior.
   workflow, console contracts, safety boundaries, failure isolation, and
   compatibility behavior are internally consistent.
 - Not proven by those tests: real external-provider design quality,
-  product-route execution/publication interoperability, portability beyond the
+  product-route publication interoperability, portability beyond the
   recorded Windows/WSL2 host, an independent security audit, the five-part
   non-template benchmark gate, multi-part assembly, or drawing-package
   usability.
@@ -291,14 +304,24 @@ These are migration tasks, not accepted target behavior.
     byte-identical;
   - the reproducible record is
     `m2-wsl2-model-program-sandbox-package-acceptance.md`.
+- Manually verified for the registered model-program Episode on the current
+  Windows/WSL2 host:
+  - `design_part` v0.2 assigned `candidate_001` and `observation_001`, executed
+    one non-template hex-bore candidate, inspected the structured observation,
+    and completed only after valid STEP re-import evidence;
+  - STEP SHA-256 was
+    `4cf93de774fec54d2d9b260e2a050bd568fc1da500aa62b36d8d319f57ae9410`;
+  - no reviewable, accepted, or deliverable record was created;
+  - the reproducible record is
+    `m2-model-program-episode-package-acceptance.md`.
 - A real external provider has not been manually verified through the product
   route.
 - No new UI was implemented, so this package did not require a new Workbench
   visual acceptance.
 - Manual browser verification: incomplete for the latest legacy Workflow
   Cockpit.
-- Target architecture verification: M1 passed. Five bounded M2 internal
-  packages are contract-tested, and the fifth has current-host WSL2 acceptance;
+- Target architecture verification: M1 passed. Six bounded M2 internal
+  packages are contract-tested, and the sandbox has current-host WSL2 acceptance;
   M2 product acceptance and later milestone claims remain unverified.
 
 ## Current risks
@@ -308,9 +331,9 @@ These are migration tasks, not accepted target behavior.
 - Provider configuration can be mistaken for an Agentic product path.
 - The existing CAD IR blocks unknown designs before a capable Agent can realize
   them.
-- The attested internal sandbox primitive can be mistaken for a completed
-  provider/product path even though Episode routing, publication, and benchmark
-  acceptance remain absent.
+- The execution-aware Episode can be mistaken for a reviewable product path
+  even though publication, user acceptance, and benchmark acceptance remain
+  absent.
 - Legacy documents or entry points can silently restore the former architecture.
 - Assembly heuristics can be mistaken for geometric fit or motion validation.
 - Generated drawings can be mistaken for checked drawings unless annotation
@@ -318,15 +341,14 @@ These are migration tasks, not accepted target behavior.
 
 ## Current milestone
 
-M0 and M1 are complete. M2 is in progress: its provider-selected
-structured-contract preview, validation Tool Broker, static source policy, and
-attested internal WSL2 execution primitive exist. Provider-selected execution,
-reviewable publication, explicit acceptance integration, and the benchmark
-gate remain unimplemented.
+M0 and M1 are complete. M2 is in progress: its provider-selected contract and
+model-program Episode, validation Tool Broker, static source policy, and
+attested WSL2 execution path exist. Reviewable publication, explicit acceptance
+integration, and the benchmark gate remain unimplemented.
 
 Later milestones remain:
 
-1. M2 provider-selected model-program actions and execution-observation loop;
+1. M2 reviewable publication, explicit acceptance, and external-provider gate;
 2. M3 feature-graph/model-program geometry paths;
 3. M4 multi-Part Job and Assembly Job progression;
 4. M5 integrated Deliverable Package and drawings;

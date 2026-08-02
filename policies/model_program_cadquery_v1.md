@@ -68,10 +68,11 @@ the distro, configuration, toolchain, file hashes, mounts, environment,
 network, subprocess controls, or limits do not match, the Broker returns
 `sandbox_unavailable` before request-side candidate evidence is created.
 
-The resulting internal execution observation remains `candidate` or
-`diagnostic` evidence. The runtime `model_program` skill is not registered and
-`design_part`/`WorkOrchestrator` cannot request this tool in the current
-product path.
+The resulting execution observation remains `candidate` or `diagnostic`
+evidence. The registered `model_program` skill can request the tool only as the
+declared delegate of `design_part`; `WorkOrchestrator` supplies all lineage and
+evidence identities. Registration grants no reviewable-publication,
+acceptance, or deliverable authority.
 
 Before a successful archive is returned, the trusted worker re-imports its
 exported STEP and requires a valid non-empty solid, unchanged solid count,

@@ -44,12 +44,14 @@ evidence. It is available only after an
 exact dedicated WSL2 distro passes the trusted startup probe; otherwise the
 Broker remains fail closed.
 
-This file is still a target runtime skill contract, not a registered provider
-skill. `create_model_program`, `patch_model_program`, `request_execution`, and
-observation-inspection actions are not exposed by `design_part` or
-`WorkOrchestrator`. Successful internal execution does not make a result
-reviewable, accepted, or deliverable. Geometry publication, product routing,
-and the benchmark gate remain unimplemented.
+This is now the registered CadFlow-owned `model_program` v0.1 delegate of
+`design_part` v0.2. The provider may create or fully replace source and
+parameters, request execution of only the current CadFlow-assigned candidate,
+and inspect only the latest uninspected observation. CadFlow assigns every
+candidate, observation, execution, lineage, and evidence identity and enforces
+separate budgets. Successful internal execution does not make a result
+reviewable, accepted, or deliverable. Publication and the benchmark gate remain
+unimplemented.
 
 ## References
 

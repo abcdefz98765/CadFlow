@@ -200,11 +200,20 @@ Status:
 - current-host Windows/WSL2 acceptance recorded all attack probes passing, a
   valid non-template STEP result and its hashes, and unchanged accepted-result
   and Deliverable Package state;
-- this product-routed preview validates a structured legacy CAD IR candidate
-  only. It cannot execute CAD or publish a reviewable result;
-- M2 remains unaccepted pending runtime model-program Episode actions,
-  design-to-execution routing, STEP-first publication/inspection, and the
-  five-part benchmark gate.
+- sixth internal package implemented on 2026-08-02:
+  - registered `model_program` v0.1 as the sole declared delegate of
+    `design_part` v0.2;
+  - added strict complete-source create/replace, current-candidate execution,
+    and latest-observation inspection actions with CadFlow-owned identities;
+  - enforced source/execution/inspection/repair budgets and mandatory
+    observation inspection before repair or completion;
+  - made the owned Part Job product route execution-aware while keeping all
+    output candidate/diagnostic-only;
+- package 6 verification passed with `47 passed` targeted, `21 passed` live
+  Episode/WSL targeted, and `633 passed, 2 skipped` in 516.74 seconds for the
+  complete suite with live WSL2 enabled;
+- M2 remains unaccepted pending STEP-first reviewable publication, explicit
+  user review/acceptance, and the five-part external-provider benchmark gate.
 
 ## M3 — General structured geometry contract
 

@@ -245,7 +245,7 @@ attempt = backend.create_work_part_attempt(
 )
 ```
 
-To route a provider-selected validation episode for an existing Part Job
+To route a provider-selected design episode for an existing Part Job
 attempt, send a path-safe `request_id` and optionally select an owned
 `attempt_run_id` and objective override:
 
@@ -273,8 +273,11 @@ typed candidate, observation, or diagnostic references. Repeating the exact
 request returns persisted evidence without a second provider call or Work
 rewrite; reusing the id with different input is rejected.
 
-This route performs structured-contract validation only. It does not execute
-CAD, create STEP/STL/model-program products, publish a reviewable result, modify
+This route lets the provider choose structured-contract validation or the
+registered `model_program` strategy. Model-program execution remains disabled
+unless that process explicitly requests the exact attested WSL2 capability.
+Even after successful execution, the route records only candidate and
+execution-observation evidence. It does not publish a reviewable result, modify
 active lineage or accepted-result pointers, or add deliverables. It has no
 Workbench UI action yet.
 
@@ -288,8 +291,8 @@ design lineage.
 `run_design_part_episode` remains the lower-level evaluation API behind the M2
 preview. It asks an injected JSON-contract provider to choose each next action,
 while CadFlow enforces the registered `design_part` capability, semantic
-context, budgets, and CadFlow Tool Broker-owned local structured-contract
-validation.
+context, budgets, and CadFlow Tool Broker-owned validation and attested
+model-program execution.
 
 ```python
 from pathlib import Path
@@ -310,18 +313,26 @@ print(result.stop_reason.value, result.validated)
 
 The injected client receives registry-compiled JSON action requests. Allowed
 actions are `request_context`, `create_contract`, `patch_contract`,
-`request_validation`, `ask_user`, and `stop`.
+`request_validation`, `create_model_program`, `patch_model_program`,
+`request_execution`, `inspect_observation`, `ask_user`, and `stop`. Model
+program submissions must contain exactly `api_id`, complete `source`, finite
+JSON `parameters`, and `requested_outputs=["step"]`. Execution and inspection
+actions contain no provider-selected identity, path, command, environment, or
+UID.
 
-This API does not execute provider source or CAD. A validated `cad_ir_draft` is
-candidate evidence only. Do not present it as STEP, reviewable geometry,
-accepted output, sandboxed execution, or general/non-template CAD capability.
+With the sandbox capability disabled, execution fails closed before source is
+written by the Broker or a candidate process starts. With a valid attestation,
+the Episode may execute source only through the fixed worker. Completion then
+requires a successful STEP re-import-validated observation and a subsequent
+`inspect_observation` action. Both a validated `cad_ir_draft` and successful
+model-program STEP remain non-reviewable candidate evidence.
 
 Each episode now writes `tool_broker_manifest.json`. It records the active
 skill's allowed tool definitions and the model-program sandbox capability gate.
 The gate is disabled by default and reports unavailable unless the exact
-dedicated WSL2 profile passes a fresh startup attestation. Even when available,
-the `design_part` manifest exposes only structured validation and cannot invoke
-model-program execution.
+dedicated WSL2 profile passes a fresh startup attestation. The `design_part`
+manifest declares only the CadFlow-owned `model_program` delegate; it never
+grants direct provider tool, process, or filesystem authority.
 
 The capability can be inspected without providing source or starting a process:
 
@@ -367,9 +378,9 @@ assert observation.output["source_retained"] is False
 
 The static observation contains a source SHA-256, metrics, policy manifest, and
 typed codes; it does not echo the source. The authoritative contract is
-`policies/model_program_cadquery_v1.md`. This tool is not registered as a
-provider Episode action and a successful result does not make execution
-available.
+`policies/model_program_cadquery_v1.md`. The registered Episode execution action
+still re-runs this policy in the Broker; a static success does not make the
+sandbox available.
 
 Calling the model-program tool while the profile is disabled, missing,
 mismatched, tampered, or fails a probe returns `sandbox_unavailable` with
@@ -420,10 +431,23 @@ shell, arbitrary command, provider path, dependency installation, or host
 filesystem authority is exposed.
 
 Successful execution produces only Run-relative
-`candidate/execution_observation` evidence and `model.step`. It remains
-`reviewable=false`, `accepted=false`, and `deliverable=false`. Runtime
-`model_program` Episode actions, `WorkOrchestrator` consumption, publication,
-and explicit acceptance are later packages.
+`candidate/execution_observation` evidence and `model.step`. The Episode stores
+complete candidate submissions and sanitized structured observations, and the
+product route can register those evidence identities. They remain
+`reviewable=false`, `accepted=false`, and `deliverable=false`. Publication and
+explicit acceptance are later packages.
+
+Repeat the registered Episode's current-host live acceptance with:
+
+```powershell
+$env:PYTHONPATH = "src"
+$env:CADFLOW_MODEL_PROGRAM_SANDBOX = "1"
+.venv-cadflow\Scripts\python.exe examples\provider_smoke\model_program_episode_eval.py
+```
+
+The script uses a credential-free scripted action provider and verifies the
+complete Episode → Broker → WSL worker → STEP re-import → inspection path. It
+also asserts that no reviewable, accepted, or deliverable record is created.
 
 Repeat the local acceptance check with:
 
@@ -447,7 +471,7 @@ Its summary must report `passed=true`, allowlisted source accepted, forbidden
 source rejected with sanitized codes, `source_retained=false`, and a separate
 execution result of `sandbox_unavailable` with no candidate directory.
 
-Repeat the validation-only WorkOrchestrator acceptance check with:
+Repeat the original structured-contract WorkOrchestrator acceptance check with:
 
 ```powershell
 $env:PYTHONPATH = "src"

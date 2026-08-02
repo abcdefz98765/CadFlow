@@ -26,6 +26,7 @@ from ai_native_cad.agents.episode import (
     ContextBroker,
     ContextEnvelope,
     EpisodeBudget,
+    EpisodeContractError,
     EpisodeOrchestrator,
     StopReason,
     build_create_part_ir_context,
@@ -35,6 +36,7 @@ from ai_native_cad.agents.episode import (
 )
 from ai_native_cad.agents.registry import (
     DESIGN_PART_SKILL,
+    MODEL_PROGRAM_SKILL,
     RUNTIME_KNOWLEDGE,
     RUNTIME_SKILL_REGISTRY,
     BudgetDefinition,
@@ -75,9 +77,11 @@ __all__ = [
     "ContextEnvelope",
     "CadFlowToolBroker",
     "DESIGN_PART_SKILL",
+    "MODEL_PROGRAM_SKILL",
     "DesignPlannerFakeAgentAdapter",
     "DeterministicAgentAdapter",
     "EpisodeBudget",
+    "EpisodeContractError",
     "EpisodeOrchestrator",
     "BudgetDefinition",
     "JsonContractAgentAdapter",

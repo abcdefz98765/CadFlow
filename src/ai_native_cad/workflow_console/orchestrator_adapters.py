@@ -197,7 +197,7 @@ class WorkflowConsoleAgentDesign:
                 "episode": outcome.as_dict(),
                 "authority": {
                     "orchestrator": "work_orchestrator",
-                    "execution_enabled": False,
+                    "execution_enabled": outcome.result_kind == "model_program",
                     "publication_enabled": False,
                     "acceptance_mutation_enabled": False,
                 },
@@ -271,16 +271,72 @@ def _episode_outcome(
                 source_artifact_ids=(candidate_id,) if candidate_id else (),
             )
         )
+    execution_observation_id = None
+    if result.result_kind == "model_program" and result.final_candidate_id:
+        candidate_id = f"episode:{result.episode_id}:model_program_candidate"
+        artifacts.append(
+            DesignEpisodeArtifact(
+                artifact_id=candidate_id,
+                relative_path=(
+                    f"{relative_root}/model_program_submissions/"
+                    f"submission_{result.source_submission_count:03d}.json"
+                ),
+                checkpoint="model_program_candidate",
+                trust_role="candidate",
+                validation_status=(
+                    "passed" if result.execution_succeeded else "not_validated"
+                ),
+            )
+        )
+    if result.result_kind == "model_program" and result.final_observation_id:
+        execution_observation_id = (
+            f"episode:{result.episode_id}:execution_observation"
+        )
+        artifacts.append(
+            DesignEpisodeArtifact(
+                artifact_id=execution_observation_id,
+                relative_path=(
+                    f"{relative_root}/execution_observations/"
+                    f"observation_{result.execution_count:03d}.json"
+                ),
+                checkpoint="execution_observation",
+                trust_role=(
+                    "observation" if result.execution_succeeded else "diagnostic"
+                ),
+                validation_status=(
+                    "passed" if result.execution_succeeded else "failed"
+                ),
+                source_artifact_ids=(candidate_id,) if candidate_id else (),
+            )
+        )
     agent_result_id = f"episode:{result.episode_id}:result"
     artifacts.append(
         DesignEpisodeArtifact(
             artifact_id=agent_result_id,
             relative_path=f"{relative_root}/agent_result.json",
-            checkpoint="contract_validation",
-            trust_role="observation" if result.validated else "diagnostic",
-            validation_status="passed" if result.validated else "blocked",
+            checkpoint=(
+                "execution_observation"
+                if result.result_kind == "model_program"
+                else "contract_validation"
+            ),
+            trust_role=(
+                "observation"
+                if result.status == "completed"
+                else "diagnostic"
+            ),
+            validation_status=(
+                "passed"
+                if result.status == "completed"
+                else "blocked"
+            ),
             source_artifact_ids=tuple(
-                item for item in (candidate_id, feedback_id) if item is not None
+                item
+                for item in (
+                    candidate_id,
+                    feedback_id,
+                    execution_observation_id,
+                )
+                if item is not None
             ),
         )
     )
@@ -290,8 +346,16 @@ def _episode_outcome(
             artifact_id=route_id,
             relative_path=f"{relative_root}/product_route_result.json",
             checkpoint="product_design_routing",
-            trust_role="observation" if result.validated else "diagnostic",
-            validation_status="passed" if result.validated else "blocked",
+            trust_role=(
+                "observation"
+                if result.status == "completed"
+                else "diagnostic"
+            ),
+            validation_status=(
+                "passed"
+                if result.status == "completed"
+                else "blocked"
+            ),
             source_artifact_ids=(agent_result_id,),
         )
     )
@@ -303,6 +367,11 @@ def _episode_outcome(
         capability_mode=result.capability_mode,
         validated=result.validated,
         artifacts=tuple(artifacts),
+        result_kind=result.result_kind,
+        output_validated=result.output_validated,
+        candidate_id=result.final_candidate_id,
+        observation_id=result.final_observation_id,
+        execution_succeeded=result.execution_succeeded,
     )
 
 
@@ -318,7 +387,7 @@ def _blocked_design_outcome(
         episode_id=episode_id,
         status="safely_blocked",
         stop_reason=stop_reason,
-        capability_mode="provider_selected_structured_contract_preview",
+        capability_mode="provider_selected_design_with_attested_model_program",
         validated=False,
         artifacts=(
             DesignEpisodeArtifact(

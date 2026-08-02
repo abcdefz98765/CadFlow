@@ -2,7 +2,7 @@
 
 Skill id: `design_part`
 
-Version: `0.1.0`
+Version: `0.2.0`
 
 Role: Geometry Agent
 
@@ -10,8 +10,8 @@ Phase: Design
 
 ## Objective
 
-Choose context and a structured part-design strategy, submit a candidate
-contract, and react to local validation observations. This first M2 package
+Choose context and either a structured compatibility strategy or the declared
+model-program strategy, submit candidates, and react to local observations. M2
 uses the legacy CAD IR only as a compatibility output contract; it does not
 make that closed schema the target geometry architecture.
 
@@ -21,6 +21,10 @@ make that closed schema the target geometry architecture.
 - `create_contract`
 - `patch_contract`
 - `request_validation`
+- `create_model_program`
+- `patch_model_program`
+- `request_execution`
+- `inspect_observation`
 - `ask_user`
 - `stop`
 
@@ -45,7 +49,7 @@ provider traffic, and repository snapshots are prohibited.
 
 ## Tools and outputs
 
-Allowed tool in version `0.1.0`:
+Direct tool in version `0.2.0`:
 
 - `validate_structured_contract`
 
@@ -54,19 +58,28 @@ validator behind the CadFlow Tool Broker. The Broker checks the active skill,
 input contract, prohibited execution fields, and structured result before the
 observation is returned.
 
-Allowed output contract:
+Declared delegate:
+
+- `model_program` v0.1, with `validate_model_program_source` and
+  `execute_model_program` behind the attested Tool Broker.
+
+Allowed output contracts:
 
 - `cad_ir_draft` compatibility candidate
+- `model_program_candidate`
 
-No CAD execution or model-program tool is enabled. A validated contract is a
-candidate, not geometry, a reviewable result, or an accepted result.
+A validated contract or successful sandbox execution remains a candidate, not
+a reviewable result or an accepted result.
 
 ## Budgets
 
-- 10 total actions;
+- 16 total actions;
 - 4 context requests;
 - 3 contract submissions;
 - 2 patches;
+- 4 source submissions;
+- 3 executions;
+- 3 observation inspections;
 - 180 seconds.
 
 ## Stop reasons
@@ -78,25 +91,31 @@ candidate, not geometry, a reviewable result, or an accepted result.
 - `budget_exhausted`
 - `provider_failure`
 - `policy_blocked`
+- `completed`, only after successful re-import-validated execution and
+  inspection, or CadFlow-owned contract validation.
 
 ## Prohibitions
 
-- no Python/CAD source, shell, subprocess, network, or dependency installation;
-- no filesystem access or paths;
-- no Work mutation, execution, publication, acceptance, or deliverables;
+- no shell, subprocess, network, dependency installation, credentials, or
+  arbitrary filesystem access;
+- no provider-selected path, command, environment, UID, candidate, observation,
+  execution, or evidence identity;
+- no Work mutation, publication, acceptance, or deliverables;
 - no fabricated validation or engineering claims;
 - no private chain-of-thought persistence.
 
 ## Validation and handoff
 
-Only the local structured-contract validators decide whether a submission is
-valid, and they are invoked through the Tool Broker. This skill stops after a
-validated compatibility contract or a typed safe block. Although the Broker
-can host an attested internal WSL2 model-program primitive, this skill has no
-model-program actions and cannot invoke it. Episode consumption of execution
-observations and geometry publication remain later M2 work. Product routing
-registers only candidate, observation, or diagnostic evidence and may not
+Only local validators decide whether a submission is valid. Model-program
+source is a complete replacement candidate; the Broker re-runs AST policy,
+requires a live digest-bound attestation, and executes only the current
+CadFlow-assigned candidate. The latest execution observation must be inspected
+before repair or completion. Product routing registers only candidate,
+observation, or diagnostic evidence and may not publish reviewable output or
 change lineage, acceptance, Assembly, or Deliverable state.
+
+Pre-execution submission evidence retains only source/parameter hashes. Full
+values are written only by the Broker after policy and attestation gates pass.
 
 ## Knowledge
 

@@ -653,8 +653,17 @@ system/toolchain, controlled environment, bounded resources, and a single
 allowlisted STEP output. Broker evidence is append-only and explicitly
 non-reviewable, non-accepted, and non-deliverable.
 
-This package does not register runtime `model_program` actions, route provider
-source through `design_part` or `WorkOrchestrator`, publish geometry, mutate an
+The sixth M2 package registers the CadFlow-owned `model_program` v0.1 skill as
+the sole declared delegate of `design_part` v0.2. Strict complete-candidate
+actions let the provider create or replace source and parameters, request
+execution of only the current CadFlow-assigned identity, and inspect only the
+latest uninspected structured observation. CadFlow owns Work/Run/Part/Episode
+context and all candidate, observation, execution, path, environment, command,
+UID, and evidence identities. Completion requires a successful observation,
+valid in-sandbox STEP re-import evidence, and explicit observation inspection.
+
+The product route may now retain these candidates and observations under the
+owning immutable Run, but it does not publish a `reviewable_result`, mutate an
 accepted-result pointer, or satisfy the benchmark gate. M2 therefore remains
 in progress.
 

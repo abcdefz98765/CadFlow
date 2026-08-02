@@ -1,12 +1,13 @@
-"""Bounded, provider-independent agent episodes for structured contracts.
+"""Bounded, provider-independent design episodes.
 
 This module deliberately contains no filesystem browsing, shell execution, or
-CAD execution.  An adapter may propose actions; the orchestrator owns budgets,
-state transitions, validation, and the compact audit trail.
+An adapter may propose actions; the orchestrator owns budgets, identities,
+context, validation, attested execution, and the compact audit trail.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass, field
@@ -20,8 +21,13 @@ from ai_native_cad.agents.registry import (
     SkillDefinition,
 )
 from ai_native_cad.agents.tool_broker import (
+    MODEL_PROGRAM_TOOL,
     STRUCTURED_CONTRACT_TOOL,
     CadFlowToolBroker,
+)
+from ai_native_cad.agents.model_program_runtime import (
+    ToolInvocationContext,
+    validate_model_program_parameters,
 )
 
 
@@ -52,6 +58,10 @@ ALLOWLISTED_ACTIONS = frozenset({
     "patch_contract",
     "submit_contract",
     "request_validation",
+    "create_model_program",
+    "patch_model_program",
+    "request_execution",
+    "inspect_observation",
     "repair_contract",
     "ask_user",
     "stop",
@@ -98,6 +108,7 @@ class AgentCapabilities:
         reason.value for reason in StopReason if reason != StopReason.COMPLETED
     )
     direct_code_execution: bool = False
+    delegated_skill_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.allowed_actions <= ALLOWLISTED_ACTIONS:
@@ -122,6 +133,7 @@ class AgentCapabilities:
             allowed_context_keys=skill.allowed_context_keys,
             allowed_contract_types=skill.output_contract_types,
             allowed_stop_reasons=skill.stop_reasons,
+            delegated_skill_ids=skill.delegated_skill_ids,
         )
 
 
@@ -132,12 +144,17 @@ class EpisodeBudget:
     max_context_bytes: int = 65_536
     max_contract_submissions: int = 3
     max_repair_attempts: int = 2
+    max_source_submissions: int = 4
+    max_executions: int = 3
+    max_observation_inspections: int = 3
     timeout_seconds: float = 180.0
 
     def __post_init__(self) -> None:
         if any(value < 0 for value in (
             self.max_steps, self.max_context_requests, self.max_context_bytes,
             self.max_contract_submissions, self.max_repair_attempts,
+            self.max_source_submissions, self.max_executions,
+            self.max_observation_inspections,
         )) or self.timeout_seconds < 0:
             raise ValueError("episode budgets must be non-negative")
 
@@ -178,6 +195,7 @@ class AgentAction:
     reason: str | None = None
     contract_type: str | None = None
     contract: dict[str, Any] | None = None
+    model_program: dict[str, Any] | None = None
     assumptions: tuple[str, ...] = ()
     summary: str | None = None
     questions: tuple[dict[str, str], ...] = ()
@@ -192,6 +210,24 @@ class AgentAction:
         action = value.get("action")
         if not isinstance(action, str) or action not in ALLOWLISTED_ACTIONS:
             raise UnknownAgentActionError(f"unknown agent action: {action!r}")
+        allowed_fields = {
+            "request_context": {"action", "context_key", "reason"},
+            "create_contract": {"action", "contract_type", "contract", "assumptions", "summary"},
+            "patch_contract": {"action", "contract_type", "contract", "assumptions", "summary"},
+            "submit_contract": {"action", "contract_type", "contract", "assumptions", "summary"},
+            "repair_contract": {"action", "contract_type", "contract", "assumptions", "summary"},
+            "request_validation": {"action", "reason"},
+            "create_model_program": {"action", "model_program", "assumptions", "summary"},
+            "patch_model_program": {"action", "model_program", "assumptions", "summary"},
+            "request_execution": {"action"},
+            "inspect_observation": {"action"},
+            "ask_user": {"action", "questions", "reason"},
+            "stop": {"action", "stop_reason", "reason"},
+        }[action]
+        if set(value) != (set(value) & allowed_fields) or "action" not in value:
+            raise EpisodeContractError(
+                f"{action} contains fields outside its strict action contract"
+            )
         raw_reason = value.get("stop_reason")
         try:
             stop_reason = StopReason(raw_reason) if raw_reason is not None else None
@@ -200,6 +236,7 @@ class AgentAction:
         assumptions = value.get("assumptions") or []
         questions = value.get("questions") or []
         contract = value.get("contract")
+        model_program = value.get("model_program")
         if not isinstance(assumptions, list) or not all(isinstance(item, str) for item in assumptions):
             raise EpisodeContractError("action assumptions must be a list of strings")
         if not isinstance(questions, list) or not all(isinstance(item, dict) for item in questions):
@@ -219,12 +256,17 @@ class AgentAction:
             )
         if contract is not None and not isinstance(contract, dict):
             raise EpisodeContractError("contract must be an object")
+        if action in {"create_model_program", "patch_model_program"}:
+            _validate_model_program_action(model_program)
+        elif model_program is not None:
+            raise EpisodeContractError("model_program is not allowed for this action")
         return cls(
             action=action,
             context_key=value.get("context_key") if isinstance(value.get("context_key"), str) else None,
             reason=value.get("reason") if isinstance(value.get("reason"), str) else None,
             contract_type=value.get("contract_type") if isinstance(value.get("contract_type"), str) else None,
             contract=contract,
+            model_program=dict(model_program) if isinstance(model_program, dict) else None,
             assumptions=tuple(assumptions),
             summary=value.get("summary") if isinstance(value.get("summary"), str) else None,
             questions=tuple(dict(item) for item in questions),
@@ -312,10 +354,18 @@ class AgentEpisodeResult:
     final_contract: dict[str, Any] | None
     validation_feedback: dict[str, Any] | None
     validated: bool
+    result_kind: str
+    source_submission_count: int
+    execution_count: int
+    observation_inspection_count: int
+    final_candidate_id: str | None
+    final_observation_id: str | None
+    execution_succeeded: bool
+    output_validated: bool
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "episode_id": self.episode_id,
             "operation": self.operation,
             "skill": {"id": self.skill_id, "version": self.skill_version},
@@ -330,6 +380,14 @@ class AgentEpisodeResult:
             "stop_reason": self.stop_reason.value,
             "validated": self.validated,
             "final_contract_available": self.final_contract is not None,
+            "result_kind": self.result_kind,
+            "source_submission_count": self.source_submission_count,
+            "execution_count": self.execution_count,
+            "observation_inspection_count": self.observation_inspection_count,
+            "final_candidate_id": self.final_candidate_id,
+            "final_observation_id": self.final_observation_id,
+            "execution_succeeded": self.execution_succeeded,
+            "output_validated": self.output_validated,
         }
 
 
@@ -369,6 +427,62 @@ class EpisodeArtifactWriter:
         destination = self.output_dir / "validation_feedback" / f"validation_{number:03d}.json"
         _write_json(destination, feedback)
 
+    def model_program_submission(
+        self,
+        number: int,
+        *,
+        candidate_id: str,
+        model_program: dict[str, Any],
+    ) -> None:
+        directory = self.output_dir / "model_program_submissions"
+        directory.mkdir(parents=True, exist_ok=True)
+        source = str(model_program["source"])
+        _write_json(
+            directory / f"submission_{number:03d}.json",
+            {
+                "schema_version": 1,
+                "candidate_id": candidate_id,
+                "api_id": model_program["api_id"],
+                "source_hash": _sha256_text(source),
+                "parameters_hash": _sha256_json(model_program["parameters"]),
+                "requested_outputs": ["step"],
+                "source_retained": False,
+                "parameters_retained": False,
+                "canonical_execution_evidence": (
+                    "candidates/<cadflow_candidate>/<cadflow_execution>/"
+                    "after policy and attestation gates"
+                ),
+                "trust_role": "candidate",
+                "reviewable": False,
+                "accepted": False,
+                "deliverable": False,
+            },
+        )
+
+    def execution_observation(
+        self,
+        number: int,
+        *,
+        observation_id: str,
+        observation: dict[str, Any],
+    ) -> None:
+        destination = (
+            self.output_dir
+            / "execution_observations"
+            / f"observation_{number:03d}.json"
+        )
+        _write_json(
+            destination,
+            {
+                "schema_version": 1,
+                "observation_id": observation_id,
+                **observation,
+                "reviewable": False,
+                "accepted": False,
+                "deliverable": False,
+            },
+        )
+
     def finish(self, result: AgentEpisodeResult) -> None:
         episode = result.as_dict()
         episode["objective"] = {"operation": self.envelope.objective.operation, "summary": self.envelope.objective.summary}
@@ -378,7 +492,9 @@ class EpisodeArtifactWriter:
             "parent_run_id": self.envelope.workflow.get("active_root_run_id"),
             "part_id": self.envelope.selected_part.get("part_id"),
             "source_handoff": self.envelope.workflow.get("source_handoff"),
-            "accepted_submission_id": f"submission_{result.contract_submission_count:03d}" if result.validated else None,
+            "accepted_submission_id": f"submission_{result.contract_submission_count:03d}" if result.validated and result.result_kind == "structured_contract" else None,
+            "candidate_id": result.final_candidate_id,
+            "observation_id": result.final_observation_id,
         }
         episode["lineage"] = lineage
         _write_json(self.output_dir / "agent_episode.json", episode)
@@ -428,7 +544,10 @@ class EpisodeOrchestrator:
         self.writer = EpisodeArtifactWriter(
             artifact_dir,
             context_envelope,
-            self.tool_broker.manifest(active_skill_id=capabilities.skill_id),
+            self.tool_broker.manifest(
+                active_skill_id=capabilities.skill_id,
+                delegated_skill_ids=capabilities.delegated_skill_ids,
+            ),
         )
 
     @property
@@ -450,20 +569,44 @@ class EpisodeOrchestrator:
         )
         if hasattr(self, "writer"):
             self.writer.tool_broker_manifest = self.tool_broker.manifest(
-                active_skill_id=self.capabilities.skill_id
+                active_skill_id=self.capabilities.skill_id,
+                delegated_skill_ids=self.capabilities.delegated_skill_ids,
             )
 
     def run(self, supplier: ActionSupplier) -> AgentEpisodeResult:
         started = time.monotonic()
         episode_id = uuid4().hex
         steps = context_requests = context_bytes = submissions = repairs = 0
+        source_submissions = executions = inspections = 0
         draft: dict[str, Any] | None = None
         feedback: dict[str, Any] | None = None
+        current_program: dict[str, Any] | None = None
+        current_candidate_id: str | None = None
+        latest_observation: dict[str, Any] | None = None
+        latest_observation_id: str | None = None
+        latest_observation_inspected = False
         state = "created"
         supplied_context: list[dict[str, Any]] = []
 
-        def finish(reason: StopReason, *, validated: bool = False) -> AgentEpisodeResult:
-            status = "completed" if reason == StopReason.COMPLETED and validated else "safely_blocked"
+        def finish(
+            reason: StopReason,
+            *,
+            validated: bool = False,
+            result_kind: str | None = None,
+            output_validated: bool = False,
+        ) -> AgentEpisodeResult:
+            actual_result_kind = result_kind or (
+                "model_program" if current_program is not None else "structured_contract"
+            )
+            observed_output_validated = bool(
+                latest_observation is not None
+                and latest_observation.get("success") is True
+                and isinstance(latest_observation.get("output"), dict)
+                and _execution_output_has_valid_reimport(
+                    latest_observation["output"]
+                )
+            )
+            status = "completed" if reason == StopReason.COMPLETED and (validated or output_validated) else "safely_blocked"
             result = AgentEpisodeResult(
                 episode_id=episode_id, operation=self.objective.operation,
                 skill_id=self.capabilities.skill_id,
@@ -474,6 +617,19 @@ class EpisodeOrchestrator:
                 context_byte_count=context_bytes,
                 repair_attempt_count=repairs, final_contract=draft,
                 validation_feedback=feedback, validated=validated,
+                result_kind=actual_result_kind,
+                source_submission_count=source_submissions,
+                execution_count=executions,
+                observation_inspection_count=inspections,
+                final_candidate_id=current_candidate_id,
+                final_observation_id=latest_observation_id,
+                execution_succeeded=(
+                    latest_observation is not None
+                    and latest_observation.get("success") is True
+                ),
+                output_validated=(
+                    output_validated or observed_output_validated
+                ),
             )
             self.writer.finish(result)
             return result
@@ -492,6 +648,26 @@ class EpisodeOrchestrator:
                 "supplied_context": supplied_context,
                 "draft": draft,
                 "validation_feedback": feedback,
+                "model_program": (
+                    {
+                        "candidate_id": current_candidate_id,
+                        "api_id": current_program["api_id"],
+                        "source": current_program["source"],
+                        "parameters": current_program["parameters"],
+                        "requested_outputs": ["step"],
+                    }
+                    if current_program is not None
+                    else None
+                ),
+                "pending_observation": (
+                    {
+                        "observation_id": latest_observation_id,
+                        "available": True,
+                        "inspected": latest_observation_inspected,
+                    }
+                    if latest_observation is not None
+                    else None
+                ),
             }
             try:
                 supplied_action = supplier(provider_state)
@@ -577,6 +753,202 @@ class EpisodeOrchestrator:
                 state = "repairing" if is_repair else "proposing"
                 continue
 
+            if action.action in {
+                "create_model_program",
+                "patch_model_program",
+            }:
+                if source_submissions >= self.budget.max_source_submissions:
+                    self.writer.event(
+                        {
+                            "step": steps,
+                            "action": action.action,
+                            "observation": "source_submission_budget_exhausted",
+                        }
+                    )
+                    return finish(
+                        StopReason.BUDGET_EXHAUSTED,
+                        result_kind="model_program",
+                    )
+                is_repair = action.action == "patch_model_program"
+                if action.action == "create_model_program" and current_program is not None:
+                    raise EpisodeContractError(
+                        "create_model_program requires no current candidate"
+                    )
+                if is_repair:
+                    if current_program is None:
+                        raise EpisodeContractError(
+                            "patch_model_program requires a current candidate"
+                        )
+                    if latest_observation is None or not latest_observation_inspected:
+                        raise EpisodeContractError(
+                            "patch_model_program requires inspection of the latest execution observation"
+                        )
+                    if repairs >= self.budget.max_repair_attempts:
+                        self.writer.event(
+                            {
+                                "step": steps,
+                                "action": action.action,
+                                "observation": "repair_budget_exhausted",
+                            }
+                        )
+                        return finish(
+                            StopReason.BUDGET_EXHAUSTED,
+                            result_kind="model_program",
+                        )
+                    repairs += 1
+                assert action.model_program is not None
+                source_submissions += 1
+                current_candidate_id = f"candidate_{source_submissions:03d}"
+                current_program = {
+                    "api_id": action.model_program["api_id"],
+                    "source": action.model_program["source"],
+                    "parameters": dict(action.model_program["parameters"]),
+                    "requested_outputs": ["step"],
+                }
+                latest_observation = None
+                latest_observation_id = None
+                latest_observation_inspected = False
+                self.writer.model_program_submission(
+                    source_submissions,
+                    candidate_id=current_candidate_id,
+                    model_program=current_program,
+                )
+                self.writer.event(
+                    {
+                        "event_type": "agent_action",
+                        "step": steps,
+                        "action": action.action,
+                        "candidate_id": current_candidate_id,
+                        "api_id": current_program["api_id"],
+                        "source_hash": _sha256_text(current_program["source"]),
+                        "parameters_hash": _sha256_json(current_program["parameters"]),
+                        "proposal_summary": action.summary,
+                        "assumptions": list(action.assumptions),
+                    }
+                )
+                state = "repairing_model_program" if is_repair else "model_program_proposed"
+                continue
+
+            if action.action == "request_execution":
+                if current_program is None or current_candidate_id is None:
+                    raise EpisodeContractError(
+                        "request_execution requires a current model-program candidate"
+                    )
+                if latest_observation is not None:
+                    raise EpisodeContractError(
+                        "request_execution requires a new or patched candidate"
+                    )
+                if executions >= self.budget.max_executions:
+                    self.writer.event(
+                        {
+                            "step": steps,
+                            "action": action.action,
+                            "observation": "execution_budget_exhausted",
+                        }
+                    )
+                    return finish(
+                        StopReason.BUDGET_EXHAUSTED,
+                        result_kind="model_program",
+                    )
+                run_id = str(
+                    self.context_envelope.workflow.get("active_leaf_run_id")
+                    or self.writer.output_dir.name
+                )
+                work_id = self.objective.work_id
+                part_job_id = self.context_envelope.selected_part.get("part_id")
+                try:
+                    invocation_context = ToolInvocationContext(
+                        work_id=str(work_id or ""),
+                        run_id=run_id,
+                        part_job_id=str(part_job_id or ""),
+                        episode_id=episode_id,
+                        evidence_root=self.writer.output_dir.resolve(),
+                    )
+                except ValueError as exc:
+                    raise EpisodeContractError(
+                        "model-program execution requires path-safe CadFlow lineage identity"
+                    ) from exc
+                observation = self.tool_broker.invoke(
+                    MODEL_PROGRAM_TOOL,
+                    skill_id="model_program",
+                    payload={
+                        "api_id": current_program["api_id"],
+                        "candidate_id": current_candidate_id,
+                        "source": current_program["source"],
+                        "parameters": current_program["parameters"],
+                        "requested_outputs": ["step"],
+                    },
+                    context=invocation_context,
+                )
+                executions += 1
+                latest_observation_id = f"observation_{executions:03d}"
+                latest_observation = observation.as_dict()
+                latest_observation_inspected = False
+                self.writer.execution_observation(
+                    executions,
+                    observation_id=latest_observation_id,
+                    observation=latest_observation,
+                )
+                self.writer.event(
+                    {
+                        "event_type": "system_observation",
+                        "step": steps,
+                        "action": action.action,
+                        "owner": "cadflow_tool_broker",
+                        "candidate_id": current_candidate_id,
+                        "observation_id": latest_observation_id,
+                        "tool_id": observation.tool_id,
+                        "success": observation.success,
+                        "codes": list(observation.codes),
+                        "side_effect_started": observation.side_effect_started,
+                        "exit_state": observation.exit_state,
+                        "observation": "execution_observation_available",
+                    }
+                )
+                state = "execution_observation_available"
+                continue
+
+            if action.action == "inspect_observation":
+                if latest_observation is None or latest_observation_id is None:
+                    raise EpisodeContractError(
+                        "inspect_observation requires an execution observation"
+                    )
+                if latest_observation_inspected:
+                    raise EpisodeContractError(
+                        "the latest execution observation was already inspected"
+                    )
+                if inspections >= self.budget.max_observation_inspections:
+                    self.writer.event(
+                        {
+                            "step": steps,
+                            "action": action.action,
+                            "observation": "observation_inspection_budget_exhausted",
+                        }
+                    )
+                    return finish(
+                        StopReason.BUDGET_EXHAUSTED,
+                        result_kind="model_program",
+                    )
+                inspections += 1
+                latest_observation_inspected = True
+                supplied_context.append(
+                    {
+                        "context_key": "latest_execution_observation",
+                        "observation_id": latest_observation_id,
+                        "content": _provider_execution_observation(latest_observation),
+                    }
+                )
+                self.writer.event(
+                    {
+                        "event_type": "agent_action",
+                        "step": steps,
+                        "action": action.action,
+                        "observation_id": latest_observation_id,
+                    }
+                )
+                state = "observation_inspected"
+                continue
+
             if action.action == "request_validation":
                 if draft is None:
                     raise EpisodeContractError("request_validation requires a submitted contract")
@@ -616,7 +988,36 @@ class EpisodeOrchestrator:
             if action.action == "stop":
                 reason = action.stop_reason or StopReason.INSUFFICIENT_CONTEXT
                 if reason == StopReason.COMPLETED:
-                    raise EpisodeContractError("only a successful validator result may complete an episode")
+                    execution_output = (
+                        latest_observation.get("output", {})
+                        if isinstance(latest_observation, dict)
+                        and isinstance(latest_observation.get("output"), dict)
+                        else {}
+                    )
+                    if not (
+                        current_program is not None
+                        and latest_observation is not None
+                        and latest_observation.get("success") is True
+                        and latest_observation_inspected
+                        and _execution_output_has_valid_reimport(execution_output)
+                    ):
+                        raise EpisodeContractError(
+                            "completed requires a successful, inspected, STEP-reimport-validated execution observation"
+                        )
+                    self.writer.event(
+                        {
+                            "step": steps,
+                            "action": action.action,
+                            "stop_reason": reason.value,
+                            "candidate_id": current_candidate_id,
+                            "observation_id": latest_observation_id,
+                        }
+                    )
+                    return finish(
+                        reason,
+                        result_kind="model_program",
+                        output_validated=True,
+                    )
                 if reason.value not in self.capabilities.allowed_stop_reasons:
                     raise EpisodeContractError(
                         "stop reason is not enabled for the active skill"
@@ -825,8 +1226,9 @@ def build_design_part_context(
         accepted_decisions=("The selected Part Job handoff is active.",),
         selected_part={"part_id": part_id, "review_status": handoff.get("status")},
         constraints=(
-            "Only a structured CAD IR compatibility candidate is enabled.",
-            "No CAD execution or model-program source is enabled.",
+            "Choose a structured CAD IR compatibility candidate or an untrusted cadquery_v1 model program.",
+            "Model programs execute only through the attested CadFlow Tool Broker and remain candidate evidence.",
+            "No result becomes reviewable, accepted, or deliverable in this episode.",
         ),
         previous_attempts=(),
         available_context=broker.available_keys,
@@ -845,7 +1247,7 @@ def run_design_part_episode(
     run_id: str | None = None,
     objective_summary: str | None = None,
 ) -> AgentEpisodeResult:
-    """Run the first provider-selected M2 action loop without CAD execution."""
+    """Run a provider-selected contract or attested model-program action loop."""
     skill = RUNTIME_SKILL_REGISTRY.for_operation("design_part")
     envelope, broker = build_design_part_context(
         handoff,
@@ -859,6 +1261,9 @@ def run_design_part_episode(
         max_context_bytes=limits.max_context_bytes,
         max_contract_submissions=limits.max_contract_submissions,
         max_repair_attempts=limits.max_repair_attempts,
+        max_source_submissions=limits.max_source_submissions,
+        max_executions=limits.max_executions,
+        max_observation_inspections=limits.max_observation_inspections,
         timeout_seconds=limits.timeout_seconds,
     )
     orchestrator = EpisodeOrchestrator(
@@ -867,7 +1272,7 @@ def run_design_part_episode(
         context_broker=broker,
         capabilities=AgentCapabilities.for_skill(
             skill,
-            capability_mode="provider_selected_structured_contract_preview",
+            capability_mode="provider_selected_design_with_attested_model_program",
         ),
         budget=episode_budget,
         validate_contract=validate_contract,
@@ -896,6 +1301,106 @@ def _contract_summary(contract: dict[str, Any]) -> str:
 def _feedback_summary(feedback: dict[str, Any]) -> dict[str, Any]:
     errors = feedback.get("errors") if isinstance(feedback.get("errors"), list) else []
     return {"valid": feedback.get("valid"), "codes": [item.get("code") for item in errors if isinstance(item, dict) and isinstance(item.get("code"), str)]}
+
+
+def _validate_model_program_action(value: Any) -> None:
+    if not isinstance(value, dict) or set(value) != {
+        "api_id",
+        "source",
+        "parameters",
+        "requested_outputs",
+    }:
+        raise EpisodeContractError(
+            "model-program submission requires exactly api_id, source, parameters, and requested_outputs"
+        )
+    if value.get("api_id") != "cadquery_v1":
+        raise EpisodeContractError("model-program api_id must be cadquery_v1")
+    if not isinstance(value.get("source"), str) or not value["source"]:
+        raise EpisodeContractError("model-program source must be a non-empty string")
+    if not isinstance(value.get("parameters"), dict):
+        raise EpisodeContractError("model-program parameters must be an object")
+    try:
+        validate_model_program_parameters(value["parameters"])
+    except ValueError as exc:
+        raise EpisodeContractError(str(exc)) from exc
+    if value.get("requested_outputs") != ["step"]:
+        raise EpisodeContractError(
+            "model-program requested_outputs must be exactly ['step']"
+        )
+
+
+def _provider_execution_observation(value: dict[str, Any]) -> dict[str, Any]:
+    output = value.get("output") if isinstance(value.get("output"), dict) else {}
+    return {
+        "success": value.get("success") is True,
+        "observation_type": value.get("observation_type"),
+        "codes": list(value.get("codes") or ()),
+        "execution_profile": value.get("execution_profile"),
+        "side_effect_started": value.get("side_effect_started") is True,
+        "exit_state": value.get("exit_state"),
+        "attestation_digest": value.get("attestation_digest"),
+        "candidate_id": output.get("candidate_id"),
+        "execution_id": output.get("execution_id"),
+        "source_hash": output.get("source_hash"),
+        "parameters_hash": output.get("parameters_hash"),
+        "profile_digest": output.get("profile_digest"),
+        "toolchain_digest": output.get("toolchain_digest"),
+        "geometry": output.get("geometry") if isinstance(output.get("geometry"), dict) else {},
+        "step_reimport": output.get("step_reimport") if isinstance(output.get("step_reimport"), dict) else {},
+        "outputs": [
+            {
+                "name": item.get("name"),
+                "sha256": item.get("sha256"),
+                "size": item.get("size"),
+            }
+            for item in (output.get("outputs") or [])
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _execution_output_has_valid_reimport(value: dict[str, Any]) -> bool:
+    geometry = value.get("geometry")
+    reimport = value.get("step_reimport")
+    imported_geometry = reimport.get("geometry") if isinstance(reimport, dict) else None
+    outputs = value.get("outputs")
+    step = outputs[0] if isinstance(outputs, list) and len(outputs) == 1 else None
+    return bool(
+        isinstance(geometry, dict)
+        and geometry.get("valid") is True
+        and isinstance(geometry.get("solid_count"), int)
+        and geometry["solid_count"] >= 1
+        and isinstance(reimport, dict)
+        and reimport.get("valid") is True
+        and isinstance(imported_geometry, dict)
+        and imported_geometry.get("valid") is True
+        and imported_geometry.get("solid_count") == geometry.get("solid_count")
+        and isinstance(step, dict)
+        and step.get("name") == "model.step"
+        and isinstance(step.get("sha256"), str)
+        and len(step["sha256"]) == 64
+        and isinstance(step.get("size"), int)
+        and step["size"] > 0
+        and isinstance(value.get("source_hash"), str)
+        and isinstance(value.get("parameters_hash"), str)
+        and isinstance(value.get("profile_digest"), str)
+        and isinstance(value.get("toolchain_digest"), str)
+    )
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _sha256_json(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _short_text(value: Any) -> str:

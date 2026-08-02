@@ -117,11 +117,21 @@ The fifth internal package adds:
 5. append-only candidate/diagnostic evidence that cannot become reviewable,
    accepted, or deliverable.
 
-This is an internal execution primitive, not a design-to-execution product
-path. The next package may register provider-selected model-program actions and
-consume execution observations only through this Broker boundary, while
-preserving reviewable/accepted separation. Do not route provider source into
-the existing host CadQuery subprocess.
+The sixth internal package adds:
+
+1. `design_part` v0.2 with the sole declared `model_program` v0.1 delegate;
+2. strict complete-source create/replace, current-candidate execution, and
+   latest-observation inspection actions;
+3. CadFlow-assigned candidate, observation, execution, lineage, and evidence
+   identities plus separate source/execution/inspection/repair budgets;
+4. mandatory observation inspection and in-sandbox STEP re-import evidence
+   before completion;
+5. execution-aware Part Job route evidence that remains non-reviewable,
+   non-accepted, and non-deliverable.
+
+The next package may publish only a fully cross-checked execution as a
+reviewable result while preserving reviewable/accepted separation. Do not route
+provider source into the existing host CadQuery subprocess.
 
 ## Change discipline
 

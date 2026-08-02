@@ -3,7 +3,8 @@
 This module implements local structured-contract validation, pure AST source
 policy validation, and the internal attested WSL2 model-program execution
 primitive. Execution evidence remains a non-reviewable candidate or diagnostic;
-the provider-facing runtime skill and product publication path are not enabled.
+the provider-facing Episode may request it only through the registered
+CadFlow-owned delegate, and the product publication path is not enabled.
 """
 
 from __future__ import annotations
@@ -365,16 +366,23 @@ class CadFlowToolBroker:
             },
         }
 
-    def manifest(self, *, active_skill_id: str) -> dict[str, Any]:
+    def manifest(
+        self,
+        *,
+        active_skill_id: str,
+        delegated_skill_ids: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        authorized_skill_ids = {active_skill_id, *delegated_skill_ids}
         allowed = [
             definition.manifest()
             for definition in self._definitions.values()
-            if active_skill_id in definition.allowed_skill_ids
+            if authorized_skill_ids & definition.allowed_skill_ids
         ]
         return {
             "schema_version": 1,
             "broker": "cadflow_tool_broker",
             "active_skill_id": active_skill_id,
+            "delegated_skill_ids": list(delegated_skill_ids),
             "allowed_tools": allowed,
             "model_program_capability": self._sandbox_capability.manifest(),
         }
@@ -936,6 +944,9 @@ def _persist_execution_evidence(
         "profile_digest": attestation.profile_digest,
         "toolchain_digest": attestation.toolchain_digest,
         "geometry": _sanitize_observation(worker_observation).get("geometry", {}),
+        "step_reimport": _sanitize_observation(worker_observation).get(
+            "step_reimport", {}
+        ),
         "evidence_manifest": str(relative_root / "evidence_manifest.json").replace("\\", "/"),
         "outputs": [
             {

@@ -387,6 +387,24 @@ def _design_part_action_request(
         "allowed_tools": sorted(skill.allowed_tools),
         "output_contract_types": sorted(skill.output_contract_types),
         "stop_reasons": sorted(skill.stop_reasons),
+        "delegated_skills": [
+            {
+                "skill_id": delegated.skill_id,
+                "version": delegated.version,
+                "allowed_actions": sorted(delegated.allowed_actions),
+                "allowed_tools": sorted(delegated.allowed_tools),
+                "output_contract_types": sorted(
+                    delegated.output_contract_types
+                ),
+                "prohibited_side_effects": list(
+                    delegated.prohibited_side_effects
+                ),
+            }
+            for delegated in (
+                RUNTIME_SKILL_REGISTRY.skill(delegated_id)
+                for delegated_id in skill.delegated_skill_ids
+            )
+        ],
         "knowledge": [
             {
                 "id": item.knowledge_id,

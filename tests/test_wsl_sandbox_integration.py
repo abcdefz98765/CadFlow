@@ -10,6 +10,7 @@ import time
 import pytest
 
 from ai_native_cad.agents.model_program_runtime import ModelProgramExecutionRequest
+from ai_native_cad.agents.episode import run_design_part_episode
 from ai_native_cad.agents.wsl_sandbox import load_configured_wsl_sandbox_executor
 
 
@@ -75,6 +76,66 @@ def test_attested_profile_and_non_template_step_execution() -> None:
         ) <= 0.01
     assert files["model.step"].startswith(b"ISO-10303-21")
     assert len(files["model.step"]) < 67_108_864
+
+
+def test_provider_selected_episode_consumes_attested_execution_observation(
+    tmp_path,
+) -> None:
+    class ScriptedAdapter:
+        def __init__(self):
+            self.actions = iter(
+                [
+                    {
+                        "action": "create_model_program",
+                        "model_program": {
+                            "api_id": "cadquery_v1",
+                            "source": VALID_NON_TEMPLATE_SOURCE,
+                            "parameters": {
+                                "diameter": 42.0,
+                                "height": 8.0,
+                                "bore": 9.0,
+                            },
+                            "requested_outputs": ["step"],
+                        },
+                    },
+                    {"action": "request_execution"},
+                    {"action": "inspect_observation"},
+                    {"action": "stop", "stop_reason": "completed"},
+                ]
+            )
+
+        def choose_design_action(self, *, state, skill_manifest):
+            return next(self.actions)
+
+    result = run_design_part_episode(
+        adapter=ScriptedAdapter(),
+        handoff={
+            "work_id": "integration_work",
+            "part_id": "hex_bore",
+            "status": "active_part_job_attempt",
+            "part_brief": "Hexagonal boss with a central bore",
+            "interface_constraints": [],
+            "preserved_assembly_context": {},
+        },
+        artifact_dir=tmp_path,
+        run_id="integration_run",
+    )
+
+    assert result.status == "completed"
+    assert result.result_kind == "model_program"
+    assert result.output_validated is True
+    assert result.execution_succeeded is True
+    assert result.validated is False
+    assert result.final_candidate_id == "candidate_001"
+    assert result.final_observation_id == "observation_001"
+    persisted = json.loads(
+        (tmp_path / "execution_observations" / "observation_001.json")
+        .read_text(encoding="utf-8")
+    )
+    assert persisted["output"]["step_reimport"]["valid"] is True
+    assert persisted["reviewable"] is False
+    assert persisted["accepted"] is False
+    assert persisted["deliverable"] is False
 
 
 def test_worker_defense_in_depth_rejects_non_allowlisted_import() -> None:

@@ -206,7 +206,7 @@ fabricated into stronger trust.
 mutations. Its current M1 commands own Work creation, Intent Run ownership,
 planned and later Part Job attempts, candidate selection, active-lineage
 changes, legacy attempt adoption, and accepted-result pointer changes. Its M2
-validation-only design command also registers typed evidence produced for an
+execution-aware design command also registers typed evidence produced for an
 existing owned Part Job attempt; it is prohibited from changing lineage,
 acceptance, Assembly Job, Deliverable Package, Part Job, or Run identity state.
 
@@ -214,7 +214,7 @@ The current deterministic execution service is reached through
 `DeterministicCompatibilityPort`. Low-level workflow/evaluation entry points
 remain callable for compatibility but do not establish target product state.
 
-The provider-selected validation episode is reached through `AgentDesignPort`.
+The provider-selected design episode is reached through `AgentDesignPort`.
 The concrete file adapter appends evidence under the owned attempt Run and
 binds a path-safe request id to a canonical fingerprint. Exact retries replay
 persisted evidence; conflicting reuse and incomplete evidence fail closed. The

@@ -1,8 +1,8 @@
-"""Typed runtime registry for the first M2 design-part slice.
+"""Typed runtime registry for the bounded M2 design-part slice.
 
 The registry constrains provider authority while leaving action choice to the
-provider.  It deliberately exposes no model-program execution tool until an
-enforceable sandbox profile exists.
+provider. Model-program tools are reachable only through the declared
+CadFlow-owned delegate and remain independently gated by live attestation.
 """
 
 from __future__ import annotations
@@ -19,6 +19,9 @@ class BudgetDefinition:
     max_context_bytes: int
     max_contract_submissions: int
     max_repair_attempts: int
+    max_source_submissions: int
+    max_executions: int
+    max_observation_inspections: int
     timeout_seconds: float
 
 
@@ -49,6 +52,7 @@ class SkillDefinition:
     budget: BudgetDefinition
     system_rules: tuple[str, ...]
     action_contract_rules: tuple[str, ...]
+    delegated_skill_ids: tuple[str, ...] = ()
 
     def manifest(self) -> dict[str, Any]:
         value = asdict(self)
@@ -71,7 +75,7 @@ class SkillDefinition:
 
 DESIGN_PART_SKILL = SkillDefinition(
     skill_id="design_part",
-    version="0.1.0",
+    version="0.2.0",
     role="geometry_agent",
     phase="design",
     checkpoints=("geometry_candidate", "contract_validation"),
@@ -82,6 +86,10 @@ DESIGN_PART_SKILL = SkillDefinition(
             "create_contract",
             "patch_contract",
             "request_validation",
+            "create_model_program",
+            "patch_model_program",
+            "request_execution",
+            "inspect_observation",
             "ask_user",
             "stop",
         }
@@ -96,10 +104,8 @@ DESIGN_PART_SKILL = SkillDefinition(
             "user_acceptance_or_revision",
         }
     ),
-    # M2 package 1 validates a structured compatibility contract only.  Model
-    # source and CAD execution remain unavailable until the Tool Broker sandbox.
     allowed_tools=frozenset({"validate_structured_contract"}),
-    output_contract_types=frozenset({"cad_ir_draft"}),
+    output_contract_types=frozenset({"cad_ir_draft", "model_program_candidate"}),
     shared_knowledge_ids=("verification_state_vocabulary",),
     private_knowledge_ids=("design_part_structured_contract_strategy",),
     stop_reasons=frozenset(
@@ -111,20 +117,25 @@ DESIGN_PART_SKILL = SkillDefinition(
             "budget_exhausted",
             "provider_failure",
             "policy_blocked",
+            "completed",
         }
     ),
     prohibited_side_effects=(
         "No filesystem paths or arbitrary repository context.",
-        "No Python, CAD source, shell, subprocess, network, or dependency installation.",
-        "No Work mutation, execution, publication, acceptance, or deliverable authority.",
+        "No shell, subprocess, network, arbitrary filesystem, credentials, or dependency installation.",
+        "Model source may execute only through the delegated CadFlow model_program skill and attested Tool Broker.",
+        "No Work mutation, publication, acceptance, or deliverable authority.",
         "No fabricated validator, geometry, fit, tolerance, strength, or safety claims.",
     ),
     budget=BudgetDefinition(
-        max_steps=10,
+        max_steps=16,
         max_context_requests=4,
         max_context_bytes=65_536,
         max_contract_submissions=3,
         max_repair_attempts=2,
+        max_source_submissions=4,
+        max_executions=3,
+        max_observation_inspections=3,
         timeout_seconds=180.0,
     ),
     system_rules=(
@@ -132,16 +143,72 @@ DESIGN_PART_SKILL = SkillDefinition(
         "Choose the next action from the declared design_part action allowlist.",
         "Request semantic context only when it materially affects the design decision.",
         "Treat validator feedback as system evidence and decide whether to patch, change strategy, ask, or stop.",
-        "Submit structured CAD IR compatibility contracts only; executable model source is unavailable.",
-        "Do not claim that a validated contract is executed, reviewable, accepted, or production geometry.",
+        "Choose either the structured CAD IR compatibility strategy or the delegated model_program strategy.",
+        "Treat source as untrusted; request execution only through CadFlow and inspect each new structured observation before repairing or completing.",
+        "Do not claim that a contract or candidate is reviewable, accepted, deliverable, or production geometry.",
     ),
     action_contract_rules=(
         "request_context requires context_key.",
         "create_contract and patch_contract require contract_type='cad_ir_draft' and a contract object.",
         "request_validation validates the most recent submitted contract.",
+        "create_model_program and patch_model_program require exactly api_id, source, parameters, and requested_outputs=['step']; patch is a complete replacement, never a diff.",
+        "request_execution executes only the latest CadFlow-assigned candidate; it accepts no provider path, command, candidate id, UID, or environment.",
+        "inspect_observation inspects only the latest uninspected CadFlow observation and accepts no provider-selected identity.",
         "ask_user requires focused questions when material information is missing.",
         "stop requires one declared typed stop_reason.",
         "Never return code, commands, paths, secrets, raw provider messages, or validator facts not supplied by CadFlow.",
+    ),
+    delegated_skill_ids=("model_program",),
+)
+
+
+MODEL_PROGRAM_SKILL = SkillDefinition(
+    skill_id="model_program",
+    version="0.1.0",
+    role="geometry_agent",
+    phase="design",
+    checkpoints=("model_program_candidate", "execution_observation"),
+    operations=("model_program",),
+    allowed_actions=frozenset(
+        {
+            "create_model_program",
+            "patch_model_program",
+            "request_execution",
+            "inspect_observation",
+        }
+    ),
+    allowed_context_keys=frozenset(),
+    allowed_tools=frozenset(
+        {"validate_model_program_source", "execute_model_program"}
+    ),
+    output_contract_types=frozenset({"model_program_candidate"}),
+    shared_knowledge_ids=("verification_state_vocabulary",),
+    private_knowledge_ids=("model_program_cadquery_v1",),
+    stop_reasons=frozenset(),
+    prohibited_side_effects=(
+        "No provider-selected paths, commands, environment, UID, shell, subprocess, network, arbitrary filesystem, or dependency installation.",
+        "Execution requires a live attestation bound to the pinned profile and toolchain.",
+        "Execution observations are candidate evidence only and grant no publication or acceptance authority.",
+    ),
+    budget=BudgetDefinition(
+        max_steps=16,
+        max_context_requests=0,
+        max_context_bytes=0,
+        max_contract_submissions=0,
+        max_repair_attempts=2,
+        max_source_submissions=4,
+        max_executions=3,
+        max_observation_inspections=3,
+        timeout_seconds=180.0,
+    ),
+    system_rules=(
+        "Use only cadquery_v1 source accepted by the CadFlow static policy.",
+        "Return a single declared action; CadFlow assigns every candidate, observation, execution, and evidence identity.",
+        "Inspect the latest observation before patching or completing.",
+    ),
+    action_contract_rules=(
+        "A source submission is a complete immutable candidate.",
+        "Execution and inspection actions contain only the action field.",
     ),
 )
 
@@ -175,6 +242,14 @@ class SkillRegistry:
                 if operation in by_operation:
                     raise ValueError(f"duplicate skill operation: {operation}")
                 by_operation[operation] = skill
+        for skill in skills:
+            if skill.skill_id in skill.delegated_skill_ids:
+                raise ValueError("a skill cannot delegate to itself")
+            unknown = set(skill.delegated_skill_ids) - set(by_id)
+            if unknown:
+                raise ValueError(
+                    f"skill delegates to unknown skills: {skill.skill_id}"
+                )
         self._by_id = MappingProxyType(by_id)
         self._by_operation = MappingProxyType(by_operation)
         self._knowledge_by_id = MappingProxyType(knowledge_by_id)
@@ -218,6 +293,15 @@ RUNTIME_KNOWLEDGE = (
         ),
     ),
     KnowledgeDefinition(
+        knowledge_id="model_program_cadquery_v1",
+        scope="skill_private",
+        source="policies/model_program_cadquery_v1.md",
+        summary=(
+            "Use the fixed cadquery_v1 entrypoint, restricted imports and calls, "
+            "finite JSON parameters, and the sole STEP output contract."
+        ),
+    ),
+    KnowledgeDefinition(
         knowledge_id="design_part_structured_contract_strategy",
         scope="skill_private",
         source=(
@@ -232,7 +316,7 @@ RUNTIME_KNOWLEDGE = (
 
 
 RUNTIME_SKILL_REGISTRY = SkillRegistry(
-    (DESIGN_PART_SKILL,),
+    (DESIGN_PART_SKILL, MODEL_PROGRAM_SKILL),
     RUNTIME_KNOWLEDGE,
 )
 
@@ -240,6 +324,7 @@ RUNTIME_SKILL_REGISTRY = SkillRegistry(
 __all__ = [
     "BudgetDefinition",
     "DESIGN_PART_SKILL",
+    "MODEL_PROGRAM_SKILL",
     "KnowledgeDefinition",
     "RUNTIME_KNOWLEDGE",
     "RUNTIME_SKILL_REGISTRY",

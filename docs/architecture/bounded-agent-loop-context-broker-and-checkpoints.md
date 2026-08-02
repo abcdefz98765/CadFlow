@@ -339,7 +339,7 @@ Implemented:
 - structured validation observations;
 - deterministic proposer compatibility;
 - isolated deterministic candidate execution in the existing CAD pipeline.
-- `design_part` v0.1 typed capability registry;
+- `design_part` v0.2 typed capability registry;
 - an explicit provider-selected structured-contract loop with context choice,
   contract creation/patching, validation observation, focused questions, and
   typed stops;
@@ -364,21 +364,24 @@ Implemented:
   execution evidence;
 - fail-closed startup behavior when the profile is disabled, absent, stale,
   tampered, or fails any active control probe.
+- a registered `model_program` v0.1 delegated skill and provider-selected
+  create/full-replacement/execute/inspect loop;
+- CadFlow-assigned candidate and observation identities, strict action fields,
+  bounded executions/inspections/repairs, and mandatory inspection before
+  repair or completion;
+- product-route persistence of execution observations as candidate or
+  diagnostic Run evidence.
 
 Not implemented:
 
-- product-integrated provider-selected design-to-execution Episode;
-- runtime `model_program` skill registration and Agent source actions;
-- Episode consumption of the internal execution observation;
 - reviewable publication and accepted-result integration for sandbox output;
 - feature-graph geometry contract;
 - Agentic assembly and drawing tools;
-- real branching repair behavior in the product path.
+- real external-provider benchmark evidence for branching repair behavior.
 
-The current provider-selected loop is a product-routed validation preview. It
-can branch after contract-validator observations and persist evidence under the
-owning attempt Run, but it cannot request CAD execution and does not publish a
-reviewable result.
+The current provider-selected loop is an execution-aware internal preview. It
+can branch after validator or sandbox observations and persist evidence under
+the owning attempt Run, but it does not publish a reviewable result.
 
 The existing deterministic CadQuery executor is not sandbox evidence: it uses
 the host Python executable and inherits the host environment. The capability

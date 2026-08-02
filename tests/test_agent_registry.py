@@ -6,6 +6,7 @@ import pytest
 
 from ai_native_cad.agents import (
     DESIGN_PART_SKILL,
+    MODEL_PROGRAM_SKILL,
     RUNTIME_SKILL_REGISTRY,
     ContextBroker,
     EpisodeBudget,
@@ -72,15 +73,16 @@ def _adapter(responses):
     )
 
 
-def test_design_part_registry_is_typed_and_has_no_execution_authority():
+def test_design_part_registry_delegates_only_to_cadflow_model_program_skill():
     skill = RUNTIME_SKILL_REGISTRY.for_operation("design_part")
 
     assert skill is DESIGN_PART_SKILL
-    assert skill.version == "0.1.0"
+    assert skill.version == "0.2.0"
     assert skill.allowed_tools == frozenset({"validate_structured_contract"})
     assert "create_contract" in skill.allowed_actions
-    assert "request_execution" not in skill.allowed_actions
-    assert "model_program" not in skill.output_contract_types
+    assert "request_execution" in skill.allowed_actions
+    assert "model_program_candidate" in skill.output_contract_types
+    assert skill.delegated_skill_ids == ("model_program",)
     assert "part_job" in skill.allowed_context_keys
     assert "reviewed_part_handoff" not in skill.allowed_context_keys
     knowledge = RUNTIME_SKILL_REGISTRY.knowledge_for_skill("design_part")
@@ -93,8 +95,13 @@ def test_design_part_registry_is_typed_and_has_no_execution_authority():
             "design_part",
             "model_program_api_patterns",
         )
-    with pytest.raises(ValueError, match="unknown skill id"):
-        RUNTIME_SKILL_REGISTRY.skill("model_program")
+    delegated = RUNTIME_SKILL_REGISTRY.skill("model_program")
+    assert delegated is MODEL_PROGRAM_SKILL
+    assert delegated.allowed_tools == frozenset(
+        {"validate_model_program_source", "execute_model_program"}
+    )
+    assert delegated.allowed_context_keys == frozenset()
+    assert delegated.stop_reasons == frozenset()
 
 
 def test_provider_selects_context_contract_and_validation_actions(tmp_path, monkeypatch):
@@ -122,9 +129,9 @@ def test_provider_selects_context_contract_and_validation_actions(tmp_path, monk
     assert result.validated is True
     assert result.operation == "design_part"
     assert result.skill_id == "design_part"
-    assert result.skill_version == "0.1.0"
+    assert result.skill_version == "0.2.0"
     assert result.capability_mode == (
-        "provider_selected_structured_contract_preview"
+        "provider_selected_design_with_attested_model_program"
     )
     assert [request["operation"] for request in client.requests] == [
         "design_part_action",
@@ -136,6 +143,26 @@ def test_provider_selects_context_contract_and_validation_actions(tmp_path, monk
         == ["validate_structured_contract"]
         for request in client.requests
     )
+    assert client.requests[0]["skill"]["delegated_skills"] == [
+        {
+            "skill_id": "model_program",
+            "version": "0.1.0",
+            "allowed_actions": [
+                "create_model_program",
+                "inspect_observation",
+                "patch_model_program",
+                "request_execution",
+            ],
+            "allowed_tools": [
+                "execute_model_program",
+                "validate_model_program_source",
+            ],
+            "output_contract_types": ["model_program_candidate"],
+            "prohibited_side_effects": list(
+                MODEL_PROGRAM_SKILL.prohibited_side_effects
+            ),
+        }
+    ]
     assert [
         item["id"] for item in client.requests[0]["skill"]["knowledge"]
     ] == [
@@ -148,7 +175,7 @@ def test_provider_selects_context_contract_and_validation_actions(tmp_path, monk
     )
     assert result_artifact["skill"] == {
         "id": "design_part",
-        "version": "0.1.0",
+        "version": "0.2.0",
     }
     context_manifest = json.loads(
         (tmp_path / "context_manifest.json").read_text(encoding="utf-8")
@@ -163,9 +190,12 @@ def test_provider_selects_context_contract_and_validation_actions(tmp_path, monk
         (tmp_path / "tool_broker_manifest.json").read_text(encoding="utf-8")
     )
     assert tool_manifest["broker"] == "cadflow_tool_broker"
-    assert [item["tool_id"] for item in tool_manifest["allowed_tools"]] == [
-        "validate_structured_contract"
-    ]
+    assert {item["tool_id"] for item in tool_manifest["allowed_tools"]} == {
+        "validate_structured_contract",
+        "validate_model_program_source",
+        "execute_model_program",
+    }
+    assert tool_manifest["delegated_skill_ids"] == ["model_program"]
     assert tool_manifest["model_program_capability"]["available"] is False
     events = [
         json.loads(line)

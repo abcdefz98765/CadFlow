@@ -375,13 +375,13 @@ Implemented foundations worth retaining:
 - STEP-first output and basic geometry inspection;
 - isolated candidate execution and failure cleanup;
 - controlled artifact access and a tested local console.
-- an internal `design_part` v0.1 typed skill registry and provider-selected
-  structured-contract episode preview with semantic context and local
-  validation observations;
+- a `design_part` v0.2 typed skill registry whose provider-selected Episode can
+  choose either structured-contract validation or a delegated, registered
+  `model_program` v0.1 strategy with attested execution observations;
 - a CadFlow-owned Tool Broker for that preview's structured-contract validator,
   plus an explicit model-program capability gate that reports the current
   Windows sandbox profile unavailable and fails closed before execution;
-- a validation-only product route from an owned Part Job attempt through
+- an execution-aware product route from an owned Part Job attempt through
   `WorkOrchestrator` into the provider-selected episode, with idempotent request
   identity, append-only Run evidence, and typed Work artifact references;
 - a selected CadQuery v1 model-program source contract and Broker-owned static
@@ -390,19 +390,20 @@ Implemented foundations worth retaining:
 - an internal, explicitly enabled `wsl2_cadquery_v1` Tool Broker execution
   primitive with a pinned dedicated WSL2 distro, digest-bound attestation,
   systemd/seccomp isolation, fixed CadQuery worker, resource limits, and
-  append-only candidate/diagnostic evidence. It has no provider Episode or
-  publication authority.
+  append-only candidate/diagnostic evidence;
+- CadFlow-assigned model-program candidate/observation identities, strict
+  create/full-replacement/execute/inspect actions, bounded observation-driven
+  repair, and an execution-aware product route that still has no publication
+  or acceptance authority.
 
 Major migration gaps:
 
 - the current CAD IR is a closed part-family selector;
-- the current product Agent Episode is effectively one-shot;
-- the product-routed provider-selected episode still stops at structured
-  contract validation and cannot consume the internal sandbox execution
-  primitive;
-- runtime model-program actions, observation-driven execution repair,
-  reviewable publication, five non-template benchmarks, and external-provider
-  acceptance remain unavailable;
+- the deterministic compatibility Agent Episode remains effectively one-shot;
+- the provider-selected Episode can consume the sandbox primitive, but its
+  successful STEP is still only candidate/execution-observation evidence;
+- reviewable publication, explicit review routing, five non-template
+  benchmarks, and external-provider acceptance remain unavailable;
 - provider-backed Agentic design is not product-usable;
 - the UI is organized around the former fixed workflow;
 - ordered Part Job attempts and the deterministic product `WorkOrchestrator`
