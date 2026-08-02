@@ -28,7 +28,7 @@ as an untrusted CAD program using an allowlisted API.
 Source text is never trusted merely because a provider produced it. This skill
 has no acceptance authority and may not bypass the Tool Broker or sandbox.
 
-## Current gap
+## Current implementation boundary
 
 CadQuery v1 is now the first selected model-program API. CadFlow implements a
 Broker-owned, AST-only `validate_model_program_source` tool with versioned
@@ -36,16 +36,19 @@ imports, calls, entrypoint, syntax, and size limits. It returns source hash and
 sanitized policy codes without retaining, importing, bytecode-compiling, or
 executing source.
 
-The `cadquery_v1` id versions this CadFlow source policy. An exact CadQuery,
-Python, OCCT, and read-only worker-image version is not bound until the
-enforceable worker is implemented and verified.
+The repository now also contains an internal `wsl2_cadquery_v1` worker profile
+with pinned Python/CadQuery/OCP dependencies, content digests, active
+attestation, seccomp, systemd isolation, resource limits, fixed STEP export,
+and Broker-owned candidate/diagnostic evidence. It is available only after an
+exact dedicated WSL2 distro passes the trusted startup probe; otherwise the
+Broker remains fail closed.
 
-This is still a target runtime skill contract. The explicit Windows execution
-gate enumerates required controls and returns `sandbox_unavailable` before any
-source write or process start. The enforceable sandbox profile, execution
-worker, runtime skill registration, Episode actions, product routing, geometry
-inspection, and publication are not implemented. A static pass grants no
-execution or trust authority.
+This file is still a target runtime skill contract, not a registered provider
+skill. `create_model_program`, `patch_model_program`, `request_execution`, and
+observation-inspection actions are not exposed by `design_part` or
+`WorkOrchestrator`. Successful internal execution does not make a result
+reviewable, accepted, or deliverable. Geometry publication, product routing,
+and the benchmark gate remain unimplemented.
 
 ## References
 

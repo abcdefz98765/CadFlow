@@ -181,11 +181,29 @@ Status:
 - local file-level acceptance confirmed allowlisted source acceptance,
   sanitized `socket`/`open` rejection, no source retention, and an independent
   `sandbox_unavailable` execution block with no candidate directory;
+- fifth internal package implemented on 2026-08-02:
+  - pinned a separately imported `CadFlow-Sandbox-CQ-v1` rootfs, Python
+    3.10.12, CadQuery 2.7.0, cadquery-ocp 7.8.1.1.post1, wheel lock, WSL
+    configuration, worker, launcher, probes, and content-derived digests;
+  - added exact-profile startup attestation, systemd mount/network isolation,
+    post-bootstrap seccomp, empty capabilities, read-only system/toolchain,
+    controlled environment, private temp, and fixed resource limits;
+  - added strict Broker execution/context types, STEP-only worker output,
+    archive validation, typed failures, and append-only candidate/diagnostic
+    execution evidence;
+  - kept the primitive explicitly disabled by default and outside runtime
+    `model_program`, `design_part`, `WorkOrchestrator`, publication, acceptance,
+    and Deliverable Package authority;
+- package 5 verification passed with `53 passed` targeted and `620 passed, 2
+  skipped` in the full suite with live WSL2 integration enabled;
+- current-host Windows/WSL2 acceptance recorded all attack probes passing, a
+  valid non-template STEP result and its hashes, and unchanged accepted-result
+  and Deliverable Package state;
 - this product-routed preview validates a structured legacy CAD IR candidate
   only. It cannot execute CAD or publish a reviewable result;
-- M2 remains unaccepted pending an enforceable sandbox execution worker,
-  runtime model-program Episode actions, design-to-execution routing, STEP-first
-  inspection/publication, and the benchmark gate.
+- M2 remains unaccepted pending runtime model-program Episode actions,
+  design-to-execution routing, STEP-first publication/inspection, and the
+  five-part benchmark gate.
 
 ## M3 — General structured geometry contract
 

@@ -262,15 +262,19 @@ the Tool Broker. Its observation contains the API id, source SHA-256, metrics,
 and typed violations, but not the submitted source. It does not write, retain,
 bytecode-compile, import, or execute source.
 
-`cadquery_v1` is the CadFlow policy version, not yet an executable toolchain
-version. The model-program manifest must bind exact CadQuery, Python, OCCT, and
-worker-image versions before the execution capability may report available.
+`cadquery_v1` is the CadFlow source-policy version. Its implemented internal
+execution profile binds Python 3.10.12, CadQuery 2.7.0, cadquery-ocp
+7.8.1.1.post1, the hashed wheel lock, worker, launcher, probes, WSL
+configuration, controls, and resource limits. The execution capability reports
+available only after the exact dedicated distro returns a fresh matching
+attestation.
 
-A static pass establishes only `source_or_contract_validated`. It cannot create
-an execution request or advance the candidate to `queued`: the independent
-Windows sandbox capability must also be available. It currently returns
-`sandbox_unavailable`, so the candidate directory and process are never
-created.
+A static pass establishes only `source_or_contract_validated`. It cannot grant
+execution authority or advance the candidate to reviewable. A CadFlow-owned
+caller may construct the strict internal execution request only when the
+independent WSL2 capability is attested; disabled, missing, stale, or tampered
+profiles return `sandbox_unavailable` with `side_effect_started=false` before
+request-side source evidence or a candidate execution directory is created.
 
 Forbidden:
 
@@ -300,6 +304,20 @@ Records:
 
 The request is created by CadFlow after action validation. Candidate source
 cannot grant itself execution authority.
+
+The implemented internal request is `ModelProgramExecutionRequest` schema v1
+with exactly `api_id`, path-safe `candidate_id`, `source`, finite JSON
+`parameters`, and `requested_outputs=["step"]`. `ToolInvocationContext` is
+provided by CadFlow and binds Work, Run, Part Job, Episode, and a controlled
+evidence root; provider payloads cannot provide paths or command arguments.
+
+The resulting `ToolObservation` records execution id, source/parameter hashes,
+attestation/profile/toolchain digests, limits, exit state, geometry summary,
+and evidence references. Run-relative evidence contains exclusive-write
+`source.py`, `parameters.json`, sanitized logs, `observation.json`, a file
+hash/size manifest, and `model.step` only on success. Its trust role is
+`candidate` for successful execution and `diagnostic` for failure. Both forms
+are explicitly `reviewable=false`, `accepted=false`, and `deliverable=false`.
 
 ## Episode artifacts
 
@@ -338,9 +356,10 @@ contract creation/patching, local validation, focused questions, and typed
 stops. Context manifest entries record Work, Run, Part Job, checkpoint, trust
 role, and compact summary. Request and byte budgets are enforced.
 
-This preview has no execution tool. A validated `cad_ir_draft` remains a
+This preview has no execution action. A validated `cad_ir_draft` remains a
 candidate contract; it is not geometry, a reviewable result, or an accepted
-result.
+result. The separately implemented internal WSL2 primitive is not present in
+the `design_part` action or tool manifest.
 
 `WorkOrchestrator.run_part_design_episode` accepts only an existing attempt Run
 owned by the named Part Job. A typed `AgentDesignPort` appends the episode below
@@ -360,10 +379,10 @@ persisted as typed diagnostic route evidence and cannot become product output.
 
 `request_validation` is now authorized and invoked by the CadFlow Tool Broker.
 The broker manifest records the active skill's allowed tool definitions and the
-current model-program sandbox capability. On Windows that capability is
-explicitly unavailable; a model-program request is blocked before source is
-written, a candidate directory is created, or a process starts. This evidence
-does not claim that sandboxed execution exists.
+current model-program sandbox capability. The internal capability is disabled
+by default; after explicit local enablement it becomes available only with a
+fresh exact-profile attestation. Availability does not add a model-program
+action to `design_part` and does not grant product publication authority.
 
 ## Build and evaluation artifacts
 

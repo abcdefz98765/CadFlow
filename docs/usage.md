@@ -318,8 +318,10 @@ accepted output, sandboxed execution, or general/non-template CAD capability.
 
 Each episode now writes `tool_broker_manifest.json`. It records the active
 skill's allowed tool definitions and the model-program sandbox capability gate.
-On the current Windows implementation, the gate reports unavailable and lists
-the missing enforcement controls.
+The gate is disabled by default and reports unavailable unless the exact
+dedicated WSL2 profile passes a fresh startup attestation. Even when available,
+the `design_part` manifest exposes only structured validation and cannot invoke
+model-program execution.
 
 The capability can be inspected without providing source or starting a process:
 
@@ -369,11 +371,59 @@ typed codes; it does not echo the source. The authoritative contract is
 provider Episode action and a successful result does not make execution
 available.
 
-Calling the unavailable model-program tool returns a structured
-`sandbox_unavailable` observation with `side_effect_started=false`. It does not
-write source, create a candidate directory, invoke the current deterministic
-CadQuery host subprocess, or publish artifacts. There is no command, setting,
-or environment variable that enables provider model-program execution yet.
+Calling the model-program tool while the profile is disabled, missing,
+mismatched, tampered, or fails a probe returns `sandbox_unavailable` with
+`side_effect_started=false`. It does not write request source, create a request
+candidate directory, invoke the deterministic host CadQuery subprocess, or
+publish artifacts.
+
+### Provision and accept the internal WSL2 execution primitive
+
+The runtime uses a dedicated distro named `CadFlow-Sandbox-CQ-v1`. It does not
+reuse the user's normal Ubuntu distro. The repository contains only the
+manifest, hashes, lock, policy, worker, and scripts; the rootfs cache,
+wheelhouse, and VHDX are stored below
+`%LOCALAPPDATA%\CadFlow\sandbox`.
+
+Verify repository content binding, then perform the explicit deployment phase:
+
+```powershell
+F:\Tools\PowerShell\7\pwsh.exe -NoProfile -Command `
+  ".venv-cadflow\Scripts\python.exe sandbox\wsl2\verify_manifest.py"
+
+F:\Tools\PowerShell\7\pwsh.exe -NoProfile -File `
+  sandbox\wsl2\provision.ps1
+```
+
+Provisioning is the only phase that downloads the pinned rootfs/wheels or uses
+package repositories. It verifies hashes, imports WSL2, installs exact package
+versions, disables DrvFs automount and Windows interop, seals the runtime, and
+runs the full attack probe. It never automatically overwrites or unregisters
+an existing distro. A name/path/state conflict fails closed. `-ResumeExisting
+-RepairUnattested` is only for a partial deployment from this script that has
+no `/opt/cadflow/ATTESTED` marker; it refuses an already attested runtime.
+
+Execution is opt-in per CadFlow process. Run the current-host acceptance in a
+fresh PowerShell process rather than setting the variable globally:
+
+```powershell
+F:\Tools\PowerShell\7\pwsh.exe -NoProfile -Command `
+  '$env:PYTHONPATH="src"; $env:CADFLOW_MODEL_PROGRAM_SANDBOX="1"; `
+  .venv-cadflow\Scripts\python.exe sandbox\wsl2\acceptance.py'
+```
+
+`CADFLOW_MODEL_PROGRAM_SANDBOX=1` merely requests a live probe; it cannot
+override the manifest, hashes, active controls, or attestation. The optional
+`CADFLOW_MODEL_PROGRAM_SANDBOX_MANIFEST` path exists for controlled testing and
+must still match the sealed distro attestation. No execution-phase network,
+shell, arbitrary command, provider path, dependency installation, or host
+filesystem authority is exposed.
+
+Successful execution produces only Run-relative
+`candidate/execution_observation` evidence and `model.step`. It remains
+`reviewable=false`, `accepted=false`, and `deliverable=false`. Runtime
+`model_program` Episode actions, `WorkOrchestrator` consumption, publication,
+and explicit acceptance are later packages.
 
 Repeat the local acceptance check with:
 

@@ -97,7 +97,8 @@ def test_design_part_registry_is_typed_and_has_no_execution_authority():
         RUNTIME_SKILL_REGISTRY.skill("model_program")
 
 
-def test_provider_selects_context_contract_and_validation_actions(tmp_path):
+def test_provider_selects_context_contract_and_validation_actions(tmp_path, monkeypatch):
+    monkeypatch.delenv("CADFLOW_MODEL_PROGRAM_SANDBOX", raising=False)
     adapter = _adapter(
         [
             {"action": "request_context", "context_key": "part_job"},

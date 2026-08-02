@@ -636,9 +636,27 @@ adds a CadFlow-owned, AST-only source-policy validator through the Tool Broker.
 It enforces versioned imports, callable surface, `build_model(parameters)`
 entrypoint shape, prohibited syntax, source size, and AST size, and emits only
 source hash, metrics, and typed violations. It does not retain, bytecode-compile,
-import, or execute source. Static policy success is a prerequisite only; the
-independent Windows execution capability remains unavailable, so no candidate
-directory, process, geometry, publication, or Work mutation follows.
+import, or execute source. Static policy success is a prerequisite only. At
+that package boundary the independent Windows execution capability remained
+unavailable, so no candidate directory, process, geometry, publication, or
+Work mutation followed.
+
+The fifth M2 package implements the internal execution boundary without
+connecting it to the provider Episode. A repository-pinned manifest builds the
+dedicated `CadFlow-Sandbox-CQ-v1` WSL2 distro outside the repository and binds
+the rootfs provenance, Python 3.10.12, CadQuery 2.7.0, cadquery-ocp
+7.8.1.1.post1, wheel lock, WSL configuration, launcher, worker, probes, limits,
+and policy digests. A trusted startup probe must attest the exact profile and
+all controls before the Broker invokes the fixed worker. The worker runs in a
+systemd mount/network boundary with seccomp, empty capabilities, read-only
+system/toolchain, controlled environment, bounded resources, and a single
+allowlisted STEP output. Broker evidence is append-only and explicitly
+non-reviewable, non-accepted, and non-deliverable.
+
+This package does not register runtime `model_program` actions, route provider
+source through `design_part` or `WorkOrchestrator`, publish geometry, mutate an
+accepted-result pointer, or satisfy the benchmark gate. M2 therefore remains
+in progress.
 
 Migration rules:
 

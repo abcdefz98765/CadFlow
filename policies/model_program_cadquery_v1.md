@@ -1,13 +1,15 @@
 # CadQuery v1 Model-Program Source Policy
 
-Status: implemented as a static validation policy; execution unavailable.
+Status: static policy and an attestation-gated internal execution primitive are
+implemented. No provider Episode action or reviewable publication path is
+registered.
 
 Policy id: `cadquery_v1`.
 
-This id versions the CadFlow source surface; it is not a claim that a CadQuery
-package/toolchain version has been bound. The exact read-only CadQuery package,
-Python, OCCT, and worker-image versions remain pending the enforceable sandbox
-worker and must be recorded before execution can become available.
+This id versions the CadFlow source surface. The internal WSL2 profile binds
+Python 3.10.12, CadQuery 2.7.0, cadquery-ocp 7.8.1.1.post1, the hashed wheel
+lock, worker, launcher, probes, and WSL configuration. That binding grants no
+provider, publication, reviewable, acceptance, or deliverable authority.
 
 Entrypoint: `build_model(parameters)`.
 
@@ -60,9 +62,16 @@ The validator uses Python AST parsing only. It does not:
 - publish geometry, change Work state, or change acceptance.
 
 Passing static policy is necessary but not sufficient for execution. The
-separate Windows sandbox capability must prove every required OS-enforced
-control. It currently reports `sandbox_unavailable`, so no provider-generated
-model program can run.
+separate Windows sandbox capability must be explicitly enabled and return a
+fresh digest-bound attestation proving every required OS-enforced control. If
+the distro, configuration, toolchain, file hashes, mounts, environment,
+network, subprocess controls, or limits do not match, the Broker returns
+`sandbox_unavailable` before request-side candidate evidence is created.
+
+The resulting internal execution observation remains `candidate` or
+`diagnostic` evidence. The runtime `model_program` skill is not registered and
+`design_part`/`WorkOrchestrator` cannot request this tool in the current
+product path.
 
 This policy constrains authority, not part type. It must evolve through
 versioned API decisions and non-template benchmarks rather than new closed

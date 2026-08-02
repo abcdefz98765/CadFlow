@@ -386,17 +386,23 @@ Implemented foundations worth retaining:
   identity, append-only Run evidence, and typed Work artifact references;
 - a selected CadQuery v1 model-program source contract and Broker-owned static
   AST validator with explicit imports, calls, entrypoint, syntax, and size
-  policy; static success grants no execution authority.
+  policy; static success grants no execution authority;
+- an internal, explicitly enabled `wsl2_cadquery_v1` Tool Broker execution
+  primitive with a pinned dedicated WSL2 distro, digest-bound attestation,
+  systemd/seccomp isolation, fixed CadQuery worker, resource limits, and
+  append-only candidate/diagnostic evidence. It has no provider Episode or
+  publication authority.
 
 Major migration gaps:
 
 - the current CAD IR is a closed part-family selector;
 - the current product Agent Episode is effectively one-shot;
 - the product-routed provider-selected episode still stops at structured
-  contract validation and has no usable sandboxed execution tool;
-- the model-program execution entry remains capability metadata and a safe
-  block; the new static source validator is not a Windows sandbox or source
-  executor;
+  contract validation and cannot consume the internal sandbox execution
+  primitive;
+- runtime model-program actions, observation-driven execution repair,
+  reviewable publication, five non-template benchmarks, and external-provider
+  acceptance remain unavailable;
 - provider-backed Agentic design is not product-usable;
 - the UI is organized around the former fixed workflow;
 - ordered Part Job attempts and the deterministic product `WorkOrchestrator`

@@ -28,8 +28,10 @@ its second package adds Broker-owned structured validation and an explicit
 fail-closed Windows model-program capability gate; its third package routes an
 owned Part Job attempt through `WorkOrchestrator` for validation and evidence
 registration only; its fourth package selects CadQuery v1 and adds AST-only
-source-policy validation. Runtime model-program actions, an enforceable sandbox
-worker, design-to-execution, publication, and benchmark acceptance remain open.
+source-policy validation; its fifth package adds an attested internal WSL2
+execution primitive and candidate/diagnostic evidence. Runtime model-program
+Episode actions, design-to-execution routing, publication, and benchmark
+acceptance remain open.
 
 In particular, do not begin later work by:
 
@@ -105,11 +107,21 @@ The fourth internal package adds:
 5. explicit proof that a static pass does not enable execution or create a
    candidate directory.
 
-This is not a sandbox implementation or a design-to-execution path. The next
-package should define the enforceable Windows worker/profile and evidence
-protocol, remaining fail closed until every required isolation control is
-independently verified. Do not route provider source into the existing host
-CadQuery subprocess.
+The fifth internal package adds:
+
+1. a repository-pinned, separately imported `CadFlow-Sandbox-CQ-v1` runtime;
+2. digest-bound startup attestation and active isolation probes;
+3. a fixed CadQuery worker behind systemd, seccomp, mount/network, capability,
+   and resource controls;
+4. strict execution requests and STEP-only structured observations;
+5. append-only candidate/diagnostic evidence that cannot become reviewable,
+   accepted, or deliverable.
+
+This is an internal execution primitive, not a design-to-execution product
+path. The next package may register provider-selected model-program actions and
+consume execution observations only through this Broker boundary, while
+preserving reviewable/accepted separation. Do not route provider source into
+the existing host CadQuery subprocess.
 
 ## Change discipline
 

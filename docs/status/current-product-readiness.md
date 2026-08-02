@@ -78,12 +78,13 @@ Workbench and does not execute provider-generated model programs.
 - Concise episode actions, submissions, observations, budget use, and result
   artifacts without private reasoning or raw provider traffic.
 - CadFlow-owned Tool Broker definitions for structured validation and the
-  future model-program execution boundary.
+  internal model-program execution boundary.
 - Broker authorization and invocation for local structured-contract validation,
   with typed observations and persisted `tool_broker_manifest.json` evidence.
-- Explicit Windows model-program capability gate that enumerates all required
-  controls and returns `sandbox_unavailable` before source, candidate-directory,
-  or process side effects.
+- Explicit Windows model-program capability gate that is disabled by default
+  and returns `sandbox_unavailable` before request-side source,
+  candidate-directory, or process side effects unless a fresh attestation
+  proves the exact profile and every required control.
 - Typed `AgentDesignPort` and `WorkOrchestrator` route for an existing Part Job
   attempt, with ownership checks before provider invocation.
 - Append-only episode evidence under the owning Run, path-safe idempotent
@@ -91,17 +92,27 @@ Workbench and does not execute provider-generated model programs.
 - Protected-state postcondition checks covering active lineage, accepted-result
   pointers, Part Jobs, Assembly Job, Deliverable Packages, and Run ids.
 - `cadquery_v1` selected as the first model-program source API, with a fixed
-  `build_model(parameters)` entrypoint contract. This is a CadFlow policy
-  version; the executable CadQuery/Python/OCCT toolchain is not yet bound.
+  `build_model(parameters)` entrypoint contract and pinned Python 3.10.12,
+  CadQuery 2.7.0, and cadquery-ocp 7.8.1.1.post1 internal toolchain.
 - Broker-owned AST-only source validation for allowlisted imports/calls,
   prohibited syntax/authority, source size, and AST size. Observations retain a
   source hash and sanitized codes, not source text.
+- Dedicated `CadFlow-Sandbox-CQ-v1` WSL2 runtime with repository-owned rootfs
+  and wheel hashes, content-derived profile/toolchain digests, disabled DrvFs
+  automount/interop, and a fixed root-owned launcher.
+- Attested systemd worker boundary with private network/mount/temp/devices,
+  hidden Windows integration mounts, read-only system/toolchain, controlled
+  environment, empty capabilities, `NoNewPrivileges`, process-clone/socket/
+  exec/mount seccomp denials, and CPU/memory/swap/task/output limits.
+- Strict model-program request and trusted invocation-context contracts,
+  STEP-only output, archive allowlist/path/symlink/size validation, typed exit
+  observations, sanitized logs, and append-only candidate/diagnostic evidence.
 
 This preview is connected to the product `WorkOrchestrator`, but only for
 validation and evidence registration. Its only tool enabled for the
 `design_part` skill is structured-contract validation. The model-program Broker
-execution entry is unavailable capability metadata, not execution authority.
-The separate static source validator is not registered as a provider Episode
+primitive is internal execution authority only when attested; neither it nor
+the separate static source validator is registered as a provider Episode
 action. The preview cannot execute CAD, publish a reviewable result, or update
 acceptance, so it must not be described as production Agentic CAD design.
 
@@ -133,9 +144,10 @@ one-shot orchestration, not Agentic design.
   reviewable publication.
 - Runtime `model_program` skill registration and provider-selected source
   creation/patch actions.
-- Tool Broker execution worker for untrusted model programs.
-- Enforced Windows sandbox profile for provider-generated CAD source (the
-  implemented capability gate currently reports unavailable).
+- Provider-selected execution/observation actions in the bounded Episode and
+  `WorkOrchestrator` product route.
+- Geometry inspection and reviewable publication for sandbox candidates.
+- Five non-template benchmark acceptance with a real external provider.
 - General feature-graph geometry contract.
 - Non-template general CAD design capability.
 - Executable Assembly Job flow with accepted input identities.
@@ -178,8 +190,9 @@ These are migration tasks, not accepted target behavior.
 
 ## Verification state
 
-- Automated verified: the complete suite passed with `596 passed, 2 skipped`
-  in 379.72 seconds on 2026-08-01.
+- Automated verified: the complete suite passed with the live WSL2 sandbox
+  explicitly enabled at `620 passed, 2 skipped` in 516.16 seconds on
+  2026-08-02.
 - The M1 acceptance baseline was `550 passed, 2 skipped` on 2026-07-27.
 - New contract tests cover ordered Part Job attempt history, acceptance-pointer
   separation, immutable Run evidence, v1 projection, schema definitions,
@@ -207,12 +220,20 @@ These are migration tasks, not accepted target behavior.
   call/syntax/entrypoint/size rejection, source redaction, Broker authorization,
   internal-exception redaction, static-versus-execution capability separation,
   and no candidate-directory side effect after a static pass.
+- WSL2 sandbox tests prove repository/profile/toolchain digest binding, fake
+  capability rejection, startup and active control probes, legal non-template
+  STEP execution, host/mount/environment/symlink escape denial, socket/
+  subprocess/shell/pip/fork denial, CPU and memory termination, strict request
+  and context contracts, archive traversal rejection, output allowlisting,
+  sanitized diagnostic logs, and append-only Broker observations.
 - Verified meaning: the M1 runtime/contracts and the existing deterministic
   workflow, console contracts, safety boundaries, failure isolation, and
   compatibility behavior are internally consistent.
-- Not proven by those tests: real external-provider design quality or
-  product-route interoperability, sandbox security, non-template geometry
-  success, multi-part assembly, or drawing-package usability.
+- Not proven by those tests: real external-provider design quality,
+  product-route execution/publication interoperability, portability beyond the
+  recorded Windows/WSL2 host, an independent security audit, the five-part
+  non-template benchmark gate, multi-part assembly, or drawing-package
+  usability.
 - Manually verified for this package:
   - Golden Desktop Robot Arm contract mode passed;
   - full mode passed and produced STEP, STL, and preview output;
@@ -254,14 +275,28 @@ These are migration tasks, not accepted target behavior.
     created no candidate directory;
   - the reproducible record is
     `m2-cadquery-source-policy-package-acceptance.md`.
+- Manually verified for the WSL2 model-program sandbox package on the current
+  Windows/WSL2 host:
+  - all active isolation and attack probes passed for the pinned distro,
+    profile, toolchain, worker, launcher, and configuration digests;
+  - a non-template hexagonal solid with a central bore produced one valid STEP
+    solid through the attested Broker primitive;
+  - source, parameters, STEP, geometry, logs, limits, exit state, and lineage
+    hashes were recorded as candidate execution evidence;
+  - reviewable, accepted, and deliverable state remained false, while the
+    existing accepted-result pointer and Deliverable Package remained
+    byte-identical;
+  - the reproducible record is
+    `m2-wsl2-model-program-sandbox-package-acceptance.md`.
 - A real external provider has not been manually verified through the product
   route.
 - No new UI was implemented, so this package did not require a new Workbench
   visual acceptance.
 - Manual browser verification: incomplete for the latest legacy Workflow
   Cockpit.
-- Target architecture verification: M1 passed. The first M2 internal package is
-  contract-tested; M2 acceptance and later milestone claims remain unverified.
+- Target architecture verification: M1 passed. Five bounded M2 internal
+  packages are contract-tested, and the fifth has current-host WSL2 acceptance;
+  M2 product acceptance and later milestone claims remain unverified.
 
 ## Current risks
 
@@ -270,8 +305,9 @@ These are migration tasks, not accepted target behavior.
 - Provider configuration can be mistaken for an Agentic product path.
 - The existing CAD IR blocks unknown designs before a capable Agent can realize
   them.
-- A sandboxed code path implemented without enforceable isolation would create
-  unacceptable host risk.
+- The attested internal sandbox primitive can be mistaken for a completed
+  provider/product path even though Episode routing, publication, and benchmark
+  acceptance remain absent.
 - Legacy documents or entry points can silently restore the former architecture.
 - Assembly heuristics can be mistaken for geometric fit or motion validation.
 - Generated drawings can be mistaken for checked drawings unless annotation
@@ -280,13 +316,14 @@ These are migration tasks, not accepted target behavior.
 ## Current milestone
 
 M0 and M1 are complete. M2 is in progress: its provider-selected
-structured-contract preview, validation Tool Broker, and fail-closed Windows
-capability gate exist, while the sandbox execution/publication vertical slice
-remains unimplemented.
+structured-contract preview, validation Tool Broker, static source policy, and
+attested internal WSL2 execution primitive exist. Provider-selected execution,
+reviewable publication, explicit acceptance integration, and the benchmark
+gate remain unimplemented.
 
 Later milestones remain:
 
-1. M2 provider-selected bounded design loop and enforceable execution boundary;
+1. M2 provider-selected model-program actions and execution-observation loop;
 2. M3 feature-graph/model-program geometry paths;
 3. M4 multi-Part Job and Assembly Job progression;
 4. M5 integrated Deliverable Package and drawings;

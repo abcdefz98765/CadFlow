@@ -91,11 +91,12 @@ candidate, not geometry, a reviewable result, or an accepted result.
 
 Only the local structured-contract validators decide whether a submission is
 valid, and they are invoked through the Tool Broker. This skill stops after a
-validated compatibility contract or a typed safe block. The Broker's Windows
-model-program capability gate currently reports `sandbox_unavailable`;
-controlled execution and geometry publication remain later M2 work. Product
-routing registers only candidate, observation, or diagnostic evidence and may
-not change lineage, acceptance, Assembly, or Deliverable state.
+validated compatibility contract or a typed safe block. Although the Broker
+can host an attested internal WSL2 model-program primitive, this skill has no
+model-program actions and cannot invoke it. Episode consumption of execution
+observations and geometry publication remain later M2 work. Product routing
+registers only candidate, observation, or diagnostic evidence and may not
+change lineage, acceptance, Assembly, or Deliverable state.
 
 ## Knowledge
 

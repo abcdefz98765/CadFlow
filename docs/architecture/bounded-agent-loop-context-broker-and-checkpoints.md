@@ -356,16 +356,21 @@ Implemented:
   request replay, and typed Work artifact references;
 - a selected `cadquery_v1` source contract and Broker-owned AST-only validation
   tool with versioned import, call, entrypoint, syntax, and size policy;
-- a strict separation between static source-policy success and the unavailable
-  OS-enforced execution capability.
+- a strict separation between static source-policy success and an independently
+  attested OS-enforced execution capability;
+- a pinned dedicated WSL2 CadQuery worker, content-derived profile/toolchain
+  digests, startup attestation, systemd/seccomp enforcement, resource limits,
+  fixed protocol, STEP-only output, and Broker-owned candidate/diagnostic
+  execution evidence;
+- fail-closed startup behavior when the profile is disabled, absent, stale,
+  tampered, or fails any active control probe.
 
 Not implemented:
 
 - product-integrated provider-selected design-to-execution Episode;
 - runtime `model_program` skill registration and Agent source actions;
-- Tool Broker execution worker for untrusted model programs;
-- enforceable Windows sandbox profile (the implemented gate reports it
-  unavailable);
+- Episode consumption of the internal execution observation;
+- reviewable publication and accepted-result integration for sandbox output;
 - feature-graph geometry contract;
 - Agentic assembly and drawing tools;
 - real branching repair behavior in the product path.
@@ -377,7 +382,10 @@ reviewable result.
 
 The existing deterministic CadQuery executor is not sandbox evidence: it uses
 the host Python executable and inherits the host environment. The capability
-gate deliberately excludes it from provider-source authority.
+gate deliberately excludes it from provider-source authority. Only the exact
+attested `CadFlow-Sandbox-CQ-v1` profile can unlock the internal execution
+primitive, and explicit local enablement does not expose it to the provider
+Episode.
 
 ## Acceptance tests
 

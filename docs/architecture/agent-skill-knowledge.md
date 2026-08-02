@@ -392,21 +392,26 @@ Current code provides:
   Run evidence, and register typed candidate/observation/diagnostic references;
 - a versioned CadQuery v1 source policy and Broker-owned AST-only validator that
   returns source hash, metrics, and sanitized violations without source
-  retention, imports, bytecode compilation, execution, or side effects.
+  retention, imports, bytecode compilation, execution, or side effects;
+- a separately gated internal WSL2 model-program worker whose exact profile,
+  toolchain, controls, and startup probes are attested before Broker execution;
+- append-only model-program source, parameters, sanitized logs, geometry
+  summary, STEP hash/size, and candidate-or-diagnostic execution evidence.
 
 It does not yet provide:
 
 - product-integrated provider-selected design-to-execution and reviewable
   publication;
-- an enforceable Windows sandbox or any provider model-program execution;
+- runtime `model_program` skill registration or provider-selected execution
+  actions;
 - feature-graph CAD IR;
 - Agentic assembly or deliverable episodes.
 
 The product-routed preview validates only the legacy structured CAD IR
-compatibility contract. The separate model-program static validator is not
-registered as an Episode action. Its execution tool entry is unavailable
-capability metadata, not execution authority. It has no CAD execution or
-publication tool and is not production-usable Agentic CAD design.
+compatibility contract. The separate model-program static validator and
+attested internal execution primitive are not registered as Episode actions.
+The primitive has CAD execution authority only inside its fixed sandbox and
+has no publication authority; it is not production-usable Agentic CAD design.
 
 No current deterministic fallback may be presented as these target
 capabilities.

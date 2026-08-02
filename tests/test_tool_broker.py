@@ -107,9 +107,10 @@ def test_windows_model_program_capability_is_explicitly_unavailable(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "ai_native_cad.agents.tool_broker.platform.system",
+        "ai_native_cad.agents.wsl_sandbox.platform.system",
         lambda: "Windows",
     )
+    monkeypatch.delenv("CADFLOW_MODEL_PROGRAM_SANDBOX", raising=False)
 
     capability = detect_model_program_sandbox_capability()
 
@@ -119,13 +120,15 @@ def test_windows_model_program_capability_is_explicitly_unavailable(
     assert capability.missing_controls == REQUIRED_MODEL_PROGRAM_CONTROLS
     assert capability.reason_codes == (
         "sandbox_unavailable",
-        "windows_enforceable_profile_not_implemented",
+        "sandbox_runtime_not_enabled",
     )
 
 
 def test_model_program_request_fails_before_source_or_process_side_effect(
     tmp_path,
+    monkeypatch,
 ) -> None:
+    monkeypatch.delenv("CADFLOW_MODEL_PROGRAM_SANDBOX", raising=False)
     broker = CadFlowToolBroker()
     candidate_dir = tmp_path / "must_not_be_created"
     source = "import socket\nopen('../escape.txt', 'w').write('bad')"
@@ -158,7 +161,6 @@ def test_available_sandbox_claim_requires_all_controls_and_evidence() -> None:
             reason_codes=(),
             evidence=("fixture",),
         )
-
     with pytest.raises(ValueError, match="typed reason"):
         SandboxCapability(
             profile_id="untyped_unavailable_fixture",
@@ -179,8 +181,49 @@ def test_available_sandbox_claim_requires_all_controls_and_evidence() -> None:
             reason_codes=(),
         )
 
+    with pytest.raises(ValueError, match="attestation"):
+        SandboxCapability(
+            profile_id="unattested_fixture",
+            platform="Windows",
+            available=True,
+            enforced_controls=REQUIRED_MODEL_PROGRAM_CONTROLS,
+            missing_controls=frozenset(),
+            reason_codes=(),
+            evidence=("fixture",),
+        )
 
-def test_design_part_manifest_exposes_only_validation_tool() -> None:
+
+def test_injected_available_capability_cannot_unlock_execution(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("CADFLOW_MODEL_PROGRAM_SANDBOX", raising=False)
+    injected = SandboxCapability(
+        profile_id="wsl2_cadquery_v1",
+        platform="Windows/WSL2",
+        available=True,
+        enforced_controls=REQUIRED_MODEL_PROGRAM_CONTROLS,
+        missing_controls=frozenset(),
+        reason_codes=(),
+        evidence=("caller-claim",),
+        attestation_digest="caller-attestation",
+        profile_digest="caller-profile",
+        toolchain_digest="caller-toolchain",
+    )
+    broker = CadFlowToolBroker(sandbox_capability=injected)
+
+    capability = broker.capability(MODEL_PROGRAM_TOOL)["capability"]
+    observation = broker.invoke(
+        MODEL_PROGRAM_TOOL,
+        skill_id="model_program",
+        payload={"source": "provider text"},
+    )
+
+    assert capability["available"] is False
+    assert observation.codes == ("sandbox_unavailable",)
+    assert observation.side_effect_started is False
+    assert not list(tmp_path.iterdir())
+
+
+def test_design_part_manifest_exposes_only_validation_tool(monkeypatch) -> None:
+    monkeypatch.delenv("CADFLOW_MODEL_PROGRAM_SANDBOX", raising=False)
     manifest = CadFlowToolBroker().manifest(active_skill_id="design_part")
 
     assert manifest["broker"] == "cadflow_tool_broker"

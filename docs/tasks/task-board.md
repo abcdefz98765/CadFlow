@@ -116,15 +116,26 @@ work ahead of the current milestone without an explicit architecture decision.
   - 2026-08-01: `175 passed` targeted; `596 passed, 2 skipped` full suite.
 - [x] Complete local file-level static-policy/fail-closed acceptance.
   - `../status/m2-cadquery-source-policy-package-acceptance.md`
-- [ ] Bind exact CadQuery, Python, OCCT, and read-only worker-image versions in
+- [x] Bind exact CadQuery, Python, OCCT, and read-only worker-image versions in
   the execution profile and model-program manifest.
-- [ ] Implement isolated candidate directory and execution worker.
-- [ ] Disable network access.
-- [ ] Block subprocess, shell, dynamic dependency installation, and writes
+- [x] Implement isolated candidate directory and execution worker.
+- [x] Disable network access.
+- [x] Block subprocess, shell, dynamic dependency installation, and writes
   outside candidate storage.
-- [ ] Enforce time, memory, process, and output-size limits.
-- [ ] Capture source, parameters, stdout/stderr, outputs, and exit state.
-- [ ] Return structured observations to the Agent.
+- [x] Enforce time, memory, process, and output-size limits.
+- [x] Capture source, parameters, stdout/stderr, outputs, and exit state as
+  append-only candidate or diagnostic evidence.
+- [x] Return structured Broker observations for the internal execution
+  primitive.
+- [x] Verify the attested worker, isolation controls, limits, evidence, and
+  Broker observation on the current Windows/WSL2 host.
+  - 2026-08-02: `53 passed` targeted; `620 passed, 2 skipped` full suite with
+    live WSL2 integration enabled.
+  - `../status/m2-wsl2-model-program-sandbox-package-acceptance.md`
+- [ ] Register provider-selected model-program actions and let an Episode
+  consume execution observations.
+- [ ] Route a successful, locally validated candidate through reviewable
+  publication while preserving explicit acceptance.
 
 ### Publication and UX slice
 
