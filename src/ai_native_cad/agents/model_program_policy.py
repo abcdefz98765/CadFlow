@@ -257,8 +257,11 @@ def cadquery_model_program_policy_manifest() -> dict[str, Any]:
         "api_id": CADQUERY_MODEL_PROGRAM_API,
         "cad_library": {
             "name": "CadQuery",
-            "package_version": None,
-            "binding_status": "pending_enforceable_worker",
+            "package_version": "2.7.0",
+            "python_version": "3.10.12",
+            "cadquery_ocp_version": "7.8.1.1.post1",
+            "execution_profile": "wsl2_cadquery_v1",
+            "binding_status": "internal_attestation_required",
         },
         "entrypoint": {
             "name": CADQUERY_MODEL_PROGRAM_ENTRYPOINT,

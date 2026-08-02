@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "profile_id": "wsl2_cadquery_v1",
+  "distro_id": "CadFlow-Sandbox-CQ-v1",
+  "profile_digest": "f3edf915b3417eb7a6c887e3bf7c73ac3023663df3290b2891b48b40e7fa86a3",
+  "toolchain_digest": "26d9a74b393b25f1d2a5a25f9a4fecda873b790b42c1b27840b229e064a19b1f",
+  "rootfs": {
+    "distribution": "Ubuntu 22.04",
+    "release": "20240304",
+    "url": "https://cloud-images.ubuntu.com/wsl/releases/22.04/20240304/ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz",
+    "sha256": "de9f6149da07b90350a3ccd94b4858b82fef71f0ec2982acb93de583c4c87585"
+  },
+  "toolchain": {
+    "python": "3.10.12-1~22.04.16",
+    "cadquery": "2.7.0",
+    "cadquery_ocp": "7.8.1.1.post1",
+    "python3_seccomp": "2.5.3-2ubuntu3~22.04.1",
+    "systemd": "249.11-0ubuntu3.21",
+    "libgl1": "1.4.0-1",
+    "libxrender1": "1:0.9.10-1build4",
+    "libsm6": "2:1.2.3-1build2",
+    "wheel_lock_sha256": "055eeb5f691c4ac292505a0abdc84142bfaa047cdeede100a15a54c6a7da0add"
+  },
+  "limits": {
+    "wall_clock_seconds": 30,
+    "cpu_seconds": 20,
+    "memory_bytes": 1073741824,
+    "swap_bytes": 0,
+    "task_count": 64,
+    "output_bytes": 67108864,
+    "stdout_bytes": 262144,
+    "stderr_bytes": 262144
+  },
+  "required_controls": [
+    "cpu_limit",
+    "dedicated_writable_candidate_directory",
+    "dynamic_dependency_installation_blocked",
+    "environment_allowlist",
+    "filesystem_boundary_enforced",
+    "generated_file_allowlist",
+    "memory_limit",
+    "network_disabled",
+    "output_size_limit",
+    "process_count_limit",
+    "read_only_declared_inputs",
+    "subprocess_and_shell_blocked",
+    "wall_clock_limit"
+  ],
+  "installed_files": {
+    "/opt/cadflow/worker.py": "480edba70a333bdb6c11e64b9249755d36b90cbd1010e34ba00c17effe1544bb",
+    "/opt/cadflow/probe.py": "b701c9369681a0db469f42f2c6e50872baa4f378d518bfaef99950098ba520df",
+    "/opt/cadflow/bin/cadflow-sandbox-launch": "d361ae9ae78761986f8469f722304fc3ab3da5771272d3576a3030b620b5a1d4",
+    "/opt/cadflow/requirements-cp310.lock": "055eeb5f691c4ac292505a0abdc84142bfaa047cdeede100a15a54c6a7da0add",
+    "/etc/wsl.conf": "7498b1d26b4b53da4ac24dbeee2fb57be34be68755e9bc42bb62fb6daf6e38e3"
+  }
+}

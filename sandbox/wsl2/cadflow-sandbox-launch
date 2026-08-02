@@ -1,0 +1,77 @@
+#!/bin/bash
+set -euo pipefail
+
+candidate_root=/var/lib/cadflow/candidates
+candidate_dir="$(mktemp -d "${candidate_root}/run.XXXXXXXX")"
+unit_id="cadflow-model-$(cat /proc/sys/kernel/random/uuid)"
+
+cleanup() {
+  if [[ "$candidate_dir" == "${candidate_root}/"run.* ]]; then
+    rm -rf -- "$candidate_dir"
+  fi
+}
+trap cleanup EXIT
+
+chown cadflow-worker:cadflow-worker "$candidate_dir"
+chmod 0700 "$candidate_dir"
+
+set +e
+systemd-run \
+  --quiet \
+  --wait \
+  --pipe \
+  --unit="$unit_id" \
+  --property=Type=exec \
+  --property=User=cadflow-worker \
+  --property=Group=cadflow-worker \
+  --property=WorkingDirectory="$candidate_dir" \
+  --property="Environment=CADFLOW_CANDIDATE_DIR=$candidate_dir" \
+  --property="Environment=HOME=$candidate_dir" \
+  --property=Environment=LANG=C.UTF-8 \
+  --property=Environment=PATH=/opt/cadflow/venv/bin:/usr/bin \
+  --property=ProtectSystem=strict \
+  --property=ProtectHome=yes \
+  --property=PrivateTmp=yes \
+  --property=PrivateDevices=yes \
+  --property=PrivateNetwork=yes \
+  --property=PrivateMounts=yes \
+  --property=TemporaryFileSystem=/run/WSL:ro \
+  --property=NoNewPrivileges=yes \
+  --property=CapabilityBoundingSet= \
+  --property=AmbientCapabilities= \
+  --property=ProtectKernelTunables=yes \
+  --property=ProtectKernelModules=yes \
+  --property=ProtectKernelLogs=yes \
+  --property=ProtectControlGroups=yes \
+  --property=ProtectClock=yes \
+  --property=RestrictSUIDSGID=yes \
+  --property=RestrictRealtime=yes \
+  --property=RestrictNamespaces=yes \
+  --property=LockPersonality=yes \
+  --property=SystemCallArchitectures=native \
+  --property=IPAddressDeny=any \
+  --property=RestrictAddressFamilies=AF_UNIX \
+  --property="InaccessiblePaths=/mnt /media /root /home -/run/WSL -/run/desktop" \
+  --property="ReadWritePaths=$candidate_dir" \
+  --property=ReadOnlyPaths=/opt/cadflow \
+  --property=UMask=0077 \
+  --property=MemoryMax=1073741824 \
+  --property=MemorySwapMax=0 \
+  --property=TasksMax=64 \
+  --property=CPUQuota=100% \
+  --property=RuntimeMaxSec=30 \
+  --property=LimitCPU=20 \
+  --property=LimitFSIZE=67108864 \
+  --property=LimitNOFILE=64 \
+  --property=LimitCORE=0 \
+  /opt/cadflow/venv/bin/python /opt/cadflow/worker.py
+unit_status=$?
+set -e
+if [[ $unit_status -ne 0 ]]; then
+  unit_result="$(systemctl show "${unit_id}.service" --property=Result --value 2>/dev/null || true)"
+  main_status="$(systemctl show "${unit_id}.service" --property=ExecMainStatus --value 2>/dev/null || true)"
+  main_code="$(systemctl show "${unit_id}.service" --property=ExecMainCode --value 2>/dev/null || true)"
+  echo "cadflow-sandbox-unit-result:${unit_result:-unknown};code:${main_code:-unknown};status:${main_status:-unknown}" >&2
+  systemctl reset-failed "${unit_id}.service" >/dev/null 2>&1 || true
+fi
+exit "$unit_status"

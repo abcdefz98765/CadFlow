@@ -221,7 +221,8 @@ def test_unsupported_api_and_invalid_input_are_sanitized() -> None:
     assert source not in json.dumps(malformed.as_dict())
 
 
-def test_static_pass_does_not_enable_model_program_execution(tmp_path) -> None:
+def test_static_pass_does_not_enable_model_program_execution(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("CADFLOW_MODEL_PROGRAM_SANDBOX", raising=False)
     broker = CadFlowToolBroker()
     candidate_dir = tmp_path / "must_not_exist"
 
@@ -248,7 +249,8 @@ def test_static_pass_does_not_enable_model_program_execution(tmp_path) -> None:
     assert not candidate_dir.exists()
 
 
-def test_model_program_manifest_separates_static_and_execution_capabilities() -> None:
+def test_model_program_manifest_separates_static_and_execution_capabilities(monkeypatch) -> None:
+    monkeypatch.delenv("CADFLOW_MODEL_PROGRAM_SANDBOX", raising=False)
     broker = CadFlowToolBroker()
     manifest = broker.manifest(active_skill_id="model_program")
     policy = cadquery_model_program_policy_manifest()
@@ -261,8 +263,11 @@ def test_model_program_manifest_separates_static_and_execution_capabilities() ->
     assert policy["api_id"] == CADQUERY_MODEL_PROGRAM_API
     assert policy["cad_library"] == {
         "name": "CadQuery",
-        "package_version": None,
-        "binding_status": "pending_enforceable_worker",
+        "package_version": "2.7.0",
+        "python_version": "3.10.12",
+        "cadquery_ocp_version": "7.8.1.1.post1",
+        "execution_profile": "wsl2_cadquery_v1",
+        "binding_status": "internal_attestation_required",
     }
     assert policy["entrypoint"]["signature"] == "build_model(parameters)"
     assert "Assembly" not in policy["allowed_imports"]["cadquery"]
