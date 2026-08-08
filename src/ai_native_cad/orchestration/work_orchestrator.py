@@ -1,8 +1,8 @@
-"""Single M1 product orchestrator for Work mutations.
+"""Single product orchestrator for Work mutations and controlled publication.
 
-This runtime coordinates the current deterministic compatibility port. It does
-not claim provider-selected Agent behavior and does not execute untrusted model
-programs.
+This runtime coordinates deterministic compatibility and the bounded Agent
+Design port. Untrusted model programs can execute only behind that port's
+CadFlow-owned Tool Broker and publication gate.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from ai_native_cad.domain.records import (
     accept_part_result,
@@ -319,7 +320,7 @@ class WorkOrchestrator:
         attempt_run_id: str | None = None,
         objective: str | None = None,
     ) -> dict[str, Any]:
-        """Append one validation-only Design Episode to an owned attempt Run."""
+        """Append one Design Episode and register only controlled evidence."""
 
         if self.design is None:
             raise ValueError("Agent Design port is unavailable")
@@ -380,7 +381,7 @@ class WorkOrchestrator:
                 run_id=run_id,
                 part_job_id=part_job_id,
                 relative_path=artifact.relative_path,
-                phase="design",
+                phase=_design_artifact_phase(artifact),
                 checkpoint=artifact.checkpoint,
                 trust_role=artifact.trust_role,
                 source_artifact_ids=list(artifact.source_artifact_ids),
@@ -421,33 +422,48 @@ class WorkOrchestrator:
             persisted_by_id[reference["artifact_id"]]
             for reference in references
         ]
-        status = "completed" if outcome.validated else "blocked"
+        status = "completed" if outcome.status == "completed" else "blocked"
         if outcome.idempotent_replay:
             postcondition = (
                 f"Design Episode request {request_id} returned its existing "
                 "append-only evidence without another provider call or Work mutation."
             )
+        elif outcome.reviewable_result_id:
+            postcondition = (
+                f"Reviewable STEP {outcome.reviewable_result_id} for "
+                f"{part_job_id} was published from locally validated evidence "
+                f"in Run {run_id}; acceptance and deliverables were unchanged."
+            )
         elif outcome.validated:
             postcondition = (
                 f"A validated contract candidate for {part_job_id} was appended "
-                f"to Run {run_id}; no CAD execution or acceptance mutation occurred."
+                f"to Run {run_id}; no acceptance mutation occurred."
             )
         else:
             postcondition = (
                 f"A typed Design Episode block for {part_job_id} was appended "
-                f"to Run {run_id}; no CAD execution or acceptance mutation occurred."
+                f"to Run {run_id}; no acceptance mutation occurred."
             )
         return {
             "episode": outcome.as_dict(),
+            "reviewable_result": outcome.reviewable_summary,
             "artifact_references": persisted_references,
             "product_state": project_product_state(persisted),
             "orchestration": _completion(
                 command="run_part_design_episode",
-                phase="design",
-                checkpoint="contract_validation",
+                phase=(
+                    "build_evaluate"
+                    if outcome.reviewable_result_id
+                    else "design"
+                ),
+                checkpoint=(
+                    "reviewable_result"
+                    if outcome.reviewable_result_id
+                    else "contract_validation"
+                ),
                 status=status,
                 postcondition=postcondition,
-                next_action=_design_episode_next_action(outcome.stop_reason),
+                next_action=_design_episode_next_action(outcome),
             ),
         }
 
@@ -494,6 +510,120 @@ class WorkOrchestrator:
                     f"{result_id}; active design lineage was unchanged."
                 ),
                 next_action="View accepted deliverables or start another attempt",
+            ),
+        }
+
+    def accept_reviewable_part_result(
+        self,
+        work_id: str,
+        *,
+        part_job_id: str,
+        reviewable_result_id: str,
+        review_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Explicit user authority for one registered reviewable result."""
+
+        work = self.store.read_work(work_id)
+        result_reference, step_reference = _registered_reviewable_result(
+            work,
+            work_id=work_id,
+            part_job_id=part_job_id,
+            reviewable_result_id=reviewable_result_id,
+        )
+        self.store.verify_reviewable_evidence(
+            work_id,
+            result_reference,
+            step_reference,
+        )
+        timestamp = _now()
+        accepted = accept_part_result(
+            work,
+            part_job_id=part_job_id,
+            result_id=reviewable_result_id,
+            attempt_run_id=result_reference["run_id"],
+            result_run_id=result_reference["run_id"],
+            review_id=review_id or f"accept_{uuid4().hex}",
+            artifact_ids=[
+                result_reference["artifact_id"],
+                step_reference["artifact_id"],
+            ],
+            accepted_at=timestamp,
+        )
+        self.store.write_work(work_id, accepted)
+        self.store.invalidate_projection()
+        return {
+            "accepted_part_result": accepted["accepted_part_results"][
+                part_job_id
+            ],
+            "reviewable_result_id": reviewable_result_id,
+            "product_state": project_product_state(accepted),
+            "orchestration": _completion(
+                command="accept_reviewable_part_result",
+                phase="accept_deliver",
+                checkpoint="acceptance_decision",
+                postcondition=(
+                    f"Explicit user acceptance moved only the {part_job_id} "
+                    f"accepted-result pointer to {reviewable_result_id}; "
+                    "active design lineage and Run evidence were unchanged."
+                ),
+                next_action="View accepted STEP or continue another Part Job",
+            ),
+        }
+
+    def revise_reviewable_part_result(
+        self,
+        work_id: str,
+        *,
+        part_job_id: str,
+        reviewable_result_id: str,
+        revision_prompt: str,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a new immutable attempt from a registered reviewable result."""
+
+        before = self.store.read_work(work_id)
+        result_reference, step_reference = _registered_reviewable_result(
+            before,
+            work_id=work_id,
+            part_job_id=part_job_id,
+            reviewable_result_id=reviewable_result_id,
+        )
+        self.store.verify_reviewable_evidence(
+            work_id,
+            result_reference,
+            step_reference,
+        )
+        accepted_before = deepcopy(before.get("accepted_part_results"))
+        result = self.create_part_attempt(
+            work_id,
+            part_job_id,
+            prompt=(
+                f"Revise reviewable result {reviewable_result_id}: "
+                f"{_require_prompt(revision_prompt)}"
+            ),
+            source="reviewable_result_revision",
+            run_id=run_id,
+        )
+        after = self.store.read_work(work_id)
+        if after.get("accepted_part_results") != accepted_before:
+            raise RuntimeError(
+                "starting a reviewable-result revision changed acceptance"
+            )
+        return {
+            **result,
+            "revision_of": {
+                "reviewable_result_id": reviewable_result_id,
+                "part_job_id": part_job_id,
+            },
+            "orchestration": _completion(
+                command="revise_reviewable_part_result",
+                phase="design",
+                checkpoint="part_job_attempt",
+                postcondition=(
+                    f"A new attempt Run was created from {reviewable_result_id}; "
+                    "the prior reviewable evidence and accepted pointer were preserved."
+                ),
+                next_action="Run a new Design Episode for the revision attempt",
             ),
         }
 
@@ -640,6 +770,81 @@ def _protected_work_state(work: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _registered_reviewable_result(
+    work: dict[str, Any],
+    *,
+    work_id: str,
+    part_job_id: str,
+    reviewable_result_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    references = [
+        item
+        for item in work.get("artifact_references", [])
+        if isinstance(item, dict)
+    ]
+    matches = [
+        item
+        for item in references
+        if item.get("artifact_id") == reviewable_result_id
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "acceptance or revision requires one registered reviewable result"
+        )
+    result = matches[0]
+    if not (
+        result.get("work_id") == work_id
+        and result.get("part_job_id") == part_job_id
+        and result.get("phase") == "build_evaluate"
+        and result.get("trust_role") == "reviewable_result"
+        and result.get("checkpoint") == "reviewable_result"
+        and result.get("validation_status") == "passed"
+        and isinstance(result.get("run_id"), str)
+        and isinstance(result.get("relative_path"), str)
+        and result["relative_path"].endswith("/reviewable_result.json")
+    ):
+        raise ValueError("registered reviewable result identity is invalid")
+    prefix = result["relative_path"].removesuffix("/reviewable_result.json")
+    step_matches = [
+        item
+        for item in references
+        if item.get("work_id") == work_id
+        and item.get("part_job_id") == part_job_id
+        and item.get("run_id") == result["run_id"]
+        and item.get("phase") == "build_evaluate"
+        and item.get("trust_role") == "reviewable_result"
+        and item.get("checkpoint") == "reviewable_result"
+        and item.get("validation_status") == "passed"
+        and result["artifact_id"] in (item.get("source_artifact_ids") or [])
+        and isinstance(item.get("relative_path"), str)
+        and item["relative_path"].startswith(f"{prefix}/candidates/")
+        and item["relative_path"].endswith("/model.step")
+    ]
+    if len(step_matches) != 1:
+        raise ValueError(
+            "registered reviewable result requires one validated STEP artifact"
+        )
+    job = next(
+        (
+            item
+            for item in work.get("part_jobs", [])
+            if isinstance(item, dict)
+            and item.get("part_job_id") == part_job_id
+        ),
+        None,
+    )
+    attempts = {
+        item.get("run_id")
+        for item in (job.get("attempts", []) if isinstance(job, dict) else [])
+        if isinstance(item, dict)
+    }
+    if result["run_id"] not in attempts:
+        raise ValueError(
+            "registered reviewable result does not belong to a Part Job attempt"
+        )
+    return result, step_matches[0]
+
+
 def _validate_design_outcome(
     request: DesignPartEpisodeRequest,
     outcome: DesignPartEpisodeOutcome,
@@ -657,6 +862,39 @@ def _validate_design_outcome(
         if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)
     }
     allowed_source_ids = existing_ids | set(artifact_ids)
+    reviewable = [
+        artifact
+        for artifact in outcome.artifacts
+        if artifact.trust_role == "reviewable_result"
+    ]
+    if outcome.reviewable_result_id is None:
+        if reviewable:
+            raise RuntimeError(
+                "Agent Design port returned reviewable artifacts without a reviewable identity"
+            )
+    else:
+        if len(reviewable) != 2:
+            raise RuntimeError(
+                "reviewable publication requires exactly a result and STEP artifact"
+            )
+        by_id = {artifact.artifact_id: artifact for artifact in reviewable}
+        result_artifact = by_id.get(outcome.reviewable_result_id)
+        step_artifact = by_id.get(outcome.reviewable_step_artifact_id)
+        if not (
+            result_artifact is not None
+            and step_artifact is not None
+            and result_artifact.checkpoint == "reviewable_result"
+            and result_artifact.relative_path.endswith(
+                "/reviewable_result.json"
+            )
+            and step_artifact.checkpoint == "reviewable_result"
+            and step_artifact.relative_path.endswith("/model.step")
+            and step_artifact.source_artifact_ids
+            == (result_artifact.artifact_id,)
+        ):
+            raise RuntimeError(
+                "Agent Design port returned an invalid reviewable publication identity"
+            )
     for artifact in outcome.artifacts:
         if not artifact.relative_path.startswith(expected_prefix):
             raise RuntimeError(
@@ -671,14 +909,26 @@ def _validate_design_outcome(
             )
 
 
-def _design_episode_next_action(stop_reason: str) -> str:
-    if stop_reason == "completed":
-        return "Review the validated contract candidate; CAD execution remains unavailable"
-    if stop_reason == "user_input_required":
+def _design_episode_next_action(outcome: DesignPartEpisodeOutcome) -> str:
+    if outcome.reviewable_result_id:
+        return "Accept or revise"
+    if outcome.stop_reason == "completed":
+        return "Review the validated contract candidate"
+    if outcome.stop_reason == "user_input_required":
         return "Answer the focused question, then start a new Design Episode request"
-    if stop_reason == "unsupported_capability":
+    if outcome.stop_reason == "unsupported_capability":
         return "Configure a provider that supports design_part actions"
     return "Inspect the typed Episode diagnostic, then retry with a new request id"
+
+
+def _design_artifact_phase(artifact: DesignEpisodeArtifact) -> str:
+    if artifact.checkpoint in {
+        "execution_observation",
+        "reviewable_publication",
+        "reviewable_result",
+    }:
+        return "build_evaluate"
+    return "design"
 
 
 def _stage_succeeded(value: Any) -> bool:

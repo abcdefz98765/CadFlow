@@ -49,9 +49,11 @@ This is now the registered CadFlow-owned `model_program` v0.1 delegate of
 parameters, request execution of only the current CadFlow-assigned candidate,
 and inspect only the latest uninspected observation. CadFlow assigns every
 candidate, observation, execution, lineage, and evidence identity and enforces
-separate budgets. Successful internal execution does not make a result
-reviewable, accepted, or deliverable. Publication and the benchmark gate remain
-unimplemented.
+separate budgets. Successful internal execution does not itself make a result
+reviewable, accepted, or deliverable. The product route now has a separate
+CadFlow-owned publication gate that can promote only fully cross-checked
+evidence to reviewable status. Explicit user acceptance and the benchmark gate
+remain outside this skill's authority.
 
 ## References
 

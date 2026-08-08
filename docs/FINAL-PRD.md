@@ -393,17 +393,24 @@ Implemented foundations worth retaining:
   append-only candidate/diagnostic evidence;
 - CadFlow-assigned model-program candidate/observation identities, strict
   create/full-replacement/execute/inspect actions, bounded observation-driven
-  repair, and an execution-aware product route that still has no publication
-  or acceptance authority.
+  repair, and an execution-aware product route;
+- a CadFlow-owned reviewable-publication gate that cross-checks immutable
+  execution identity, source/parameter/profile/toolchain/attestation digests,
+  STEP hash/size, Broker evidence, and in-sandbox re-import measurements before
+  registering a reviewable result;
+- explicit reviewable-result accept and revise routes: only the accept route
+  changes an accepted-result pointer, while revision creates a new Part Job
+  attempt and preserves prior acceptance and Run evidence.
 
 Major migration gaps:
 
 - the current CAD IR is a closed part-family selector;
 - the deterministic compatibility Agent Episode remains effectively one-shot;
-- the provider-selected Episode can consume the sandbox primitive, but its
-  successful STEP is still only candidate/execution-observation evidence;
-- reviewable publication, explicit review routing, five non-template
-  benchmarks, and external-provider acceptance remain unavailable;
+- publication is implemented only for a successful, inspected,
+  re-import-validated model-program execution; failed or tampered evidence
+  remains diagnostic;
+- five non-template benchmarks, external-provider acceptance, and user
+  acceptance of a benchmark reviewable result remain unavailable;
 - provider-backed Agentic design is not product-usable;
 - the UI is organized around the former fixed workflow;
 - ordered Part Job attempts and the deterministic product `WorkOrchestrator`

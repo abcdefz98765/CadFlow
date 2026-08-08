@@ -153,11 +153,9 @@ def test_work_orchestrator_routes_validation_only_episode_without_trust_mutation
         "checkpoint": "contract_validation",
         "postcondition": (
             "A validated contract candidate for clamp was appended to Run "
-            "clamp_attempt_1; no CAD execution or acceptance mutation occurred."
+            "clamp_attempt_1; no acceptance mutation occurred."
         ),
-        "next_action": (
-            "Review the validated contract candidate; CAD execution remains unavailable"
-        ),
+        "next_action": "Review the validated contract candidate",
     }
     assert len(client.requests) == 3
     assert {item["trust_role"] for item in data["artifact_references"]} == {

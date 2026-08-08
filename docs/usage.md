@@ -269,22 +269,31 @@ The local Python equivalent is
 request_id="clamp_design_001", attempt_run_id="clamp_attempt_2")`.
 The attempt must already belong to that Part Job. Evidence is appended below
 `runs/<run_id>/episodes/design_part/<request_id>/` and registered in the Work as
-typed candidate, observation, or diagnostic references. Repeating the exact
-request returns persisted evidence without a second provider call or Work
-rewrite; reusing the id with different input is rejected.
+typed candidate, observation, diagnostic, or gated reviewable-result
+references. Repeating the exact request returns persisted evidence without a
+second provider call, execution, publication rewrite, or Work rewrite; reusing
+the id with different input is rejected.
 
 This route lets the provider choose structured-contract validation or the
 registered `model_program` strategy. Model-program execution remains disabled
 unless that process explicitly requests the exact attested WSL2 capability.
-Even after successful execution, the route records only candidate and
-execution-observation evidence. It does not publish a reviewable result, modify
-active lineage or accepted-result pointers, or add deliverables. It has no
-Workbench UI action yet.
+After successful execution and observation inspection, the CadFlow publication
+gate cross-checks lineage, source/parameter/profile/toolchain/attestation
+digests, Broker evidence, STEP hash/size, limits, and in-sandbox re-import
+facts. Only then can the route register `reviewable_result.json` and its STEP.
+Publication does not modify active lineage, accepted-result pointers, or
+Deliverable Packages. It has no new Workbench UI action.
 
-An accepted part result is changed only by the explicit approval action after
-a validated STEP artifact exists. The action registers controlled artifact
-references and updates the accepted-result pointer without advancing active
-design lineage.
+Accept one registered reviewable result explicitly with
+`POST /api/works/{work_id}/parts/{part_job_id}/reviewable-results/{reviewable_result_id}/accept`.
+The body must be empty. This is the only Package 3 route that changes the Part
+Job's accepted-result pointer; active design lineage and Run evidence are not
+rewritten.
+
+Create a revision attempt with
+`POST /api/works/{work_id}/parts/{part_job_id}/reviewable-results/{reviewable_result_id}/revisions`
+and body `{"revision_prompt":"...","run_id":"optional_path_safe_id"}`. This
+does not change any prior accepted result.
 
 ## Evaluate the M2 provider-selected design preview
 
@@ -324,8 +333,9 @@ With the sandbox capability disabled, execution fails closed before source is
 written by the Broker or a candidate process starts. With a valid attestation,
 the Episode may execute source only through the fixed worker. Completion then
 requires a successful STEP re-import-validated observation and a subsequent
-`inspect_observation` action. Both a validated `cad_ir_draft` and successful
-model-program STEP remain non-reviewable candidate evidence.
+`inspect_observation` action. A validated `cad_ir_draft` remains candidate
+evidence. A successful model-program STEP remains candidate evidence until the
+independent publication gate passes; reviewable still does not mean accepted.
 
 Each episode now writes `tool_broker_manifest.json`. It records the active
 skill's allowed tool definitions and the model-program sandbox capability gate.
@@ -430,12 +440,13 @@ must still match the sealed distro attestation. No execution-phase network,
 shell, arbitrary command, provider path, dependency installation, or host
 filesystem authority is exposed.
 
-Successful execution produces only Run-relative
+Successful execution first produces only Run-relative
 `candidate/execution_observation` evidence and `model.step`. The Episode stores
-complete candidate submissions and sanitized structured observations, and the
-product route can register those evidence identities. They remain
-`reviewable=false`, `accepted=false`, and `deliverable=false`. Publication and
-explicit acceptance are later packages.
+complete candidate submissions and sanitized structured observations. The
+product route may then publish a separate reviewable record only after the
+local gate passes. Candidate evidence remains `reviewable=false`; the published
+record remains `accepted=false` and `deliverable=false` until explicit user
+acceptance.
 
 Repeat the registered Episode's current-host live acceptance with:
 
@@ -448,6 +459,19 @@ $env:CADFLOW_MODEL_PROGRAM_SANDBOX = "1"
 The script uses a credential-free scripted action provider and verifies the
 complete Episode → Broker → WSL worker → STEP re-import → inspection path. It
 also asserts that no reviewable, accepted, or deliverable record is created.
+
+Repeat the Package 3 product-route publication acceptance with:
+
+```powershell
+$env:PYTHONPATH = "src"
+$env:CADFLOW_MODEL_PROGRAM_SANDBOX = "1"
+.venv-cadflow\Scripts\python.exe examples\provider_smoke\reviewable_product_route_eval.py
+```
+
+The script uses a temporary Workspace and scripted provider. It verifies
+reviewable publication, STEP identity, unchanged pointers/deliverables before
+acceptance, exact replay, the explicit acceptance route, and revision pointer
+preservation. Its acceptance mutation exists only in that temporary test Work.
 
 Repeat the local acceptance check with:
 

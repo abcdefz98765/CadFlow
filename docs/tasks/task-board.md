@@ -66,15 +66,18 @@ work ahead of the current milestone without an explicit architecture decision.
     operations retain compatibility prompt assembly.
 - [x] Implement provider-selected actions rather than a fixed proposer sequence.
   - The provider-selected loop is product-routed for contract validation and
-    attested model-program execution; publication remains open.
+    attested model-program execution; successful validated output can now pass
+    the separate CadFlow-owned publication gate.
 - [x] Persist concise actions, observations, candidates, and budget use.
 - [x] Route an owned Part Job attempt through `WorkOrchestrator` and a typed
-  `AgentDesignPort` without granting execution or publication authority.
+  `AgentDesignPort` without granting provider-side execution, publication, or
+  acceptance authority.
 - [x] Bind path-safe request ids to canonical request fingerprints and replay
   persisted results without a second provider invocation or Work rewrite.
-- [x] Register only typed candidate/observation/diagnostic artifact references
-  and prove lineage, acceptance, Assembly, Deliverable, Part Job, and Run state
-  remain unchanged.
+- [x] Register typed candidate/observation/diagnostic evidence and permit only
+  the local publication gate to add reviewable-result references; prove
+  lineage, acceptance, Assembly, Deliverable, Part Job, and Run state remain
+  unchanged during execution/publication.
 - [x] Verify the validation-only product route with targeted and full regression
   tests.
   - 2026-08-01: `156 passed` targeted; `574 passed, 2 skipped` full suite.
@@ -142,16 +145,29 @@ work ahead of the current milestone without an explicit architecture decision.
   - `../status/m2-model-program-episode-package-acceptance.md`
   - 2026-08-02: `47 passed` targeted; `21 passed` live Episode/WSL targeted;
     `633 passed, 2 skipped` full suite in 516.74 seconds with live WSL2 enabled.
-- [ ] Route a successful, locally validated candidate through reviewable
+- [x] Route a successful, locally validated candidate through reviewable
   publication while preserving explicit acceptance.
+  - Cross-check Work/Run/Part/Episode/candidate/execution identity, source and
+    parameter hashes, attestation/profile/toolchain digests, Broker manifest,
+    STEP hash/size, limits, and STEP re-import geometry.
+  - Publication failure remains diagnostic and cannot register product output.
+  - `../status/m2-reviewable-publication-package-acceptance.md`
 
 ### Publication and UX slice
 
-- [ ] Reuse STEP-first geometry inspection and output validation.
-- [ ] Publish only locally validated candidates as reviewable results.
-- [ ] Show capability mode, assumptions, observations, and one next action.
-- [ ] Require explicit user acceptance.
-- [ ] Support revision as a child Run.
+- [x] Reuse STEP-first geometry inspection and output validation.
+- [x] Publish only locally validated candidates as reviewable results.
+- [x] Show capability mode, assumptions, validation summary, limitations, and
+  one next action: `Accept or revise`.
+- [x] Require explicit user acceptance through the by-id acceptance route.
+- [x] Support revision as a new Part Job attempt Run while preserving prior
+  accepted results.
+- [x] Verify Package 3 with unit/contract tests and a live WSL2 product-route
+  acceptance on the current Windows host.
+  - 2026-08-08: `160 passed` targeted; `644 passed, 2 skipped` complete suite
+    in 576.21 seconds with live WSL2 enabled.
+- [ ] Obtain user acceptance of at least one external-provider benchmark
+  reviewable result; do not mark M2 complete before that action.
 
 ### Benchmarks
 

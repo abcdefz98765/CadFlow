@@ -126,8 +126,32 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         path="/api/works/{work_id}/parts/{part_job_id}/design-episodes",
         backend_operation="run_work_part_design_episode",
         description=(
-            "Append one provider-selected validation-only Design Episode to "
+            "Append one provider-selected Design Episode to "
             "an owned Part Job attempt Run."
+        ),
+    ),
+    RouteSpec(
+        name="accept_work_reviewable_result",
+        method="POST",
+        path=(
+            "/api/works/{work_id}/parts/{part_job_id}/reviewable-results/"
+            "{reviewable_result_id}/accept"
+        ),
+        backend_operation="accept_work_reviewable_result",
+        description=(
+            "Explicitly accept one registered reviewable Part result."
+        ),
+    ),
+    RouteSpec(
+        name="revise_work_reviewable_result",
+        method="POST",
+        path=(
+            "/api/works/{work_id}/parts/{part_job_id}/reviewable-results/"
+            "{reviewable_result_id}/revisions"
+        ),
+        backend_operation="revise_work_reviewable_result",
+        description=(
+            "Create a new Part Job attempt from one registered reviewable result."
         ),
     ),
     RouteSpec(
@@ -542,6 +566,41 @@ def _run_work_part_design_episode(
     )
 
 
+def _accept_work_reviewable_result(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    if body:
+        raise ValueError("reviewable acceptance body must be empty")
+    return backend.accept_work_reviewable_result(
+        _require_value(path_params, "work_id"),
+        _require_value(path_params, "part_job_id"),
+        _require_value(path_params, "reviewable_result_id"),
+    )
+
+
+def _revise_work_reviewable_result(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    unknown = set(body) - {"revision_prompt", "run_id"}
+    if unknown:
+        raise ValueError("reviewable revision body contains unknown fields")
+    return backend.revise_work_reviewable_result(
+        _require_value(path_params, "work_id"),
+        _require_value(path_params, "part_job_id"),
+        _require_value(path_params, "reviewable_result_id"),
+        revision_prompt=_require_value(body, "revision_prompt"),
+        run_id=body.get("run_id"),
+    )
+
+
 def _read_run_metadata(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -810,6 +869,8 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "create_work_part_runs": _create_work_part_runs,
     "create_work_part_attempt": _create_work_part_attempt,
     "run_work_part_design_episode": _run_work_part_design_episode,
+    "accept_work_reviewable_result": _accept_work_reviewable_result,
+    "revise_work_reviewable_result": _revise_work_reviewable_result,
     "read_provider_config": _read_provider_config,
     "configure_provider": _configure_provider,
     "test_provider_connection": _test_provider_connection,
@@ -845,6 +906,8 @@ def _success_status_code(route_name: str) -> int:
         "create_work_part_runs",
         "create_work_part_attempt",
         "run_work_part_design_episode",
+        "accept_work_reviewable_result",
+        "revise_work_reviewable_result",
         "run_revision",
         "record_gate_decision",
         "apply_requirement_clarification",

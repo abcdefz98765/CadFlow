@@ -97,7 +97,12 @@ class DesignEpisodeArtifact:
         _require_relative_path(self.relative_path)
         if not isinstance(self.checkpoint, str) or not self.checkpoint:
             raise ValueError("artifact checkpoint is required")
-        if self.trust_role not in {"candidate", "observation", "diagnostic"}:
+        if self.trust_role not in {
+            "candidate",
+            "observation",
+            "diagnostic",
+            "reviewable_result",
+        }:
             raise ValueError("Design Episode artifact has an invalid trust role")
         if not isinstance(self.validation_status, str) or not self.validation_status:
             raise ValueError("artifact validation_status is required")
@@ -142,6 +147,9 @@ class DesignPartEpisodeOutcome:
     candidate_id: str | None = None
     observation_id: str | None = None
     execution_succeeded: bool = False
+    reviewable_result_id: str | None = None
+    reviewable_step_artifact_id: str | None = None
+    reviewable_summary: dict[str, Any] | None = None
     idempotent_replay: bool = False
     schema_version: int = 1
 
@@ -170,6 +178,28 @@ class DesignPartEpisodeOutcome:
             raise ValueError("only a model-program outcome may validate output")
         if self.output_validated and not self.execution_succeeded:
             raise ValueError("validated model-program output requires execution success")
+        reviewable_values = (
+            self.reviewable_result_id,
+            self.reviewable_step_artifact_id,
+            self.reviewable_summary,
+        )
+        if any(value is not None for value in reviewable_values):
+            if not all(value is not None for value in reviewable_values):
+                raise ValueError("reviewable outcome identity must be complete")
+            if not (
+                self.result_kind == "model_program"
+                and self.status == "completed"
+                and self.stop_reason == "completed"
+                and self.output_validated
+                and self.execution_succeeded
+            ):
+                raise ValueError(
+                    "reviewable outcome requires a completed validated model program"
+                )
+            _require_safe_id(self.reviewable_result_id, "reviewable_result_id")
+            _require_artifact_id(self.reviewable_step_artifact_id)
+            if not isinstance(self.reviewable_summary, dict):
+                raise ValueError("reviewable_summary must be an object")
         if not self.artifacts:
             raise ValueError("Design Episode outcome requires durable evidence")
 
@@ -187,6 +217,9 @@ class DesignPartEpisodeOutcome:
             "candidate_id": self.candidate_id,
             "observation_id": self.observation_id,
             "execution_succeeded": self.execution_succeeded,
+            "reviewable_result_id": self.reviewable_result_id,
+            "reviewable_step_artifact_id": self.reviewable_step_artifact_id,
+            "reviewable_summary": self.reviewable_summary,
             "idempotent_replay": self.idempotent_replay,
             "artifacts": [artifact.as_dict() for artifact in self.artifacts],
         }
@@ -214,6 +247,15 @@ class DesignPartEpisodeOutcome:
             candidate_id=value.get("candidate_id"),
             observation_id=value.get("observation_id"),
             execution_succeeded=value.get("execution_succeeded") is True,
+            reviewable_result_id=value.get("reviewable_result_id"),
+            reviewable_step_artifact_id=value.get(
+                "reviewable_step_artifact_id"
+            ),
+            reviewable_summary=(
+                dict(value["reviewable_summary"])
+                if isinstance(value.get("reviewable_summary"), dict)
+                else None
+            ),
             idempotent_replay=idempotent_replay,
             schema_version=value.get("schema_version", 1),
         )
@@ -237,6 +279,13 @@ class WorkStorePort(Protocol):
     def read_work(self, work_id: str) -> dict[str, Any]: ...
 
     def write_work(self, work_id: str, work: dict[str, Any]) -> None: ...
+
+    def verify_reviewable_evidence(
+        self,
+        work_id: str,
+        result_reference: dict[str, Any],
+        step_reference: dict[str, Any],
+    ) -> None: ...
 
     def work_detail(self, work_id: str) -> dict[str, Any]: ...
 
@@ -277,7 +326,7 @@ class DeterministicCompatibilityPort(Protocol):
 
 
 class AgentDesignPort(Protocol):
-    """Append one provider-selected, validation-only Episode to a Run."""
+    """Append one provider-selected Episode and controlled publication evidence."""
 
     def run_part_design_episode(
         self,

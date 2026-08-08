@@ -29,6 +29,7 @@ from ai_native_cad.agents.model_program_runtime import (
     ToolInvocationContext,
     validate_model_program_parameters,
 )
+from ai_native_cad.agents.provider_context import sanitize_provider_payload
 
 
 class StopReason(str, Enum):
@@ -412,7 +413,10 @@ class EpisodeArtifactWriter:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def event(self, value: dict[str, Any]) -> None:
-        self.events.append(value)
+        sanitized = sanitize_provider_payload(value)
+        if not isinstance(sanitized, dict):
+            raise ValueError("episode event sanitizer must return an object")
+        self.events.append(sanitized)
 
     def add_context(self, item: ContextItem) -> None:
         entry = item.manifest_entry()

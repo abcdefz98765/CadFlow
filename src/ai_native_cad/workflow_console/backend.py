@@ -457,7 +457,7 @@ class WorkflowConsoleBackend:
         attempt_run_id: str | None = None,
         objective: str | None = None,
     ) -> dict[str, Any]:
-        """Route one validation-only Design Episode through WorkOrchestrator."""
+        """Route one bounded Design Episode through WorkOrchestrator."""
 
         for value in (work_id, part_job_id, request_id):
             self._require_safe_run_id(value)
@@ -469,6 +469,45 @@ class WorkflowConsoleBackend:
             request_id=request_id,
             attempt_run_id=attempt_run_id,
             objective=_safe_prompt_text(objective) if objective is not None else None,
+        )
+
+    def accept_work_reviewable_result(
+        self,
+        work_id: str,
+        part_job_id: str,
+        reviewable_result_id: str,
+    ) -> dict[str, Any]:
+        """Apply one explicit user acceptance to a registered reviewable result."""
+
+        for value in (work_id, part_job_id, reviewable_result_id):
+            self._require_safe_run_id(value)
+        return self._work_orchestrator().accept_reviewable_part_result(
+            work_id,
+            part_job_id=part_job_id,
+            reviewable_result_id=reviewable_result_id,
+        )
+
+    def revise_work_reviewable_result(
+        self,
+        work_id: str,
+        part_job_id: str,
+        reviewable_result_id: str,
+        *,
+        revision_prompt: str,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a new Part Job attempt without changing prior acceptance."""
+
+        for value in (work_id, part_job_id, reviewable_result_id):
+            self._require_safe_run_id(value)
+        if run_id is not None:
+            self._require_safe_run_id(run_id)
+        return self._work_orchestrator().revise_reviewable_part_result(
+            work_id,
+            part_job_id=part_job_id,
+            reviewable_result_id=reviewable_result_id,
+            revision_prompt=_safe_prompt_text(revision_prompt),
+            run_id=run_id,
         )
 
     def get_work_summary(self, work_id: str) -> dict[str, Any]:

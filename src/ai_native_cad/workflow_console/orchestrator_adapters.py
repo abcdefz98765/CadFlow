@@ -18,6 +18,11 @@ from ai_native_cad.orchestration.ports import (
     DesignPartEpisodeOutcome,
     DesignPartEpisodeRequest,
 )
+from ai_native_cad.orchestration.reviewable_publication import (
+    ReviewablePublicationError,
+    publish_reviewable_model_program_result,
+    write_publication_diagnostic,
+)
 from ai_native_cad.workflow_console.work_index import create_work_manifest
 
 if TYPE_CHECKING:
@@ -51,6 +56,67 @@ class WorkflowConsoleWorkStore:
 
     def write_work(self, work_id: str, work: dict[str, Any]) -> None:
         self.backend._write_work_manifest(work_id, work)
+
+    def verify_reviewable_evidence(
+        self,
+        work_id: str,
+        result_reference: dict[str, Any],
+        step_reference: dict[str, Any],
+    ) -> None:
+        run_id = result_reference.get("run_id")
+        if not isinstance(run_id, str) or run_id != step_reference.get("run_id"):
+            raise ValueError("reviewable evidence Run identity is invalid")
+        run_path = self.backend.resolve_run(
+            run_id,
+            root=self.backend._work_runs_root(work_id),
+        )
+        result_path = self.backend._require_child_path(
+            run_path,
+            result_reference.get("relative_path", ""),
+        )
+        step_path = self.backend._require_child_path(
+            run_path,
+            step_reference.get("relative_path", ""),
+        )
+        if not result_path.is_file() or result_path.is_symlink():
+            raise ValueError("registered reviewable result evidence is missing")
+        if not step_path.is_file() or step_path.is_symlink():
+            raise ValueError("registered reviewable STEP evidence is missing")
+        try:
+            record = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            raise ValueError("registered reviewable result evidence is unreadable") from None
+        prefix = result_reference["relative_path"].removesuffix(
+            "/reviewable_result.json"
+        )
+        expected_step_relative = step_reference["relative_path"].removeprefix(
+            f"{prefix}/"
+        )
+        step = record.get("step") if isinstance(record, dict) else None
+        if not (
+            record.get("reviewable_result_id") == result_reference["artifact_id"]
+            and record.get("work_id") == work_id
+            and record.get("run_id") == run_id
+            and record.get("part_job_id") == result_reference.get("part_job_id")
+            and record.get("trust_role") == "reviewable_result"
+            and record.get("reviewable") is True
+            and record.get("accepted") is False
+            and record.get("deliverable") is False
+            and isinstance(step, dict)
+            and step.get("artifact_id") == step_reference["artifact_id"]
+            and step.get("relative_path") == expected_step_relative
+            and isinstance(step.get("sha256"), str)
+            and len(step["sha256"]) == 64
+            and isinstance(step.get("size"), int)
+            and step["size"] > 0
+        ):
+            raise ValueError("registered reviewable evidence identity is invalid")
+        if not (
+            step_path.stat().st_size == step["size"]
+            and hashlib.sha256(step_path.read_bytes()).hexdigest()
+            == step["sha256"]
+        ):
+            raise ValueError("registered reviewable STEP evidence was tampered")
 
     def work_detail(self, work_id: str) -> dict[str, Any]:
         return self.backend.get_work_detail(work_id)
@@ -121,7 +187,7 @@ class WorkflowConsoleDeterministicCompatibility:
 
 
 class WorkflowConsoleAgentDesign:
-    """Append validation-only provider Episodes under the owning Part Job Run."""
+    """Append provider Episodes and gated evidence under the owning attempt."""
 
     def __init__(self, backend: WorkflowConsoleBackend) -> None:
         self.backend = backend
@@ -181,6 +247,7 @@ class WorkflowConsoleAgentDesign:
                     request,
                     result,
                     relative_root=relative_root,
+                    episode_dir=episode_dir,
                 )
 
         _write_json(
@@ -198,7 +265,9 @@ class WorkflowConsoleAgentDesign:
                 "authority": {
                     "orchestrator": "work_orchestrator",
                     "execution_enabled": outcome.result_kind == "model_program",
-                    "publication_enabled": False,
+                    "publication_enabled": (
+                        outcome.reviewable_result_id is not None
+                    ),
                     "acceptance_mutation_enabled": False,
                 },
             },
@@ -232,6 +301,7 @@ def _episode_outcome(
     result: Any,
     *,
     relative_root: str,
+    episode_dir: Path,
 ) -> DesignPartEpisodeOutcome:
     artifacts: list[DesignEpisodeArtifact] = []
     candidate_id = None
@@ -309,6 +379,45 @@ def _episode_outcome(
                 source_artifact_ids=(candidate_id,) if candidate_id else (),
             )
         )
+    published = None
+    publication_error = None
+    if result.result_kind == "model_program" and result.status == "completed":
+        try:
+            published = publish_reviewable_model_program_result(
+                request=request,
+                result=result,
+                episode_dir=episode_dir,
+                relative_root=relative_root,
+            )
+        except ReviewablePublicationError as exc:
+            publication_error = exc.code
+            write_publication_diagnostic(
+                episode_dir,
+                code=publication_error,
+            )
+            artifacts.append(
+                DesignEpisodeArtifact(
+                    artifact_id=(
+                        f"episode:{result.episode_id}:publication_diagnostic"
+                    ),
+                    relative_path=(
+                        f"{relative_root}/publication_diagnostic.json"
+                    ),
+                    checkpoint="reviewable_publication",
+                    trust_role="diagnostic",
+                    validation_status="failed",
+                    source_artifact_ids=tuple(
+                        item
+                        for item in (candidate_id, execution_observation_id)
+                        if item is not None
+                    ),
+                )
+            )
+        else:
+            artifacts.extend(
+                (published.result_artifact, published.step_artifact)
+            )
+    product_completed = result.status == "completed" and publication_error is None
     agent_result_id = f"episode:{result.episode_id}:result"
     artifacts.append(
         DesignEpisodeArtifact(
@@ -321,12 +430,12 @@ def _episode_outcome(
             ),
             trust_role=(
                 "observation"
-                if result.status == "completed"
+                if product_completed
                 else "diagnostic"
             ),
             validation_status=(
                 "passed"
-                if result.status == "completed"
+                if product_completed
                 else "blocked"
             ),
             source_artifact_ids=tuple(
@@ -348,12 +457,12 @@ def _episode_outcome(
             checkpoint="product_design_routing",
             trust_role=(
                 "observation"
-                if result.status == "completed"
+                if product_completed
                 else "diagnostic"
             ),
             validation_status=(
                 "passed"
-                if result.status == "completed"
+                if product_completed
                 else "blocked"
             ),
             source_artifact_ids=(agent_result_id,),
@@ -362,8 +471,10 @@ def _episode_outcome(
     return DesignPartEpisodeOutcome(
         request_id=request.request_id,
         episode_id=result.episode_id,
-        status=result.status,
-        stop_reason=result.stop_reason.value,
+        status="safely_blocked" if publication_error else result.status,
+        stop_reason=(
+            "policy_blocked" if publication_error else result.stop_reason.value
+        ),
         capability_mode=result.capability_mode,
         validated=result.validated,
         artifacts=tuple(artifacts),
@@ -372,6 +483,31 @@ def _episode_outcome(
         candidate_id=result.final_candidate_id,
         observation_id=result.final_observation_id,
         execution_succeeded=result.execution_succeeded,
+        reviewable_result_id=(
+            published.record["reviewable_result_id"] if published else None
+        ),
+        reviewable_step_artifact_id=(
+            published.record["step"]["artifact_id"] if published else None
+        ),
+        reviewable_summary=(
+            {
+                "reviewable_result_id": published.record[
+                    "reviewable_result_id"
+                ],
+                "capability_mode": published.record["capability_mode"],
+                "assumptions": published.record["assumptions"],
+                "validation": published.record["validation"],
+                "geometry": published.record["geometry"],
+                "step": {
+                    key: published.record["step"][key]
+                    for key in ("artifact_id", "sha256", "size")
+                },
+                "limitations": published.record["limitations"],
+                "recommended_action": "Accept or revise",
+            }
+            if published
+            else None
+        ),
     )
 
 

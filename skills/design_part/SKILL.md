@@ -68,8 +68,9 @@ Allowed output contracts:
 - `cad_ir_draft` compatibility candidate
 - `model_program_candidate`
 
-A validated contract or successful sandbox execution remains a candidate, not
-a reviewable result or an accepted result.
+A validated compatibility contract remains a candidate. Successful sandbox
+execution remains a candidate until the separate CadFlow publication gate
+passes; publication never implies acceptance.
 
 ## Budgets
 
@@ -100,7 +101,8 @@ a reviewable result or an accepted result.
   arbitrary filesystem access;
 - no provider-selected path, command, environment, UID, candidate, observation,
   execution, or evidence identity;
-- no Work mutation, publication, acceptance, or deliverables;
+- no provider-controlled Work mutation, publication, acceptance, or
+  deliverables;
 - no fabricated validation or engineering claims;
 - no private chain-of-thought persistence.
 
@@ -110,9 +112,10 @@ Only local validators decide whether a submission is valid. Model-program
 source is a complete replacement candidate; the Broker re-runs AST policy,
 requires a live digest-bound attestation, and executes only the current
 CadFlow-assigned candidate. The latest execution observation must be inspected
-before repair or completion. Product routing registers only candidate,
-observation, or diagnostic evidence and may not publish reviewable output or
-change lineage, acceptance, Assembly, or Deliverable state.
+before repair or completion. Product routing may invoke the independent
+CadFlow-owned publication gate after completion. The provider cannot invoke or
+bypass that gate, and neither execution nor publication may change lineage,
+acceptance, Assembly, or Deliverable state.
 
 Pre-execution submission evidence retains only source/parameter hashes. Full
 values are written only by the Broker after policy and attestation gates pass.

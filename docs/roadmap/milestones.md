@@ -212,8 +212,29 @@ Status:
 - package 6 verification passed with `47 passed` targeted, `21 passed` live
   Episode/WSL targeted, and `633 passed, 2 skipped` in 516.74 seconds for the
   complete suite with live WSL2 enabled;
-- M2 remains unaccepted pending STEP-first reviewable publication, explicit
-  user review/acceptance, and the five-part external-provider benchmark gate.
+- seventh internal package implemented on 2026-08-08:
+  - added a strict CadFlow-owned reviewable publication gate over exact
+    lineage, source/parameter/profile/toolchain/attestation digests, Broker
+    evidence, limits, STEP identity, and in-sandbox re-import facts;
+  - registered immutable reviewable-result and STEP artifact references only
+    after every gate passed; failure/tampering remains diagnostic;
+  - added explicit by-id accept and revise routes outside provider authority;
+    acceptance alone changes the accepted pointer and revision preserves prior
+    acceptance while creating a new attempt;
+  - current-host scripted-provider acceptance produced a valid 28,033-byte
+    reviewable STEP with SHA-256
+    `3dfc3bed636bb8995f9325b61bbe22eb72a03097fabfe0fec8891d4cf909826c`
+    while pre-acceptance lineage, pointers, and Deliverables remained
+    unchanged;
+  - Package 3 verification passed `160 passed` targeted and
+    `644 passed, 2 skipped` in 576.21 seconds for the complete suite with live
+    WSL2 enabled;
+  - Package 3 verification passed `160 passed` targeted and
+    `644 passed, 2 skipped` in 576.21 seconds for the complete suite with live
+    WSL2 enabled;
+- M2 remains unaccepted pending the five-part real external-provider benchmark
+  gate and explicit user acceptance of at least one resulting reviewable
+  result.
 
 ## M3 — General structured geometry contract
 

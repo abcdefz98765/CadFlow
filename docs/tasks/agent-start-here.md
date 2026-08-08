@@ -1,6 +1,6 @@
 # Agent Implementation Start Here
 
-Status date: 2026-08-01.
+Status date: 2026-08-08.
 
 This is the execution entry point after the documentation correction. It does
 not replace the PRD, architecture, roadmap, or task board.
@@ -29,8 +29,9 @@ fail-closed Windows model-program capability gate; its third package routes an
 owned Part Job attempt through `WorkOrchestrator` for validation and evidence
 registration only; its fourth package selects CadQuery v1 and adds AST-only
 source-policy validation; its fifth package adds an attested internal WSL2
-execution primitive and candidate/diagnostic evidence. Runtime model-program
-Episode actions, design-to-execution routing, publication, and benchmark
+execution primitive; its sixth registers provider-selected model-program
+actions; and its seventh adds strict reviewable publication plus explicit
+accept/revise routes. The five-part external-provider benchmark and user
 acceptance remain open.
 
 In particular, do not begin later work by:
@@ -129,9 +130,21 @@ The sixth internal package adds:
 5. execution-aware Part Job route evidence that remains non-reviewable,
    non-accepted, and non-deliverable.
 
-The next package may publish only a fully cross-checked execution as a
-reviewable result while preserving reviewable/accepted separation. Do not route
-provider source into the existing host CadQuery subprocess.
+The seventh internal package adds:
+
+1. a publication gate that independently checks lineage, digests, Broker
+   evidence, STEP hash/size, limits, and in-sandbox STEP re-import facts;
+2. immutable `reviewable_result.json` plus a registered reviewable STEP only
+   after every check passes;
+3. diagnostic-only failure and tamper handling;
+4. a by-id explicit acceptance route as the only model-program accepted-pointer
+   mutation authority;
+5. a by-id revision route that creates a new Part Job attempt and preserves
+   prior accepted results and historical Runs.
+
+The next package is the real external-provider benchmark gate. Do not weaken
+validation to satisfy it, do not route provider source into the host CadQuery
+subprocess, and do not mark M2 complete before explicit user acceptance.
 
 ## Change discipline
 

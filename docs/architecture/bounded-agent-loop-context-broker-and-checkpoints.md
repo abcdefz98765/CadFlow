@@ -351,7 +351,7 @@ Implemented:
   environment, network, subprocess, dependency, resource, and output controls;
 - fail-closed `sandbox_unavailable` observations before candidate-directory or
   process side effects when that profile is unavailable;
-- a validation-only `WorkOrchestrator` route through a typed `AgentDesignPort`
+- an execution-aware `WorkOrchestrator` route through a typed `AgentDesignPort`
   for an owned Part Job attempt, with append-only Run evidence, idempotent
   request replay, and typed Work artifact references;
 - a selected `cadquery_v1` source contract and Broker-owned AST-only validation
@@ -370,18 +370,22 @@ Implemented:
   bounded executions/inspections/repairs, and mandatory inspection before
   repair or completion;
 - product-route persistence of execution observations as candidate or
-  diagnostic Run evidence.
+  diagnostic Run evidence;
+- strict publication of successful, inspected, re-import-validated execution
+  evidence as an immutable reviewable result and STEP reference;
+- explicit by-id acceptance and revision routes outside provider authority.
 
 Not implemented:
 
-- reviewable publication and accepted-result integration for sandbox output;
 - feature-graph geometry contract;
 - Agentic assembly and drawing tools;
 - real external-provider benchmark evidence for branching repair behavior.
 
 The current provider-selected loop is an execution-aware internal preview. It
 can branch after validator or sandbox observations and persist evidence under
-the owning attempt Run, but it does not publish a reviewable result.
+the owning attempt Run. CadFlow may publish only a fully cross-checked output;
+the provider cannot publish or accept it. Product readiness remains blocked on
+the external-provider benchmark and explicit user acceptance.
 
 The existing deterministic CadQuery executor is not sandbox evidence: it uses
 the host Python executable and inherits the host environment. The capability

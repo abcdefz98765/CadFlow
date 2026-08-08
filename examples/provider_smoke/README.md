@@ -72,6 +72,31 @@ python examples/provider_smoke/model_program_policy_eval.py
 - Does not verify: bytecode compilation, source import, CAD execution, Windows
   isolation, geometry correctness, reviewable publication, or provider quality.
 
+## Attested Model-Program Episode Acceptance
+
+```bash
+CADFLOW_MODEL_PROGRAM_SANDBOX=1 python examples/provider_smoke/model_program_episode_eval.py
+```
+
+- Verifies: a scripted provider drives create → execute → inspect → complete
+  through the dedicated attested WSL2 worker.
+- Does not verify: product publication, a real external provider, or user
+  acceptance.
+- Durable outputs: none; the acceptance uses a temporary directory.
+
+## Reviewable Product Route Acceptance
+
+```bash
+CADFLOW_MODEL_PROGRAM_SANDBOX=1 python examples/provider_smoke/reviewable_product_route_eval.py
+```
+
+- Verifies: temporary Work/Part Job routing, attested execution, strict
+  reviewable publication, exact replay, explicit acceptance authority, and
+  revision preservation.
+- The acceptance route mutation occurs only in the temporary test Work.
+- Does not verify: the real-provider five-part benchmark or final user
+  acceptance. M2 remains incomplete.
+
 ## Basic Provider Smoke
 
 ### `parse_requirement_smoke.py`

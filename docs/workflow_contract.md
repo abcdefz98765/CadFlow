@@ -368,8 +368,10 @@ source file and create no execution candidate directory.
 
 A validated `cad_ir_draft` remains a candidate contract. A successful model
 program must also carry valid in-sandbox STEP re-import evidence and be
-inspected before completion, but remains a candidate/execution observation. It
-is not a reviewable or accepted result.
+inspected before completion. It remains a candidate/execution observation
+until the separate CadFlow publication gate cross-checks the exact lineage,
+digests, Broker manifest, STEP hash/size, and re-import measurements. It is
+never accepted merely because execution or publication succeeded.
 
 `WorkOrchestrator.run_part_design_episode` accepts only an existing attempt Run
 owned by the named Part Job. A typed `AgentDesignPort` appends the episode below
@@ -380,19 +382,21 @@ second provider call or Work rewrite, while reuse with different input is
 rejected. Incomplete or unreadable prior evidence fails closed and requires a
 new request id.
 
-The orchestrator registers only declared candidate, observation, or diagnostic
-artifact references. It verifies that active lineage, accepted-result pointers,
-Part Job ownership, Assembly Job state, Deliverable Packages, and Run ids remain
-unchanged. This route grants no reviewable-publication, deliverable, or
-acceptance authority. Provider, policy, and unsupported-adapter failures are
-persisted as typed diagnostic route evidence and cannot become product output.
+Before publication the orchestrator registers only declared candidate,
+observation, or diagnostic artifact references. The publication gate may add
+exactly one `reviewable_result` record and one STEP reference after every local
+check passes. Active lineage, accepted-result pointers, Assembly Job state,
+Deliverable Packages, and Run ids remain unchanged. Provider, policy,
+publication, and unsupported-adapter failures are persisted as typed
+diagnostic evidence and cannot become product output.
 
 `request_validation` is now authorized and invoked by the CadFlow Tool Broker.
 The broker manifest records the active skill's allowed tool definitions and the
 current model-program sandbox capability. The internal capability is disabled
 by default; after explicit local enablement it becomes available only with a
-fresh exact-profile attestation. Registration does not bypass that gate and
-does not grant product publication authority.
+fresh exact-profile attestation. Registration does not bypass that gate. The
+Broker executes; the publication gate promotes verified evidence; only the
+explicit acceptance route mutates an accepted-result pointer.
 
 ## Build and evaluation artifacts
 
@@ -473,6 +477,12 @@ Records:
 
 A reviewable result is not accepted.
 
+For the current model-program slice, `reviewable_result.json` additionally
+records capability mode, Work/Run/Part/Episode/candidate/observation/execution
+identity, source/parameter/attestation/profile/toolchain digests, enforced
+limits, geometry and STEP re-import summaries, STEP hash/size, assumptions,
+limitations, and the single recommended action `Accept or revise`.
+
 Legacy `part_result_review.json` may map to this role.
 
 ## Acceptance
@@ -497,9 +507,29 @@ Acceptance:
 - does not imply engineering release;
 - records the accepted evidence and known limitations.
 
+The current explicit Part result route is:
+
+```text
+POST /api/works/{work_id}/parts/{part_job_id}/reviewable-results/{reviewable_result_id}/accept
+```
+
+It accepts an empty body and resolves the exact registered reviewable record
+and its STEP reference. Candidate, observation, diagnostic, mismatched Work,
+mismatched Part Job, sibling Run, or unregistered identities are rejected.
+
 ## Revision
 
 A revision creates a child Run from an explicit parent result.
+
+For the current Part Job implementation, the explicit route is:
+
+```text
+POST /api/works/{work_id}/parts/{part_job_id}/reviewable-results/{reviewable_result_id}/revisions
+```
+
+The body contains `revision_prompt` and an optional path-safe `run_id`. It
+creates a new Part Job attempt Run and does not remove or change a prior
+accepted-result pointer.
 
 Preferred artifacts:
 

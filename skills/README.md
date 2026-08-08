@@ -40,19 +40,21 @@ Current directories are retained during migration:
 - `review/` — compatibility name for Evaluation and evidence explanation.
 - `revision/` — child-Run change intent and candidate revision.
 - `assembly/` — Assembly Job planning, placement, constraints, and checks.
-- `design_part/` — M2 provider-selected structured-contract episode contract;
-  version 0.1 is product-routed through `WorkOrchestrator` for Broker-owned
-  validation and evidence only, with no CAD execution authority.
+- `design_part/` — M2 provider-selected contract/model-program episode;
+  version 0.2 is product-routed through `WorkOrchestrator` for Broker-owned
+  validation, attested execution, and gated reviewable publication.
+- `model_program/` — registered version 0.1 delegate using the pinned,
+  attested WSL2 CadQuery worker.
 
 Target additions still required by the roadmap:
 
-- runtime registration and sandboxed execution for the model-program skill;
 - a deliverables skill for accepted-result-derived drawings, BOMs, and packages.
 
 The runtime now includes a narrow CadFlow Tool Broker, a CadQuery v1 AST-only
-source validator, and a fail-closed Windows model-program capability gate. This
-does not make the target model-program skill executable: no runtime skill or
-enforceable sandbox worker is registered.
+source validator, a fail-closed Windows capability gate, and the registered
+`model_program` delegate backed only by the exact attested
+`CadFlow-Sandbox-CQ-v1` worker. CadFlow, not the provider, owns execution,
+publication, and acceptance boundaries.
 
 ## Skill contract
 

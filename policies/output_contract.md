@@ -24,6 +24,17 @@ result manifest is written successfully.
 Failed or blocked candidates retain source, observations, reports, and logs but
 must not expose partial geometry as a trusted product.
 
+For the current model-program path, publication additionally requires exact
+Work/Run/Part/Episode/candidate/execution identity, matching
+source/parameter/profile/toolchain/attestation digests, a Broker-owned
+candidate manifest, matching STEP hash/size, and valid in-sandbox STEP
+re-import measurements. Publication creates a reviewable result only; it does
+not change acceptance or Deliverable state.
+
+Only the explicit by-id user acceptance route may move the corresponding Part
+Job accepted-result pointer. The revision route creates a new attempt and
+preserves any prior accepted result.
+
 ## Product precedence
 
 STEP is the current primary exchange geometry. STL is a derived mesh. Native or

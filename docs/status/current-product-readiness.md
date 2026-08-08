@@ -1,6 +1,6 @@
 # Current Product Readiness
 
-Status date: 2026-08-01.
+Status date: 2026-08-08.
 
 This document distinguishes the Agent-first target architecture from the
 currently implemented deterministic product and the accepted M1 runtime
@@ -17,8 +17,9 @@ The authoritative target is now:
 - first-class Part Job attempts and Assembly Job;
 - accepted-result-derived STEP, assembly, BOM, and drawing packages.
 
-This target is documented. Its M1 runtime and domain foundation is implemented;
-the Agentic design runtime and later-milestone product surfaces are not.
+This target is documented. Its M1 runtime/domain foundation and a bounded M2
+execution/publication preview are implemented; the accepted Agentic product
+slice and later-milestone surfaces are not.
 
 ## Implemented and usable now
 
@@ -122,13 +123,35 @@ Workbench and does not execute provider-generated model programs.
   private reasoning; the provider never supplies path,
   command, environment, UID, evidence root, candidate, observation, or
   execution identity.
+- CadFlow-owned reviewable publication for completed model-program episodes.
+  The gate cross-checks Work/Run/Part/Episode/candidate/execution identity,
+  source/parameter/profile/toolchain/attestation digests, Broker manifest,
+  limits, STEP hash/size, valid solid facts, and STEP re-import tolerances.
+- Immutable `reviewable_result.json` and registered reviewable STEP references;
+  publication failure or tampering creates diagnostic evidence only.
+- Explicit by-id acceptance and revision routes. Only acceptance changes the
+  Part Job accepted-result pointer; revision creates a new attempt and
+  preserves historical Runs and any prior accepted result.
 
 This preview is connected to the product `WorkOrchestrator` for validation,
-attested execution, and evidence registration. The model-program Broker
-primitive remains disabled unless a fresh attestation proves the exact sealed
-profile. Successful STEP output remains candidate/execution-observation
-evidence: the preview cannot publish a reviewable result or update acceptance,
-so it must not be described as production Agentic CAD design.
+attested execution, evidence registration, and gated reviewable publication.
+The model-program Broker primitive remains disabled unless a fresh attestation
+proves the exact sealed profile. Reviewable publication does not accept or
+deliver the result. The slice must not be described as production Agentic CAD
+design until the real external-provider benchmark and explicit user acceptance
+gates pass.
+
+Capability classification for this section:
+
+- implemented: yes, for the bounded Episode, attested execution, publication,
+  explicit acceptance route, and revision route described above;
+- automated verified: yes, with unit/contract/tamper/route tests and live WSL2
+  integration; final complete-suite numbers are recorded below;
+- manually verified: yes, on the current Windows/WSL2 host with a scripted
+  provider and temporary Work;
+- production usable: only the attestation-constrained internal execution and
+  publication primitive. The Agentic product path is not production usable
+  until the external-provider benchmark and explicit user acceptance pass.
 
 The product `create_part_ir` path currently follows a fixed proposer sequence:
 one fixed context request, one adapter submission, one validation request, and
@@ -154,9 +177,9 @@ one-shot orchestration, not Agentic design.
 
 ## Not implemented
 
-- Reviewable publication gate for locally validated sandbox candidates.
-- Explicit review response, acceptance authority, and revision route.
 - Five non-template benchmark acceptance with a real external provider.
+- Explicit user acceptance of at least one external-provider benchmark
+  reviewable result and the final M2 acceptance record.
 - General feature-graph geometry contract.
 - Non-template general CAD design capability.
 - Executable Assembly Job flow with accepted input identities.
@@ -199,8 +222,11 @@ These are migration tasks, not accepted target behavior.
 
 ## Verification state
 
-- Automated verified: the complete suite passed with the live WSL2 sandbox
-  explicitly enabled at `633 passed, 2 skipped` in 516.74 seconds on
+- Automated verified for Package 3 on 2026-08-08: `160 passed` targeted,
+  including live WSL2 product/attack coverage, and `644 passed, 2 skipped` in
+  576.21 seconds for the complete suite with the live sandbox enabled.
+- Previous Package 2 baseline: the complete suite passed with the live WSL2
+  sandbox explicitly enabled at `633 passed, 2 skipped` in 516.74 seconds on
   2026-08-02.
 - The M1 acceptance baseline was `550 passed, 2 skipped` on 2026-07-27.
 - New contract tests cover ordered Part Job attempt history, acceptance-pointer
@@ -246,7 +272,7 @@ These are migration tasks, not accepted target behavior.
   workflow, console contracts, safety boundaries, failure isolation, and
   compatibility behavior are internally consistent.
 - Not proven by those tests: real external-provider design quality,
-  product-route publication interoperability, portability beyond the
+  portability beyond the
   recorded Windows/WSL2 host, an independent security audit, the five-part
   non-template benchmark gate, multi-part assembly, or drawing-package
   usability.
@@ -314,15 +340,29 @@ These are migration tasks, not accepted target behavior.
   - no reviewable, accepted, or deliverable record was created;
   - the reproducible record is
     `m2-model-program-episode-package-acceptance.md`.
+- Manually verified for reviewable publication on the current Windows/WSL2
+  host:
+  - a scripted provider drove the complete Work → Episode → Tool Broker →
+    dedicated WSL2 worker → STEP re-import → publication route;
+  - publication produced one reviewable STEP with SHA-256
+    `3dfc3bed636bb8995f9325b61bbe22eb72a03097fabfe0fec8891d4cf909826c`;
+  - accepted pointers, active lineage, and Deliverable Packages were unchanged
+    before the explicit acceptance call;
+  - exact replay made no provider call and did not rewrite the Work;
+  - isolated temporary-Work tests proved explicit acceptance and revision
+    authority while revision preserved the accepted pointer;
+  - the reproducible record is
+    `m2-reviewable-publication-package-acceptance.md`.
 - A real external provider has not been manually verified through the product
   route.
 - No new UI was implemented, so this package did not require a new Workbench
   visual acceptance.
 - Manual browser verification: incomplete for the latest legacy Workflow
   Cockpit.
-- Target architecture verification: M1 passed. Six bounded M2 internal
-  packages are contract-tested, and the sandbox has current-host WSL2 acceptance;
-  M2 product acceptance and later milestone claims remain unverified.
+- Target architecture verification: M1 passed. Seven bounded M2 internal
+  packages are contract-tested, and execution/publication have current-host
+  WSL2 acceptance. The external-provider benchmark and user acceptance remain
+  unverified, so M2 is not complete.
 
 ## Current risks
 
@@ -331,9 +371,9 @@ These are migration tasks, not accepted target behavior.
 - Provider configuration can be mistaken for an Agentic product path.
 - The existing CAD IR blocks unknown designs before a capable Agent can realize
   them.
-- The execution-aware Episode can be mistaken for a reviewable product path
-  even though publication, user acceptance, and benchmark acceptance remain
-  absent.
+- The implemented reviewable product path can be mistaken for completed M2
+  even though external-provider quality, benchmark acceptance, and explicit
+  user acceptance remain absent.
 - Legacy documents or entry points can silently restore the former architecture.
 - Assembly heuristics can be mistaken for geometric fit or motion validation.
 - Generated drawings can be mistaken for checked drawings unless annotation
@@ -343,12 +383,13 @@ These are migration tasks, not accepted target behavior.
 
 M0 and M1 are complete. M2 is in progress: its provider-selected contract and
 model-program Episode, validation Tool Broker, static source policy, and
-attested WSL2 execution path exist. Reviewable publication, explicit acceptance
-integration, and the benchmark gate remain unimplemented.
+attested WSL2 execution path, reviewable publication, and explicit accept/revise
+routes exist. The external-provider benchmark gate and explicit user acceptance
+of one resulting reviewable result remain unfinished.
 
 Later milestones remain:
 
-1. M2 reviewable publication, explicit acceptance, and external-provider gate;
+1. M2 external-provider benchmark and explicit user acceptance;
 2. M3 feature-graph/model-program geometry paths;
 3. M4 multi-Part Job and Assembly Job progression;
 4. M5 integrated Deliverable Package and drawings;

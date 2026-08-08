@@ -12,6 +12,8 @@ import pytest
 from ai_native_cad.agents.model_program_runtime import ModelProgramExecutionRequest
 from ai_native_cad.agents.episode import run_design_part_episode
 from ai_native_cad.agents.wsl_sandbox import load_configured_wsl_sandbox_executor
+from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
+from ai_native_cad.workflow_console.routes import dispatch_route
 
 
 pytestmark = pytest.mark.skipif(
@@ -97,6 +99,7 @@ def test_provider_selected_episode_consumes_attested_execution_observation(
                             },
                             "requested_outputs": ["step"],
                         },
+                        "assumptions": ["Dimensions are in millimetres."],
                     },
                     {"action": "request_execution"},
                     {"action": "inspect_observation"},
@@ -136,6 +139,127 @@ def test_provider_selected_episode_consumes_attested_execution_observation(
     assert persisted["reviewable"] is False
     assert persisted["accepted"] is False
     assert persisted["deliverable"] is False
+
+
+def test_work_product_route_publishes_then_requires_explicit_acceptance(
+    tmp_path,
+) -> None:
+    class ScriptedAdapter:
+        def __init__(self):
+            self.calls = 0
+            self.actions = iter(
+                [
+                    {
+                        "action": "create_model_program",
+                        "model_program": {
+                            "api_id": "cadquery_v1",
+                            "source": VALID_NON_TEMPLATE_SOURCE,
+                            "parameters": {
+                                "diameter": 42.0,
+                                "height": 8.0,
+                                "bore": 9.0,
+                            },
+                            "requested_outputs": ["step"],
+                        },
+                        "assumptions": ["Dimensions are in millimetres."],
+                    },
+                    {"action": "request_execution"},
+                    {"action": "inspect_observation"},
+                    {"action": "stop", "stop_reason": "completed"},
+                ]
+            )
+
+        def choose_design_action(self, *, state, skill_manifest):
+            self.calls += 1
+            return next(self.actions)
+
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work("Hex bore", work_id="integration_work")
+    backend.create_work_part_attempt(
+        "integration_work",
+        "hex_bore",
+        run_id="integration_attempt_1",
+    )
+    provider = ScriptedAdapter()
+    backend.stage_runner.agent_adapter = provider
+    before = backend._read_work_manifest("integration_work")
+
+    response = dispatch_route(
+        backend,
+        "run_work_part_design_episode",
+        path_params={
+            "work_id": "integration_work",
+            "part_job_id": "hex_bore",
+        },
+        body={"request_id": "integration_request_1"},
+    )
+
+    assert response["ok"] is True
+    data = response["data"]
+    reviewable_id = data["reviewable_result"]["reviewable_result_id"]
+    assert data["orchestration"]["checkpoint"] == "reviewable_result"
+    assert data["orchestration"]["phase"] == "build_evaluate"
+    assert data["orchestration"]["next_action"] == "Accept or revise"
+    assert data["reviewable_result"]["validation"] == {
+        "execution_success": True,
+        "step_reimport_valid": True,
+        "solid_count": 1,
+    }
+    assert data["reviewable_result"]["recommended_action"] == "Accept or revise"
+    assert data["reviewable_result"]["assumptions"] == [
+        "Dimensions are in millimetres."
+    ]
+    assert {
+        item["trust_role"] for item in data["artifact_references"]
+    } >= {"candidate", "observation", "reviewable_result"}
+    published = backend._read_work_manifest("integration_work")
+    assert published["accepted_part_results"] == before["accepted_part_results"]
+    assert published["deliverable_packages"] == before["deliverable_packages"]
+    assert published["active_lineage"] == before["active_lineage"]
+    manifest_path = backend._work_manifest_path("integration_work")
+    after_publish_bytes = manifest_path.read_bytes()
+
+    replay = backend.run_work_part_design_episode(
+        "integration_work",
+        "hex_bore",
+        request_id="integration_request_1",
+    )
+    assert replay["episode"]["idempotent_replay"] is True
+    assert replay["reviewable_result"]["reviewable_result_id"] == reviewable_id
+    assert provider.calls == 4
+    assert manifest_path.read_bytes() == after_publish_bytes
+
+    accepted = dispatch_route(
+        backend,
+        "accept_work_reviewable_result",
+        path_params={
+            "work_id": "integration_work",
+            "part_job_id": "hex_bore",
+            "reviewable_result_id": reviewable_id,
+        },
+        body={},
+    )
+    assert accepted["ok"] is True
+    accepted_pointer = accepted["data"]["accepted_part_result"]
+    assert accepted_pointer["result_id"] == reviewable_id
+
+    revised = dispatch_route(
+        backend,
+        "revise_work_reviewable_result",
+        path_params={
+            "work_id": "integration_work",
+            "part_job_id": "hex_bore",
+            "reviewable_result_id": reviewable_id,
+        },
+        body={
+            "revision_prompt": "Increase the bore by 0.5 mm.",
+            "run_id": "integration_attempt_2",
+        },
+    )
+    assert revised["ok"] is True
+    final = backend._read_work_manifest("integration_work")
+    assert final["accepted_part_results"]["hex_bore"] == accepted_pointer
+    assert final["deliverable_packages"] == []
 
 
 def test_worker_defense_in_depth_rejects_non_allowlisted_import() -> None:

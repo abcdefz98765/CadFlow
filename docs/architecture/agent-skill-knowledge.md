@@ -401,19 +401,24 @@ Current code provides:
   complete-source actions, CadFlow-assigned identities, execution/inspection
   ordering, and separate source/execution/inspection/repair budgets;
 - execution-observation consumption by both the bounded Episode and the owned
-  Part Job attempt product route, without publication or acceptance authority.
+  Part Job attempt product route;
+- CadFlow-owned reviewable publication after strict evidence/digest/STEP
+  re-import cross-checks, plus separate explicit user accept and revise routes.
 
 It does not yet provide:
 
-- reviewable publication of a locally validated provider-selected execution;
 - feature-graph CAD IR;
 - Agentic assembly or deliverable episodes.
+- the five-case external-provider benchmark and user acceptance required to
+  close M2.
 
 The product-routed Episode can validate the legacy structured CAD IR contract
 or consume the separately attested model-program primitive. The primitive has
-CAD execution authority only inside its fixed sandbox and successful output
-remains non-reviewable candidate evidence. It has no publication or acceptance
-authority and is not production-usable Agentic CAD design.
+CAD execution authority only inside its fixed sandbox. Candidate output
+remains non-reviewable until the independent CadFlow publication gate passes;
+the Episode itself has no acceptance authority. This vertical slice is not yet
+production-usable Agentic CAD design because the external benchmark and user
+acceptance gates remain open.
 
 No current deterministic fallback may be presented as these target
 capabilities.

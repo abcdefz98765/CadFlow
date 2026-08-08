@@ -663,9 +663,25 @@ UID, and evidence identities. Completion requires a successful observation,
 valid in-sandbox STEP re-import evidence, and explicit observation inspection.
 
 The product route may now retain these candidates and observations under the
-owning immutable Run, but it does not publish a `reviewable_result`, mutate an
-accepted-result pointer, or satisfy the benchmark gate. M2 therefore remains
-in progress.
+owning immutable Run.
+
+The seventh M2 package adds a CadFlow-owned publication gate. It publishes one
+immutable `reviewable_result.json` and one registered STEP reference only when
+the latest inspected execution is successful and the gate independently
+cross-checks Work/Run/Part/Episode/candidate/execution identity, source and
+parameter hashes, attestation/profile/toolchain digests, output hash/size,
+Broker manifest, and the worker's valid solid/STEP re-import comparison.
+Failure or tampering produces diagnostic evidence only. Publication does not
+change active lineage, accepted-result pointers, Assembly Job state, or
+Deliverable Packages.
+
+Two by-id product routes now express user authority. Acceptance accepts only a
+registered reviewable result and its exact STEP reference, then changes only
+that Part Job's accepted-result pointer. Revision validates the same identity,
+creates a new Part Job attempt Run, and preserves prior accepted results and
+historical evidence. Neither route grants authority to the provider Episode.
+M2 remains in progress until the external-provider benchmark gate passes and a
+user explicitly accepts at least one resulting reviewable result.
 
 Migration rules:
 

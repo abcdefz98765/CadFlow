@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from copy import deepcopy
 
-from ai_native_cad.domain.records import create_artifact_reference
+import pytest
+
+from ai_native_cad.domain.records import (
+    create_artifact_reference,
+    register_artifact_references,
+)
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
 from ai_native_cad.workflow_console.routes import dispatch_route
 
@@ -169,6 +176,174 @@ def test_artifact_registration_retry_preserves_first_identity_timestamp(tmp_path
     manifest = backend._read_work_manifest("clamp_work")
     assert len(manifest["artifact_references"]) == 1
     assert manifest["artifact_references"][0]["created_at"] == reference["created_at"]
+
+
+def _register_reviewable_result(backend, *, trust_role="reviewable_result"):
+    result_id = "reviewable_episode001_candidate_001"
+    prefix = "episodes/design_part/request_001"
+    result = create_artifact_reference(
+        artifact_id=result_id,
+        work_id="clamp_work",
+        run_id="clamp_attempt_1",
+        part_job_id="clamp",
+        relative_path=f"{prefix}/reviewable_result.json",
+        phase="build_evaluate",
+        checkpoint="reviewable_result",
+        trust_role=trust_role,
+        validation_status="passed",
+    )
+    step = create_artifact_reference(
+        artifact_id="reviewable_step_episode001_candidate_001",
+        work_id="clamp_work",
+        run_id="clamp_attempt_1",
+        part_job_id="clamp",
+        relative_path=f"{prefix}/candidates/candidate_001/exec_001/model.step",
+        phase="build_evaluate",
+        checkpoint="reviewable_result",
+        trust_role=trust_role,
+        validation_status="passed",
+        source_artifact_ids=[result_id],
+    )
+    manifest = register_artifact_references(
+        backend._read_work_manifest("clamp_work"),
+        [result, step],
+    )
+    backend._write_work_manifest("clamp_work", manifest)
+    episode_dir = (
+        backend._work_runs_root("clamp_work")
+        / "clamp_attempt_1"
+        / prefix
+    )
+    step_path = episode_dir / "candidates" / "candidate_001" / "exec_001" / "model.step"
+    step_path.parent.mkdir(parents=True, exist_ok=True)
+    step_bytes = b"ISO-10303-21;\nEND-ISO-10303-21;\n"
+    step_path.write_bytes(step_bytes)
+    (episode_dir / "reviewable_result.json").write_text(
+        json.dumps(
+            {
+                "reviewable_result_id": result_id,
+                "work_id": "clamp_work",
+                "run_id": "clamp_attempt_1",
+                "part_job_id": "clamp",
+                "trust_role": "reviewable_result",
+                "reviewable": True,
+                "accepted": False,
+                "deliverable": False,
+                "step": {
+                    "artifact_id": "reviewable_step_episode001_candidate_001",
+                    "relative_path": "candidates/candidate_001/exec_001/model.step",
+                    "sha256": hashlib.sha256(step_bytes).hexdigest(),
+                    "size": len(step_bytes),
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return result_id
+
+
+def test_explicit_reviewable_acceptance_and_revision_preserve_lineage(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work("Clamp", work_id="clamp_work")
+    backend.create_work_part_attempt(
+        "clamp_work", "clamp", run_id="clamp_attempt_1"
+    )
+    result_id = _register_reviewable_result(backend)
+    before = backend._read_work_manifest("clamp_work")
+    run_prompt = (
+        backend._work_runs_root("clamp_work")
+        / "clamp_attempt_1"
+        / "prompt.txt"
+    ).read_bytes()
+
+    accepted = dispatch_route(
+        backend,
+        "accept_work_reviewable_result",
+        path_params={
+            "work_id": "clamp_work",
+            "part_job_id": "clamp",
+            "reviewable_result_id": result_id,
+        },
+        body={},
+    )
+
+    assert accepted["ok"] is True
+    pointer = accepted["data"]["accepted_part_result"]
+    assert pointer["result_id"] == result_id
+    assert pointer["artifact_ids"] == [
+        result_id,
+        "reviewable_step_episode001_candidate_001",
+    ]
+    after_accept = backend._read_work_manifest("clamp_work")
+    assert after_accept["active_lineage"] == before["active_lineage"]
+    assert after_accept["deliverable_packages"] == []
+
+    revised = dispatch_route(
+        backend,
+        "revise_work_reviewable_result",
+        path_params={
+            "work_id": "clamp_work",
+            "part_job_id": "clamp",
+            "reviewable_result_id": result_id,
+        },
+        body={
+            "revision_prompt": "Increase the bore by 0.5 mm.",
+            "run_id": "clamp_attempt_2",
+        },
+    )
+
+    assert revised["ok"] is True
+    after_revision = backend._read_work_manifest("clamp_work")
+    assert after_revision["accepted_part_results"]["clamp"] == pointer
+    assert [
+        item["run_id"] for item in after_revision["part_jobs"][0]["attempts"]
+    ] == ["clamp_attempt_1", "clamp_attempt_2"]
+    assert after_revision["deliverable_packages"] == []
+    assert (
+        backend._work_runs_root("clamp_work")
+        / "clamp_attempt_1"
+        / "prompt.txt"
+    ).read_bytes() == run_prompt
+
+
+def test_explicit_reviewable_route_rejects_candidate_or_diagnostic(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work("Clamp", work_id="clamp_work")
+    backend.create_work_part_attempt(
+        "clamp_work", "clamp", run_id="clamp_attempt_1"
+    )
+    result_id = _register_reviewable_result(backend, trust_role="candidate")
+
+    with pytest.raises(ValueError, match="registered reviewable result identity"):
+        backend.accept_work_reviewable_result("clamp_work", "clamp", result_id)
+    assert backend._read_work_manifest("clamp_work")["accepted_part_results"] == {}
+
+
+def test_explicit_acceptance_rechecks_step_hash_before_pointer_mutation(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work("Clamp", work_id="clamp_work")
+    backend.create_work_part_attempt(
+        "clamp_work", "clamp", run_id="clamp_attempt_1"
+    )
+    result_id = _register_reviewable_result(backend)
+    step_path = (
+        backend._work_runs_root("clamp_work")
+        / "clamp_attempt_1"
+        / "episodes"
+        / "design_part"
+        / "request_001"
+        / "candidates"
+        / "candidate_001"
+        / "exec_001"
+        / "model.step"
+    )
+    step_path.write_bytes(b"tampered")
+
+    with pytest.raises(ValueError, match="STEP evidence was tampered"):
+        backend.accept_work_reviewable_result("clamp_work", "clamp", result_id)
+    assert backend._read_work_manifest("clamp_work")["accepted_part_results"] == {}
 
 
 def test_auto_advance_failure_persists_blocked_intent_without_part_attempts(

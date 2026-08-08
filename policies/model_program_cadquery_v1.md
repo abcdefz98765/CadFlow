@@ -1,8 +1,8 @@
 # CadQuery v1 Model-Program Source Policy
 
-Status: static policy and an attestation-gated internal execution primitive are
-implemented. No provider Episode action or reviewable publication path is
-registered.
+Status: static policy, an attestation-gated internal execution primitive,
+provider-selected Episode actions, and CadFlow-owned reviewable publication
+are implemented. Acceptance remains a separate explicit user route.
 
 Policy id: `cadquery_v1`.
 
@@ -13,9 +13,9 @@ provider, publication, reviewable, acceptance, or deliverable authority.
 
 Entrypoint: `build_model(parameters)`.
 
-The return value is intended to be a CadQuery `Workplane` or `Shape`, but only a
-future isolated runtime and local geometry validators may establish that fact.
-Static validation never declares geometry valid.
+The return value must be a CadQuery `Workplane` or `Shape`. Only the isolated
+worker and local output checks establish that fact; static validation never
+declares geometry valid.
 
 ## Allowed source surface
 
@@ -71,8 +71,9 @@ network, subprocess controls, or limits do not match, the Broker returns
 The resulting execution observation remains `candidate` or `diagnostic`
 evidence. The registered `model_program` skill can request the tool only as the
 declared delegate of `design_part`; `WorkOrchestrator` supplies all lineage and
-evidence identities. Registration grants no reviewable-publication,
-acceptance, or deliverable authority.
+evidence identities. A separate CadFlow publication gate may promote only a
+successful, inspected, cross-checked result. Registration grants no provider
+publication, acceptance, or deliverable authority.
 
 Before a successful archive is returned, the trusted worker re-imports its
 exported STEP and requires a valid non-empty solid, unchanged solid count,
