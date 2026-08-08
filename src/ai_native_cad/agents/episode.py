@@ -487,6 +487,25 @@ class EpisodeArtifactWriter:
             },
         )
 
+    def user_input_request(
+        self,
+        *,
+        questions: tuple[dict[str, str], ...],
+        reason: str | None,
+    ) -> None:
+        """Persist the focused question as product-safe episode evidence."""
+        _write_json(
+            self.output_dir / "user_input_request.json",
+            {
+                "schema_version": 1,
+                "checkpoint": "clarification_decision",
+                "status": "user_input_required",
+                "questions": [dict(item) for item in questions],
+                "why_it_matters": reason,
+                "private_reasoning_exposed": False,
+            },
+        )
+
     def finish(self, result: AgentEpisodeResult) -> None:
         episode = result.as_dict()
         episode["objective"] = {"operation": self.envelope.objective.operation, "summary": self.envelope.objective.summary}
@@ -986,6 +1005,10 @@ class EpisodeOrchestrator:
                 continue
 
             if action.action == "ask_user":
+                self.writer.user_input_request(
+                    questions=action.questions,
+                    reason=action.reason,
+                )
                 self.writer.event({"step": steps, "action": action.action, "questions": list(action.questions), "reason": action.reason})
                 return finish(StopReason.USER_INPUT_REQUIRED)
 

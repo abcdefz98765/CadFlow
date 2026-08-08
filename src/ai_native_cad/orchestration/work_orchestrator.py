@@ -467,6 +467,95 @@ class WorkOrchestrator:
             ),
         }
 
+    def answer_part_design_question(
+        self,
+        work_id: str,
+        part_job_id: str,
+        *,
+        run_id: str,
+        answer_id: str,
+        question_artifact_id: str,
+        field: str,
+        question: str,
+        answer: str,
+    ) -> dict[str, Any]:
+        """Append user-provided clarification evidence without rewriting a Run."""
+        if self.design is None:
+            raise ValueError("Agent Design port is unavailable")
+        work = self.store.read_work(work_id)
+        job = next(
+            (
+                item
+                for item in work.get("part_jobs", [])
+                if isinstance(item, dict) and item.get("part_job_id") == part_job_id
+            ),
+            None,
+        )
+        if job is None:
+            raise ValueError(f"Work has no Part Job: {part_job_id}")
+        if run_id not in {
+            item.get("run_id")
+            for item in job.get("attempts", [])
+            if isinstance(item, dict)
+        }:
+            raise ValueError("clarification answer must target an owned Part Job attempt")
+        question_reference = next(
+            (
+                item
+                for item in work.get("artifact_references", [])
+                if isinstance(item, dict)
+                and item.get("artifact_id") == question_artifact_id
+                and item.get("run_id") == run_id
+                and item.get("part_job_id") == part_job_id
+                and item.get("checkpoint") == "clarification_decision"
+                and item.get("validation_status") == "user_input_required"
+            ),
+            None,
+        )
+        if question_reference is None:
+            raise ValueError("clarification question is not registered for this attempt")
+        protected_before = _protected_work_state(work)
+        artifact = self.design.record_part_design_answer(
+            work_id=work_id,
+            run_id=run_id,
+            part_job_id=part_job_id,
+            answer_id=answer_id,
+            question_artifact_id=question_artifact_id,
+            field=field,
+            question=question,
+            answer=answer,
+        )
+        reference = create_artifact_reference(
+            artifact_id=artifact.artifact_id,
+            work_id=work_id,
+            run_id=run_id,
+            part_job_id=part_job_id,
+            relative_path=artifact.relative_path,
+            phase="intent",
+            checkpoint=artifact.checkpoint,
+            trust_role=artifact.trust_role,
+            source_artifact_ids=list(artifact.source_artifact_ids),
+            validation_status=artifact.validation_status,
+            created_at=_now(),
+        )
+        updated = register_artifact_references(work, [reference], updated_at=_now())
+        if _protected_work_state(updated) != protected_before:
+            raise RuntimeError("clarification routing attempted to mutate protected Work state")
+        self.store.write_work(work_id, updated)
+        self.store.invalidate_projection()
+        return {
+            "answer_artifact_id": artifact.artifact_id,
+            "run_id": run_id,
+            "part_job_id": part_job_id,
+            "orchestration": _completion(
+                command="answer_part_design_question",
+                phase="intent",
+                checkpoint="clarification_decision",
+                postcondition="The user's answer was appended as new Work/Run evidence.",
+                next_action="Continue design with the supplied answer",
+            ),
+        }
+
     def accept_part_result(
         self,
         work_id: str,

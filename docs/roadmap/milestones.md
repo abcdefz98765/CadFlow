@@ -21,6 +21,7 @@ Current delivery order:
 M2 backend vertical slice
   -> M2.5 Workbench MVP usability gate
   -> M2.6 canonical Product Example and guided design story
+  -> M2.7 onboarding, Settings, recovery, and Live Agent Example
   -> M2 external-provider benchmark acceptance
   -> M3 feature graph
   -> M4 assembly
@@ -335,6 +336,40 @@ Status:
 
 - implementation complete on 2026-08-08; automated and real-browser evidence
   is recorded in current product readiness.
+
+## M2.7 — Onboarding, Settings, recovery, and Live Agent Example
+
+Goal:
+
+- let a normal user start a real design, establish real Provider/local-CAD
+  readiness, understand a safe stop, and continue the same Work.
+
+Scope:
+
+- Home / Works / Settings product language over the existing page ids;
+- New Design and beginning-state Live Product Example actions;
+- DeepSeek-first draft, Test, and Save & Verify settings with session-memory or
+  environment credentials and no plaintext secret persistence;
+- real readiness summaries, Agent-first four-phase Workflow projection, and
+  product recovery owners/actions;
+- append-only clarification answer evidence and continuation through the
+  existing bounded Agent route;
+- the M2.6 Completed Product Golden retained as the deterministic snapshot.
+
+Acceptance:
+
+- real-browser bilingual and responsive onboarding/settings/recovery/live
+  example paths pass at 1440px, 1024px, and 390–430px;
+- the real configured provider may ask, repair, fail, or publish reviewable
+  geometry honestly, and reviewable output is never auto-accepted;
+- full regression remains green. The formal five-case external-provider
+  benchmark remains the next M2 acceptance gate.
+
+Out of scope:
+
+- formal provider benchmark, M3 feature graph, new CAD families, broader
+  sandbox/Tool Broker authority, Assembly execution, Deliverable Packages,
+  BOM, drawings, or canonical architecture changes.
 
 ## M3 — General structured geometry contract
 

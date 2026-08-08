@@ -192,20 +192,37 @@ creation and stages are reached through a controlled compatibility adapter.
 The internal route contracts are:
 
 ```text
+POST /api/designs
+POST /api/examples/live-product
 POST /api/examples/product-golden
 POST /api/works
 POST /api/works/{work_id}/requirement-run
 POST /api/works/{work_id}/part-runs
 POST /api/works/{work_id}/parts/{part_job_id}/attempts
 POST /api/works/{work_id}/parts/{part_job_id}/design-episodes
+POST /api/works/{work_id}/parts/{part_job_id}/design-answers
+POST /workflow/provider/save-and-verify
+GET  /api/readiness
 ```
 
-On the Workspace page, **Open Product Example / 打开产品示例** invokes the
-Product Golden route. It creates or reopens the reproducible compact micro-servo
-bracket Work and navigates directly to Overview / Design. The example uses a
-scripted provider and needs no external API credential; its candidate still
-requires the existing attested `cadquery_v1` execution profile and fails closed
-if that profile is unavailable. It leaves the reviewable result unaccepted.
+On Home, **Start Product Example / 开始产品示例** creates a new compact
+micro-servo bracket Work with only the original request and one owned Part Job
+attempt. It uses the configured external provider and the existing real bounded
+Agent/runtime route; it does not preload a design, STEP, reviewable result, or
+accepted pointer. **Open Completed Example / 打开已完成示例** remains the
+reproducible scripted Product Golden for offline regression and review-state UI
+checks.
+
+Settings defaults this workspace to the requested DeepSeek Flash model,
+`deepseek-v4-flash`. `DEEPSEEK_API_KEY` and `OPENAI_API_KEY` remain supported.
+An API key entered in Settings is retained only in the current backend process
+memory. `config.json` stores only provider, model, HTTPS base URL, timeout,
+retries, advancement mode, and safe connection evidence (status, provider,
+model, base URL, and verification timestamp). That evidence restores the
+Connected presentation after restart only when a credential remains available
+from the environment. Test connection checks the current unsaved draft; Save &
+Verify checks it again before persisting non-secret fields. No API key is
+written to workspace, Work, Run, trace, or screenshot files.
 
 `POST /api/examples/golden-desktop-robot-arm` remains available only for the
 former Workflow/CAD IR compatibility regression.

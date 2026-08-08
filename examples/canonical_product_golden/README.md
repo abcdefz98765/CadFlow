@@ -2,9 +2,14 @@
 
 Classification: **PRODUCT GOLDEN**.
 
-This is the reproducible current-product example for the Agent-first Workbench.
-Open the Workspace page and choose **Open Product Example**. CadFlow creates or
+This is the reproducible completed snapshot for the Agent-first Workbench.
+Open Home and choose **Open Completed Example** under the secondary examples.
+CadFlow creates or
 reopens the Work and navigates directly to Overview / Design.
+
+The primary **Start Product Example** action is separate: it begins with only
+the request and Part Job, then uses the configured real external provider. That
+Live Agent path is experimental and is not expected to reproduce this geometry.
 
 ## Original request
 

@@ -3,11 +3,21 @@
 Examples are classified by purpose. Files under `examples/` are not all
 user-facing product examples, and passing one category does not prove another.
 
-## PRODUCT GOLDEN
+## LIVE PRODUCT EXAMPLE
+
+The primary **Start Product Example** action creates a new micro-servo bracket
+Work at the real beginning: the original request, one owned Part Job attempt,
+and no generated design, geometry, reviewable result, or accepted pointer. It
+uses the currently configured external provider and the real bounded Agent,
+Tool Broker, sandbox, inspection, and publication route. It is experimental
+and stochastic: it may ask a question, repair, stop safely, or produce a
+different valid design. It is not a reproducibility fixture.
+
+## COMPLETED PRODUCT GOLDEN
 
 | Example | Purpose | Current product behavior |
 | --- | --- | --- |
-| `canonical_product_golden/` | Reproducible current Agent-first single-Part Job story | Yes. Open it from Workspace with **Open Product Example**. It uses a scripted provider, the registered model-program path, controlled execution, STEP inspection, reviewable publication, and the existing Accept/Revise routes. |
+| `canonical_product_golden/` | Reproducible completed Agent-first single-Part Job snapshot | Secondary. Open it with **Open Completed Example**. It uses a scripted provider, the registered model-program path, controlled execution, STEP inspection, reviewable publication, and the existing Accept/Revise routes. |
 
 The Product Golden proves the product journey, durable projection, Workbench,
 geometry presentation, and acceptance/revision behavior. It does not prove
@@ -24,9 +34,9 @@ external-provider design quality. It requires no external API credential.
 | `provider_smoke/reviewed_part_single_create_smoke.py` | Staged legacy reviewed-one-part boundary | Compatibility evaluation; never full assembly. |
 | `prompt_pipeline/` | Manual deterministic prompt-to-IR evaluation | Compatibility evaluation. |
 
-The later five-case external-provider benchmark will assess real Agent design
+The formal five-case external-provider benchmark will assess real Agent design
 quality, strategy, repair, and `ask_user` behavior. It is intentionally not the
-Product Golden and is not run by M2.6.
+Live Product Example or Completed Product Golden and is not run by M2.7.
 
 ## COMPATIBILITY / REGRESSION
 

@@ -24,7 +24,7 @@ def make_handler(
     static_root: str | Path | None = None,
 ) -> type[SimpleHTTPRequestHandler]:
     """Create a request handler bound to one backend instance."""
-    console_backend = backend or WorkflowConsoleBackend()
+    console_backend = backend or WorkflowConsoleBackend(restore_saved_provider=True)
     web_root = Path(static_root or STATIC_ROOT).resolve()
 
     class WorkflowConsoleRequestHandler(SimpleHTTPRequestHandler):

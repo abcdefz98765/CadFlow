@@ -12,6 +12,10 @@ from copy import deepcopy
 from typing import Any, Literal
 
 from ai_native_cad.workflow_console.review_surface import build_workflow_review_surface
+from ai_native_cad.workflow_console.product_usability import (
+    build_agent_first_workflow_projection,
+    build_recovery_projection,
+)
 from ai_native_cad.workflow_console.i18n import (
     action_labels,
     action_label,
@@ -107,6 +111,8 @@ def build_workbench_overview_view_model(
     metadata = _dict_value(entity.get("metadata"))
     if metadata.get("example_classification") == "product_golden":
         capability_key = "reproducible_product_golden"
+    elif metadata.get("example_classification") == "live_agent_example":
+        capability_key = "agentic_experimental"
     elif (
         isinstance(active_record, dict)
         and active_record.get("capability_mode")
@@ -116,11 +122,19 @@ def build_workbench_overview_view_model(
     else:
         capability_key = "deterministic_compatibility"
     preview = _workbench_preview(work_id, active_job, active_record, references, language)
+    recovery = build_recovery_projection(
+        backend,
+        work_id,
+        entity,
+        references,
+        language=language,
+    )
     activity = _workbench_agent_activity(
         active_job,
         active_record,
         references,
         language,
+        recovery=recovery,
     )
     recommendation = _workbench_recommendation(
         entity,
@@ -182,6 +196,7 @@ def build_workbench_overview_view_model(
         "agent_design": agent_design,
         "transformation": transformation,
         "recommendation": recommendation,
+        "recovery": recovery,
         "capability": {
             "key": capability_key,
             "label": i18n_copy(language, capability_key),
@@ -468,6 +483,13 @@ def _workbench_transformation(
         for item in references
         if isinstance(item, dict)
     }
+    successful_observation = any(
+        item.get("checkpoint") == "execution_observation"
+        and item.get("trust_role") == "observation"
+        and item.get("validation_status") in {"passed", "completed", "valid"}
+        for item in references
+        if isinstance(item, dict)
+    )
     events = [
         {
             "key": "request_received",
@@ -482,7 +504,7 @@ def _workbench_transformation(
         {
             "key": "geometry_built",
             "label": i18n_copy(language, "timeline_geometry_built"),
-            "status": "completed" if record or "observation" in roles else "pending",
+            "status": "completed" if record or successful_observation else "pending",
         },
         {
             "key": "step_inspected",
@@ -495,6 +517,15 @@ def _workbench_transformation(
             "status": "completed" if job and job.get("has_reviewable_result") else "pending",
         },
     ]
+    if int(agent_design.get("repair_count") or 0) > 0:
+        events.insert(
+            4,
+            {
+                "key": "candidate_repaired",
+                "label": i18n_copy(language, "repairing_candidate"),
+                "status": "completed",
+            },
+        )
     return {
         "title": i18n_copy(language, "what_happened"),
         "chain": ["user_request", "agent_design", "build_evaluate", "result"],
@@ -716,13 +747,51 @@ def _workbench_agent_activity(
     record: dict[str, Any] | None,
     references: list[dict[str, Any]],
     language: str,
+    *,
+    recovery: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if record and job and job.get("state") in {"reviewable", "accepted"}:
+    answered_question_ids = {
+        source
+        for item in references
+        if item.get("trust_role") == "accepted_input"
+        for source in item.get("source_artifact_ids", [])
+        if isinstance(source, str)
+    }
+    waiting_for_user = any(
+        item.get("checkpoint") == "clarification_decision"
+        and item.get("validation_status") == "user_input_required"
+        and item.get("artifact_id") not in answered_question_ids
+        for item in references
+    )
+    recovery_category = str((recovery or {}).get("category") or "")
+    safely_stopped = recovery_category in {
+        "provider_auth_failed",
+        "provider_failure",
+        "policy_blocked",
+        "unsupported_capability",
+        "budget_exhausted",
+    }
+    if waiting_for_user:
+        key = "waiting_user"
+    elif safely_stopped:
+        key = "safely_stopped"
+    elif record and job and job.get("state") in {"reviewable", "accepted"}:
         key = "accepted_state" if job.get("state") == "accepted" else "ready_review"
-    elif any(item.get("trust_role") == "diagnostic" for item in references):
-        key = "repairing_candidate"
-    elif any(item.get("trust_role") == "observation" for item in references):
+    elif any(
+        item.get("checkpoint") == "execution_observation"
+        and item.get("trust_role") == "observation"
+        and item.get("validation_status") == "passed"
+        for item in references
+    ):
         key = "inspecting_step"
+    elif any(item.get("trust_role") == "candidate" for item in references):
+        key = "building_geometry"
+    elif any(
+        item.get("checkpoint") == "contract_validation"
+        and item.get("trust_role") == "diagnostic"
+        for item in references
+    ):
+        key = "repairing_candidate"
     elif job and job.get("attempt_count"):
         key = "preparing_candidate"
     else:
@@ -732,7 +801,7 @@ def _workbench_agent_activity(
         "candidate": "preparing_candidate",
         "observation": "inspecting_step",
         "reviewable_result": "ready_review",
-        "diagnostic": "repairing_candidate",
+        "diagnostic": "safely_stopped" if safely_stopped else "repairing_candidate",
     }
     for reference in references[-12:]:
         detail_key = detail_keys.get(str(reference.get("trust_role")))
@@ -1035,8 +1104,38 @@ def build_workflow_page_view_model(
         raise ValueError("workflow view mode must be current_work or run_snapshot")
     work = backend.get_work_detail(work_id)
     summary = work.get("summary") if isinstance(work.get("summary"), dict) else {}
+    entity = work.get("entity_state") if isinstance(work.get("entity_state"), dict) else {}
+    metadata = entity.get("metadata") if isinstance(entity.get("metadata"), dict) else {}
     lineage = summary.get("active_lineage") if isinstance(summary.get("active_lineage"), dict) else {}
     active_root = lineage.get("active_root_run_id") or summary.get("root_run_id")
+    if view_mode == "current_work" and (
+        metadata.get("example_classification") == "live_agent_example"
+        or metadata.get("product_entry") == "new_design"
+    ):
+        overview = build_workbench_overview_view_model(backend, work_id, language=language)
+        agent_page = build_agent_first_workflow_projection(overview, language=language)
+        agent_page.update({
+            "view_mode": "current_work",
+            "read_only": False,
+            "read_only_reason": None,
+            "work": {
+                "work_id": work_id,
+                "title": summary.get("title") or work_id,
+                "overall_status": summary.get("overall_status"),
+                "summary": summary.get("next_action"),
+            },
+            "active_lineage": lineage,
+            "lineage_inferred": bool(lineage.get("lineage_inferred")),
+            "viewed_run_id": None,
+            "run_strip": _run_strip(work.get("run_history"), lineage, view_mode, None),
+            "recommended_next_action": None,
+            "available_actions": {"primary_action": None, "secondary_actions": [], "disabled_actions": []},
+            "action_inventory": [],
+            "empty_state": None,
+            "error_state": None,
+            "source": {"projection": "agent_first", "overview": overview},
+        })
+        return agent_page
     if view_mode == "run_snapshot":
         if not selected_run_id:
             raise ValueError("a Run Snapshot requires selected_run_id")

@@ -1,11 +1,11 @@
 # Current Product Readiness
 
-Status date: 2026-08-08.
+Status date: 2026-08-09.
 
 This document distinguishes the Agent-first target architecture from the
 implemented deterministic product, accepted M1 runtime foundation, bounded M2
-backend preview, reuse-first M2.5 Workbench MVP, and the M2.6 canonical Product
-Golden guided-design story.
+backend preview, reuse-first M2.5 Workbench MVP, the M2.6 completed Product
+Golden, and the M2.7 onboarding/settings/recovery integration gate.
 
 ## Target status
 
@@ -20,9 +20,61 @@ The authoritative target is now:
 
 This target is documented. Its M1 runtime/domain foundation, a bounded M2
 execution/publication preview, the M2.5 single-Part Job Workbench surface, and
-the M2.6 canonical Product Golden are implemented; external-provider M2
+the M2.6 canonical Product Golden and M2.7 usability integration are implemented;
+external-provider M2
 acceptance and later-milestone modeling, Assembly, and Deliverable capabilities
 are not.
+
+## M2.7 onboarding, Settings, recovery, and Live Agent Example — implemented and verified
+
+- The existing NiceGUI shell now presents Home / Works / Settings and prioritizes
+  New Design, the beginning-state Live Product Example, real Provider/local-CAD
+  readiness, and recent product-language Work cards.
+- DeepSeek is the default external-provider choice and `deepseek-v4-flash` is
+  the requested default model path. Test checks the current unsaved draft. Save
+  & Verify repeats the real check, persists only non-secret configuration plus
+  safe connection evidence, and restores the Connected status and adapter after
+  process restart when a credential is still available from the environment.
+- API keys are supplied by `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` or a Settings
+  password field retained only in backend/browser session memory. They are not
+  written to workspace configuration, Work manifests, Run evidence, provider
+  traces, logs, or screenshots. Secret-bearing generic gate payloads now fail
+  before any Run log mutation.
+- Start Product Example creates a new micro-servo bracket Work with the original
+  request and one real Part Job attempt only. It does not preload a design brief,
+  candidate source, STEP/STL, reviewable result, or accepted pointer. Continue
+  uses the configured adapter and existing bounded Design Episode, Tool Broker,
+  sandbox, inspection, publication, Accept, and Revise boundaries.
+- Agent-first Works project the actual evidence into Intent, Design, Build &
+  Evaluate, and Accept & Deliver; compatibility Run Snapshots retain the legacy
+  checkpoint graph. Reviewable and accepted status come from the same manifest
+  references used by Overview.
+- Recovery projection covers user, configuration, CadFlow, environment, and
+  unsupported owners. Settings, Retry, Modify request, environment guidance,
+  and technical details route to real behavior. Focused `ask_user` questions are
+  persisted, answered as append-only accepted input, and resumed through the
+  existing bounded episode route.
+- The reproducible M2.6 Completed Product Golden remains available as a
+  secondary scripted snapshot. No M3, new CAD family, Assembly, Deliverable,
+  BOM/drawing, sandbox-authority, or Tool-Broker-authority expansion was made.
+- Automated verification: `656 passed, 9 skipped` in the complete repository
+  suite, plus `178 passed` in the focused M2.7/console regression during the
+  implementation cycle.
+- Live-provider verification: the official DeepSeek endpoint accepted Save &
+  Verify with `deepseek-v4-flash`; changing the model invalidated the status and
+  restoring/saving it re-established Connected. A real beginning-state Live
+  Product Example entered the bounded Agent route and stopped with
+  `policy_blocked`. CadFlow published no reviewable result, accepted pointer,
+  model, or deliverable, which is the required safe behavior for that outcome.
+- Browser verification: English/Chinese critical paths were exercised at
+  1440px, 1024px, and 414px. Home, Works, Settings, provider setup/connected
+  states, live-example start/running/safe-stop states, four-phase Workflow, user
+  clarification, unsupported capability, and configuration recovery are saved
+  under `docs/ux/screenshots/onboarding-settings-recovery-live-example/`.
+- The formal five-case M2 external-provider benchmark remains unrun and is still
+  the next acceptance milestone; M2 is not complete. The live screenshot named
+  `live-example-design-and-model-zh.png` intentionally shows the honest
+  no-candidate safe-stop state because the real run did not reach geometry.
 
 ## Implemented and usable now
 

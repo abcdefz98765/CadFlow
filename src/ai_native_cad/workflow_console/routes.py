@@ -93,6 +93,20 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="Create or reopen the reproducible current Product Golden Work.",
     ),
     RouteSpec(
+        name="start_live_product_example",
+        method="POST",
+        path="/api/examples/live-product",
+        backend_operation="start_live_product_example",
+        description="Create a new beginning-state Product Example for the configured real Agent.",
+    ),
+    RouteSpec(
+        name="create_product_design",
+        method="POST",
+        path="/api/designs",
+        backend_operation="create_product_design",
+        description="Create a normal single-Part Job design Work from a user request.",
+    ),
+    RouteSpec(
         name="create_golden_example",
         method="POST",
         path="/api/examples/golden-desktop-robot-arm",
@@ -138,6 +152,13 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
+        name="answer_work_part_design_question",
+        method="POST",
+        path="/api/works/{work_id}/parts/{part_job_id}/design-answers",
+        backend_operation="answer_work_part_design_question",
+        description="Append one focused user answer and preserve prior Run evidence.",
+    ),
+    RouteSpec(
         name="accept_work_reviewable_result",
         method="POST",
         path=(
@@ -180,7 +201,21 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         method="POST",
         path="/workflow/provider/test",
         backend_operation="test_provider_connection",
-        description="Run a minimal provider connectivity check without writing workflow artifacts.",
+        description="Test the current provider draft without persisting settings or credentials.",
+    ),
+    RouteSpec(
+        name="save_and_verify_provider",
+        method="POST",
+        path="/workflow/provider/save-and-verify",
+        backend_operation="save_and_verify_provider",
+        description="Verify a provider draft and persist only non-secret settings on success.",
+    ),
+    RouteSpec(
+        name="read_product_readiness",
+        method="GET",
+        path="/api/readiness",
+        backend_operation="read_product_readiness",
+        description="Read real provider and local CAD execution readiness.",
     ),
     RouteSpec(
         name="read_run_metadata",
@@ -521,6 +556,34 @@ def _open_product_golden_example(
     return backend.open_product_golden_example()
 
 
+def _start_live_product_example(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    if body:
+        raise ValueError("live Product Example does not accept request fields")
+    return backend.start_live_product_example()
+
+
+def _create_product_design(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    unknown = set(body) - {"request", "title"}
+    if unknown:
+        raise ValueError("new design body contains unknown fields")
+    return backend.create_product_design(
+        _require_value(body, "request"),
+        title=body.get("title"),
+    )
+
+
 def _read_work(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -582,6 +645,30 @@ def _run_work_part_design_episode(
         request_id=_require_value(body, "request_id"),
         attempt_run_id=body.get("attempt_run_id"),
         objective=body.get("objective"),
+    )
+
+
+def _answer_work_part_design_question(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    unknown = set(body) - {
+        "run_id", "answer_id", "question_artifact_id", "field", "question", "answer"
+    }
+    if unknown:
+        raise ValueError("design answer body contains unknown fields")
+    return backend.answer_work_part_design_question(
+        _require_value(path_params, "work_id"),
+        _require_value(path_params, "part_job_id"),
+        run_id=_require_value(body, "run_id"),
+        answer_id=_require_value(body, "answer_id"),
+        question_artifact_id=_require_value(body, "question_artifact_id"),
+        field=_require_value(body, "field"),
+        question=_require_value(body, "question"),
+        answer=_require_value(body, "answer"),
     )
 
 
@@ -648,6 +735,7 @@ def _configure_provider(
     return backend.configure_provider(
         _require_value(body, "provider"),
         model=body.get("model"),
+        base_url=body.get("base_url"),
         timeout_seconds=body.get("timeout_seconds"),
         max_retries=body.get("max_retries"),
     )
@@ -659,7 +747,49 @@ def _test_provider_connection(
     body: dict[str, Any],
     query: dict[str, Any],
 ) -> dict[str, Any]:
-    return backend.test_provider_connection()
+    unknown = set(body) - {
+        "provider", "model", "base_url", "timeout_seconds", "max_retries", "api_key"
+    }
+    if unknown:
+        raise ValueError("provider test body contains unknown fields")
+    return backend.test_provider_connection(
+        body.get("provider"),
+        model=body.get("model"),
+        base_url=body.get("base_url"),
+        timeout_seconds=body.get("timeout_seconds"),
+        max_retries=body.get("max_retries"),
+        api_key=body.get("api_key"),
+    )
+
+
+def _save_and_verify_provider(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    unknown = set(body) - {
+        "provider", "model", "base_url", "timeout_seconds", "max_retries", "api_key"
+    }
+    if unknown:
+        raise ValueError("provider save body contains unknown fields")
+    return backend.save_and_verify_provider(
+        _require_value(body, "provider"),
+        model=body.get("model"),
+        base_url=body.get("base_url"),
+        timeout_seconds=body.get("timeout_seconds"),
+        max_retries=body.get("max_retries"),
+        api_key=body.get("api_key"),
+    )
+
+
+def _read_product_readiness(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    return backend.read_product_readiness()
 
 
 def _run_stage(
@@ -883,17 +1013,22 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "list_works": _list_works,
     "create_work": _create_work,
     "open_product_golden_example": _open_product_golden_example,
+    "start_live_product_example": _start_live_product_example,
+    "create_product_design": _create_product_design,
     "create_golden_example": _create_golden_example,
     "read_work": _read_work,
     "create_work_requirement_run": _create_work_requirement_run,
     "create_work_part_runs": _create_work_part_runs,
     "create_work_part_attempt": _create_work_part_attempt,
     "run_work_part_design_episode": _run_work_part_design_episode,
+    "answer_work_part_design_question": _answer_work_part_design_question,
     "accept_work_reviewable_result": _accept_work_reviewable_result,
     "revise_work_reviewable_result": _revise_work_reviewable_result,
     "read_provider_config": _read_provider_config,
     "configure_provider": _configure_provider,
     "test_provider_connection": _test_provider_connection,
+    "save_and_verify_provider": _save_and_verify_provider,
+    "read_product_readiness": _read_product_readiness,
     "read_run_metadata": _read_run_metadata,
     "run_stage": _run_stage,
     "run_revision": _run_revision,
@@ -920,13 +1055,17 @@ def _success_status_code(route_name: str) -> int:
         "create_workspace",
         "load_workspace",
         "write_workspace_config",
+        "save_and_verify_provider",
         "create_work",
         "open_product_golden_example",
+        "start_live_product_example",
+        "create_product_design",
         "create_golden_example",
         "create_work_requirement_run",
         "create_work_part_runs",
         "create_work_part_attempt",
         "run_work_part_design_episode",
+        "answer_work_part_design_question",
         "accept_work_reviewable_result",
         "revise_work_reviewable_result",
         "run_revision",

@@ -162,6 +162,11 @@ def test_scripted_user_input_and_context_exhaustion_are_typed(tmp_path):
         action="ask_user", questions=({"field": "diameter", "question": "Specify diameter", "reason": "Missing interface"},),
     ))
     assert outcome.stop_reason == StopReason.USER_INPUT_REQUIRED
+    question = json.loads((tmp_path / "user" / "user_input_request.json").read_text(encoding="utf-8"))
+    assert question["questions"] == [
+        {"field": "diameter", "question": "Specify diameter", "reason": "Missing interface"}
+    ]
+    assert question["private_reasoning_exposed"] is False
 
     outcome = _orchestrator(tmp_path / "context", budget=EpisodeBudget(max_context_requests=1)).run(
         lambda state: AgentAction(action="request_context", context_key="reviewed_part_handoff")

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import hashlib
+import inspect
+import os
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +48,8 @@ WORKSPACE_CONFIG_NAME = "config.json"
 WORKSPACE_SCHEMA_VERSION = 1
 WORKSPACE_ADVANCEMENT_MODES = {"manual_confirm", "auto_advance"}
 DEFAULT_WORKSPACE_ADVANCEMENT_MODE = "manual_confirm"
+DEFAULT_EXTERNAL_PROVIDER = "deepseek"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash"
 EDITABLE_ARTIFACTS = {
     "requirement_v2.json",
     "planning_artifact.json",
@@ -106,6 +110,7 @@ class WorkflowConsoleBackend:
         run_roots: tuple[str | Path, ...] | None = None,
         stage_runner: StageRunner | None = None,
         provider_adapter_factory: Any | None = None,
+        restore_saved_provider: bool = False,
     ) -> None:
         self.project_root = Path(project_root or PROJECT_ROOT).resolve()
         workspace_path = Path(workspace_root or "workspace")
@@ -118,6 +123,17 @@ class WorkflowConsoleBackend:
         self._provider_adapter_factory = provider_adapter_factory or make_json_contract_adapter_from_env
         self._work_index_cache: dict[bool, dict[str, Any]] = {}
         self._run_listing_cache: list[dict[str, Any]] | None = None
+        self._session_provider_api_keys: dict[str, str] = {}
+        self._provider_verification: dict[str, Any] = {
+            "status": "not_tested",
+            "provider": None,
+            "model": None,
+            "base_url": None,
+            "saved": False,
+        }
+        self._local_execution_readiness: dict[str, Any] | None = None
+        if restore_saved_provider:
+            self._restore_saved_provider_adapter()
 
     def read_workspace(self) -> dict[str, Any]:
         """Return sanitized workspace identity and storage state."""
@@ -200,17 +216,21 @@ class WorkflowConsoleBackend:
         config = _read_json_if_present(self._resolve_workspace_path(WORKSPACE_CONFIG_NAME)) or {}
         provider = _safe_summary_text(config.get("provider")) or "local/mock"
         model = _safe_summary_text(config.get("model"))
+        base_url = _safe_optional_workspace_text(config.get("base_url"), "base_url", limit=500)
         timeout_seconds = config.get("timeout_seconds") if isinstance(config.get("timeout_seconds"), int) else None
         max_retries = config.get("max_retries") if isinstance(config.get("max_retries"), int) else None
+        provider_verification = _safe_provider_verification(config.get("provider_verification"))
         advancement_mode = config.get("advancement_mode")
         if advancement_mode not in WORKSPACE_ADVANCEMENT_MODES:
             advancement_mode = DEFAULT_WORKSPACE_ADVANCEMENT_MODE
         return {
             "provider": provider,
             "model": model,
+            "base_url": base_url,
             "timeout_seconds": timeout_seconds,
             "max_retries": max_retries,
             "advancement_mode": advancement_mode,
+            "provider_verification": provider_verification,
         }
 
     def write_workspace_config(self, config: dict[str, Any], *, merge: bool = False) -> dict[str, Any]:
@@ -222,8 +242,10 @@ class WorkflowConsoleBackend:
         next_config = {**current, **config}
         provider = _safe_workspace_text(next_config.get("provider") or "local/mock", "provider", limit=80)
         model = _safe_optional_workspace_text(next_config.get("model"), "model", limit=120)
+        base_url = _safe_optional_workspace_text(next_config.get("base_url"), "base_url", limit=500)
         timeout_seconds = _optional_positive_int(next_config.get("timeout_seconds"), "timeout_seconds")
         max_retries = _optional_nonnegative_int(next_config.get("max_retries"), "max_retries")
+        provider_verification = _safe_provider_verification(next_config.get("provider_verification"))
         advancement_mode = next_config.get("advancement_mode") or DEFAULT_WORKSPACE_ADVANCEMENT_MODE
         if advancement_mode not in WORKSPACE_ADVANCEMENT_MODES:
             raise ValueError(f"unsupported workspace advancement mode: {advancement_mode}")
@@ -231,15 +253,23 @@ class WorkflowConsoleBackend:
             "schema_version": WORKSPACE_SCHEMA_VERSION,
             "provider": provider,
             "model": model,
+            "base_url": base_url,
             "timeout_seconds": timeout_seconds,
             "max_retries": max_retries,
             "advancement_mode": advancement_mode,
+            "provider_verification": provider_verification,
             "updated_at": _now_timestamp(),
         }
         self.workspace_root.mkdir(parents=True, exist_ok=True)
         _write_json(self._resolve_workspace_path(WORKSPACE_CONFIG_NAME), value)
         if provider:
-            self.configure_provider(provider, model=model, timeout_seconds=timeout_seconds, max_retries=max_retries)
+            self.configure_provider(
+                provider,
+                model=model,
+                base_url=base_url,
+                timeout_seconds=timeout_seconds,
+                max_retries=max_retries,
+            )
         return {"config": self.read_workspace_config()}
 
     def read_provider_config(self) -> dict[str, Any]:
@@ -248,42 +278,78 @@ class WorkflowConsoleBackend:
             "provider_identity": _compact_adapter_identity(
                 dict(getattr(self.stage_runner.agent_adapter, "provider_identity", {}) or {})
             ),
+            "verification": self.read_provider_readiness(),
         }
 
     def configure_provider(
         self,
         provider: str,
         model: str | None = None,
+        base_url: str | None = None,
         timeout_seconds: int | None = None,
         max_retries: int | None = None,
     ) -> dict[str, Any]:
         """Switch the in-process console adapter without accepting secrets."""
         _validate_provider_config_inputs(provider, model, timeout_seconds, max_retries)
+        _validate_provider_base_url(base_url)
         normalized = provider.lower().strip()
         if normalized in {"local", "local/mock", "mock", "deterministic"}:
             self.stage_runner.agent_adapter = DeterministicAgentAdapter()
         elif normalized in {"deepseek", "openai", "oai"}:
-            self.stage_runner.agent_adapter = self._provider_adapter_factory(
+            self.stage_runner.agent_adapter = self._make_provider_adapter(
                 normalized,
                 model=model,
+                base_url=base_url,
                 timeout_seconds=timeout_seconds,
                 max_retries=max_retries,
+                api_key=self._session_provider_api_keys.get(normalized),
             )
         else:
             raise ValueError(f"unsupported workflow console provider: {provider}")
         return self.read_provider_config()
 
-    def test_provider_connection(self) -> dict[str, Any]:
-        """Run a minimal provider check without writing workflow artifacts."""
-        adapter = self.stage_runner.agent_adapter
+    def test_provider_connection(
+        self,
+        provider: str | None = None,
+        *,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout_seconds: int | None = None,
+        max_retries: int | None = None,
+        api_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Verify the current unsaved provider draft without persisting it."""
+        if api_key is not None and (not isinstance(api_key, str) or not api_key.strip()):
+            api_key = None
+        if provider is None:
+            adapter = self.stage_runner.agent_adapter
+        else:
+            _validate_provider_config_inputs(provider, model, timeout_seconds, max_retries)
+            _validate_provider_base_url(base_url)
+            normalized = provider.lower().strip()
+            if normalized in {"local", "local/mock", "mock", "deterministic"}:
+                adapter = DeterministicAgentAdapter()
+            elif normalized in {"deepseek", "openai", "oai"}:
+                adapter = self._make_provider_adapter(
+                    normalized,
+                    model=model,
+                    base_url=base_url,
+                    timeout_seconds=timeout_seconds,
+                    max_retries=max_retries,
+                    api_key=api_key or self._session_provider_api_keys.get(normalized),
+                )
+            else:
+                raise ValueError(f"unsupported workflow console provider: {provider}")
         identity = _compact_adapter_identity(dict(getattr(adapter, "provider_identity", {}) or {}))
         provider = identity.get("provider") or "local/mock"
         if provider == "local/mock":
-            return {
+            result = {
                 "status": "ok",
                 "provider_identity": identity,
                 "operation": "local_provider_check",
             }
+            self._record_provider_verification(result, base_url=base_url, saved=False)
+            return result
         try:
             requirement = adapter.parse_requirement(
                 "Make a spacer washer with OD 12 mm, ID 6 mm, thickness 4 mm.",
@@ -293,20 +359,24 @@ class WorkflowConsoleBackend:
                 },
             )
         except JsonContractProviderError as exc:
-            return {
+            result = {
                 "status": "failed",
                 "provider_identity": identity,
                 "operation": "parse_requirement",
                 "error": exc.to_dict(),
             }
+            self._record_provider_verification(result, base_url=base_url, saved=False)
+            return result
         except Exception:
-            return {
+            result = {
                 "status": "failed",
                 "provider_identity": identity,
                 "operation": "parse_requirement",
                 "error": {"type": "provider_connection_error", "category": "client_error", "retryable": False},
             }
-        return {
+            self._record_provider_verification(result, base_url=base_url, saved=False)
+            return result
+        result = {
             "status": "ok",
             "provider_identity": identity,
             "operation": "parse_requirement",
@@ -317,6 +387,183 @@ class WorkflowConsoleBackend:
                 else [],
             },
         }
+        self._record_provider_verification(result, base_url=base_url, saved=False)
+        return result
+
+    def save_and_verify_provider(
+        self,
+        provider: str,
+        *,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout_seconds: int | None = None,
+        max_retries: int | None = None,
+        api_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Verify a draft, then persist only non-secret settings on success."""
+        verified = self.test_provider_connection(
+            provider,
+            model=model,
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
+            api_key=api_key,
+        )
+        if verified.get("status") != "ok":
+            return {"status": "failed", "verification": verified, "saved": False}
+        normalized = provider.lower().strip()
+        if api_key and normalized in {"deepseek", "openai", "oai"}:
+            self._session_provider_api_keys[normalized] = api_key.strip()
+        safe_config: dict[str, Any] = {
+            "provider": provider,
+            "model": model,
+            "base_url": base_url,
+            "timeout_seconds": timeout_seconds,
+            "max_retries": max_retries,
+            "provider_verification": {
+                "status": "connected",
+                "provider": normalized,
+                "model": model or verified.get("provider_identity", {}).get("model"),
+                "base_url": base_url,
+                "verified_at": _now_timestamp(),
+            },
+        }
+        config = self.write_workspace_config(safe_config, merge=True)["config"]
+        self._provider_verification.update({
+            "status": "connected",
+            "provider": _compact_adapter_identity(
+                dict(getattr(self.stage_runner.agent_adapter, "provider_identity", {}) or {})
+            ).get("provider"),
+            "model": config.get("model") or verified.get("provider_identity", {}).get("model"),
+            "base_url": config.get("base_url"),
+            "saved": True,
+            "verified_at": _now_timestamp(),
+        })
+        return {
+            "status": "ok",
+            "saved": True,
+            "verification": verified,
+            "config": config,
+            "provider_identity": _compact_adapter_identity(
+                dict(getattr(self.stage_runner.agent_adapter, "provider_identity", {}) or {})
+            ),
+            "credential_storage": "process_memory_or_environment",
+        }
+
+    def read_provider_readiness(self) -> dict[str, Any]:
+        """Return connection evidence without exposing credential source names."""
+        config = self.read_workspace_config()
+        provider = str(config.get("provider") or "local/mock").lower().strip()
+        is_external = provider in {"deepseek", "openai", "oai"}
+        model = config.get("model")
+        saved_verification = _safe_provider_verification(config.get("provider_verification"))
+        verification = (
+            dict(self._provider_verification)
+            if self._provider_verification.get("saved") is True
+            else {**saved_verification, "saved": bool(saved_verification)}
+        )
+        matches_saved = bool(
+            verification.get("status") == "connected"
+            and verification.get("saved") is True
+            and verification.get("provider") == provider
+            and verification.get("model") == model
+            and verification.get("base_url") == config.get("base_url")
+        )
+        credential_available = provider in {"local", "local/mock", "mock", "deterministic"} or bool(
+            self._session_provider_api_keys.get(provider)
+            or os.environ.get("DEEPSEEK_API_KEY" if provider == "deepseek" else "OPENAI_API_KEY" if provider in {"openai", "oai"} else "")
+        )
+        if not is_external:
+            status = "needs_setup"
+        elif not credential_available:
+            status = "needs_setup"
+        elif matches_saved:
+            status = "ready"
+        elif verification.get("status") == "failed":
+            status = "error"
+        elif verification.get("status") == "connected":
+            status = "changed_since_test"
+        else:
+            status = "needs_verification"
+        return {
+            "status": status,
+            "ready": status == "ready" and is_external,
+            "provider": provider,
+            "model": model or (DEFAULT_DEEPSEEK_MODEL if provider == "deepseek" else None),
+            "credential_available": credential_available,
+            "last_test_status": verification.get("status"),
+            "last_error_category": verification.get("error_category"),
+            "verified_at": verification.get("verified_at"),
+            "secret_persisted": False,
+        }
+
+    def read_local_execution_readiness(self, *, refresh: bool = False) -> dict[str, Any]:
+        """Project the real model-program sandbox capability for normal UI."""
+        if self._local_execution_readiness is None or refresh:
+            from ai_native_cad.agents.tool_broker import CadFlowToolBroker, MODEL_PROGRAM_TOOL
+
+            capability = CadFlowToolBroker().capability(MODEL_PROGRAM_TOOL)["capability"]
+            self._local_execution_readiness = {
+                "status": "ready" if capability.get("available") is True else "unavailable",
+                "ready": capability.get("available") is True,
+                "runtime": "CadQuery",
+                "isolated_execution": "verified" if capability.get("available") is True else "unavailable",
+                "reason_codes": list(capability.get("reason_codes") or []),
+                "technical_details_available": True,
+            }
+        return dict(self._local_execution_readiness)
+
+    def read_product_readiness(self) -> dict[str, Any]:
+        return {
+            "provider": self.read_provider_readiness(),
+            "local_execution": self.read_local_execution_readiness(),
+        }
+
+    def _record_provider_verification(
+        self,
+        result: dict[str, Any],
+        *,
+        base_url: str | None,
+        saved: bool,
+    ) -> None:
+        identity = result.get("provider_identity") if isinstance(result.get("provider_identity"), dict) else {}
+        error = result.get("error") if isinstance(result.get("error"), dict) else {}
+        self._provider_verification = {
+            "status": "connected" if result.get("status") == "ok" else "failed",
+            "provider": identity.get("provider"),
+            "model": identity.get("model"),
+            "base_url": base_url,
+            "saved": saved,
+            "error_category": error.get("category"),
+            "verified_at": _now_timestamp(),
+        }
+
+    def _restore_saved_provider_adapter(self) -> None:
+        """Restore safe adapter settings; credentials still come from memory/env."""
+        config_path = self._resolve_workspace_path(WORKSPACE_CONFIG_NAME)
+        if not config_path.exists():
+            return
+        try:
+            config = self.read_workspace_config()
+            self.configure_provider(
+                str(config.get("provider") or "local/mock"),
+                model=config.get("model"),
+                base_url=config.get("base_url"),
+                timeout_seconds=config.get("timeout_seconds"),
+                max_retries=config.get("max_retries"),
+            )
+        except (TypeError, ValueError):
+            self.stage_runner.agent_adapter = DeterministicAgentAdapter()
+
+    def _make_provider_adapter(self, provider: str, **kwargs: Any) -> Any:
+        """Call injected legacy factories without forcing new secret parameters."""
+        signature = inspect.signature(self._provider_adapter_factory)
+        accepted = {
+            key: value
+            for key, value in kwargs.items()
+            if key in signature.parameters and value is not None
+        }
+        return self._provider_adapter_factory(provider, **accepted)
 
     def list_runs(
         self,
@@ -388,6 +635,88 @@ class WorkflowConsoleBackend:
         )
         self.invalidate_work_index()
         return result
+
+    def start_live_product_example(self) -> dict[str, Any]:
+        """Create a new beginning-state Work for the real configured Agent."""
+        objective = (
+            "Create a compact single-piece mounting bracket for a micro servo. "
+            "It should mount to a flat panel with four screws, support the servo "
+            "between two upright ears, and leave cable clearance. Choose sensible "
+            "prototype dimensions. This is an exploration model, not a strength-"
+            "validated release part."
+        )
+        if not self.read_workspace().get("present"):
+            self.create_workspace()
+        for index in range(1, 10_000):
+            work_id = "live_product_example" if index == 1 else f"live_product_example_{index}"
+            try:
+                created = self.create_work(
+                    "Compact Micro Servo Bracket",
+                    description=objective,
+                    work_id=work_id,
+                    metadata={
+                        "example_classification": "live_agent_example",
+                        "example_label": "Live Agent · Experimental",
+                        "provider_route": "configured_external_provider",
+                    },
+                )
+            except FileExistsError:
+                continue
+            break
+        else:
+            raise FileExistsError("live Product Example id space is exhausted")
+        attempt = self._work_orchestrator().create_part_attempt(
+            work_id,
+            "servo_mounting_bracket",
+            prompt=objective,
+            role="Single-piece micro-servo mounting bracket",
+            source="live_product_example",
+        )
+        self.invalidate_work_index()
+        manifest = self._read_work_manifest(work_id)
+        if manifest.get("artifact_references") or manifest.get("accepted_part_results"):
+            raise RuntimeError("live Product Example must start without generated or accepted evidence")
+        return {
+            "work_id": work_id,
+            "part_job_id": "servo_mounting_bracket",
+            "attempt_run_id": attempt["part_job"]["active_attempt_run_id"],
+            "state": "ready_to_design",
+            "provider_requirement": self.read_provider_readiness(),
+            "preloaded_design": False,
+            "preloaded_geometry": False,
+            "reviewable": False,
+            "accepted": False,
+        }
+
+    def create_product_design(
+        self,
+        request: str,
+        *,
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        """Create one normal single-Part Job Work from the user's request."""
+        prompt = _safe_prompt_text(request)
+        normalized_title = _safe_summary_text(title) or _generated_work_title(prompt)
+        created = self.create_work(
+            normalized_title,
+            description=prompt,
+            metadata={"product_entry": "new_design"},
+        )
+        work_id = created["work"]["work_id"]
+        attempt = self._work_orchestrator().create_part_attempt(
+            work_id,
+            "primary_part",
+            prompt=prompt,
+            role="Primary design part",
+            source="new_design",
+        )
+        self.invalidate_work_index()
+        return {
+            "work_id": work_id,
+            "part_job_id": "primary_part",
+            "attempt_run_id": attempt["part_job"]["active_attempt_run_id"],
+            "state": "ready_to_design",
+        }
 
     def get_golden_example_summary(self, work_id: str) -> dict[str, Any] | None:
         """Return the path-free product view for an executable golden Work."""
@@ -484,6 +813,46 @@ class WorkflowConsoleBackend:
             request_id=request_id,
             attempt_run_id=attempt_run_id,
             objective=_safe_prompt_text(objective) if objective is not None else None,
+        )
+
+    def answer_work_part_design_question(
+        self,
+        work_id: str,
+        part_job_id: str,
+        *,
+        run_id: str,
+        answer_id: str,
+        question_artifact_id: str,
+        field: str,
+        question: str,
+        answer: str,
+    ) -> dict[str, Any]:
+        """Persist one focused Agent answer through the Work orchestrator."""
+        for value in (work_id, part_job_id, run_id, answer_id):
+            self._require_safe_run_id(value)
+        safe_field = _safe_workspace_text(field, "clarification field", limit=120)
+        safe_question = _safe_workspace_text(question, "clarification question", limit=1000)
+        safe_answer = _safe_workspace_text(answer, "clarification answer", limit=4000)
+        _reject_secret_fields({"field": safe_field, "question": safe_question, "answer": safe_answer})
+        payload = self.read_work_artifact_reference(work_id, question_artifact_id)
+        content = payload.get("content") if isinstance(payload, dict) else {}
+        questions = content.get("questions") if isinstance(content, dict) else []
+        if not any(
+            isinstance(item, dict)
+            and item.get("field") == safe_field
+            and item.get("question") == safe_question
+            for item in questions
+        ):
+            raise ValueError("clarification answer does not match the persisted Agent question")
+        return self._work_orchestrator().answer_part_design_question(
+            work_id,
+            part_job_id,
+            run_id=run_id,
+            answer_id=answer_id,
+            question_artifact_id=question_artifact_id,
+            field=safe_field,
+            question=safe_question,
+            answer=safe_answer,
         )
 
     def accept_work_reviewable_result(
@@ -933,6 +1302,7 @@ class WorkflowConsoleBackend:
             raise ValueError(f"unsupported workflow console gate decision action: {action}")
         if payload is not None and not isinstance(payload, dict):
             raise ValueError("workflow console gate decision payload must be a dictionary")
+        _reject_secret_fields({"reason": reason, "payload": payload})
 
         run_path = self._require_console_path(Path(run_dir))
         runtime_path = self._require_child_path(run_path, "logs/runtime.json")
@@ -1689,7 +2059,15 @@ def _reject_secret_config(config: dict[str, Any]) -> None:
         lowered_key = str(key).lower()
         if any(marker in lowered_key for marker in blocked):
             raise ValueError("workflow console workspace config must not include secrets")
-        if isinstance(value, str):
+        if isinstance(value, dict):
+            _reject_secret_config(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    _reject_secret_config(item)
+                elif isinstance(item, str):
+                    _reject_secret_config({"value": item})
+        elif isinstance(value, str):
             lowered_value = value.lower()
             if any(marker in lowered_value for marker in ("api_key", "apikey", "bearer ", "secret", "password")):
                 raise ValueError("workflow console workspace config must not include secrets")
@@ -1721,6 +2099,26 @@ def _safe_optional_workspace_text(value: Any, label: str, *, limit: int) -> str 
         return None
     _reject_secret_config({label: text})
     return text[:limit]
+
+
+def _safe_provider_verification(value: Any) -> dict[str, Any]:
+    """Return only non-secret, connection-evidence fields from persisted config."""
+    if not isinstance(value, dict) or value.get("status") != "connected":
+        return {}
+    _reject_secret_config(value)
+    provider = _safe_optional_workspace_text(value.get("provider"), "provider", limit=80)
+    if provider is None:
+        return {}
+    model = _safe_optional_workspace_text(value.get("model"), "model", limit=120)
+    base_url = _safe_optional_workspace_text(value.get("base_url"), "base_url", limit=500)
+    verified_at = _safe_optional_workspace_text(value.get("verified_at"), "verified_at", limit=80)
+    return {
+        "status": "connected",
+        "provider": provider.lower(),
+        "model": model,
+        "base_url": base_url,
+        "verified_at": verified_at,
+    }
 
 
 def _optional_positive_int(value: Any, label: str) -> int | None:
@@ -2502,6 +2900,26 @@ def _validate_provider_config_inputs(
         raise ValueError("workflow console provider timeout_seconds must be between 1 and 300")
     if max_retries is not None and (not isinstance(max_retries, int) or not 0 <= max_retries <= 5):
         raise ValueError("workflow console provider max_retries must be between 0 and 5")
+
+
+def _validate_provider_base_url(value: str | None) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("workflow console provider base_url must be a non-empty string when set")
+    normalized = value.strip()
+    if not normalized.startswith("https://") or any(character.isspace() for character in normalized):
+        raise ValueError("workflow console provider base_url must be an HTTPS URL")
+    if _contains_secret_marker(normalized):
+        raise ValueError("workflow console provider base_url must not include secrets")
+
+
+def _generated_work_title(prompt: str) -> str:
+    compact = " ".join(prompt.split())
+    if not compact:
+        return "New Design"
+    title = compact[:72].rstrip(" ,.;:-")
+    return title + ("…" if len(compact) > len(title) else "")
 
 
 def _contains_secret_marker(value: str) -> bool:

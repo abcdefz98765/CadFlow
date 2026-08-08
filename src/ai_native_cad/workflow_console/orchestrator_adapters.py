@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -274,6 +275,52 @@ class WorkflowConsoleAgentDesign:
         )
         return outcome
 
+    def record_part_design_answer(
+        self,
+        *,
+        work_id: str,
+        run_id: str,
+        part_job_id: str,
+        answer_id: str,
+        question_artifact_id: str,
+        field: str,
+        question: str,
+        answer: str,
+    ) -> DesignEpisodeArtifact:
+        run_path = self.backend.resolve_run(
+            run_id,
+            root=self.backend._work_runs_root(work_id),
+        )
+        relative_path = f"clarifications/{answer_id}.json"
+        destination = self.backend._require_child_path(run_path, relative_path)
+        if destination.exists():
+            raise FileExistsError("design clarification answer already exists")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(
+            destination,
+            {
+                "schema_version": 1,
+                "checkpoint": "clarification_decision",
+                "work_id": work_id,
+                "run_id": run_id,
+                "part_job_id": part_job_id,
+                "question_artifact_id": question_artifact_id,
+                "field": field,
+                "question": question,
+                "answer": answer,
+                "source": "user",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        return DesignEpisodeArtifact(
+            artifact_id=f"clarification:{answer_id}",
+            relative_path=relative_path,
+            checkpoint="clarification_decision",
+            trust_role="accepted_input",
+            validation_status="provided",
+            source_artifact_ids=(question_artifact_id,),
+        )
+
 
 def _design_handoff(request: DesignPartEpisodeRequest) -> dict[str, Any]:
     interfaces = request.interface_context.get("interfaces")
@@ -418,6 +465,17 @@ def _episode_outcome(
                 (published.result_artifact, published.step_artifact)
             )
     product_completed = result.status == "completed" and publication_error is None
+    if result.stop_reason.value == "user_input_required":
+        question_id = f"episode:{result.episode_id}:user_input_request"
+        artifacts.append(
+            DesignEpisodeArtifact(
+                artifact_id=question_id,
+                relative_path=f"{relative_root}/user_input_request.json",
+                checkpoint="clarification_decision",
+                trust_role="diagnostic",
+                validation_status="user_input_required",
+            )
+        )
     agent_result_id = f"episode:{result.episode_id}:result"
     artifacts.append(
         DesignEpisodeArtifact(

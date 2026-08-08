@@ -506,3 +506,22 @@ A target Workbench slice is usable when:
 - acceptance and revision preserve history;
 - primary actions have verified postconditions;
 - the affected journey passes automated and real-browser checks.
+
+## 25. Onboarding, Settings, and recovery projection
+
+The existing shell presents its compatible `workspace`, `works`, and `config`
+page ids as Home, Works, and Settings. Home prioritizes New Design, Start
+Product Example, real environment readiness, and recent Works; filesystem and
+workspace diagnostics remain under Advanced.
+
+Provider connection is a session draft with explicit Not tested, Testing,
+Connected, Failed, and Changed since last test states. Test uses the current
+unsaved draft. Save & Verify persists only non-secret configuration after a
+successful real check. API keys remain environment-provided or in backend
+process memory.
+
+Every common product stop projects one resolution owner (`user`,
+`configuration`, `cadflow`, `environment`, or `unsupported`), a plain-language
+reason, and one real recovery action. The normal surface never leads with raw
+error enums. Agent-first single-Part Job Works use the four canonical phases;
+legacy compatibility Run Snapshots retain their detailed checkpoint graph.

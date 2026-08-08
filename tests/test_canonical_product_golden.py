@@ -216,7 +216,7 @@ def test_product_golden_route_uses_shared_service_and_preserves_old_golden(monke
     ).ROUTE_SPECS)
 
 
-def test_product_example_is_primary_and_robot_arm_is_compatibility():
+def test_live_product_example_is_primary_and_completed_golden_remains_secondary():
     source = __import__(
         "ai_native_cad.workflow_console.nicegui_app",
         fromlist=["placeholder"],
@@ -224,8 +224,8 @@ def test_product_example_is_primary_and_robot_arm_is_compatibility():
     examples_index = Path("examples/README.md").read_text(encoding="utf-8")
     robot_readme = Path("examples/golden_desktop_robot_arm/README.md").read_text(encoding="utf-8")
 
-    assert source.index('border border-blue-200 bg-blue-50') < source.index(
-        'i18n_copy(language, "compatibility_examples")'
+    assert source.index('"Start Product Example"') < source.index(
+        'i18n_copy(language, "open_product_example")'
     )
     assert i18n_copy("en", "compatibility_examples") == "Compatibility examples"
     assert "PRODUCT GOLDEN" in examples_index
