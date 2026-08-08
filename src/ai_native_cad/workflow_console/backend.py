@@ -510,6 +510,66 @@ class WorkflowConsoleBackend:
             run_id=run_id,
         )
 
+    def resolve_work_artifact_reference(
+        self,
+        work_id: str,
+        artifact_id: str,
+    ) -> tuple[dict[str, Any], Path]:
+        """Resolve one exact manifest-owned artifact without accepting a path.
+
+        This extends the console's existing controlled artifact boundary to
+        first-class Work artifact references.  Browser callers supply stable
+        domain ids only; the persisted relative path remains server-side.
+        """
+
+        self._require_safe_run_id(work_id)
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise ValueError("workflow console artifact id is required")
+        work = self._read_work_manifest(work_id)
+        matches = [
+            item
+            for item in work.get("artifact_references", [])
+            if isinstance(item, dict) and item.get("artifact_id") == artifact_id
+        ]
+        if len(matches) != 1:
+            raise FileNotFoundError(
+                f"workflow console Work artifact does not exist: {artifact_id}"
+            )
+        reference = matches[0]
+        run_id = reference.get("run_id")
+        relative_path = reference.get("relative_path")
+        if not isinstance(run_id, str) or not isinstance(relative_path, str):
+            raise ValueError("workflow console Work artifact reference is invalid")
+        run_path = self.resolve_run(run_id, root=self._work_runs_root(work_id))
+        artifact_path = self._require_child_path(run_path, relative_path)
+        if not artifact_path.is_file() or artifact_path.is_symlink():
+            raise FileNotFoundError(
+                f"workflow console Work artifact file is missing: {artifact_id}"
+            )
+        return reference, artifact_path
+
+    def read_work_artifact_reference(
+        self,
+        work_id: str,
+        artifact_id: str,
+    ) -> dict[str, Any]:
+        """Read one registered JSON evidence record for a Work projection."""
+
+        reference, artifact_path = self.resolve_work_artifact_reference(
+            work_id,
+            artifact_id,
+        )
+        if artifact_path.suffix.lower() != ".json":
+            raise ValueError("workflow console Work artifact is not JSON evidence")
+        try:
+            value = json.loads(artifact_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            raise ValueError("workflow console Work artifact evidence is unreadable") from None
+        return {
+            "reference": dict(reference),
+            "content": _sanitize_public_artifact_content(value),
+        }
+
     def get_work_summary(self, work_id: str) -> dict[str, Any]:
         """Return one inferred Work summary."""
         from ai_native_cad.workflow_console.work_index import get_work_summary_from_index

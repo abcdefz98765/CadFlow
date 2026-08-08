@@ -511,19 +511,25 @@ The Console presents workflow summaries and final STEP, STL, and preview
 deliverables. Raw JSON, agent traces, runtime logs, and generated scripts stay
 in the local run directory for developer inspection.
 
-For the NiceGUI cockpit:
+For the NiceGUI Workbench:
 
 ```powershell
 .\scripts\start_nicegui_console.ps1
 ```
 
-The console is a workflow cockpit, not just an artifact browser. The Workflow
-page leads with a Workflow Graph for Requirement, Clarification, Planning,
-Assembly Plan, reviewed-part handoff, CAD IR draft, part result review,
-workflow review, and rework. Selecting a graph node opens that stage's detail:
-human summary, current status, key decisions, user actions, important artifacts,
-and collapsed Advanced / Debug sections. The full stage list, raw workflow
-graph, raw diagnostics, and raw allowlisted artifacts are secondary surfaces.
+Select a Work to open **Overview / Design**, the primary Agent-first surface.
+It shows the objective, compact four-phase orientation, current recommendation,
+Agent activity, geometry, reviewable or accepted result, validation and
+limitations, primary action, and Part Job summary. The four phases are not a
+wizard. **Workflow**, **Parts**, and **History** remain reachable as detailed
+secondary views, and Historical Run Snapshot remains read-only.
+
+The existing Workflow page still provides the detailed graph for Requirement,
+Clarification, Planning, Assembly Plan, reviewed-part handoff, CAD IR draft,
+part result review, workflow review, and rework. Selecting a node opens the
+existing stage detail and controlled artifact viewer. Raw ids, paths, Episode
+evidence, Broker/WSL2/toolchain/attestation data, hashes, and validator details
+are collapsed under Advanced/Evidence.
 
 The page now leads with a Work hero, active lineage Run strip, one recommended
 action, and a horizontally scrollable dot workflow graph. The selected stage is
@@ -540,12 +546,29 @@ output until the user explicitly approves it. Only the Run referenced by
 candidate execution preserves report and trace evidence but does not publish
 `model.py`, STEP, STL, or preview files in the Run product location.
 
-For local visual acceptance, create the Golden Full and Contract examples from
-Workspace, select each Work's Workflow page, then inspect desktop (1440/1024)
-and mobile (390–430) widths. Confirm labels, connector topology, selected
-outline versus status color, candidate/reference distinction, and Current Work
-versus read-only Snapshot context. Browser automation may not be able to reach
-the desktop loopback server; in that case use this checklist in a local browser.
+Registered reviewable model-program output contains STEP only. For visual
+inspection, the Workbench resolves the exact manifest-owned, validated STEP by
+Work and artifact id, creates an ephemeral STL in the system temporary
+directory, and displays it through the existing STL viewer. That temporary mesh
+is deleted after the response and is never registered as evidence, accepted as
+a result, or treated as a deliverable.
+
+The corresponding local-only NiceGUI routes are:
+
+- `GET /api/work-artifacts/{work_id}/{artifact_id}/download` for an exact
+  registered reviewable or accepted artifact;
+- `GET /api/work-artifacts/{work_id}/{artifact_id}/preview.stl` for the
+  ephemeral viewer mesh of a registered, validated reviewable or accepted STEP.
+
+Neither route accepts a filesystem path. Existing deterministic downloads and
+STL preview continue to use `GET /api/downloads/{run_id}/{filename}`.
+
+For local visual acceptance, open deterministic and scripted-provider Works in
+Overview / Design, then inspect desktop (1440/1024) and mobile (390–430) widths.
+Confirm objective, capability label, phase orientation, geometry, Agent
+activity, reviewable versus accepted state, Accept, natural-language Revise,
+Part Jobs, collapsed Advanced/Evidence, detailed Workflow, and Current Work
+versus read-only Snapshot context.
 
 Workflow has two explicit contexts. **Current Work** shows the Work manifest's
 active aggregated lineage and allows workflow actions against the action's

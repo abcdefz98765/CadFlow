@@ -779,22 +779,37 @@ def _build_parts(work: dict[str, Any]) -> list[dict[str, Any]]:
     for job in manifest_jobs:
         if not isinstance(job, dict) or job.get("part_id") in existing_ids:
             continue
-        run_id = job.get("run_id")
+        part_id = job.get("part_job_id") or job.get("part_id")
+        attempts = [
+            item for item in job.get("attempts", []) if isinstance(item, dict)
+        ]
+        run_id = job.get("active_attempt_run_id") or (
+            attempts[-1].get("run_id") if attempts else None
+        )
         run = work["runs_by_id"].get(run_id) if isinstance(run_id, str) else None
-        status = job.get("status") or ("incomplete" if run_id else "planned")
+        accepted_result = _dict(
+            _dict(work.get("entity_state"))
+            .get("accepted_part_results", {})
+            .get(part_id)
+        )
+        status = (
+            "accepted"
+            if accepted_result.get("status") == "approved"
+            else job.get("status") or ("incomplete" if run_id else "planned")
+        )
         rows.append({
-            "part_id": job.get("part_id"),
+            "part_id": part_id,
             "role": job.get("role"),
             "status": status,
             "current_stage": "part_run" if run_id else "planned",
             "latest_run_id": run_id,
-            "download_run_id": _part_download_run_id(job.get("part_id"), work["runs_by_id"]),
-            "attempt_count": 1 if run_id else 0,
+            "download_run_id": run_id if run and any(_has_download(run, name) for name in DOWNLOADABLE_FILES) else _part_download_run_id(part_id, work["runs_by_id"]),
+            "attempt_count": len(attempts),
             "has_step": bool(run and _has_download(run, "model.step")),
             "has_stl": bool(run and _has_download(run, "model.stl")),
             "has_preview": bool(run and _has_download(run, "preview.png")),
-            "review_status": None,
-            "next_action": "Open part run" if run_id else "Create part run",
+            "review_status": accepted_result.get("status"),
+            "next_action": _part_next_action(status),
         })
     if rows:
         return rows

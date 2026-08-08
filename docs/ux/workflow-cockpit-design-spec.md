@@ -2,8 +2,17 @@
 
 Status: target UX specification.
 
-The filename is retained temporarily for link compatibility. The former fixed
-Workflow Cockpit is now a legacy/diagnostic surface.
+The filename is retained for link compatibility. The former fixed checkpoint
+sequence is no longer the primary product journey.
+
+The existing Workflow Cockpit implementation remains a reusable product
+surface. Its shell, navigation, workflow graph, Parts, History, Run Snapshot,
+review, artifact viewer, action feedback, i18n, and responsive components
+should be evolved and reused where they remain useful.
+
+The detailed checkpoint graph may remain available as a secondary Workflow
+view for users who want process detail, history, or diagnostics. A change in
+product orientation is not a reason to reimplement mature interactions.
 
 ## 1. Product experience
 
@@ -23,21 +32,24 @@ The main page should answer:
 
 A selected Work has:
 
-- **Design** — conversation, Agent activity, current candidate, preview, and
-  recommended action;
+- **Overview / Design** — the evolved existing Work Overview, with objective,
+  Agent activity, current candidate, preview, validation, and recommended
+  action;
+- **Workflow** — the existing detailed checkpoint graph, stage progress,
+  review, stale state, and process history;
 - **Parts** — Part Jobs, attempts, interfaces, and accepted results;
-- **Assembly** — Assembly Job, accepted inputs, constraints, result, and
-  limitations;
-- **Deliverables** — accepted-result-derived STEP, assembly, BOM, drawings, and
-  reports;
-- **History** — immutable Runs, comparisons, and Run Snapshots;
-- **Diagnostics** — legacy Workflow graph, raw artifacts, episode events, and
-  low-level evidence.
+- **History** — immutable Runs, comparisons, and Run Snapshots.
 
-Pages without implemented capability show an honest target-state explanation,
-not enabled placeholder actions.
+Advanced/Evidence on those existing surfaces contains raw artifacts, Episode
+events, and low-level evidence. Assembly and Deliverables become primary
+navigation only after their underlying product capabilities exist; the current
+Workbench must not add empty pages for them.
 
-## 3. Design page
+## 3. Overview / Design page
+
+The existing Work Overview is the primary implementation surface. It is
+refactored in place rather than replaced by a parallel Workbench page or state
+model.
 
 Desktop order:
 
@@ -390,19 +402,26 @@ Bad:
 - route not supported;
 - blank graph.
 
-## 21. Legacy Workflow Cockpit
+## 21. Existing Workflow Cockpit reuse
 
-The current NiceGUI Workflow graph remains temporarily available under
-Diagnostics.
+The current NiceGUI shell and Workflow graph remain supported product assets.
+The graph is reachable as the secondary **Workflow** view; users can inspect
+checkpoint detail, stage review, stale state, history, and diagnostics without
+being forced to complete every node as the primary journey.
 
 It may receive:
 
 - safety fixes;
 - migration adapters;
-- regression maintenance.
+- regression maintenance;
+- new domain projections needed by the primary Overview, Parts, History, or
+  Run Snapshot surfaces;
+- focused evolution that reuses its established interaction components.
 
-It should not receive new product phases, review cards, or primary navigation
-importance.
+It should not turn the four canonical phases into a wizard or restore the fixed
+checkpoint sequence as mandatory primary navigation. Existing review cards,
+artifact viewing, action feedback, i18n, and responsive behavior should be
+reused rather than rebuilt.
 
 ## 22. View-model target
 
@@ -427,7 +446,9 @@ importance.
 ```
 
 The view model consumes explicit domain state and artifact references. It does
-not recursively infer trusted state from filenames.
+not recursively infer trusted state from filenames. This target extends the
+existing Work and Workflow projections; it is not a parallel browser-owned UI
+state model.
 
 ## 23. Visual acceptance scenarios
 

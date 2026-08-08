@@ -10,8 +10,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import tempfile
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from html import escape as html_escape
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote
@@ -23,6 +26,7 @@ from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, WorkflowC
 from ai_native_cad.workflow_console.review_surface import REVIEW_SURFACE_ARTIFACTS, build_workflow_review_surface
 from ai_native_cad.workflow_console.work_stage_projection import build_work_stage_projection, unavailable_work_stage_projection
 from ai_native_cad.workflow_console.workflow_page_view_model import build_workflow_page_view_model
+from ai_native_cad.workflow_console.workflow_page_view_model import build_workbench_overview_view_model
 from ai_native_cad.workflow_console.routes import dispatch_route
 from ai_native_cad.workflow_console.server import resolve_downloadable
 from ai_native_cad.workflow_console.stage_runner import READABLE_ARTIFACTS
@@ -87,6 +91,10 @@ def _select_console_work(state: dict[str, Any], work_id: str, refresh: Callable[
     state["view_mode"] = "current_work"
     state["selected_node_id"] = None
     state["selected_stage_id"] = None
+    # Action feedback belongs to the Work that produced it.  Keeping it while
+    # switching Works makes a successful accept/revise look as if it happened
+    # on the newly selected Work.
+    state["action_execution"] = None
     state["active_page"] = "overview"
     refresh()
 
@@ -131,7 +139,7 @@ WORKFLOW_UI_CSS = """
   --wf-reference:#64748b; --wf-override:#7c3aed;
 }
 body{background:var(--wf-bg);color:var(--wf-ink)}
-.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.sidebar{background:#fff;border-right:1px solid var(--wf-border);min-height:100vh}.content{min-height:100vh}.nav-btn{justify-content:flex-start;width:100%}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.workbench-shell{display:flex;flex-wrap:nowrap;align-items:flex-start}.sidebar{background:#fff;border-right:1px solid var(--wf-border);min-height:100vh;flex:0 0 320px;width:320px}.content{min-height:100vh;min-width:0}.nav-btn{justify-content:flex-start;width:100%}
 .work-tree-item{border:1px solid transparent;border-radius:var(--wf-radius-sm);padding:var(--wf-space-2) 10px;width:100%;cursor:pointer}.work-tree-item:hover{background:#f8fafc}.work-tree-item-active{background:#eef6ff;border-color:#bfdbfe}.work-page-tree{border-left:2px solid #dbeafe;margin-left:14px;padding-left:10px}.work-page-btn{font-size:12px;min-height:30px;justify-content:flex-start;width:100%}
 .workflow-hero,.workflow-snapshot-banner,.workflow-run-strip-panel,.workflow-stage-detail-v2{background:var(--wf-surface);border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}
 .workflow-action-feedback{border:1px solid var(--wf-border);border-left-width:4px;border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);margin-bottom:var(--wf-space-3)}.workflow-action-feedback.pending{border-left-color:var(--wf-running);background:#eff6ff}.workflow-action-feedback.succeeded{border-left-color:var(--wf-completed);background:#f0fdf4}.workflow-action-feedback.failed{border-left-color:var(--wf-blocked);background:#fef2f2}.workflow-action-feedback.warning{border-left-color:var(--wf-review);background:#fffbeb}
@@ -142,7 +150,8 @@ body{background:var(--wf-bg);color:var(--wf-ink)}
 .workflow-part-candidate{min-width:146px;max-width:180px;border:1px solid var(--wf-border);border-radius:999px;padding:var(--wf-space-2) var(--wf-space-3);background:#fff}.workflow-part-candidate.reference-component{border-radius:var(--wf-radius-sm);border-style:dashed;background:#f8fafc}.workflow-part-selected{border-color:var(--wf-primary);outline:2px solid #bfdbfe;outline-offset:1px}
 .stage-conclusion{border-bottom:1px solid var(--wf-border);padding-bottom:var(--wf-space-3)}.stage-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--wf-space-3)}.stage-detail-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);min-height:156px}.stage-detail-card h3{margin:0 0 var(--wf-space-2);font-size:12px;letter-spacing:.07em;color:var(--wf-muted);font-weight:700}.stage-detail-card.decision{background:#fbfcff}.stage-artifact-list{margin-top:var(--wf-space-2);padding-top:var(--wf-space-2);border-top:1px solid #eef2f7}.workflow-evidence{border-top:1px solid var(--wf-border);padding-top:var(--wf-space-3)}.workflow-disabled-reason{font-size:12px;color:var(--wf-muted)}
 .history-list{display:grid;gap:var(--wf-space-3)}.history-run-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);background:#fff;cursor:pointer}.history-run-card:hover{border-color:#94a3b8}.history-run-grid{display:grid;grid-template-columns:1.2fr repeat(4,minmax(0,1fr));gap:var(--wf-space-3)}.history-field-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--wf-muted)}
-@keyframes wf-pulse{50%{box-shadow:0 0 0 5px #dbeafe}}@media(max-width:1100px){.stage-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr)}}@media(max-width:760px){.sidebar{width:100%;min-height:auto;border-right:0;border-bottom:1px solid var(--wf-border)}.content{min-width:0;padding:var(--wf-space-3)}.workflow-hero,.workflow-snapshot-banner,.workflow-run-strip-panel,.workflow-stage-detail-v2{padding:var(--wf-space-3)}.workflow-graph{padding:var(--wf-space-3)}.workflow-graph-canvas{min-width:1040px}.stage-detail-grid,.history-run-grid{grid-template-columns:1fr}.workflow-lane{margin-left:170px}.workflow-branch-note{margin-left:140px}}
+.workbench-phase{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%;max-width:760px}.workbench-phase-item{border-top:3px solid #cbd5e1;padding-top:6px;color:var(--wf-muted);font-size:12px}.workbench-phase-item.current{border-color:var(--wf-primary);color:#1d4ed8;font-weight:700}.workbench-objective{background:linear-gradient(135deg,#eff6ff,#fff);border:1px solid #bfdbfe;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-recommendation{border-left:4px solid var(--wf-primary);background:#fff;border-radius:var(--wf-radius-sm);padding:var(--wf-space-4)}.workbench-primary-grid{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(420px,1.2fr);gap:var(--wf-space-4);align-items:stretch}.workbench-panel{background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}.workbench-activity{order:1}.workbench-geometry{order:2;min-height:420px}.workbench-viewer{width:100%;height:350px;border:0;border-radius:var(--wf-radius-sm);background:#111827}.workbench-result{border:1px solid #fbbf24;border-left:4px solid #d97706;background:#fffbeb;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-result.accepted{border-color:#4ade80;background:#f0fdf4}.workbench-validation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--wf-space-4)}.workbench-part-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--wf-space-3)}.workbench-part-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-4);background:#fff}.workbench-capability{font-size:12px;font-weight:700;letter-spacing:.03em}.workbench-advanced{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);background:#f8fafc}
+@keyframes wf-pulse{50%{box-shadow:0 0 0 5px #dbeafe}}@media(max-width:1100px){.stage-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-primary-grid{grid-template-columns:minmax(250px,.85fr) minmax(360px,1.15fr)}.workbench-geometry{min-height:380px}.workbench-viewer{height:310px}}@media(max-width:760px){.workbench-shell{flex-direction:column}.sidebar{flex:0 0 auto;width:100%;min-height:auto;border-right:0;border-bottom:1px solid var(--wf-border)}.content{width:100%;min-width:0;padding:var(--wf-space-3)}.workflow-hero,.workflow-snapshot-banner,.workflow-run-strip-panel,.workflow-stage-detail-v2{padding:var(--wf-space-3)}.workflow-graph{padding:var(--wf-space-3)}.workflow-graph-canvas{min-width:1040px}.stage-detail-grid,.history-run-grid{grid-template-columns:1fr}.workflow-lane{margin-left:170px}.workflow-branch-note{margin-left:140px}.workbench-phase{overflow-x:auto;grid-template-columns:repeat(4,minmax(112px,1fr))}.workbench-objective{padding:var(--wf-space-4)}.workbench-primary-grid{grid-template-columns:1fr}.workbench-geometry{order:1;min-height:330px}.workbench-activity{order:2}.workbench-viewer{height:280px}.workbench-validation-grid,.workbench-part-grid{grid-template-columns:1fr}}
 """
 
 ARTIFACT_PAGE_ARTIFACTS = (
@@ -244,7 +253,14 @@ class ActionExecutionState:
 
 
 def _action_identity(action: dict[str, Any]) -> tuple[Any, ...]:
-    return (action.get("key"), action.get("target_work_id"), action.get("target_run_id"), action.get("target_stage_id"), action.get("part_id"))
+    return (
+        action.get("key"),
+        action.get("target_work_id"),
+        action.get("target_run_id"),
+        action.get("target_stage_id"),
+        action.get("part_id") or action.get("part_job_id"),
+        action.get("reviewable_result_id"),
+    )
 
 
 def _pending_action_matches(state: dict[str, Any], action: dict[str, Any]) -> bool:
@@ -269,6 +285,31 @@ def _schedule_action(coroutine: Any) -> Any:
 def _runtime_message(action: dict[str, Any], language: str, phase: str, *, error: str | None = None) -> str:
     part_id = str(action.get("part_id") or "")
     key = str(action.get("key") or action.get("backend_action") or "")
+    product_messages = {
+        "accept_reviewable_result": {
+            "pending": ("Accepting result…", "正在接受结果……"),
+            "success": ("Result accepted", "结果已接受"),
+            "failed": ("Could not accept the result", "未能接受结果"),
+        },
+        "revise_reviewable_result": {
+            "pending": ("Creating a new design attempt…", "正在创建新的设计尝试……"),
+            "success": ("New design attempt created", "已创建新的设计尝试"),
+            "failed": ("Could not create the revision", "未能创建设计修改"),
+        },
+        "continue_agent": {
+            "pending": ("The Agent is designing and checking geometry…", "Agent 正在设计并检查几何……"),
+            "success": ("Agent activity completed", "Agent 设计活动已完成"),
+            "failed": ("Agent activity could not complete", "Agent 设计活动未能完成"),
+        },
+        "start_design": {
+            "pending": ("Starting the design…", "正在开始设计……"),
+            "success": ("Design started", "设计已开始"),
+            "failed": ("Could not start the design", "未能开始设计"),
+        },
+    }
+    if key in product_messages and phase in product_messages[key]:
+        pair = product_messages[key][phase]
+        return pair[1] if language == "zh" else pair[0]
     if phase == "pending" and key == "select_candidate_part":
         return f"正在将后续零件切换为 {part_id}……" if language == "zh" else f"Switching the next part to {part_id}…"
     if phase == "success" and key == "select_candidate_part":
@@ -379,6 +420,15 @@ def build_console_page_data(
             language=language,
         )
     data["view_mode"] = "run_snapshot" if view_mode == "run_snapshot" else "current_work"
+    if selected_work and active_page in {"overview", "workflow", "parts", "history"}:
+        try:
+            data["workbench_overview"] = build_workbench_overview_view_model(
+                backend,
+                selected_work,
+                language=language,
+            )
+        except (FileNotFoundError, ValueError):
+            data["workbench_overview"] = {}
     return data
 
 
@@ -752,6 +802,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
     """Create the NiceGUI UI. Importing NiceGUI is optional until this is called."""
     try:
         from nicegui import app, ui
+        from starlette.background import BackgroundTask
         from starlette.responses import FileResponse
     except ImportError as exc:  # pragma: no cover - exercised only without optional dependency at runtime
         raise RuntimeError("NiceGUI is not installed. Install the web extra, for example: cadflow[web].") from exc
@@ -764,6 +815,40 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
     @app.get("/api/downloads/{run_id}/{filename}")
     def download_file(run_id: str, filename: str, root: str | None = None) -> FileResponse:
         return FileResponse(resolve_downloadable(console_backend, run_id, filename, root=root))
+
+    @app.get("/api/work-artifacts/{work_id}/{artifact_id}/download")
+    def download_work_artifact(work_id: str, artifact_id: str) -> FileResponse:
+        reference, artifact_path = console_backend.resolve_work_artifact_reference(
+            work_id,
+            artifact_id,
+        )
+        if reference.get("trust_role") not in {
+            "reviewable_result",
+            "accepted_result",
+        }:
+            raise ValueError("only reviewable or accepted Work artifacts are downloadable")
+        return FileResponse(artifact_path, filename=artifact_path.name)
+
+    @app.get("/api/work-artifacts/{work_id}/{artifact_id}/preview.stl")
+    def preview_work_step(work_id: str, artifact_id: str) -> FileResponse:
+        reference, step_path = console_backend.resolve_work_artifact_reference(
+            work_id,
+            artifact_id,
+        )
+        if not (
+            reference.get("trust_role") in {"reviewable_result", "accepted_result"}
+            and reference.get("validation_status") == "passed"
+            and step_path.suffix.lower() in {".step", ".stp"}
+        ):
+            raise ValueError("only validated reviewable or accepted STEP can be previewed")
+        preview_path = _step_preview_stl(step_path)
+        return FileResponse(
+            preview_path,
+            media_type="model/stl",
+            background=BackgroundTask(
+                lambda path=preview_path: path.unlink(missing_ok=True)
+            ),
+        )
 
     state: dict[str, Any] = {
         "_backend": console_backend,
@@ -780,7 +865,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
     @ui.page("/")
     def index() -> None:
         ui.add_head_html(f"<style>{WORKFLOW_UI_CSS}</style>")
-        with ui.row().classes("w-full gap-0"):
+        with ui.row().classes("workbench-shell w-full gap-0"):
             sidebar = ui.column().classes("sidebar w-80 gap-3 p-4")
             content = ui.column().classes("content flex-1 gap-4 p-5")
 
@@ -808,7 +893,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
                 with sidebar:
                     _render_sidebar(ui, data, state, select_work, select_page, refresh)
                 with content:
-                    if state.get("active_page") in {"overview", "workflow", "node", "parts", "review", "products", "runs"}:
+                    if state.get("active_page") in {"overview", "workflow", "node", "parts", "review", "products", "runs", "history"}:
                         _render_work_header(ui, data)
                     _render_active_page(ui, data, actions, state, refresh, select_node, select_stage, select_run, select_current_work, select_work, select_page)
 
@@ -843,6 +928,33 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
             refresh()
 
     return app
+
+
+def _step_preview_stl(step_path: Path) -> Path:
+    """Create an ephemeral mesh for the existing STL viewer.
+
+    The source is an exact, locally validated Work artifact.  The mesh is a
+    presentation derivative in the system temporary directory: it is never
+    registered as product evidence or treated as a deliverable.
+    """
+
+    import cadquery as cq
+
+    with tempfile.NamedTemporaryFile(
+        prefix="cadflow-preview-",
+        suffix=".stl",
+        delete=False,
+    ) as handle:
+        preview_path = Path(handle.name)
+    try:
+        model = cq.importers.importStep(str(step_path))
+        cq.exporters.export(model, str(preview_path))
+        if not preview_path.is_file() or preview_path.stat().st_size <= 0:
+            raise ValueError("STEP preview conversion produced no mesh")
+        return preview_path
+    except Exception:
+        preview_path.unlink(missing_ok=True)
+        raise
 
 
 def _render_sidebar(
@@ -910,7 +1022,13 @@ def _render_sidebar_work_item(
         if selected:
             with ui.column().classes("work-page-tree w-full gap-1"):
                 for page, icon, text in WORK_USER_PAGES:
-                    item = ui.button(text, icon=icon, on_click=_page_selection_callback(on_select_page, page))
+                    localized = {
+                        "overview": i18n_copy(str(data.get("language") or "en"), "overview_design"),
+                        "workflow": i18n_copy(str(data.get("language") or "en"), "detailed_workflow"),
+                        "parts": i18n_copy(str(data.get("language") or "en"), "part_jobs"),
+                        "history": i18n_copy(str(data.get("language") or "en"), "history"),
+                    }.get(page, text)
+                    item = ui.button(localized, icon=icon, on_click=_page_selection_callback(on_select_page, page))
                     item.props("flat dense" if state.get("active_page") != page else "unelevated dense color=secondary")
                     item.classes("work-page-btn")
                     item.tooltip(_nav_help(page))
@@ -921,14 +1039,35 @@ def _render_work_header(ui: Any, data: dict[str, Any]) -> None:
     if not summary:
         ui.label("No Work selected").classes("text-2xl font-semibold")
         return
+    language = str(data.get("language") or "en")
+    overview = data.get("workbench_overview") if isinstance(data.get("workbench_overview"), dict) else {}
+    workbench_work = overview.get("work") if isinstance(overview.get("work"), dict) else {}
+    phase = overview.get("phase") if isinstance(overview.get("phase"), dict) else {}
     counts = summary.get("part_counts") if isinstance(summary.get("part_counts"), dict) else {}
-    with ui.row().classes("w-full items-start justify-between"):
+    with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
         with ui.column().classes("gap-1"):
             ui.label(summary.get("title") or summary.get("work_id")).classes("text-2xl font-semibold")
+            if workbench_work.get("active_part"):
+                ui.label(
+                    ("当前零件：" if language == "zh" else "Active part: ")
+                    + str(workbench_work["active_part"])
+                ).classes("text-sm text-gray-600")
         with ui.row().classes("gap-2"):
-            ui.badge(summary.get("overall_status") or "unknown").classes(_badge_class(summary.get("overall_status")))
-            ui.badge(f"Parts: {counts.get('accepted', 0)} accepted / {counts.get('blocked', 0)} blocked")
-    ui.label(summary.get("next_action") or "").classes("text-sm text-gray-700")
+            if phase.get("label"):
+                ui.badge(phase["label"]).classes("bg-blue-600")
+            ui.badge(
+                (
+                    f"已接受 {workbench_work.get('accepted_part_count', counts.get('accepted', 0))} 个零件"
+                    if language == "zh"
+                    else f"{workbench_work.get('accepted_part_count', counts.get('accepted', 0))} accepted parts"
+                )
+            ).classes("bg-green-700" if workbench_work.get("accepted_part_count") else "bg-gray-500")
+    if phase.get("items"):
+        with ui.element("div").classes("workbench-phase"):
+            for item in phase["items"]:
+                ui.label(item.get("label") or "").classes(
+                    "workbench-phase-item" + (" current" if item.get("current") else "")
+                )
 
 
 def _render_active_page(
@@ -952,7 +1091,7 @@ def _render_active_page(
     elif page == "works":
         _render_works(ui, data, state, on_select_work, refresh)
     elif page == "overview":
-        _render_work_overview(ui, data, state, refresh)
+        _render_work_overview(ui, data, actions, state, refresh, on_select_page)
     elif page == "workflow":
         _render_workflow_page_v2(ui, data, actions, state, refresh, on_select_stage, on_select_run, on_select_current_work)
     elif page == "node":
@@ -1108,53 +1247,654 @@ def _confirm_workspace_dialog(
         _create_workspace_ui(path, name, include_examples, state, refresh)
 
 
-def _render_work_overview(ui: Any, data: dict[str, Any], state: dict[str, Any], refresh: Callable[[], None]) -> None:
-    work = data.get("selected_work") or {}
-    summary = work.get("summary") if isinstance(work.get("summary"), dict) else {}
-    entity = work.get("entity_state") if isinstance(work.get("entity_state"), dict) else {}
-    current = work.get("current_state") if isinstance(work.get("current_state"), dict) else {}
-    workspace_config = data.get("workspace_config") if isinstance(data.get("workspace_config"), dict) else {}
-    counts = current.get("part_counts") if isinstance(current.get("part_counts"), dict) else {}
-    with ui.grid(columns=4).classes("w-full gap-3"):
-        _overview_metric(ui, "Status", summary.get("overall_status") or "incomplete")
-        _overview_metric(ui, "Current stage", _friendly_current_stage(work))
-        _overview_metric(ui, "Parts", _sidebar_part_count_label(counts))
-        _overview_metric(ui, "Mode", entity.get("advancement_mode") or workspace_config.get("advancement_mode") or "manual_confirm")
-    with ui.card().classes("w-full shadow-none border border-blue-100 bg-blue-50"):
-        ui.label("Next action").classes("text-sm font-medium text-blue-900")
-        ui.label(current.get("next_action") or "Inspect workflow.").classes("text-base text-blue-950")
-    if entity.get("description"):
-        ui.label(entity["description"]).classes("text-sm text-gray-700")
-    golden = work.get("golden_example") if isinstance(work.get("golden_example"), dict) else None
-    if golden:
-        _render_golden_comparison(ui, golden)
-    requirement = entity.get("requirement") if isinstance(entity.get("requirement"), dict) else {}
-    with ui.card().classes("w-full"):
-        _label_with_help(ui, "Requirement", "Work 的需求入口。这里会创建 root run，保存用户输入和后续结构化需求文件。", "text-lg font-medium")
-        _key_values(ui, {
-            "Status": requirement.get("status") or "not_started",
-            "Confirmation": "required" if requirement.get("confirmation_required") else "not required",
-        })
-        with ui.row().classes("w-full items-start gap-2"):
-            prompt = ui.textarea("Requirement input", placeholder="Describe the product/work to start a root workflow run.").props("outlined autogrow").classes("flex-1")
-            _help_icon(ui, "输入当前 Work 的原始需求。MVP 不做完整聊天 UI，而是把需求写入 root run 供后续 workflow 使用。")
-        button = ui.button("Create Root Run", icon="play_arrow", on_click=lambda: _create_work_requirement_run_ui(summary.get("work_id"), prompt.value, state, refresh))
-        button.tooltip("为当前 Work 创建 root run；不会直接批量生成所有 CAD。")
+def _render_work_overview(
+    ui: Any,
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    on_select_page: Callable[[str], None],
+) -> None:
+    """Evolve the existing Overview into the primary Agent-first Work surface."""
+
+    overview = data.get("workbench_overview") if isinstance(data.get("workbench_overview"), dict) else {}
+    language = str(data.get("language") or "en")
+    if not overview:
+        ui.label("Work overview is unavailable." if language != "zh" else "Work 概览当前不可用。").classes("text-negative")
+        return
+    work = overview.get("work") if isinstance(overview.get("work"), dict) else {}
+    objective = overview.get("objective") if isinstance(overview.get("objective"), dict) else {}
+    recommendation = overview.get("recommendation") if isinstance(overview.get("recommendation"), dict) else {}
+    capability = overview.get("capability") if isinstance(overview.get("capability"), dict) else {}
+    activity = overview.get("agent_activity") if isinstance(overview.get("agent_activity"), dict) else {}
+    preview = overview.get("preview") if isinstance(overview.get("preview"), dict) else {}
+    result = overview.get("current_result") if isinstance(overview.get("current_result"), dict) else None
+    active_job = next(
+        (
+            item
+            for item in overview.get("part_jobs", [])
+            if isinstance(item, dict) and item.get("part_job_id") == work.get("active_part")
+        ),
+        None,
+    )
+
+    _render_action_feedback_panel(ui, state, language)
+    with ui.element("section").classes("workbench-objective w-full"):
+        with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
+            with ui.column().classes("gap-1 flex-1"):
+                ui.label(objective.get("title") or i18n_copy(language, "current_objective")).classes("workflow-eyebrow")
+                ui.label(objective.get("summary") or "—").classes("text-xl font-semibold leading-relaxed")
+            ui.badge(capability.get("label") or "").classes(
+                "bg-purple-700 workbench-capability" if capability.get("experimental") else "bg-slate-600 workbench-capability"
+            )
+        ui.label(
+            i18n_copy(
+                language,
+                "isolated_execution_verified" if capability.get("experimental") else "deterministic_compatibility",
+            )
+        ).classes("text-sm text-gray-600")
+
+    with ui.element("section").classes("workbench-recommendation w-full"):
+        ui.label(i18n_copy(language, "current_recommendation")).classes("workflow-eyebrow")
+        ui.label(recommendation.get("summary") or recommendation.get("label") or "—").classes("text-base font-medium")
+
+    with ui.element("section").classes("workbench-primary-grid w-full"):
+        with ui.element("article").classes("workbench-panel workbench-activity"):
+            ui.label(i18n_copy(language, "agent_activity")).classes("workflow-eyebrow")
+            with ui.row().classes("items-center gap-3 mt-3"):
+                ui.icon("smart_toy").classes("text-3xl text-blue-600")
+                ui.label(activity.get("label") or "—").classes("text-lg font-semibold")
+            ui.label(activity.get("summary") or "").classes("text-sm text-gray-700 mt-2")
+            details = activity.get("details") if isinstance(activity.get("details"), list) else []
+            if details:
+                with ui.expansion(i18n_copy(language, "agent_activity_details"), icon="timeline").classes("w-full mt-3"):
+                    for item in details:
+                        with ui.row().classes("items-center gap-2"):
+                            ui.icon("check_circle", size="xs").classes("text-blue-600")
+                            ui.label(str(item)).classes("text-sm")
+            if recommendation.get("key") == "continue_agent" and active_job:
+                ui.button(
+                    i18n_copy(language, "continue_agent"),
+                    icon="play_arrow",
+                    on_click=lambda: _show_continue_agent_confirmation(
+                        ui, actions.backend, overview, state, refresh, language
+                    ),
+                ).props("color=primary").classes("mt-4")
+        with ui.element("article").classes("workbench-panel workbench-geometry"):
+            with ui.row().classes("w-full items-center justify-between gap-2"):
+                ui.label(i18n_copy(language, "geometry_preview")).classes("workflow-eyebrow")
+                ui.badge(preview.get("label") or i18n_copy(language, "preview_unavailable")).classes(
+                    _badge_class(preview.get("status"))
+                )
+            if preview.get("viewer_url"):
+                ui.html(
+                    f'<iframe class="workbench-viewer" title="Geometry preview" '
+                    f'src="{html_escape(str(preview["viewer_url"]), quote=True)}"></iframe>',
+                    sanitize=False,
+                ).classes("w-full mt-3")
+            else:
+                with ui.column().classes("w-full h-72 items-center justify-center gap-2"):
+                    ui.icon("view_in_ar").classes("text-5xl text-gray-300")
+                    ui.label(preview.get("label") or i18n_copy(language, "no_candidate")).classes("text-gray-500")
+            if preview.get("download_url"):
+                ui.link("STEP", preview["download_url"]).classes("text-sm mt-2")
+
+    if result:
+        _render_workbench_result(ui, result, overview, actions.backend, state, refresh, language)
+    elif recommendation.get("key") == "start_design":
+        _render_workbench_start_design(ui, data, state, refresh, language)
+
+    _render_workbench_parts_summary(ui, overview, on_select_page, language)
+
+    with ui.row().classes("w-full gap-2 flex-wrap"):
+        ui.button(
+            i18n_copy(language, "detailed_workflow"),
+            icon="account_tree",
+            on_click=_page_selection_callback(on_select_page, "workflow"),
+        ).props("outline")
+        ui.button(
+            i18n_copy(language, "part_jobs"),
+            icon="view_list",
+            on_click=_page_selection_callback(on_select_page, "parts"),
+        ).props("outline")
+        ui.button(
+            i18n_copy(language, "history"),
+            icon="history",
+            on_click=_page_selection_callback(on_select_page, "history"),
+        ).props("outline")
+
+    _render_workbench_advanced(ui, overview, language)
+
+
+def _render_workbench_start_design(
+    ui: Any,
+    data: dict[str, Any],
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    summary = _dict_get(data.get("selected_work"), "summary") or {}
+    with ui.element("section").classes("workbench-panel w-full"):
+        ui.label(i18n_copy(language, "start_design")).classes("text-lg font-semibold")
+        prompt = ui.textarea(
+            i18n_copy(language, "current_objective"),
+            value=state.get("intent_draft") or "",
+            placeholder=(
+                "描述需要设计的零件、关键尺寸和用途。"
+                if language == "zh"
+                else "Describe the part, its important dimensions, and intended use."
+            ),
+        ).props("outlined autogrow").classes("w-full")
+        prompt.on_value_change(
+            lambda event: state.__setitem__("intent_draft", event.value or "")
+        )
+        button = ui.button(
+            i18n_copy(language, "start_design"),
+            icon="play_arrow",
+            on_click=lambda: _schedule_action(
+                _start_work_intent_async(
+                    state.get("_backend"),
+                    summary.get("work_id"),
+                    prompt.value,
+                    state,
+                    refresh,
+                    language,
+                )
+            ),
+        ).props("color=primary")
         if not summary.get("work_id"):
             button.disable()
-        if state.get("requirement_run_result") is not None:
-            with ui.expansion("Action result").classes("w-full"):
-                ui.markdown(f"```json\n{json.dumps(state['requirement_run_result'], indent=2, sort_keys=True)}\n```").classes("w-full mono")
-    with ui.card().classes("w-full"):
-        _label_with_help(ui, "Part Runs", "根据拆分出的 parts 创建每个 part 对应的 run 容器。人工确认模式下需要手动点击。", "text-lg font-medium")
-        ui.label("Manual mode creates part runs after you confirm the split; auto mode creates them when split artifacts are available.").classes("text-sm text-gray-600")
-        button = ui.button("Confirm Split / Create Part Runs", icon="account_tree", on_click=lambda: _create_work_part_runs_ui(summary.get("work_id"), state, refresh))
-        button.tooltip("确认当前 parts split，并为候选 part 创建 run 容器；不会自动执行批量 CAD。")
-        if not summary.get("work_id") or not current.get("root_run_id"):
-            button.disable()
-        if state.get("part_runs_result") is not None:
-            with ui.expansion("Action result").classes("w-full"):
-                ui.markdown(f"```json\n{json.dumps(state['part_runs_result'], indent=2, sort_keys=True)}\n```").classes("w-full mono")
+
+
+def _render_workbench_result(
+    ui: Any,
+    result: dict[str, Any],
+    overview: dict[str, Any],
+    backend: WorkflowConsoleBackend,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    accepted = result.get("accepted") is True
+    with ui.element("section").classes(
+        "workbench-result w-full" + (" accepted" if accepted else "")
+    ):
+        with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
+            with ui.column().classes("gap-1"):
+                ui.label(result.get("title") or i18n_copy(language, "current_result")).classes("text-xl font-semibold")
+                ui.label(
+                    f"{('零件' if language == 'zh' else 'Part')}: {result.get('part') or '—'}"
+                ).classes("text-sm")
+                ui.label(
+                    f"{('角色' if language == 'zh' else 'Role')}: {result.get('role') or '—'}"
+                ).classes("text-sm text-gray-600")
+            ui.badge(
+                i18n_copy(language, "result_accepted" if accepted else "result_ready_review")
+            ).classes("bg-green-700" if accepted else "bg-amber-700")
+
+        geometry = result.get("geometry") if isinstance(result.get("geometry"), dict) else {}
+        bbox = geometry.get("bounding_box") if isinstance(geometry.get("bounding_box"), dict) else {}
+        with ui.element("div").classes("workbench-validation-grid w-full mt-4"):
+            with ui.column().classes("gap-2"):
+                ui.label(i18n_copy(language, "validation")).classes("workflow-eyebrow")
+                for item in result.get("verified", []):
+                    ui.label(f"✓ {item}").classes("text-sm text-green-800")
+                if geometry:
+                    ui.label(
+                        (
+                            f"{('边界框' if language == 'zh' else 'Bounding box')}: "
+                            f"{bbox.get('x', '—')} × {bbox.get('y', '—')} × {bbox.get('z', '—')} mm"
+                        )
+                    ).classes("text-sm")
+                    ui.label(
+                        f"{('实体数' if language == 'zh' else 'Solid count')}: {geometry.get('solid_count', '—')}"
+                    ).classes("text-sm")
+                    if geometry.get("volume") is not None:
+                        ui.label(
+                            f"{('体积' if language == 'zh' else 'Volume')}: {geometry.get('volume')} mm³"
+                        ).classes("text-sm")
+            with ui.column().classes("gap-2"):
+                ui.label(i18n_copy(language, "not_verified")).classes("workflow-eyebrow")
+                for item in result.get("unverified", []):
+                    ui.label(f"△ {item}").classes("text-sm text-amber-800")
+
+        if result.get("assumptions"):
+            with ui.expansion(i18n_copy(language, "assumptions"), icon="lightbulb").classes("w-full mt-3"):
+                for item in result["assumptions"]:
+                    ui.label(f"• {item}").classes("text-sm")
+        if result.get("limitations"):
+            with ui.expansion(i18n_copy(language, "limitations"), icon="warning_amber").classes("w-full"):
+                for item in result["limitations"]:
+                    ui.label(f"• {item}").classes("text-sm")
+
+        result_id = result.get("reviewable_result_id")
+        part_id = _dict_get(overview.get("work"), "active_part")
+        if isinstance(result_id, str) and isinstance(part_id, str):
+            with ui.row().classes("gap-2 mt-4 flex-wrap"):
+                if not accepted:
+                    accept = ui.button(
+                        i18n_copy(language, "accept_result"),
+                        icon="check_circle",
+                        on_click=lambda: _show_accept_result_confirmation(
+                            ui,
+                            backend,
+                            str(_dict_get(overview.get("advanced"), "work_id")),
+                            part_id,
+                            result_id,
+                            state,
+                            refresh,
+                            language,
+                        ),
+                    ).props("color=positive")
+                    if _pending_action_matches(
+                        state,
+                        {
+                            "key": "accept_reviewable_result",
+                            "target_work_id": _dict_get(overview.get("advanced"), "work_id"),
+                            "part_job_id": part_id,
+                        },
+                    ):
+                        accept.disable()
+                ui.button(
+                    i18n_copy(language, "revise"),
+                    icon="edit",
+                    on_click=lambda: _show_revision_dialog(
+                        ui,
+                        backend,
+                        str(_dict_get(overview.get("advanced"), "work_id")),
+                        part_id,
+                        result_id,
+                        state,
+                        refresh,
+                        language,
+                    ),
+                ).props("outline")
+
+
+def _render_workbench_parts_summary(
+    ui: Any,
+    overview: dict[str, Any],
+    on_select_page: Callable[[str], None] | None,
+    language: str,
+) -> None:
+    parts = [item for item in overview.get("part_jobs", []) if isinstance(item, dict)]
+    with ui.element("section").classes("workbench-panel w-full"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label(i18n_copy(language, "part_jobs")).classes("text-lg font-semibold")
+            if on_select_page is not None:
+                ui.button(
+                    i18n_copy(language, "details"),
+                    icon="arrow_forward",
+                    on_click=_page_selection_callback(on_select_page, "parts"),
+                ).props("flat dense")
+        if not parts:
+            ui.label(
+                "尚未创建零件任务。" if language == "zh" else "No Part Jobs have been created yet."
+            ).classes("text-sm text-gray-500")
+            return
+        with ui.element("div").classes("workbench-part-grid w-full mt-3"):
+            for part in parts:
+                with ui.element("article").classes("workbench-part-card"):
+                    with ui.row().classes("w-full items-start justify-between gap-2"):
+                        with ui.column().classes("gap-1"):
+                            ui.label(part.get("name") or part.get("part_job_id") or "Part").classes("font-semibold")
+                            ui.label(part.get("role") or "—").classes("text-sm text-gray-600")
+                        ui.badge(part.get("state_label") or part.get("state") or "—").classes(
+                            _badge_class(part.get("state"))
+                        )
+                    ui.label(
+                        f"{i18n_copy(language, 'attempts')}: {part.get('attempt_count', 0)}"
+                    ).classes("text-sm mt-2")
+                    ui.label(
+                        (
+                            ("可审查结果：有" if part.get("has_reviewable_result") else "可审查结果：无")
+                            if language == "zh"
+                            else ("Reviewable result: available" if part.get("has_reviewable_result") else "Reviewable result: none")
+                        )
+                    ).classes("text-sm")
+                    ui.label(
+                        (
+                            ("已接受结果：有" if part.get("has_accepted_result") else "已接受结果：无")
+                            if language == "zh"
+                            else ("Accepted result: available" if part.get("has_accepted_result") else "Accepted result: none")
+                        )
+                    ).classes("text-sm")
+                    ui.label(part.get("recommended_action") or "").classes("text-sm font-medium text-blue-700 mt-2")
+
+
+def _render_workbench_advanced(
+    ui: Any,
+    overview: dict[str, Any],
+    language: str,
+) -> None:
+    advanced = overview.get("advanced") if isinstance(overview.get("advanced"), dict) else {}
+    with ui.expansion(
+        advanced.get("label") or i18n_copy(language, "advanced_evidence"),
+        icon="science",
+        value=False,
+    ).classes("workbench-advanced w-full"):
+        evidence = advanced.get("reviewable_evidence") if isinstance(advanced.get("reviewable_evidence"), dict) else {}
+        if evidence:
+            ui.label("Runtime: WSL2 CadQuery sandbox").classes("text-sm font-medium")
+            ui.label("Attestation: verified").classes("text-sm text-green-700")
+            ui.markdown(
+                f"```json\n{json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True)}\n```"
+            ).classes("w-full mono")
+        references = advanced.get("artifact_references") if isinstance(advanced.get("artifact_references"), list) else []
+        with ui.expansion(
+            "Artifact references" if language != "zh" else "Artifact 引用",
+            icon="inventory_2",
+        ).classes("w-full"):
+            ui.markdown(
+                f"```json\n{json.dumps(references, ensure_ascii=False, indent=2, sort_keys=True)}\n```"
+            ).classes("w-full mono")
+
+
+def _show_accept_result_confirmation(
+    ui: Any,
+    backend: WorkflowConsoleBackend,
+    work_id: str,
+    part_id: str,
+    result_id: str,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    action = {
+        "key": "accept_reviewable_result",
+        "label": "Accept result",
+        "target_work_id": work_id,
+        "part_job_id": part_id,
+        "reviewable_result_id": result_id,
+    }
+    if _pending_action_matches(state, action):
+        return
+    dialog = ui.dialog()
+    with dialog, ui.card().classes("w-[560px] max-w-full"):
+        ui.label(i18n_copy(language, "accept_result")).classes("text-xl font-semibold")
+        ui.label(i18n_copy(language, "accept_consequence")).classes("text-sm text-gray-700")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button(i18n_copy(language, "cancel"), on_click=dialog.close).props("outline")
+            ui.button(
+                i18n_copy(language, "accept_result"),
+                icon="check",
+                on_click=lambda: (
+                    dialog.close(),
+                    _schedule_action(
+                        _accept_reviewable_result_async(
+                            backend, action, state, refresh, language
+                        )
+                    ),
+                ),
+            ).props("color=positive")
+    dialog.open()
+
+
+def _show_revision_dialog(
+    ui: Any,
+    backend: WorkflowConsoleBackend,
+    work_id: str,
+    part_id: str,
+    result_id: str,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    action = {
+        "key": "revise_reviewable_result",
+        "label": "Revise",
+        "target_work_id": work_id,
+        "part_job_id": part_id,
+        "reviewable_result_id": result_id,
+    }
+    if _pending_action_matches(state, action):
+        return
+    dialog = ui.dialog()
+    with dialog, ui.card().classes("w-[640px] max-w-full"):
+        ui.label(i18n_copy(language, "revise")).classes("text-xl font-semibold")
+        ui.label(i18n_copy(language, "revision_preserves_acceptance")).classes("text-sm text-gray-700")
+        revision = ui.textarea(
+            i18n_copy(language, "revision_request"),
+            value=state.get("revision_draft") or "",
+            placeholder=(
+                "例如：把长度增加 10 mm，并将中心孔直径改为 5 mm。"
+                if language == "zh"
+                else "For example: increase the length by 10 mm and change the center bore to 5 mm."
+            ),
+        ).props("outlined autogrow").classes("w-full")
+        revision.on_value_change(
+            lambda event: state.__setitem__("revision_draft", event.value or "")
+        )
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button(i18n_copy(language, "cancel"), on_click=dialog.close).props("outline")
+            ui.button(
+                i18n_copy(language, "revise"),
+                icon="edit",
+                on_click=lambda: (
+                    dialog.close(),
+                    _schedule_action(
+                        _revise_reviewable_result_async(
+                            backend,
+                            action,
+                            revision.value,
+                            state,
+                            refresh,
+                            language,
+                        )
+                    ),
+                ),
+            ).props("color=primary")
+    dialog.open()
+
+
+def _show_continue_agent_confirmation(
+    ui: Any,
+    backend: WorkflowConsoleBackend,
+    overview: dict[str, Any],
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    work = overview.get("work") if isinstance(overview.get("work"), dict) else {}
+    advanced = overview.get("advanced") if isinstance(overview.get("advanced"), dict) else {}
+    part_id = work.get("active_part")
+    work_id = advanced.get("work_id")
+    job = next(
+        (item for item in overview.get("part_jobs", []) if isinstance(item, dict) and item.get("part_job_id") == part_id),
+        None,
+    )
+    if not (isinstance(work_id, str) and isinstance(part_id, str) and isinstance(job, dict)):
+        return
+    action = {
+        "key": "continue_agent",
+        "label": "Continue Agent",
+        "target_work_id": work_id,
+        "part_job_id": part_id,
+        "target_run_id": job.get("latest_attempt_run_id"),
+    }
+    dialog = ui.dialog()
+    with dialog, ui.card().classes("w-[560px] max-w-full"):
+        ui.label(i18n_copy(language, "continue_agent")).classes("text-xl font-semibold")
+        ui.label(
+            "Agent 将准备候选设计、在隔离环境中生成几何并检查结果。"
+            if language == "zh"
+            else "The Agent will prepare a candidate, build geometry in isolation, and inspect the result."
+        ).classes("text-sm text-gray-700")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button(i18n_copy(language, "cancel"), on_click=dialog.close).props("outline")
+            ui.button(
+                i18n_copy(language, "continue_agent"),
+                icon="play_arrow",
+                on_click=lambda: (
+                    dialog.close(),
+                    _schedule_action(
+                        _continue_agent_async(backend, action, state, refresh, language)
+                    ),
+                ),
+            ).props("color=primary")
+    dialog.open()
+
+
+async def _start_work_intent_async(
+    backend: WorkflowConsoleBackend | None,
+    work_id: str | None,
+    prompt: str | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> dict[str, Any] | None:
+    action = {
+        "key": "start_design",
+        "label": "Start design",
+        "target_work_id": work_id,
+    }
+    if backend is None or not work_id or not isinstance(prompt, str) or not prompt.strip():
+        state["action_execution"] = {
+            **asdict(ActionExecutionState.from_action(action, status="failed", message=_runtime_message(action, language, "failed"))),
+            "identity": _action_identity(action),
+            "error_detail": "Describe the design objective first." if language != "zh" else "请先描述设计目标。",
+        }
+        refresh()
+        return None
+
+    def execute() -> dict[str, Any]:
+        return backend.create_work_requirement_run(work_id, prompt.strip())
+
+    def verify(_result: dict[str, Any]) -> tuple[bool, str | None]:
+        manifest = backend._read_work_manifest(work_id)
+        ok = isinstance(manifest.get("root_run_id"), str)
+        return ok, None if ok else "Intent Run was not persisted."
+
+    result = await _execute_action_lifecycle(
+        action, state, refresh, execute, language=language, verify=verify
+    )
+    if result is not None:
+        state["intent_draft"] = ""
+    return result
+
+
+async def _accept_reviewable_result_async(
+    backend: WorkflowConsoleBackend,
+    action: dict[str, Any],
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> dict[str, Any] | None:
+    work_id = str(action["target_work_id"])
+    part_id = str(action["part_job_id"])
+    result_id = str(action["reviewable_result_id"])
+
+    def execute() -> dict[str, Any]:
+        return backend.accept_work_reviewable_result(work_id, part_id, result_id)
+
+    def verify(_result: dict[str, Any]) -> tuple[bool, str | None]:
+        pointer = _dict_get(
+            _dict_get(backend._read_work_manifest(work_id), "accepted_part_results"),
+            part_id,
+        )
+        ok = isinstance(pointer, dict) and pointer.get("result_id") == result_id and pointer.get("status") == "approved"
+        return ok, None if ok else "Accepted-result pointer did not change to the reviewed result."
+
+    return await _execute_action_lifecycle(
+        action, state, refresh, execute, language=language, verify=verify
+    )
+
+
+async def _revise_reviewable_result_async(
+    backend: WorkflowConsoleBackend,
+    action: dict[str, Any],
+    revision_prompt: str | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> dict[str, Any] | None:
+    work_id = str(action["target_work_id"])
+    part_id = str(action["part_job_id"])
+    result_id = str(action["reviewable_result_id"])
+    if not isinstance(revision_prompt, str) or not revision_prompt.strip():
+        failed = ActionExecutionState.from_action(
+            action,
+            status="failed",
+            message=_runtime_message(action, language, "failed"),
+        )
+        failed.error_detail = "Describe the requested change first." if language != "zh" else "请先描述要修改的内容。"
+        _set_action_execution(state, failed, action)
+        refresh()
+        return None
+    before = backend._read_work_manifest(work_id)
+    accepted_before = deepcopy(_dict_get(before, "accepted_part_results"))
+    job_before = next(
+        (item for item in before.get("part_jobs", []) if isinstance(item, dict) and item.get("part_job_id") == part_id),
+        {},
+    )
+    attempt_count = len(job_before.get("attempts", []))
+
+    def execute() -> dict[str, Any]:
+        return backend.revise_work_reviewable_result(
+            work_id,
+            part_id,
+            result_id,
+            revision_prompt=revision_prompt.strip(),
+        )
+
+    def verify(_result: dict[str, Any]) -> tuple[bool, str | None]:
+        after = backend._read_work_manifest(work_id)
+        job_after = next(
+            (item for item in after.get("part_jobs", []) if isinstance(item, dict) and item.get("part_job_id") == part_id),
+            {},
+        )
+        ok = (
+            after.get("accepted_part_results") == accepted_before
+            and len(job_after.get("attempts", [])) == attempt_count + 1
+        )
+        return ok, None if ok else "Revision did not add exactly one attempt while preserving acceptance."
+
+    result = await _execute_action_lifecycle(
+        action, state, refresh, execute, language=language, verify=verify
+    )
+    if result is not None:
+        state["revision_draft"] = ""
+    return result
+
+
+async def _continue_agent_async(
+    backend: WorkflowConsoleBackend,
+    action: dict[str, Any],
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> dict[str, Any] | None:
+    from uuid import uuid4
+
+    work_id = str(action["target_work_id"])
+    part_id = str(action["part_job_id"])
+    before = backend._read_work_manifest(work_id)
+    accepted_before = deepcopy(before.get("accepted_part_results"))
+    reference_count = len(before.get("artifact_references", []))
+
+    def execute() -> dict[str, Any]:
+        return backend.run_work_part_design_episode(
+            work_id,
+            part_id,
+            request_id=f"workbench_{uuid4().hex}",
+            attempt_run_id=(
+                action.get("target_run_id")
+                if isinstance(action.get("target_run_id"), str)
+                else None
+            ),
+        )
+
+    def verify(_result: dict[str, Any]) -> tuple[bool, str | None]:
+        after = backend._read_work_manifest(work_id)
+        ok = (
+            after.get("accepted_part_results") == accepted_before
+            and len(after.get("artifact_references", [])) > reference_count
+        )
+        return ok, None if ok else "Agent activity did not persist new evidence or changed acceptance."
+
+    return await _execute_action_lifecycle(
+        action, state, refresh, execute, language=language, verify=verify
+    )
 
 
 def _render_works(
@@ -1344,6 +2084,10 @@ def _render_action_feedback_panel(ui: Any, state: dict[str, Any], language: str)
                 if status == "succeeded" and execution.get("action_key") == "select_candidate_part":
                     ui.label("装配计划已保存为用户覆盖版本。零件请求及后续阶段已标记为过期。已有 Run 和已批准结果保持不变。" if language == "zh" else "The Assembly Plan was saved as a user override. Part Request and downstream stages are stale. Existing Runs and accepted results are unchanged.").classes("text-xs")
                     ui.label(i18n_copy(language, "next_create_part_request")).classes("text-xs font-medium")
+                if status == "succeeded" and execution.get("action_key") == "accept_reviewable_result":
+                    ui.label(i18n_copy(language, "accept_success_detail")).classes("text-xs")
+                if status == "succeeded" and execution.get("action_key") == "revise_reviewable_result":
+                    ui.label(i18n_copy(language, "revise_success_detail")).classes("text-xs")
                 if status == "failed" and execution.get("error_detail"):
                     with ui.expansion(i18n_copy(language, "details"), icon="error_outline").classes("w-full"):
                         ui.label(str(execution["error_detail"])).classes("text-xs whitespace-pre-wrap")
@@ -3254,6 +3998,21 @@ def _node_stage_for_review(node: dict[str, Any]) -> str:
 
 def _render_parts_matrix(ui: Any, data: dict[str, Any]) -> None:
     work = data.get("selected_work") or {}
+    overview = data.get("workbench_overview") if isinstance(data.get("workbench_overview"), dict) else {}
+    language = str(data.get("language") or "en")
+    if overview:
+        _render_workbench_parts_summary(ui, overview, None, language)
+        legacy_parts = work.get("parts") if isinstance(work.get("parts"), list) else []
+        if legacy_parts:
+            with ui.expansion(
+                "Model and compatibility details" if language != "zh" else "模型与兼容详情",
+                icon="view_in_ar",
+            ).classes("w-full"):
+                with ui.element("div").classes("workbench-part-grid w-full"):
+                    for part in legacy_parts:
+                        if isinstance(part, dict):
+                            _render_part_card(ui, part)
+        return
     graph = work.get("workflow_graph") if isinstance(work.get("workflow_graph"), dict) else {}
     parts = work.get("parts") or []
     display_parts = parts or graph.get("part_nodes") or []

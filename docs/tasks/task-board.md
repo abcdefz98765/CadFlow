@@ -1,6 +1,6 @@
 # CadFlow Task Board
 
-Status date: 2026-08-01.
+Status date: 2026-08-08.
 
 The ordered roadmap is `docs/roadmap/milestones.md`. Execution starts at
 `docs/tasks/agent-start-here.md`. Do not pull later UI, assembly, or assurance
@@ -164,12 +164,45 @@ work ahead of the current milestone without an explicit architecture decision.
   accepted results.
 - [x] Verify Package 3 with unit/contract tests and a live WSL2 product-route
   acceptance on the current Windows host.
-  - 2026-08-08: `160 passed` targeted; `644 passed, 2 skipped` complete suite
-    in 576.21 seconds with live WSL2 enabled.
 - [ ] Obtain user acceptance of at least one external-provider benchmark
   reviewable result; do not mark M2 complete before that action.
 
-### Benchmarks
+## M2.5 — Reuse-first Workbench MVP usability gate
+
+- [x] Keep the existing NiceGUI application, shell, Work selection, and Work
+  header as the product foundation.
+- [x] Evolve the existing Overview into the primary Overview / Design surface.
+- [x] Show Intent, Design, Build & Evaluate, and Accept & Deliver as a compact
+  orientation indicator rather than a wizard.
+- [x] Reuse manifest Part Jobs, artifact references, Episode evidence, and
+  existing status projections for objective, Agent activity, candidate, and
+  result presentation.
+- [x] Reuse the existing STL viewer for deterministic output and add a
+  controlled ephemeral STEP-to-STL presentation adapter for registered,
+  validated reviewable/accepted STEP only.
+- [x] Show reviewable geometry, measured facts, actual validation, assumptions,
+  important limitations, and unsupported engineering checks in product
+  language.
+- [x] Route Accept through the existing explicit reviewable-result acceptance
+  backend and verify the persisted accepted pointer.
+- [x] Route natural-language Revise through the existing revision backend,
+  verify one new attempt, and preserve prior acceptance.
+- [x] Keep Workflow, Parts, History, and immutable Run Snapshot reachable.
+- [x] Keep the existing artifact viewer and action lifecycle in use.
+- [x] Move Run/Episode ids, artifact paths, model source, Broker/WSL2/toolchain/
+  attestation evidence, hashes, and validator payloads under Advanced/Evidence.
+- [x] Add English and Chinese product-critical copy through the existing
+  `i18n.py` catalog.
+- [x] Complete real-browser deterministic, reviewable, accepted, revision, and
+  Advanced/Evidence checks.
+- [x] Save 1440px, 1024px, and 390–430px browser screenshots under
+  `docs/ux/screenshots/workbench-mvp/`.
+- [x] Keep the complete regression suite green and record the result.
+  - 2026-08-08: targeted and complete suite results are recorded in current
+    product readiness.
+- [x] Commit and push the completed M2.5 implementation.
+
+## M2 external-provider benchmark acceptance
 
 - [ ] Define at least five non-template part prompts.
 - [ ] Include brackets or mechanisms that cannot be solved by adding a new
@@ -214,13 +247,14 @@ work ahead of the current milestone without an explicit architecture decision.
 - [ ] Package accepted STEP, assembly, BOM, drawings, and reports.
 - [ ] Test drawing failure independently from model acceptance.
 
-## M6 — Workbench UX
+## M6 — Workbench expansion
 
 - [ ] Define the four-phase page/view-model contract.
 - [ ] Put design conversation and geometry preview first.
 - [ ] Show candidate alternatives and observation-driven repair.
 - [ ] Show Part Jobs, accepted results, and assembly readiness.
-- [ ] Move the fixed Workflow graph to compatibility/Diagnostics.
+- [ ] Continue evolving the existing detailed Workflow view without restoring
+  it as a mandatory primary journey.
 - [ ] Preserve Current Work and Run Snapshot boundaries.
 - [ ] Verify pending, success, failure, and recovery in a real browser.
 - [ ] Verify Chinese and English primary flows.

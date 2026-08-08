@@ -27,7 +27,8 @@ It is responsible for:
 - collecting explicit acceptance and revision decisions;
 - opening accepted-result-derived deliverables;
 - showing History and immutable Run Snapshots;
-- exposing legacy Workflow and raw evidence under Diagnostics.
+- exposing the detailed Workflow view and raw evidence as secondary/advanced
+  surfaces.
 
 It is not:
 
@@ -154,17 +155,24 @@ Classify current surfaces:
 - Current Work / Run Snapshot — preserve;
 - controlled artifact viewer — preserve under Advanced/Diagnostics;
 - action pending and postcondition verification — preserve;
-- fixed dot Workflow graph — move to Diagnostics;
+- fixed dot Workflow graph — preserve as the secondary detailed Workflow view,
+  without making its checkpoint sequence the primary journey;
 - stage-specific review forms — retain only for legacy Runs;
 - Parts and History — migrate to first-class domain objects;
 - provider configuration — preserve but do not imply Agentic capability.
 
-The primary route must not switch to the target Workbench until:
+The primary route may evolve the existing Overview into the Workbench when:
 
 - the M2 Design Episode has a real handler;
 - candidate preview and observation state are available;
 - acceptance has an explicit domain target;
 - legacy Runs remain reachable.
+
+These conditions are met for the bounded M2 single-Part Job slice. The
+implementation therefore reuses the existing NiceGUI shell, navigation,
+Workflow, Parts, History, Run Snapshot, artifact viewer, action lifecycle,
+i18n, and responsive CSS rather than introducing a second Web application or
+parallel state model.
 
 ## Artifact access
 

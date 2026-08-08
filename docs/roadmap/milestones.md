@@ -6,13 +6,25 @@ This roadmap implements the Agent-first target in `docs/FINAL-PRD.md`.
 
 ## Sequencing principles
 
-- Restore design capability before further Workflow Cockpit polish.
+- Turn each implemented backend slice into a usable product surface before
+  expanding modeling breadth.
 - Constrain side effects and publication, not the Agent's design strategy.
 - Build one end-to-end vertical slice before generalizing registries.
 - Measure progress with non-template geometry benchmarks.
 - Make Part Job attempts first-class before claiming multi-part progression.
 - Integrate assembly, BOM, and drawings into normal Work deliverables.
 - Preserve legacy Runs and deterministic tests during migration.
+
+Current delivery order:
+
+```text
+M2 backend vertical slice
+  -> M2.5 Workbench MVP usability gate
+  -> M2 external-provider benchmark acceptance
+  -> M3 feature graph
+  -> M4 assembly
+  -> M5 deliverables
+```
 
 ## M0 — Documentation and architecture correction
 
@@ -226,15 +238,58 @@ Status:
     `3dfc3bed636bb8995f9325b61bbe22eb72a03097fabfe0fec8891d4cf909826c`
     while pre-acceptance lineage, pointers, and Deliverables remained
     unchanged;
-  - Package 3 verification passed `160 passed` targeted and
-    `644 passed, 2 skipped` in 576.21 seconds for the complete suite with live
-    WSL2 enabled;
-  - Package 3 verification passed `160 passed` targeted and
-    `644 passed, 2 skipped` in 576.21 seconds for the complete suite with live
-    WSL2 enabled;
+- the backend vertical slice is sufficient for Workbench MVP integration;
+- external-provider benchmark execution is intentionally sequenced after the
+  M2.5 usability gate;
 - M2 remains unaccepted pending the five-part real external-provider benchmark
   gate and explicit user acceptance of at least one resulting reviewable
   result.
+
+## M2.5 — Agent-first Workbench MVP usability gate
+
+Goal:
+
+- make the implemented deterministic and bounded M2 single-Part Job loops
+  usable through the existing NiceGUI product surface before expanding CAD
+  capability.
+
+Reuse-first scope:
+
+- evolve the existing Work Overview into Overview / Design;
+- preserve the NiceGUI shell, Work selection, Workflow graph, Parts, History,
+  immutable Run Snapshot, artifact viewer, action lifecycle, i18n, and
+  responsive CSS;
+- show the four canonical phases as orientation rather than a wizard;
+- make objective, Agent activity, geometry, validation, limitations, and one
+  recommendation dominate the first viewport;
+- expose reviewable-versus-accepted state with real Accept and natural-language
+  Revise actions;
+- keep ids, paths, Broker/WSL2/toolchain/attestation data, and hashes under
+  Advanced/Evidence.
+
+Acceptance:
+
+- deterministic compatibility and Agentic experimental capability are labeled
+  honestly;
+- reviewable STEP geometry is visible through the existing model-viewer
+  surface, and accepted deterministic STL remains visible;
+- Accept verifies the accepted-result pointer after refresh;
+- Revise creates one new Part Job attempt and preserves any prior accepted
+  result;
+- Workflow, Parts, History, and read-only Run Snapshot remain reachable;
+- Chinese and English main paths pass automated checks;
+- 1440px, 1024px, and 390–430px real-browser checks pass with saved evidence;
+- the complete regression suite remains green.
+
+Status:
+
+- passed on 2026-08-08: targeted and complete automated suites passed;
+  real-browser deterministic, reviewable, accepted, revision,
+  Advanced/Evidence, Workflow/Parts/History/Run Snapshot, 1440px, 1024px, and
+  397px checks passed with saved screenshots;
+- canonical product architecture is unchanged;
+- no external-provider benchmark, sandbox/policy, feature graph, CAD family,
+  Assembly execution, or Deliverable Package work is included.
 
 ## M3 — General structured geometry contract
 
@@ -319,11 +374,11 @@ Acceptance:
 - package contents resolve only through accepted pointers;
 - automated tests cover at least one part drawing and one assembly package.
 
-## M6 — Agent-first workbench UX
+## M6 — Agent-first workbench expansion
 
 Goal:
 
-- replace the former checkpoint cockpit as the primary experience.
+- expand the reuse-first M2.5 Workbench beyond the single-Part Job MVP.
 
 Primary layout:
 
@@ -338,7 +393,8 @@ Primary layout:
 Required outcomes:
 
 - four-phase navigation;
-- old Workflow graph moved to compatibility/Diagnostics;
+- existing detailed Workflow view remains reachable for process detail and
+  diagnostics;
 - real-time pending, execution, observation, and repair feedback;
 - explicit acceptance and revision;
 - bilingual product-critical paths;
