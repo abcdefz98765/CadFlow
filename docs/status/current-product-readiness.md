@@ -228,9 +228,10 @@ one-shot orchestration, not Agentic design.
   scripts exist but are not a normal Assembly Job flow.
 - Drawings: TechDraw helper exists but is not integrated into accepted-result
   Deliverable Packages.
-- Browser usability: the M2.5 Workbench implementation has automated coverage;
-  real-browser deterministic/reviewable/accepted/revision/Advanced and
-  responsive acceptance remains unfinished.
+- Browser usability: M2.5 real-browser acceptance passed for deterministic,
+  reviewable, accepted, revision, Advanced/Evidence, Workflow, Parts, History,
+  Run Snapshot, 1440px, 1024px, and mobile cases. Browser usability beyond the
+  single-Part Job Workbench MVP remains later-milestone scope.
 
 ## Not implemented
 
