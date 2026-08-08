@@ -374,6 +374,21 @@ class WorkflowConsoleBackend:
         self.invalidate_work_index()
         return result
 
+    def open_product_golden_example(
+        self,
+        *,
+        progress_callback: Any | None = None,
+    ) -> dict[str, Any]:
+        """Create or reopen the canonical current Product Golden Work."""
+        from ai_native_cad.examples import open_canonical_product_golden
+
+        result = open_canonical_product_golden(
+            self,
+            progress_callback=progress_callback,
+        )
+        self.invalidate_work_index()
+        return result
+
     def get_golden_example_summary(self, work_id: str) -> dict[str, Any] | None:
         """Return the path-free product view for an executable golden Work."""
         manifest = self._read_work_manifest(work_id)
@@ -646,6 +661,22 @@ class WorkflowConsoleBackend:
         self._require_safe_run_id(work_id)
         work_dir = self._require_child_path(self._resolve_workspace_path("works"), work_id)
         return self._require_child_path(work_dir, "runs")
+
+    def read_work_run_prompt(self, work_id: str, run_id: str) -> str | None:
+        """Read immutable prompt evidence for an exact manifest-owned Run."""
+        for value in (work_id, run_id):
+            self._require_safe_run_id(value)
+        manifest = self._read_work_manifest(work_id)
+        if run_id not in manifest.get("run_ids", []):
+            raise ValueError("Run is not owned by the requested Work")
+        path = self._require_child_path(
+            self._work_runs_root(work_id),
+            f"{run_id}/prompt.txt",
+        )
+        if not path.is_file():
+            return None
+        value = path.read_text(encoding="utf-8").strip()
+        return value or None
 
     def _next_workspace_run_id(self, work_id: str, base: str) -> str:
         candidate_base = _safe_run_name(base) or "work_run"

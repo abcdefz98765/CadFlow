@@ -192,12 +192,23 @@ creation and stages are reached through a controlled compatibility adapter.
 The internal route contracts are:
 
 ```text
+POST /api/examples/product-golden
 POST /api/works
 POST /api/works/{work_id}/requirement-run
 POST /api/works/{work_id}/part-runs
 POST /api/works/{work_id}/parts/{part_job_id}/attempts
 POST /api/works/{work_id}/parts/{part_job_id}/design-episodes
 ```
+
+On the Workspace page, **Open Product Example / 打开产品示例** invokes the
+Product Golden route. It creates or reopens the reproducible compact micro-servo
+bracket Work and navigates directly to Overview / Design. The example uses a
+scripted provider and needs no external API credential; its candidate still
+requires the existing attested `cadquery_v1` execution profile and fails closed
+if that profile is unavailable. It leaves the reviewable result unaccepted.
+
+`POST /api/examples/golden-desktop-robot-arm` remains available only for the
+former Workflow/CAD IR compatibility regression.
 
 The Part Job attempt route accepts optional JSON fields `prompt`, `role`, and
 `run_id`. It appends an attempt to `part_jobs[].attempts` and does not change

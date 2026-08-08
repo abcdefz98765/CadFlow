@@ -20,6 +20,7 @@ Current delivery order:
 ```text
 M2 backend vertical slice
   -> M2.5 Workbench MVP usability gate
+  -> M2.6 canonical Product Example and guided design story
   -> M2 external-provider benchmark acceptance
   -> M3 feature graph
   -> M4 assembly
@@ -290,6 +291,50 @@ Status:
 - canonical product architecture is unchanged;
 - no external-provider benchmark, sandbox/policy, feature graph, CAD family,
   Assembly execution, or Deliverable Package work is included.
+
+## M2.6 — Canonical Product Example and guided design story
+
+Goal:
+
+- make the implemented single-Part Job product understandable without internal
+  workflow, artifact, Run, or execution vocabulary.
+
+Scope:
+
+- one directly loadable compact micro-servo bracket Product Golden;
+- scripted provider for reproducibility, clearly separated from external-
+  provider design-quality acceptance;
+- durable original-request and concise Agent-design projections;
+- a compact request → design → build/evaluate → result evidence chain;
+- prominent reuse of the existing geometry viewer and measured facts;
+- explicit verified, assumed, unverified, unsupported, and not-requested scope;
+- preserved Detailed Workflow, Accept, Revise, Advanced evidence, i18n, and
+  responsive layout;
+- an audited example index that classifies product, benchmark, compatibility,
+  and infrastructure examples.
+
+Acceptance:
+
+- **Open Product Example** creates or reopens the Product Golden and navigates
+  to Overview / Design without external API credentials;
+- the former Desktop Robot Arm Golden remains regression evidence but is not
+  promoted as the current product experience;
+- a normal user can understand request, Agent design, generated geometry,
+  actual validation, current phase, and next action without raw JSON;
+- reviewable acceptance and natural-language revision preserve lineage and the
+  prior accepted result;
+- English, Chinese, 1440px, 1024px, and mobile paths pass real-browser checks.
+
+Out of scope:
+
+- the five-case external-provider benchmark;
+- new CAD families, sandbox or Tool Broker changes, feature graph, Assembly Job
+  execution, Deliverables, BOM, drawings, or canonical architecture changes.
+
+Status:
+
+- implementation complete on 2026-08-08; automated and real-browser evidence
+  is recorded in current product readiness.
 
 ## M3 — General structured geometry contract
 

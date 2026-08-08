@@ -1,5 +1,7 @@
 # Workflow Console Examples
 
+Classification: **COMPATIBILITY / REGRESSION**.
+
 This folder contains path-independent example Work templates for the local
 NiceGUI Workflow Console.
 
@@ -15,3 +17,7 @@ The MVP examples cover:
   and screws in the Parts Matrix.
 - `reviewed_one_part_enclosure_base`: a multi-part Work where one selected
   part has a reviewed single-part result.
+
+These static schema-v1 templates preserve historical console projections. They
+are not the canonical Product Golden. Use **Open Product Example** on the
+Workspace page for the current Agent-first single-Part Job experience.

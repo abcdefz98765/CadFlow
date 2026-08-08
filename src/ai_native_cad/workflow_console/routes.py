@@ -86,11 +86,18 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         description="Create a real local Work entity without executing workflow stages.",
     ),
     RouteSpec(
+        name="open_product_golden_example",
+        method="POST",
+        path="/api/examples/product-golden",
+        backend_operation="open_product_golden_example",
+        description="Create or reopen the reproducible current Product Golden Work.",
+    ),
+    RouteSpec(
         name="create_golden_example",
         method="POST",
         path="/api/examples/golden-desktop-robot-arm",
         backend_operation="create_golden_example",
-        description="Create an append-only executable Golden Desktop Robot Arm Work.",
+        description="Create the compatibility Golden Desktop Robot Arm Work.",
     ),
     RouteSpec(
         name="read_work",
@@ -502,6 +509,18 @@ def _create_golden_example(
     return backend.create_golden_example(mode)
 
 
+def _open_product_golden_example(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    if body:
+        raise ValueError("product Golden example does not accept request fields")
+    return backend.open_product_golden_example()
+
+
 def _read_work(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -863,6 +882,7 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "list_runs": _list_runs,
     "list_works": _list_works,
     "create_work": _create_work,
+    "open_product_golden_example": _open_product_golden_example,
     "create_golden_example": _create_golden_example,
     "read_work": _read_work,
     "create_work_requirement_run": _create_work_requirement_run,
@@ -901,6 +921,7 @@ def _success_status_code(route_name: str) -> int:
         "load_workspace",
         "write_workspace_config",
         "create_work",
+        "open_product_golden_example",
         "create_golden_example",
         "create_work_requirement_run",
         "create_work_part_runs",

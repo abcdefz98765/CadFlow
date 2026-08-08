@@ -55,9 +55,10 @@ Desktop order:
 
 ```text
 Work header and assurance mode
-Current objective and recommended action
+Your Request and Agent Design
+Current recommendation
 
-Conversation / Agent activity | Geometry preview
+What happened / Agent activity | Geometry preview
 
 Current candidate and validation summary
 Meaningful alternatives
@@ -68,7 +69,8 @@ Advanced evidence
 Narrow order:
 
 ```text
-Objective
+Your Request
+Agent Design
 Recommended action or focused question
 Geometry preview
 Agent activity
@@ -106,6 +108,21 @@ Activity events such as context retrieval and tool calls appear in a compact
 expandable timeline.
 
 The panel is not a raw provider transcript.
+
+For the current single-Part Job Workbench, the primary narrative starts with
+two explicit durable projections:
+
+- **Your Request / 你的要求** shows the original request verbatim, the active
+  revision request when applicable, user-supplied constraints, and whether the
+  source is the initial request or a revision;
+- **Agent Design / Agent 设计** shows only persisted concise design decisions:
+  concept, geometry strategy, important parameters, functional features,
+  interfaces, assumptions, trade-offs, repair changes, and capability mode.
+
+Agent Design is distinct from Agent Activity. It never reconstructs a request
+from generated summaries and never exposes private reasoning. When the current
+attempt lacks sufficient persisted design evidence, the card states that gap
+instead of inventing a design narrative.
 
 ## 6. Geometry preview
 
@@ -430,6 +447,9 @@ reused rather than rebuilt.
   "work": {},
   "phase": "design",
   "objective": {},
+  "user_input": {},
+  "agent_design": {},
+  "transformation": {},
   "recommended_action": {},
   "conversation": [],
   "agent_activity": {},
@@ -449,6 +469,11 @@ The view model consumes explicit domain state and artifact references. It does
 not recursively infer trusted state from filenames. This target extends the
 existing Work and Workflow projections; it is not a parallel browser-owned UI
 state model.
+
+`transformation` is a compact narrative/evidence chain—User Request → Agent
+Design → Build & Evaluate → Result—not a wizard. Product-language events may
+link to the existing Detailed Workflow or Advanced evidence when more detail is
+needed.
 
 ## 23. Visual acceptance scenarios
 

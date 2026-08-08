@@ -1,6 +1,12 @@
-# Golden Workflow: Desktop 2DOF Robot Arm
+# Compatibility / Multi-Part Planning Regression: Desktop 2DOF Robot Arm
 
-This is a golden workflow contract, not a model asset library. It describes the
+Classification: **COMPATIBILITY / REGRESSION**.
+
+This is not the canonical current Product Golden. It preserves coverage for the
+former Requirement / Planning / reviewed-part / CAD IR / Workflow Cockpit
+product and for historical multi-part planning projections.
+
+This is a legacy Golden workflow contract, not a model asset library. It describes the
 expected user-visible and artifact-level progression from an incomplete Work
 prompt to one reviewed, normalized, generic concept part.
 
@@ -51,7 +57,7 @@ compact stable fields extracted from real artifacts.
 The workspace path currently must be inside the project checkout because the
 existing local CAD pipeline enforces project-root output containment.
 
-## Load in the Web Console
+## Load in the Detailed Workflow compatibility view
 
 1. Run the executable example with a workspace path such as
    `workspace\golden_demo`.
@@ -64,8 +70,12 @@ Workflow graph, candidates, reference lane, reviewed-part stages, and review
 tail are derived from their runtime artifacts rather than the expected-summary
 fixtures.
 
+Use **Open Product Example** on the Workspace page for the canonical current
+Agent-first Workbench journey.
+
 ## Scope
 
 A successful result means that one selected generic concept part was generated.
 It does not mean the complete robot arm, every candidate part, servo fit,
-motion, or strength was generated or validated.
+motion, or strength was generated or validated. It does not create or execute a
+canonical Assembly Job.

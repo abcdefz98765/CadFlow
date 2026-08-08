@@ -1,4 +1,9 @@
-# Provider Smoke
+# Provider Benchmark and Infrastructure Smoke
+
+Classification: **BENCHMARK / EVALUATION** and **INFRASTRUCTURE SMOKE**.
+
+These scripts are internal acceptance and evaluation entry points. They are not
+the Product Golden and are not equal user-facing examples.
 
 Manual-only provider sanity checks for JSON-contract adapters.
 
@@ -252,13 +257,10 @@ diagnostics instead of hidden fallback behavior.
 
 This does not mean all parts in an assembly can be generated automatically. It
 does not mean lid/cover geometry is supported yet, and it does not mean full
-assembly export or fit validation exists. The next capability gap is not
-assembly routing; it is single-part support and mapping for additional candidate
-families such as lid/cover.
-
-Potential next step: evaluate whether `lid` should map to an existing simple
-plate/cover family or become a new supported single-part family. This should be
-done as a separate capability decision, not as a smoke-test workaround.
+assembly export or fit validation exists. This historical smoke boundary must
+not drive a new closed `part_type` or family merely to make the example pass.
+Future capability is evaluated against the canonical feature-graph or sandboxed
+model-program paths.
 
 Sanitized example summary:
 

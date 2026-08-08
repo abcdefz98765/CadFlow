@@ -150,8 +150,8 @@ body{background:var(--wf-bg);color:var(--wf-ink)}
 .workflow-part-candidate{min-width:146px;max-width:180px;border:1px solid var(--wf-border);border-radius:999px;padding:var(--wf-space-2) var(--wf-space-3);background:#fff}.workflow-part-candidate.reference-component{border-radius:var(--wf-radius-sm);border-style:dashed;background:#f8fafc}.workflow-part-selected{border-color:var(--wf-primary);outline:2px solid #bfdbfe;outline-offset:1px}
 .stage-conclusion{border-bottom:1px solid var(--wf-border);padding-bottom:var(--wf-space-3)}.stage-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--wf-space-3)}.stage-detail-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);min-height:156px}.stage-detail-card h3{margin:0 0 var(--wf-space-2);font-size:12px;letter-spacing:.07em;color:var(--wf-muted);font-weight:700}.stage-detail-card.decision{background:#fbfcff}.stage-artifact-list{margin-top:var(--wf-space-2);padding-top:var(--wf-space-2);border-top:1px solid #eef2f7}.workflow-evidence{border-top:1px solid var(--wf-border);padding-top:var(--wf-space-3)}.workflow-disabled-reason{font-size:12px;color:var(--wf-muted)}
 .history-list{display:grid;gap:var(--wf-space-3)}.history-run-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);background:#fff;cursor:pointer}.history-run-card:hover{border-color:#94a3b8}.history-run-grid{display:grid;grid-template-columns:1.2fr repeat(4,minmax(0,1fr));gap:var(--wf-space-3)}.history-field-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--wf-muted)}
-.workbench-phase{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%;max-width:760px}.workbench-phase-item{border-top:3px solid #cbd5e1;padding-top:6px;color:var(--wf-muted);font-size:12px}.workbench-phase-item.current{border-color:var(--wf-primary);color:#1d4ed8;font-weight:700}.workbench-objective{background:linear-gradient(135deg,#eff6ff,#fff);border:1px solid #bfdbfe;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-recommendation{border-left:4px solid var(--wf-primary);background:#fff;border-radius:var(--wf-radius-sm);padding:var(--wf-space-4)}.workbench-primary-grid{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(420px,1.2fr);gap:var(--wf-space-4);align-items:stretch}.workbench-panel{background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}.workbench-activity{order:1}.workbench-geometry{order:2;min-height:420px}.workbench-viewer{width:100%;height:350px;border:0;border-radius:var(--wf-radius-sm);background:#111827}.workbench-result{border:1px solid #fbbf24;border-left:4px solid #d97706;background:#fffbeb;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-result.accepted{border-color:#4ade80;background:#f0fdf4}.workbench-validation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--wf-space-4)}.workbench-part-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--wf-space-3)}.workbench-part-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-4);background:#fff}.workbench-capability{font-size:12px;font-weight:700;letter-spacing:.03em}.workbench-advanced{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);background:#f8fafc}
-@keyframes wf-pulse{50%{box-shadow:0 0 0 5px #dbeafe}}@media(max-width:1100px){.stage-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-primary-grid{grid-template-columns:minmax(250px,.85fr) minmax(360px,1.15fr)}.workbench-geometry{min-height:380px}.workbench-viewer{height:310px}}@media(max-width:760px){.workbench-shell{flex-direction:column}.sidebar{flex:0 0 auto;width:100%;min-height:auto;border-right:0;border-bottom:1px solid var(--wf-border)}.content{width:100%;min-width:0;padding:var(--wf-space-3)}.workflow-hero,.workflow-snapshot-banner,.workflow-run-strip-panel,.workflow-stage-detail-v2{padding:var(--wf-space-3)}.workflow-graph{padding:var(--wf-space-3)}.workflow-graph-canvas{min-width:1040px}.stage-detail-grid,.history-run-grid{grid-template-columns:1fr}.workflow-lane{margin-left:170px}.workflow-branch-note{margin-left:140px}.workbench-phase{overflow-x:auto;grid-template-columns:repeat(4,minmax(112px,1fr))}.workbench-objective{padding:var(--wf-space-4)}.workbench-primary-grid{grid-template-columns:1fr}.workbench-geometry{order:1;min-height:330px}.workbench-activity{order:2}.workbench-viewer{height:280px}.workbench-validation-grid,.workbench-part-grid{grid-template-columns:1fr}}
+.workbench-phase{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%;max-width:760px}.workbench-phase-item{border-top:3px solid #cbd5e1;padding-top:6px;color:var(--wf-muted);font-size:12px}.workbench-phase-item.current{border-color:var(--wf-primary);color:#1d4ed8;font-weight:700}.workbench-objective{background:linear-gradient(135deg,#eff6ff,#fff);border:1px solid #bfdbfe;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-narrative-grid{display:grid;grid-template-columns:minmax(300px,.9fr) minmax(420px,1.1fr);gap:var(--wf-space-4)}.workbench-request{background:linear-gradient(135deg,#eff6ff,#fff);border-color:#bfdbfe}.workbench-design{background:linear-gradient(135deg,#faf5ff,#fff);border-color:#ddd6fe}.workbench-revision-request{border-left:3px solid #7c3aed;background:#faf5ff;padding:var(--wf-space-3);border-radius:var(--wf-radius-sm)}.workbench-recommendation{border-left:4px solid var(--wf-primary);background:#fff;border-radius:var(--wf-radius-sm);padding:var(--wf-space-4)}.workbench-primary-grid{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(420px,1.2fr);gap:var(--wf-space-4);align-items:stretch}.workbench-panel{background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}.workbench-activity{order:1}.workbench-geometry{order:2;min-height:420px}.workbench-viewer{width:100%;height:350px;border:0;border-radius:var(--wf-radius-sm);background:#111827}.workbench-result{border:1px solid #fbbf24;border-left:4px solid #d97706;background:#fffbeb;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-result.accepted{border-color:#4ade80;background:#f0fdf4}.workbench-validation-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--wf-space-4)}.workbench-part-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--wf-space-3)}.workbench-part-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-4);background:#fff}.workbench-capability{font-size:12px;font-weight:700;letter-spacing:.03em}.workbench-advanced{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);background:#f8fafc}.workbench-advanced,.workbench-advanced *{min-width:0}.workbench-advanced pre,.workbench-advanced code{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+@keyframes wf-pulse{50%{box-shadow:0 0 0 5px #dbeafe}}@media(max-width:1100px){.stage-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-narrative-grid{grid-template-columns:1fr}.workbench-primary-grid{grid-template-columns:minmax(250px,.85fr) minmax(360px,1.15fr)}.workbench-validation-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-geometry{min-height:380px}.workbench-viewer{height:310px}}@media(max-width:760px){.workbench-shell{flex-direction:column}.sidebar{flex:0 0 auto;width:100%;min-height:auto;border-right:0;border-bottom:1px solid var(--wf-border)}.content{width:100%;min-width:0;padding:var(--wf-space-3)}.workflow-hero,.workflow-snapshot-banner,.workflow-run-strip-panel,.workflow-stage-detail-v2{padding:var(--wf-space-3)}.workflow-graph{padding:var(--wf-space-3)}.workflow-graph-canvas{min-width:1040px}.stage-detail-grid,.history-run-grid{grid-template-columns:1fr}.workflow-lane{margin-left:170px}.workflow-branch-note{margin-left:140px}.workbench-phase{overflow-x:auto;grid-template-columns:repeat(4,minmax(112px,1fr))}.workbench-objective{padding:var(--wf-space-4)}.workbench-narrative-grid,.workbench-primary-grid{grid-template-columns:1fr}.workbench-geometry{order:1;min-height:330px}.workbench-activity{order:2}.workbench-viewer{height:280px}.workbench-validation-grid,.workbench-part-grid{grid-template-columns:1fr}}
 """
 
 ARTIFACT_PAGE_ARTIFACTS = (
@@ -286,6 +286,11 @@ def _runtime_message(action: dict[str, Any], language: str, phase: str, *, error
     part_id = str(action.get("part_id") or "")
     key = str(action.get("key") or action.get("backend_action") or "")
     product_messages = {
+        "open_product_example": {
+            "pending": ("Preparing the Product Example…", "正在准备产品示例……"),
+            "success": ("Product Example ready", "产品示例已就绪"),
+            "failed": ("Could not open the Product Example", "未能打开产品示例"),
+        },
         "accept_reviewable_result": {
             "pending": ("Accepting result…", "正在接受结果……"),
             "success": ("Result accepted", "结果已接受"),
@@ -1125,6 +1130,8 @@ def _render_workspace_page(
 ) -> None:
     workspace = data.get("workspace") if isinstance(data.get("workspace"), dict) else {}
     config = data.get("workspace_config") if isinstance(data.get("workspace_config"), dict) else {}
+    language = str(data.get("language") or "en")
+    _render_action_feedback_panel(ui, state, language)
     with ui.row().classes("w-full items-center justify-between"):
         with ui.column().classes("gap-1"):
             _label_with_help(ui, "Workspace", "当前本地工作区。Work、配置和新的 run 都会写入这个 workspace。", "text-2xl font-semibold")
@@ -1142,13 +1149,31 @@ def _render_workspace_page(
     })
     if state.get("workspace_result"):
         ui.markdown(f"```json\n{json.dumps(state['workspace_result'], indent=2, sort_keys=True)}\n```").classes("w-full mono")
-    with ui.card().classes("w-full border border-amber-200 bg-amber-50 shadow-none"):
-        _label_with_help(ui, "Examples", "创建真实可运行的产品示例 Work；所有阶段都通过共享 backend service 执行。", "text-lg font-medium")
-        ui.label("Desktop 2DOF Robot Arm").classes("font-semibold text-gray-900")
-        ui.label("Contract validates CAD IR and creates input_ir without STEP/STL. Full runs CadQuery and generates STEP/STL.").classes("text-sm text-gray-700")
-        with ui.row().classes("gap-2"):
-            ui.button("Create Contract Example", icon="fact_check", on_click=lambda: _create_golden_example_ui("contract", state, refresh)).tooltip("Run through validated input_ir; CAD execution is intentionally skipped.")
-            ui.button("Create Full Example", icon="precision_manufacturing", on_click=lambda: _create_golden_example_ui("full", state, refresh)).tooltip("Run CadQuery and create STEP/STL for one generic concept part.")
+    with ui.card().classes("w-full border border-blue-200 bg-blue-50 shadow-none"):
+        _label_with_help(ui, "Product Golden", "当前 Agent-first 单零件产品旅程的可复现示例。", "text-lg font-medium")
+        ui.label("Compact Micro Servo Mounting Bracket").classes("font-semibold text-gray-900")
+        ui.label(i18n_copy(language, "product_example_summary")).classes("text-sm text-gray-700")
+        open_button = ui.button(
+            i18n_copy(language, "open_product_example"),
+            icon="view_in_ar",
+            on_click=lambda: _schedule_action(
+                _open_product_example_async(state.get("_backend"), state, refresh, language)
+            ),
+        ).props("color=primary")
+        if _pending_action_matches(
+            state,
+            {"key": "open_product_example", "target_work_id": "product_golden"},
+        ):
+            open_button.disable()
+        ui.label(i18n_copy(language, "product_golden_scope")).classes("text-xs text-gray-600")
+        with ui.expansion(i18n_copy(language, "compatibility_examples"), icon="history").classes("w-full"):
+            ui.label("Desktop 2DOF Robot Arm").classes("font-semibold text-gray-900")
+            ui.label(
+                "Legacy Requirement / Planning / CAD IR and multi-part planning regression evidence; it is not the current product experience or a complete assembly."
+            ).classes("text-sm text-gray-700")
+            with ui.row().classes("gap-2"):
+                ui.button("Create Contract Regression", icon="fact_check", on_click=lambda: _create_golden_example_ui("contract", state, refresh)).props("outline")
+                ui.button("Create Full Regression", icon="precision_manufacturing", on_click=lambda: _create_golden_example_ui("full", state, refresh)).props("outline")
         progress = state.get("golden_example_progress") if isinstance(state.get("golden_example_progress"), list) else []
         if progress:
             with ui.expansion("Example progress", value=True).classes("w-full"):
@@ -1264,6 +1289,9 @@ def _render_work_overview(
         return
     work = overview.get("work") if isinstance(overview.get("work"), dict) else {}
     objective = overview.get("objective") if isinstance(overview.get("objective"), dict) else {}
+    user_input = overview.get("user_input") if isinstance(overview.get("user_input"), dict) else {}
+    agent_design = overview.get("agent_design") if isinstance(overview.get("agent_design"), dict) else {}
+    transformation = overview.get("transformation") if isinstance(overview.get("transformation"), dict) else {}
     recommendation = overview.get("recommendation") if isinstance(overview.get("recommendation"), dict) else {}
     capability = overview.get("capability") if isinstance(overview.get("capability"), dict) else {}
     activity = overview.get("agent_activity") if isinstance(overview.get("agent_activity"), dict) else {}
@@ -1279,20 +1307,56 @@ def _render_work_overview(
     )
 
     _render_action_feedback_panel(ui, state, language)
-    with ui.element("section").classes("workbench-objective w-full"):
-        with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
-            with ui.column().classes("gap-1 flex-1"):
-                ui.label(objective.get("title") or i18n_copy(language, "current_objective")).classes("workflow-eyebrow")
-                ui.label(objective.get("summary") or "—").classes("text-xl font-semibold leading-relaxed")
-            ui.badge(capability.get("label") or "").classes(
-                "bg-purple-700 workbench-capability" if capability.get("experimental") else "bg-slate-600 workbench-capability"
+    with ui.element("section").classes("workbench-narrative-grid w-full"):
+        with ui.element("article").classes("workbench-request workbench-panel"):
+            with ui.row().classes("w-full items-start justify-between gap-3"):
+                ui.label(user_input.get("title") or i18n_copy(language, "your_request")).classes("workflow-eyebrow")
+                ui.badge(user_input.get("source_label") or "").classes("bg-blue-700")
+            ui.label(user_input.get("original_request") or objective.get("summary") or "—").classes(
+                "text-lg font-semibold leading-relaxed mt-2"
             )
-        ui.label(
-            i18n_copy(
-                language,
-                "isolated_execution_verified" if capability.get("experimental") else "deterministic_compatibility",
+            if user_input.get("revision_request"):
+                with ui.element("div").classes("workbench-revision-request mt-3"):
+                    ui.label(i18n_copy(language, "request_source_revision")).classes("workflow-eyebrow")
+                    ui.label(str(user_input["revision_request"])).classes("text-base font-medium")
+            constraints = user_input.get("visible_constraints") if isinstance(user_input.get("visible_constraints"), list) else []
+            if constraints:
+                ui.label(i18n_copy(language, "visible_constraints")).classes("workflow-eyebrow mt-3")
+                with ui.row().classes("w-full gap-2 flex-wrap"):
+                    for item in constraints:
+                        ui.badge(str(item)).classes("bg-slate-100 text-slate-700")
+
+        with ui.element("article").classes("workbench-design workbench-panel"):
+            with ui.row().classes("w-full items-start justify-between gap-3"):
+                ui.label(agent_design.get("title") or i18n_copy(language, "agent_design")).classes("workflow-eyebrow")
+                ui.badge(capability.get("label") or "").classes(
+                    "bg-purple-700 workbench-capability" if capability.get("experimental") else "bg-slate-600 workbench-capability"
+                )
+            ui.label(agent_design.get("summary") or i18n_copy(language, "agent_design_evidence_gap")).classes(
+                "text-lg font-semibold leading-relaxed mt-2"
             )
-        ).classes("text-sm text-gray-600")
+            if agent_design.get("geometry_strategy"):
+                ui.label(i18n_copy(language, "geometry_strategy")).classes("workflow-eyebrow mt-3")
+                ui.label(str(agent_design["geometry_strategy"])).classes("text-sm text-gray-700")
+            parameters = agent_design.get("important_parameters") if isinstance(agent_design.get("important_parameters"), list) else []
+            if parameters:
+                ui.label(i18n_copy(language, "important_parameters")).classes("workflow-eyebrow mt-3")
+                with ui.row().classes("w-full gap-2 flex-wrap"):
+                    for item in parameters:
+                        if isinstance(item, dict):
+                            label = f"{item.get('name')}: {item.get('value')} {item.get('unit') or ''}".strip()
+                            ui.badge(label).classes("bg-indigo-50 text-indigo-800")
+            features = agent_design.get("functional_features") if isinstance(agent_design.get("functional_features"), list) else []
+            if features:
+                with ui.expansion(i18n_copy(language, "functional_features"), icon="construction").classes("w-full mt-2"):
+                    for item in features:
+                        ui.label(f"• {item}").classes("text-sm")
+            if agent_design.get("source_capability_mode"):
+                ui.label(
+                    f"{i18n_copy(language, 'source_capability_mode')}: {agent_design['source_capability_mode']}"
+                ).classes("text-xs text-gray-500 mt-2")
+            if capability.get("key") == "reproducible_product_golden":
+                ui.label(i18n_copy(language, "product_golden_scope")).classes("text-xs text-purple-800 mt-2")
 
     with ui.element("section").classes("workbench-recommendation w-full"):
         ui.label(i18n_copy(language, "current_recommendation")).classes("workflow-eyebrow")
@@ -1300,6 +1364,18 @@ def _render_work_overview(
 
     with ui.element("section").classes("workbench-primary-grid w-full"):
         with ui.element("article").classes("workbench-panel workbench-activity"):
+            ui.label(transformation.get("title") or i18n_copy(language, "what_happened")).classes("workflow-eyebrow")
+            with ui.column().classes("w-full gap-2 mt-3"):
+                for event in transformation.get("events", []):
+                    if not isinstance(event, dict):
+                        continue
+                    complete = event.get("status") == "completed"
+                    with ui.row().classes("items-center gap-2"):
+                        ui.icon("check_circle" if complete else "radio_button_unchecked", size="xs").classes(
+                            "text-green-700" if complete else "text-gray-400"
+                        )
+                        ui.label(str(event.get("label") or "")).classes("text-sm")
+            ui.separator().classes("my-3")
             ui.label(i18n_copy(language, "agent_activity")).classes("workflow-eyebrow")
             with ui.row().classes("items-center gap-3 mt-3"):
                 ui.icon("smart_toy").classes("text-3xl text-blue-600")
@@ -1336,6 +1412,21 @@ def _render_work_overview(
                 with ui.column().classes("w-full h-72 items-center justify-center gap-2"):
                     ui.icon("view_in_ar").classes("text-5xl text-gray-300")
                     ui.label(preview.get("label") or i18n_copy(language, "no_candidate")).classes("text-gray-500")
+            geometry = preview.get("geometry") if isinstance(preview.get("geometry"), dict) else {}
+            bbox = geometry.get("bounding_box") if isinstance(geometry.get("bounding_box"), dict) else {}
+            if geometry:
+                with ui.row().classes("w-full gap-2 flex-wrap mt-2"):
+                    ui.badge(
+                        f"{('边界框' if language == 'zh' else 'Bounding box')}: "
+                        f"{bbox.get('x', '—')} × {bbox.get('y', '—')} × {bbox.get('z', '—')} mm"
+                    ).classes("bg-slate-100 text-slate-800")
+                    ui.badge(
+                        f"{('实体数' if language == 'zh' else 'Solid count')}: {geometry.get('solid_count', '—')}"
+                    ).classes("bg-slate-100 text-slate-800")
+                    if geometry.get("face_count") is not None:
+                        ui.badge(
+                            f"{('面数' if language == 'zh' else 'Face count')}: {geometry.get('face_count')}"
+                        ).classes("bg-slate-100 text-slate-800")
             if preview.get("download_url"):
                 ui.link("STEP", preview["download_url"]).classes("text-sm mt-2")
 
@@ -1454,14 +1545,19 @@ def _render_workbench_result(
                             f"{('体积' if language == 'zh' else 'Volume')}: {geometry.get('volume')} mm³"
                         ).classes("text-sm")
             with ui.column().classes("gap-2"):
-                ui.label(i18n_copy(language, "not_verified")).classes("workflow-eyebrow")
+                ui.label(i18n_copy(language, "assumptions")).classes("workflow-eyebrow")
+                for item in result.get("assumptions", []):
+                    ui.label(f"◇ {item}").classes("text-sm text-blue-800")
+                ui.label(i18n_copy(language, "not_verified")).classes("workflow-eyebrow mt-2")
                 for item in result.get("unverified", []):
                     ui.label(f"△ {item}").classes("text-sm text-amber-800")
-
-        if result.get("assumptions"):
-            with ui.expansion(i18n_copy(language, "assumptions"), icon="lightbulb").classes("w-full mt-3"):
-                for item in result["assumptions"]:
-                    ui.label(f"• {item}").classes("text-sm")
+            with ui.column().classes("gap-2"):
+                ui.label(i18n_copy(language, "unsupported")).classes("workflow-eyebrow")
+                for item in result.get("unsupported", []):
+                    ui.label(f"— {item}").classes("text-sm text-red-800")
+                ui.label(i18n_copy(language, "not_requested")).classes("workflow-eyebrow mt-2")
+                for item in result.get("not_requested", []):
+                    ui.label(f"○ {item}").classes("text-sm text-gray-700")
         if result.get("limitations"):
             with ui.expansion(i18n_copy(language, "limitations"), icon="warning_amber").classes("w-full"):
                 for item in result["limitations"]:
@@ -1495,20 +1591,21 @@ def _render_workbench_result(
                         },
                     ):
                         accept.disable()
-                ui.button(
-                    i18n_copy(language, "revise"),
-                    icon="edit",
-                    on_click=lambda: _show_revision_dialog(
-                        ui,
-                        backend,
-                        str(_dict_get(overview.get("advanced"), "work_id")),
-                        part_id,
-                        result_id,
-                        state,
-                        refresh,
-                        language,
-                    ),
-                ).props("outline")
+                if not result.get("revision_in_progress"):
+                    ui.button(
+                        i18n_copy(language, "revise"),
+                        icon="edit",
+                        on_click=lambda: _show_revision_dialog(
+                            ui,
+                            backend,
+                            str(_dict_get(overview.get("advanced"), "work_id")),
+                            part_id,
+                            result_id,
+                            state,
+                            refresh,
+                            language,
+                        ),
+                    ).props("outline")
 
 
 def _render_workbench_parts_summary(
@@ -3644,6 +3741,65 @@ def _create_work_ui(
         state["selected_work_id"] = response["data"]["work"]["work_id"]
         state["active_page"] = "overview"
     refresh()
+
+
+async def _open_product_example_async(
+    backend: WorkflowConsoleBackend | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> dict[str, Any] | None:
+    action = {
+        "key": "open_product_example",
+        "label": "Open Product Example",
+        "target_work_id": "product_golden",
+    }
+    if backend is None:
+        failed = ActionExecutionState.from_action(
+            action,
+            status="failed",
+            message=_runtime_message(action, language, "failed"),
+        )
+        failed.error_detail = "Backend is unavailable."
+        _set_action_execution(state, failed, action)
+        refresh()
+        return None
+
+    def execute() -> dict[str, Any]:
+        return backend.open_product_golden_example()
+
+    def verify(result: dict[str, Any]) -> tuple[bool, str | None]:
+        work_id = result.get("work_id")
+        if not isinstance(work_id, str):
+            return False, "Product Example did not return a Work."
+        manifest = backend._read_work_manifest(work_id)
+        metadata = _dict_get(manifest, "metadata") or {}
+        has_reviewable = any(
+            isinstance(item, dict)
+            and item.get("checkpoint") == "reviewable_result"
+            and item.get("trust_role") == "reviewable_result"
+            for item in manifest.get("artifact_references", [])
+        )
+        ok = metadata.get("example_classification") == "product_golden" and has_reviewable
+        return ok, None if ok else "Product Example is missing its reviewable product evidence."
+
+    result = await _execute_action_lifecycle(
+        action,
+        state,
+        refresh,
+        execute,
+        language=language,
+        verify=verify,
+    )
+    if result is not None:
+        state["selected_work_id"] = result["work_id"]
+        state["selected_run_id"] = None
+        state["view_mode"] = "current_work"
+        state["selected_node_id"] = None
+        state["selected_stage_id"] = None
+        state["active_page"] = "overview"
+        refresh()
+    return result
 
 
 def _create_golden_example_ui(mode: str, state: dict[str, Any], refresh: Callable[[], None]) -> None:

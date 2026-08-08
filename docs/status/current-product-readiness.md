@@ -4,7 +4,8 @@ Status date: 2026-08-08.
 
 This document distinguishes the Agent-first target architecture from the
 implemented deterministic product, accepted M1 runtime foundation, bounded M2
-backend preview, and reuse-first M2.5 Workbench MVP.
+backend preview, reuse-first M2.5 Workbench MVP, and the M2.6 canonical Product
+Golden guided-design story.
 
 ## Target status
 
@@ -18,9 +19,10 @@ The authoritative target is now:
 - accepted-result-derived STEP, assembly, BOM, and drawing packages.
 
 This target is documented. Its M1 runtime/domain foundation, a bounded M2
-execution/publication preview, and the M2.5 single-Part Job Workbench surface
-are implemented; external-provider M2 acceptance and later-milestone modeling,
-Assembly, and Deliverable capabilities are not.
+execution/publication preview, the M2.5 single-Part Job Workbench surface, and
+the M2.6 canonical Product Golden are implemented; external-provider M2
+acceptance and later-milestone modeling, Assembly, and Deliverable capabilities
+are not.
 
 ## Implemented and usable now
 
@@ -61,6 +63,55 @@ Production-usable scope:
 The deterministic scope remains compatibility-labeled. The same Workbench can
 also present the bounded reviewable model-program result described below, but
 that Agentic route remains experimental until external-provider acceptance.
+
+## M2.6 canonical Product Golden — implemented and verified
+
+- **Open Product Example / 打开产品示例** directly creates or reopens one
+  compact micro-servo mounting-bracket Work and navigates to Overview / Design;
+  no external provider credentials are required and the result is not
+  auto-accepted.
+- The reproducible scripted provider exercises the existing Work → Part Job →
+  design episode → attested `cadquery_v1` model-program → STEP inspection →
+  reviewable publication path. It proves the product journey and presentation,
+  not external-provider design quality.
+- Overview projects the durable original prompt and current revision under
+  **Your Request**, and a registered concise `design_brief` under **Agent
+  Design**. The latter contains persisted concept, geometry strategy,
+  parameters, features, interfaces, assumptions, trade-offs, repair count, and
+  capability mode; it contains no private reasoning.
+- A compact **What happened** progression separates design transformation from
+  Agent Activity. The existing STL viewer remains the visual anchor with the
+  registered STEP, 58 × 42 × 34 mm bounding box, one solid, and 26 faces.
+- Result presentation separates checks that ran from assumptions, unverified
+  manufacturer-specific fit, unsupported release validation, and not-requested
+  strength/tolerance/motion analysis.
+- Detailed Workflow remains secondary but reachable. Existing explicit Accept
+  and Revise routes are reused; starting revision creates attempt 2 while the
+  accepted attempt-1 model and evidence remain visible.
+- The example index classifies the servo bracket as Product Golden, provider
+  routes as benchmark/evaluation, Desktop Robot Arm and older scripted flows as
+  compatibility/regression, and broker/episode/policy checks as infrastructure
+  smoke.
+
+Capability classification for M2.6:
+
+- implemented: yes;
+- automated verified: `148 passed, 2 skipped` in focused Product Golden,
+  Workbench, route, and old-Golden regression tests, followed by `657 passed,
+  2 skipped` in the complete suite with the existing WSL2 sandbox enabled on
+  2026-08-08;
+- manually verified: the real in-app browser opened the example, displayed the
+  original request, Agent Design, event progression, generated geometry,
+  measured and scoped validation facts, opened Detailed Workflow, returned to
+  Overview with context intact, explicitly accepted the result, then created a
+  Chinese natural-language revision while retaining the prior accepted result;
+  Advanced still exposed runtime and attestation evidence;
+- responsive verified: English and Chinese critical paths passed at 1440px,
+  1024px, and 414px without page-level horizontal overflow. The ten requested
+  screenshots are saved under `docs/ux/screenshots/product-golden/`;
+- production usable: a normal user can directly inspect and operate the current
+  local single-Part Job example. The Agentic route and general CAD capability
+  remain experimental pending the external-provider benchmark.
 
 ## M2.5 reuse-first Workbench MVP — implemented and verified
 
@@ -230,8 +281,10 @@ one-shot orchestration, not Agentic design.
   Deliverable Packages.
 - Browser usability: M2.5 real-browser acceptance passed for deterministic,
   reviewable, accepted, revision, Advanced/Evidence, Workflow, Parts, History,
-  Run Snapshot, 1440px, 1024px, and mobile cases. Browser usability beyond the
-  single-Part Job Workbench MVP remains later-milestone scope.
+  Run Snapshot, 1440px, 1024px, and mobile cases. M2.6 additionally passed the
+  directly loadable Product Golden critical path in English and Chinese at
+  1440px, 1024px, and 414px. Browser usability beyond the single-Part Job
+  Workbench remains later-milestone scope.
 
 ## Not implemented
 
@@ -415,6 +468,11 @@ These are migration tasks, not accepted target behavior.
   recorded in the capability classification above; real-browser deterministic,
   reviewable, accepted, revision, Advanced/Evidence, secondary navigation,
   1440px, 1024px, and 397px checks passed with saved screenshots.
+- M2.6 Product Golden verification passed on 2026-08-08. Focused tests passed
+  with `148 passed, 2 skipped`; the complete suite passed with `657 passed,
+  2 skipped`. Real-browser Product Golden, bilingual, Detailed Workflow,
+  Accept, accepted-result Revise, Advanced/Evidence, 1440px, 1024px, and 414px
+  checks passed with the ten requested screenshots.
 - Target architecture verification: M1 passed. Seven bounded M2 internal
   packages are contract-tested, and execution/publication have current-host
   WSL2 acceptance. The external-provider benchmark and user acceptance remain
@@ -439,15 +497,16 @@ These are migration tasks, not accepted target behavior.
 
 M0 and M1 are complete. The M2 backend vertical slice is implemented through
 reviewable publication and explicit accept/revise routes. The M2.5 Workbench MVP
-usability gate is complete. The external-provider M2 benchmark is now the
-current milestone; M2 itself remains unaccepted until that benchmark and an
-explicit user acceptance pass.
+usability gate and M2.6 canonical Product Golden comprehensibility gate are
+complete. The external-provider M2 benchmark is now the current milestone; M2
+itself remains unaccepted until that benchmark and an explicit user acceptance
+pass.
 
 Delivery order:
 
 1. run the M2 external-provider benchmark and explicit user acceptance;
-2. preserve the completed M2.5 Workbench usability gate while fixing any
-   benchmark-driven usability defects;
+2. preserve the completed M2.5 Workbench and M2.6 Product Golden gates while
+   fixing any benchmark-driven usability defects;
 3. M3 feature-graph/model-program geometry paths;
 4. M4 multi-Part Job and Assembly Job progression;
 5. M5 integrated Deliverable Package and drawings;
