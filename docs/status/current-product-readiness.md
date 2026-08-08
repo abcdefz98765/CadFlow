@@ -3,8 +3,8 @@
 Status date: 2026-08-08.
 
 This document distinguishes the Agent-first target architecture from the
-currently implemented deterministic product and the accepted M1 runtime
-foundation.
+implemented deterministic product, accepted M1 runtime foundation, bounded M2
+backend preview, and reuse-first M2.5 Workbench MVP.
 
 ## Target status
 
@@ -17,9 +17,10 @@ The authoritative target is now:
 - first-class Part Job attempts and Assembly Job;
 - accepted-result-derived STEP, assembly, BOM, and drawing packages.
 
-This target is documented. Its M1 runtime/domain foundation and a bounded M2
-execution/publication preview are implemented; the accepted Agentic product
-slice and later-milestone surfaces are not.
+This target is documented. Its M1 runtime/domain foundation, a bounded M2
+execution/publication preview, and the M2.5 single-Part Job Workbench surface
+are implemented; external-provider M2 acceptance and later-milestone modeling,
+Assembly, and Deliverable capabilities are not.
 
 ## Implemented and usable now
 
@@ -45,7 +46,10 @@ slice and later-milestone surfaces are not.
 - Final failure cleanup that avoids publishing untrusted product files.
 - Explicit part-result acceptance and accepted-pointer-only Deliverables.
 - Controlled artifact reads, overrides, and Run Snapshot boundaries.
-- Local NiceGUI Workflow Console for the legacy workflow.
+- Local NiceGUI Agent-first Workbench built by evolving the existing Workflow
+  Console shell, Work selection, Work header, Overview, Workflow graph, Parts,
+  History, Run Snapshot, artifact viewer, action feedback, i18n, and responsive
+  CSS.
 
 Production-usable scope:
 
@@ -54,8 +58,60 @@ Production-usable scope:
   explicit accepted-result changes, and accepted artifact projection through
   the existing backend/API and Workflow Console actions.
 
-This is a deterministic local product scope. It is not the Agent-first
-Workbench and does not execute provider-generated model programs.
+The deterministic scope remains compatibility-labeled. The same Workbench can
+also present the bounded reviewable model-program result described below, but
+that Agentic route remains experimental until external-provider acceptance.
+
+## M2.5 reuse-first Workbench MVP — implemented and verified
+
+- Existing Overview is now the primary Overview / Design surface; no second
+  NiceGUI app, shell, action lifecycle, artifact viewer, CSS system, or parallel
+  browser-owned domain state was created.
+- Work Header shows title, active Part Job, accepted count, concise status, one
+  recommendation, and a compact four-phase indicator.
+- Intent, Design, Build & Evaluate, and Accept & Deliver are orientation derived
+  from current Work/Part Job state, not four pages or a linear wizard.
+- Primary information order is objective, recommendation, Agent activity,
+  geometry, current result, validation/limitations, primary action, Part Jobs,
+  detailed Workflow, then Advanced/Evidence.
+- Agent activity maps persisted candidate/observation/reviewable/diagnostic
+  evidence to concise product language. Raw provider traffic and private
+  reasoning are not exposed.
+- Deterministic STEP/STL uses the existing STL viewer. A registered, validated
+  reviewable or accepted STEP can be converted to an ephemeral temporary STL
+  presentation mesh for that same viewer; the mesh is not Work evidence or a
+  deliverable.
+- Reviewable Result distinguishes measured geometry, validation that actually
+  ran, assumptions, important limitations, and unverified fit/strength/
+  tolerance/motion claims.
+- Accept calls the existing explicit acceptance route and reports success only
+  after the persisted Part Job accepted pointer matches.
+- Revise collects natural language, calls the existing revision route, and
+  reports success only after one new attempt exists and prior acceptance is
+  unchanged.
+- Workflow remains a reachable detailed process view. Parts reuses the existing
+  cards and preview details. History and immutable Run Snapshot remain
+  reachable and read-only.
+- Run/Episode/candidate/observation ids, artifact paths, Broker evidence,
+  runtime/toolchain/attestation data, hashes, and raw validator evidence are
+  under collapsed Advanced/Evidence.
+- Product-critical English and Chinese copy is supplied by the existing
+  `i18n.py` catalog.
+
+Capability classification for M2.5:
+
+- implemented: yes;
+- automated verified: `179 passed` targeted and `644 passed, 9 skipped` in the
+  complete suite on 2026-08-08;
+- manually verified: deterministic compatibility, M2 reviewable geometry,
+  Accept, accepted-result Revise, Agent activity, Advanced/Evidence, Workflow,
+  Parts, History, and immutable Run Snapshot passed in the real in-app browser;
+  1440px, 1024px, and 397px viewport evidence is saved under
+  `docs/ux/screenshots/workbench-mvp/`;
+- production usable: the local single-Part Job Workbench MVP is usable on the
+  current host. The Agentic route remains experimental and the overall product
+  is not production-ready until the external-provider M2 benchmark and later
+  capability gates pass.
 
 ## Implemented but not Agentic
 
@@ -172,8 +228,9 @@ one-shot orchestration, not Agentic design.
   scripts exist but are not a normal Assembly Job flow.
 - Drawings: TechDraw helper exists but is not integrated into accepted-result
   Deliverable Packages.
-- Browser usability: the legacy Workflow Cockpit has automated coverage but its
-  latest complete manual acceptance remains unfinished.
+- Browser usability: the M2.5 Workbench implementation has automated coverage;
+  real-browser deterministic/reviewable/accepted/revision/Advanced and
+  responsive acceptance remains unfinished.
 
 ## Not implemented
 
@@ -185,7 +242,6 @@ one-shot orchestration, not Agentic design.
 - Executable Assembly Job flow with accepted input identities.
 - Integrated assembly STEP or native assembly deliverable.
 - Integrated BOM and drawing package.
-- Agent-first four-phase workbench UI.
 - Engineering release checks for fit, tolerance, motion, strength, DFM/DFA,
   GD&T, FEA, or safety.
 
@@ -207,12 +263,11 @@ migration.
 The following current behavior still does not conform to the target
 architecture:
 
-- fixed fifteen-checkpoint primary Workflow;
 - flat closed-family CAD IR;
 - deterministic fixed-action behavior in the current `create_part_ir`
   compatibility product path;
-- legacy Workflow Console stage/availability presentation outside the new
-  manifest-derived product projection;
+- detailed Workflow still contains legacy stage/availability compatibility
+  presentation, but it is secondary to the manifest-derived Overview;
 - hard-coded capability labeling in reviewed-part results;
 - multiple compatibility/evaluation entry points remain callable outside
   product authority;
@@ -355,10 +410,10 @@ These are migration tasks, not accepted target behavior.
     `m2-reviewable-publication-package-acceptance.md`.
 - A real external provider has not been manually verified through the product
   route.
-- No new UI was implemented, so this package did not require a new Workbench
-  visual acceptance.
-- Manual browser verification: incomplete for the latest legacy Workflow
-  Cockpit.
+- M2.5 Workbench verification passed on 2026-08-08. The automated counts are
+  recorded in the capability classification above; real-browser deterministic,
+  reviewable, accepted, revision, Advanced/Evidence, secondary navigation,
+  1440px, 1024px, and 397px checks passed with saved screenshots.
 - Target architecture verification: M1 passed. Seven bounded M2 internal
   packages are contract-tested, and execution/publication have current-host
   WSL2 acceptance. The external-provider benchmark and user acceptance remain
@@ -381,19 +436,21 @@ These are migration tasks, not accepted target behavior.
 
 ## Current milestone
 
-M0 and M1 are complete. M2 is in progress: its provider-selected contract and
-model-program Episode, validation Tool Broker, static source policy, and
-attested WSL2 execution path, reviewable publication, and explicit accept/revise
-routes exist. The external-provider benchmark gate and explicit user acceptance
-of one resulting reviewable result remain unfinished.
+M0 and M1 are complete. The M2 backend vertical slice is implemented through
+reviewable publication and explicit accept/revise routes. The M2.5 Workbench MVP
+usability gate is complete. The external-provider M2 benchmark is now the
+current milestone; M2 itself remains unaccepted until that benchmark and an
+explicit user acceptance pass.
 
-Later milestones remain:
+Delivery order:
 
-1. M2 external-provider benchmark and explicit user acceptance;
-2. M3 feature-graph/model-program geometry paths;
-3. M4 multi-Part Job and Assembly Job progression;
-4. M5 integrated Deliverable Package and drawings;
-5. M6 Agent-first workbench UX.
+1. run the M2 external-provider benchmark and explicit user acceptance;
+2. preserve the completed M2.5 Workbench usability gate while fixing any
+   benchmark-driven usability defects;
+3. M3 feature-graph/model-program geometry paths;
+4. M4 multi-Part Job and Assembly Job progression;
+5. M5 integrated Deliverable Package and drawings;
+6. M6 Workbench expansion beyond the single-Part Job MVP.
 
 See:
 

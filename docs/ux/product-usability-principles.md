@@ -282,18 +282,24 @@ Advanced/Diagnostics may contain:
 
 Never expose arbitrary filesystem browsing, secrets, or unrestricted execution.
 
-## Legacy Workflow Cockpit
+## Existing Workflow Cockpit reuse
 
-During migration the existing Workflow Cockpit remains a compatibility and
-diagnostic surface.
+During migration the former fixed checkpoint sequence is no longer the primary
+journey, but the existing Workflow Cockpit remains a reusable product surface.
+Preserve and evolve its shell, navigation, detailed graph, Parts, History, Run
+Snapshot, reviews, artifact viewer, action feedback, i18n, and responsive
+components. The graph remains reachable as a secondary Workflow view for
+process detail and diagnostics.
 
-Do not invest in additional stage cards, graph states, or review forms unless
-required for:
+Do not add checkpoint ceremony unless required for:
 
 - preserving safe operation;
 - supporting migration;
 - fixing a release-blocking bug;
 - exposing a real new Agent-first capability.
+
+Do not rebuild mature interactions merely because the product orientation has
+changed.
 
 ## Definition of done
 

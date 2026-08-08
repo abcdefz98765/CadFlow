@@ -59,16 +59,6 @@ the revision route then created a new attempt while preserving that pointer and
 creating no Deliverable Package. These temporary mutations are route tests, not
 the final user's M2 acceptance.
 
-Automated verification passed `160` targeted Package 3 tests and the complete
-suite at `644 passed, 2 skipped` in 576.21 seconds with live WSL2 enabled. The
-dedicated WSL2 integration file passed `6` live tests, including the product
-route and attack/resource-limit coverage.
-
-Automated verification passed `160` targeted Package 3 tests and the complete
-suite at `644 passed, 2 skipped` in 576.21 seconds with live WSL2 enabled. The
-dedicated WSL2 integration file passed `6` live tests, including the product
-route and attack/resource-limit coverage.
-
 ## Capability statement
 
 - implemented: strict reviewable publication, product response, by-id explicit

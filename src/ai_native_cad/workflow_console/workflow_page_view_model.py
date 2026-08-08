@@ -12,7 +12,13 @@ from copy import deepcopy
 from typing import Any, Literal
 
 from ai_native_cad.workflow_console.review_surface import build_workflow_review_surface
-from ai_native_cad.workflow_console.i18n import action_labels, action_label, stage_label
+from ai_native_cad.workflow_console.i18n import (
+    action_labels,
+    action_label,
+    copy as i18n_copy,
+    stage_label,
+    status_label,
+)
 from ai_native_cad.workflow_console.work_stage_projection import (
     build_work_stage_projection,
     unavailable_work_stage_projection,
@@ -25,6 +31,549 @@ _SELECTION_PRIORITY = ("blocked", "needs_review", "running", "stale")
 _READ_ONLY_REASON = "Historical Run Snapshots are read-only. Return to Current Work or create a new Rework attempt."
 _REVIEW_DECISION_ACTIONS = {"save_stage_review", "approve_stage", "mark_needs_revision", "mark_blocked"}
 _AGENT_REVIEW_ACTIONS = {"part_review", "part_result_review", "create_workflow_review"}
+
+_PHASE_KEYS = (
+    "intent",
+    "design",
+    "build_evaluate",
+    "accept_deliver",
+)
+
+
+def build_workbench_overview_view_model(
+    backend: Any,
+    work_id: str,
+    *,
+    language: str = "en",
+) -> dict[str, Any]:
+    """Project the existing Current Work surface into the Agent-first Overview.
+
+    This is a presentation projection over the same manifest, Part Jobs,
+    artifact references, actions, and history already used by the console.  It
+    adds no browser-owned domain state and never infers trust from a filename.
+    """
+
+    language = "zh" if language == "zh" else "en"
+    work = backend.get_work_detail(work_id)
+    summary = _dict_value(work.get("summary"))
+    entity = _dict_value(work.get("entity_state"))
+    references = [
+        dict(item)
+        for item in entity.get("artifact_references", [])
+        if isinstance(item, dict)
+    ]
+    accepted = _dict_value(entity.get("accepted_part_results"))
+    result_records = _reviewable_records(
+        backend,
+        work_id,
+        references,
+    )
+    jobs = _workbench_part_jobs(
+        entity,
+        accepted,
+        references,
+        result_records,
+        [item for item in work.get("parts", []) if isinstance(item, dict)],
+        language,
+    )
+    active_job = _active_workbench_part(jobs)
+    active_record = (
+        result_records.get(active_job.get("reviewable_result_id"))
+        if isinstance(active_job, dict)
+        else None
+    )
+    phase_key = _workbench_phase(entity, jobs, active_job)
+    capability_key = (
+        "agentic_experimental"
+        if isinstance(active_record, dict)
+        and active_record.get("capability_mode")
+        == "provider_selected_design_with_attested_model_program"
+        else "deterministic_compatibility"
+    )
+    preview = _workbench_preview(work_id, active_job, active_record, references, language)
+    activity = _workbench_agent_activity(
+        active_job,
+        active_record,
+        references,
+        language,
+    )
+    recommendation = _workbench_recommendation(
+        entity,
+        active_job,
+        active_record,
+        language,
+    )
+    current_result = _workbench_result(active_job, active_record, language)
+    objective = str(
+        entity.get("description")
+        or summary.get("title")
+        or i18n_copy(language, "no_candidate")
+    )
+    phase_items = [
+        {
+            "key": key,
+            "label": i18n_copy(language, f"phase_{key}"),
+            "current": key == phase_key,
+        }
+        for key in _PHASE_KEYS
+    ]
+    accepted_count = sum(
+        1
+        for pointer in accepted.values()
+        if isinstance(pointer, dict) and pointer.get("status") == "approved"
+    )
+    return {
+        "work": {
+            "title": summary.get("title") or work_id,
+            "status": summary.get("overall_status") or "incomplete",
+            "active_part": active_job.get("part_job_id") if active_job else None,
+            "accepted_part_count": accepted_count,
+            "part_count": len(jobs),
+        },
+        "phase": {
+            "key": phase_key,
+            "label": i18n_copy(language, f"phase_{phase_key}"),
+            "items": phase_items,
+            "orientation_only": True,
+        },
+        "objective": {
+            "title": i18n_copy(language, "current_objective"),
+            "summary": objective,
+        },
+        "recommendation": recommendation,
+        "capability": {
+            "key": capability_key,
+            "label": i18n_copy(language, capability_key),
+            "experimental": capability_key == "agentic_experimental",
+        },
+        "agent_activity": activity,
+        "preview": preview,
+        "current_result": current_result,
+        "part_jobs": jobs,
+        "history": {
+            "reachable": True,
+            "run_snapshot_read_only": True,
+            "run_count": len(work.get("run_history", [])),
+        },
+        "workflow": {
+            "reachable": True,
+            "label": i18n_copy(language, "detailed_workflow"),
+        },
+        "advanced": {
+            "label": i18n_copy(language, "advanced_evidence"),
+            "collapsed": True,
+            "work_id": work_id,
+            "run_ids": list(entity.get("run_ids", [])),
+            "artifact_references": references,
+            "reviewable_evidence": _advanced_reviewable_evidence(active_record),
+        },
+    }
+
+
+def _reviewable_records(
+    backend: Any,
+    work_id: str,
+    references: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    for reference in references:
+        if not (
+            reference.get("checkpoint") == "reviewable_result"
+            and reference.get("trust_role") == "reviewable_result"
+            and reference.get("validation_status") == "passed"
+            and str(reference.get("relative_path") or "").endswith(
+                "/reviewable_result.json"
+            )
+        ):
+            continue
+        artifact_id = reference.get("artifact_id")
+        if not isinstance(artifact_id, str):
+            continue
+        try:
+            payload = backend.read_work_artifact_reference(work_id, artifact_id)
+        except (FileNotFoundError, ValueError):
+            continue
+        content = payload.get("content") if isinstance(payload, dict) else None
+        if not (
+            isinstance(content, dict)
+            and content.get("reviewable_result_id") == artifact_id
+            and content.get("reviewable") is True
+        ):
+            continue
+        records[artifact_id] = content
+    return records
+
+
+def _workbench_part_jobs(
+    entity: dict[str, Any],
+    accepted: dict[str, Any],
+    references: list[dict[str, Any]],
+    records: dict[str, dict[str, Any]],
+    legacy_parts: list[dict[str, Any]],
+    language: str,
+) -> list[dict[str, Any]]:
+    jobs = []
+    for raw in entity.get("part_jobs", []):
+        if not isinstance(raw, dict):
+            continue
+        part_id = raw.get("part_job_id") or raw.get("part_id")
+        if not isinstance(part_id, str):
+            continue
+        attempts = [item for item in raw.get("attempts", []) if isinstance(item, dict)]
+        latest_run_id = (
+            raw.get("active_attempt_run_id")
+            or (attempts[-1].get("run_id") if attempts else None)
+        )
+        pointer = _dict_value(accepted.get(part_id))
+        compatibility = next(
+            (item for item in legacy_parts if item.get("part_id") == part_id),
+            {},
+        )
+        result_ids = [
+            artifact_id
+            for artifact_id, record in records.items()
+            if record.get("part_job_id") == part_id
+        ]
+        latest_result_id = next(
+            (
+                artifact_id
+                for attempt in reversed(attempts)
+                for artifact_id in reversed(result_ids)
+                if records[artifact_id].get("run_id") == attempt.get("run_id")
+            ),
+            result_ids[-1] if result_ids else None,
+        )
+        accepted_result_id = pointer.get("result_id")
+        has_new_attempt = bool(
+            latest_run_id
+            and accepted_result_id
+            and latest_run_id
+            not in {pointer.get("attempt_run_id"), pointer.get("run_id")}
+        )
+        if has_new_attempt:
+            state = "design"
+        elif latest_result_id and latest_result_id == accepted_result_id:
+            state = "accepted"
+        elif latest_result_id:
+            state = "reviewable"
+        elif accepted_result_id:
+            state = "accepted"
+        elif attempts:
+            state = "design"
+        else:
+            state = "not_started"
+        jobs.append(
+            {
+                "part_job_id": part_id,
+                "name": part_id.replace("_", " ").title(),
+                "role": raw.get("role") or ("零件" if language == "zh" else "Part"),
+                "attempt_count": len(attempts),
+                "latest_attempt_run_id": latest_run_id,
+                "state": state,
+                "state_label": status_label(language, state),
+                "reviewable_result_id": latest_result_id,
+                "accepted_result_id": accepted_result_id,
+                "has_reviewable_result": bool(latest_result_id),
+                "has_accepted_result": bool(accepted_result_id),
+                "legacy_download_run_id": compatibility.get("download_run_id"),
+                "legacy_has_stl": bool(compatibility.get("has_stl")),
+                "legacy_has_step": bool(compatibility.get("has_step")),
+                "recommended_action": _part_recommendation(state, language),
+            }
+        )
+    if jobs:
+        return jobs
+
+    # Deterministic compatibility Works may predate first-class Part Jobs.  The
+    # existing Work projector remains the authority for these rows.
+    return [
+        {
+            "part_job_id": item.get("part_id"),
+            "name": str(item.get("part_id") or "Part").replace("_", " ").title(),
+            "role": item.get("role") or ("零件" if language == "zh" else "Part"),
+            "attempt_count": int(item.get("attempt_count") or 0),
+            "latest_attempt_run_id": item.get("latest_run_id"),
+            "legacy_download_run_id": item.get("download_run_id"),
+            "legacy_has_stl": bool(item.get("has_stl")),
+            "legacy_has_step": bool(item.get("has_step")),
+            "state": "accepted" if item.get("status") == "accepted" else (
+                "reviewable" if item.get("status") == "needs_review" else "design"
+            ),
+            "state_label": status_label(
+                language,
+                "accepted" if item.get("status") == "accepted" else (
+                    "reviewable" if item.get("status") == "needs_review" else "design"
+                ),
+            ),
+            "reviewable_result_id": None,
+            "accepted_result_id": "legacy_accepted" if item.get("status") == "accepted" else None,
+            "has_reviewable_result": item.get("status") == "needs_review",
+            "has_accepted_result": item.get("status") == "accepted",
+            "recommended_action": _part_recommendation(
+                "accepted" if item.get("status") == "accepted" else "design",
+                language,
+            ),
+        }
+        for item in legacy_parts
+    ]
+
+
+def _active_workbench_part(jobs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for state in ("reviewable", "design", "accepted", "not_started"):
+        match = next((item for item in jobs if item.get("state") == state), None)
+        if match:
+            return match
+    return jobs[0] if jobs else None
+
+
+def _workbench_phase(
+    entity: dict[str, Any],
+    jobs: list[dict[str, Any]],
+    active_job: dict[str, Any] | None,
+) -> str:
+    if not entity.get("root_run_id") and not jobs:
+        return "intent"
+    state = active_job.get("state") if active_job else None
+    if state in {"reviewable", "accepted"}:
+        return "accept_deliver"
+    if state == "design":
+        return "design"
+    if any(
+        item.get("trust_role") == "observation"
+        for item in entity.get("artifact_references", [])
+        if isinstance(item, dict)
+    ):
+        return "build_evaluate"
+    return "design"
+
+
+def _workbench_preview(
+    work_id: str,
+    job: dict[str, Any] | None,
+    record: dict[str, Any] | None,
+    references: list[dict[str, Any]],
+    language: str,
+) -> dict[str, Any]:
+    if job and record:
+        result_id = record.get("reviewable_result_id")
+        step = next(
+            (
+                item
+                for item in references
+                if isinstance(item, dict)
+                and item.get("checkpoint") == "reviewable_result"
+                and item.get("trust_role") == "reviewable_result"
+                and item.get("validation_status") == "passed"
+                and item.get("part_job_id") == job.get("part_job_id")
+                and result_id in (item.get("source_artifact_ids") or [])
+            ),
+            None,
+        )
+        if step:
+            artifact_id = step.get("artifact_id")
+            return {
+                "status": "accepted" if job.get("state") == "accepted" else "reviewable",
+                "label": i18n_copy(
+                    language,
+                    "result_accepted" if job.get("state") == "accepted" else "result_ready_review",
+                ),
+                "kind": "registered_step",
+                "viewer_url": (
+                    f"/web-viewer/index.html?file="
+                    f"%2Fapi%2Fwork-artifacts%2F{work_id}%2F{artifact_id}%2Fpreview.stl"
+                ),
+                "download_url": f"/api/work-artifacts/{work_id}/{artifact_id}/download",
+                "geometry": _dict_value(record.get("geometry")),
+            }
+    if job and job.get("legacy_has_stl") and job.get("legacy_download_run_id"):
+        run_id = job["legacy_download_run_id"]
+        return {
+            "status": job.get("state"),
+            "label": i18n_copy(language, "model_ready"),
+            "kind": "legacy_stl",
+            "viewer_url": f"/web-viewer/index.html?file=%2Fapi%2Fdownloads%2F{run_id}%2Fmodel.stl",
+            "download_url": (
+                f"/api/downloads/{run_id}/model.step"
+                if job.get("legacy_has_step")
+                else None
+            ),
+            "geometry": {},
+        }
+    return {
+        "status": "no_candidate",
+        "label": i18n_copy(language, "no_candidate"),
+        "kind": "empty",
+        "viewer_url": None,
+        "download_url": None,
+        "geometry": {},
+    }
+
+
+def _workbench_agent_activity(
+    job: dict[str, Any] | None,
+    record: dict[str, Any] | None,
+    references: list[dict[str, Any]],
+    language: str,
+) -> dict[str, Any]:
+    if record and job and job.get("state") in {"reviewable", "accepted"}:
+        key = "accepted_state" if job.get("state") == "accepted" else "ready_review"
+    elif any(item.get("trust_role") == "diagnostic" for item in references):
+        key = "repairing_candidate"
+    elif any(item.get("trust_role") == "observation" for item in references):
+        key = "inspecting_step"
+    elif job and job.get("attempt_count"):
+        key = "preparing_candidate"
+    else:
+        key = "understanding_interfaces"
+    details = []
+    detail_keys = {
+        "candidate": "preparing_candidate",
+        "observation": "inspecting_step",
+        "reviewable_result": "ready_review",
+        "diagnostic": "repairing_candidate",
+    }
+    for reference in references[-12:]:
+        detail_key = detail_keys.get(str(reference.get("trust_role")))
+        if detail_key and i18n_copy(language, detail_key) not in details:
+            details.append(i18n_copy(language, detail_key))
+    return {
+        "key": key,
+        "label": i18n_copy(language, key),
+        "summary": i18n_copy(language, key),
+        "details": details,
+        "raw_provider_payload_exposed": False,
+        "private_reasoning_exposed": False,
+    }
+
+
+def _workbench_recommendation(
+    entity: dict[str, Any],
+    job: dict[str, Any] | None,
+    record: dict[str, Any] | None,
+    language: str,
+) -> dict[str, Any]:
+    if not entity.get("root_run_id") and not job:
+        return {
+            "key": "start_design",
+            "label": i18n_copy(language, "start_design"),
+            "summary": (
+                "描述目标并开始第一个设计尝试。"
+                if language == "zh"
+                else "Describe the objective and start the first design attempt."
+            ),
+        }
+    if job and record and job.get("state") == "reviewable":
+        return {
+            "key": "accept_or_revise",
+            "label": i18n_copy(language, "accept_result"),
+            "summary": i18n_copy(language, "result_ready_review"),
+        }
+    if job and job.get("state") == "accepted":
+        return {
+            "key": "revise",
+            "label": i18n_copy(language, "revise"),
+            "summary": i18n_copy(language, "accept_success_detail"),
+        }
+    return {
+        "key": "continue_agent",
+        "label": i18n_copy(language, "continue_agent"),
+        "summary": (
+            "让 Agent 准备、生成并检查下一候选设计。"
+            if language == "zh"
+            else "Let the Agent prepare, build, and inspect the next candidate."
+        ),
+    }
+
+
+def _workbench_result(
+    job: dict[str, Any] | None,
+    record: dict[str, Any] | None,
+    language: str,
+) -> dict[str, Any] | None:
+    if not job:
+        return None
+    if not record:
+        if job.get("legacy_has_step") or job.get("has_accepted_result"):
+            return {
+                "status": job.get("state"),
+                "title": i18n_copy(
+                    language,
+                    "result_accepted" if job.get("state") == "accepted" else "model_ready",
+                ),
+                "part": job.get("name"),
+                "role": job.get("role"),
+                "geometry": {},
+                "verified": [],
+                "assumptions": [],
+                "limitations": [],
+                "unverified": [],
+            }
+        return None
+    geometry = _dict_value(record.get("geometry"))
+    validation = _dict_value(record.get("validation"))
+    verified = []
+    if geometry.get("valid") is True:
+        verified.append("有效实体" if language == "zh" else "Valid solid")
+    if isinstance(record.get("step"), dict):
+        verified.append("STEP 导出成功" if language == "zh" else "STEP export passed")
+    if validation.get("step_reimport_valid") is True:
+        verified.append(
+            "STEP 重新导入验证通过"
+            if language == "zh"
+            else "STEP re-import passed"
+        )
+    return {
+        "status": job.get("state"),
+        "title": i18n_copy(
+            language,
+            "result_accepted" if job.get("state") == "accepted" else "result_ready_review",
+        ),
+        "part": job.get("name"),
+        "role": job.get("role"),
+        "geometry": geometry,
+        "verified": verified,
+        "assumptions": list(record.get("assumptions") or []),
+        "limitations": list(record.get("limitations") or [])[:3],
+        "unverified": (
+            ["装配配合", "强度", "公差", "运动"]
+            if language == "zh"
+            else ["Assembly fit", "Strength", "Tolerance", "Motion"]
+        ),
+        "reviewable_result_id": record.get("reviewable_result_id"),
+        "accepted": job.get("state") == "accepted",
+    }
+
+
+def _advanced_reviewable_evidence(record: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(record, dict):
+        return {}
+    keys = (
+        "run_id",
+        "episode_id",
+        "candidate_id",
+        "observation_id",
+        "execution_id",
+        "api_id",
+        "source_hash",
+        "parameters_hash",
+        "attestation_digest",
+        "profile_digest",
+        "toolchain_digest",
+        "limits",
+    )
+    return {key: deepcopy(record.get(key)) for key in keys if record.get(key) is not None}
+
+
+def _part_recommendation(state: str, language: str) -> str:
+    if state == "reviewable":
+        return i18n_copy(language, "accept_result")
+    if state == "accepted":
+        return i18n_copy(language, "revise")
+    return i18n_copy(language, "continue_agent")
+
+
+def _dict_value(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 # Canonical checkpoints stay owned by the architecture.  This catalog only
 # explains their established responsibility in the user's language.
