@@ -96,6 +96,32 @@ are not.
   `live-example-design-and-model-zh.png` intentionally shows the honest
   no-candidate safe-stop state because the real run did not reach geometry.
 
+## M2.8 UI convergence — implemented and verified
+
+- Overview now owns one dominant Work-level action. Agent Activity explains
+  progress without repeating the command, Part cards navigate to Workflow, and
+  empty Agent Design, geometry, and Agent Output states remain compact until
+  durable evidence exists.
+- Current Attention remains a derived presentation projection. A single-Part
+  Work uses one compact current-task row; a multi-Part Work uses an independent
+  per-Part index. Ready, Running, Needs you, Review, Blocked, Accepted, and
+  completed presentation states do not alter domain status or persist UI state.
+- The Dynamic Work Graph renders its existing nodes, edges, branches, and
+  revision provenance as compact topology instead of four fixed equal-width
+  state columns. The four phases remain orientation chips.
+- Desktop Workflow uses graph-and-inspector master-detail; 1024px and mobile
+  stack without page-level horizontal overflow. Node detail prioritizes state,
+  explanation, valid action, and relevant result before technical ids.
+- Real in-app browser verification covered beginning/ready Overview,
+  clarification, reviewable geometry and acceptance, accepted-result revision,
+  two-Part attention/branching, selected-node changes, immutable Run Snapshot,
+  Chinese, 1440px, 1024px, and 414px layouts. Eleven screenshots are under
+  `../ux/screenshots/ui-convergence/`.
+- Focused behavior verification passed with `32 passed`. The clean complete
+  suite result is recorded in the Verification state section below.
+- No workflow/domain architecture, graph persistence, Work decomposition,
+  Assembly, Deliverable, Provider, Agent-role, or security capability was added.
+
 ## Implemented and usable now
 
 - Local Workspace and Work creation.
@@ -571,6 +597,11 @@ These are migration tasks, not accepted target behavior.
   saved under `../ux/screenshots/workflow-command-surface/`. Focused
   verification passed with `69 passed`; the complete suite passed with `663
   passed, 9 skipped`.
+- The M2.8 UI convergence pass completed on 2026-08-09. Focused behavior tests
+  passed with `32 passed`; the clean complete suite passed with `664 passed, 9
+  skipped`. Real-browser verification and screenshots cover the simplified
+  Overview, compact Current Attention, topology-first graph, nearby node
+  inspector, all required owner states, and 1440px/1024px/414px layouts.
 - M2.8 added only optional durable revision provenance on Part attempts because
   parent Run/result causality cannot be recovered honestly from prompt text,
   attempt order, or timestamps. No graph persistence, workflow engine, Agent

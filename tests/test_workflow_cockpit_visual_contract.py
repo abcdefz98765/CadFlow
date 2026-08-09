@@ -31,6 +31,9 @@ def test_visual_tokens_keep_status_selection_attention_and_horizontal_graph_sepa
     assert all(node["status"] != "selected" and isinstance(node["selected"], bool) for node in nodes)
     assert "overflow-x:auto" in WORKFLOW_UI_CSS
     assert ".dynamic-workflow-canvas{min-width:" in WORKFLOW_UI_CSS
+    assert ".dynamic-phase-grid{display:flex" in WORKFLOW_UI_CSS
+    assert ".workflow-master-detail{display:grid" in WORKFLOW_UI_CSS
+    assert ".dynamic-edge-line" in WORKFLOW_UI_CSS
     assert ".dynamic-node.selected" in WORKFLOW_UI_CSS
     assert ".workflow-dot.status-unavailable" in WORKFLOW_UI_CSS
     assert ".workflow-dot.status-execution_skipped" in WORKFLOW_UI_CSS
@@ -70,6 +73,7 @@ def test_current_and_snapshot_page_structure_are_distinguishable(tmp_path, monke
     assert "stage_spine" in snapshot["workflow_graph"]
     assert [page for page, _icon, _label in WORK_USER_PAGES] == ["overview", "workflow", "parts", "history"]
     assert "grid-template-columns:repeat(4" in WORKFLOW_UI_CSS
+    assert ".workflow-inspector-pane{min-width:0;position:sticky" in WORKFLOW_UI_CSS
     assert "@media(max-width:760px)" in WORKFLOW_UI_CSS
 
 

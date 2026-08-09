@@ -78,6 +78,12 @@ node. A single-Part Work may have one attention node; parallel Part Jobs may
 simultaneously expose several waiting, reviewable, blocked, or active nodes.
 Selection, attention, actions, and layout are not persisted.
 
+Current Attention is rendered as an index, not a second graph or action
+console. A single-Part Work uses one compact current-task row; a multi-Part
+Work uses a compact per-Part list whose items select the corresponding graph
+node. The selected-node inspector remains the precise Workflow command
+surface.
+
 The graph should be built from existing:
 
 - Work state;
@@ -264,6 +270,11 @@ Recommended information order:
 
 Do not make internal artifact names the information architecture.
 
+Overview normally has one dominant Work-level action. Agent Activity explains
+progress and Part cards navigate to their current graph state; neither repeats
+that dominant command. Empty Agent Design, geometry, and Agent Output states
+stay compact until durable evidence exists.
+
 ## 13. Agent Design, Activity, and Output
 
 Keep these distinct.
@@ -427,7 +438,10 @@ Success is a real state change, not merely a returned function value.
 
 Reuse the existing responsive system.
 
-At desktop, graph and detail may sit side-by-side when useful.
+At desktop, the normal Current Work Workflow uses a graph-and-inspector
+master-detail layout so node selection updates nearby detail without a long
+scroll. Phase labels remain compact orientation above the topology and do not
+reserve four equal empty lanes.
 
 At 1024px and mobile, prioritize:
 
@@ -436,7 +450,9 @@ At 1024px and mobile, prioritize:
 - geometry;
 - primary action.
 
-The graph may scroll/zoom rather than compressing every label beyond readability.
+At narrower widths graph and inspector stack. The topology may scroll within
+its own surface rather than forcing page-level horizontal overflow or
+compressing every label beyond readability.
 
 ## 25. Avoid over-designing Workflow
 

@@ -158,6 +158,9 @@ def test_beginning_work_and_current_attempt_expose_existing_agent_command(tmp_pa
     assert request_page["recommended_next_action"]["key"] == "continue_agent"
     assert request_page["recommended_next_action"]["label"] == "Start design"
     assert attempt_page["available_actions"]["primary_action"]["key"] == "continue_agent"
+    assert attempt_page["selected_node"]["user_state"] == "ready"
+    assert attempt_page["selected_node"]["interaction"]["requires_user_action"] is False
+    assert attempt_page["current_attention"][0]["state"] == "ready"
     assert attempt_page["action_inventory"]
     assert all(node["interaction"]["business_state_owner"] == "domain" for node in attempt_page["nodes"])
     assert "global_current_node" not in json.dumps(attempt_page)
@@ -185,6 +188,8 @@ def test_retry_is_exposed_only_for_retryable_current_stop(tmp_path):
     )
     assert retry_page["recommended_next_action"]["key"] == "retry_agent"
     assert retry_page["current_attention"][0]["node_id"] == f"recovery:{retry_artifact}"
+    assert retry_page["selected_node"]["user_state"] == "blocked"
+    assert retry_page["current_attention"][0]["state"] == "blocked"
 
     historical_page = build_workflow_page_view_model(
         backend,
@@ -211,6 +216,7 @@ def test_retry_is_exposed_only_for_retryable_current_stop(tmp_path):
         language="en",
     )
     assert unsupported_page["recommended_next_action"]["key"] == "modify_request"
+    assert unsupported_page["selected_node"]["user_state"] == "blocked"
     assert all(action["key"] != "retry_agent" for action in unsupported_page["action_inventory"])
 
 
@@ -289,6 +295,8 @@ def test_multi_part_current_work_has_one_branch_per_durable_part_job(tmp_path):
     assert page["workflow_graph"]["compatibility_mode"] is False
     assert len(page["current_attention"]) == 2
     assert {item["part_job_id"] for item in page["current_attention"]} == {"base", "cover"}
+    assert {item["state"] for item in page["current_attention"]} == {"ready"}
+    assert all(item["part_label"] for item in page["current_attention"])
 
 
 def test_legacy_part_job_is_badged_as_compatibility_projection(tmp_path):

@@ -162,13 +162,13 @@ body{background:var(--wf-bg);color:var(--wf-ink)}
 .workflow-graph{overflow-x:auto;background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workflow-graph-canvas{min-width:1120px}.workflow-graph-label{font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--wf-muted)}.workflow-stage-row,.workflow-lane-row{display:flex;align-items:flex-start;gap:var(--wf-space-2);flex-wrap:nowrap}.workflow-step{align-items:center;gap:var(--wf-space-1);cursor:pointer;min-width:104px;max-width:132px;padding:var(--wf-space-2);border:1px solid transparent;border-radius:var(--wf-radius-sm)}.workflow-step:hover{background:#f8fafc}.workflow-step-selected{border-color:var(--wf-primary);background:#eff6ff;outline:2px solid #bfdbfe;outline-offset:1px}.workflow-connector{height:2px;min-width:24px;flex:1;background:#cbd5e1;margin-top:18px;position:relative}.workflow-connector:after{content:'›';position:absolute;right:-2px;top:-12px;color:#94a3b8;font-size:24px}.workflow-branch-note{margin-left:208px;color:var(--wf-muted);font-size:12px}.workflow-lane{border-left:2px solid #cbd5e1;margin-left:278px;padding-left:var(--wf-space-3)}
 .workflow-dot{width:18px;height:18px;border:2px solid #fff;border-radius:999px;box-shadow:0 0 0 2px #cbd5e1}.workflow-dot.status-completed,.workflow-dot.status-contract_complete{background:var(--wf-completed);box-shadow:0 0 0 2px #86efac}.workflow-dot.status-running{background:var(--wf-running);box-shadow:0 0 0 2px #93c5fd;animation:wf-pulse 1.7s infinite}.workflow-dot.status-needs_review{background:var(--wf-review);box-shadow:0 0 0 2px #fde68a}.workflow-dot.status-blocked,.workflow-dot.status-failed{background:var(--wf-blocked);box-shadow:0 0 0 2px #fecaca}.workflow-dot.status-stale{background:#fff;border:3px solid var(--wf-stale);box-shadow:0 0 0 2px #fde68a}.workflow-dot.status-user_modified{background:var(--wf-override);box-shadow:0 0 0 2px #ddd6fe}.workflow-dot.status-execution_skipped,.workflow-dot.status-skipped{background:#f8fafc;border:3px double #64748b;box-shadow:0 0 0 2px #cbd5e1}.workflow-dot.status-unavailable{background:#fff;border:2px dashed var(--wf-unavailable);box-shadow:none}.workflow-dot.status-not_started{background:#fff;border-color:#94a3b8;box-shadow:none}.workflow-dot.status-reference_only{border-radius:3px;background:#fff;border-color:var(--wf-reference);box-shadow:none}.workflow-dot.kind-review,.workflow-dot.kind-rework{transform:rotate(45deg);border-radius:3px}.workflow-dot.kind-review+label,.workflow-dot.kind-rework+label{margin-top:2px}.workflow-attention{font-size:10px;color:var(--wf-review);font-weight:700}.workflow-node-status{font-size:11px;color:var(--wf-muted);text-transform:capitalize}
 .workflow-dot.status-reviewable{background:var(--wf-review);box-shadow:0 0 0 2px #fde68a}.workflow-dot.status-accepted{background:var(--wf-completed);box-shadow:0 0 0 2px #86efac}.workflow-dot.kind-decision{transform:rotate(45deg);border-radius:3px}.workflow-dot.kind-part{border-radius:4px;background:#7c3aed;box-shadow:0 0 0 2px #ddd6fe}.workflow-dot.kind-accepted{border-radius:4px}
-.dynamic-workflow-shell{overflow-x:auto;background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}.dynamic-workflow-canvas{min-width:1080px}.dynamic-phase-grid{display:grid;grid-template-columns:repeat(4,minmax(240px,1fr));gap:8px}.dynamic-phase-header{padding:10px 12px;border-top:4px solid #94a3b8;background:#f8fafc;border-radius:6px;font-size:12px;font-weight:800;letter-spacing:.06em;color:#475569}.dynamic-phase-header:nth-child(2){border-color:#8b5cf6;background:#faf5ff}.dynamic-phase-header:nth-child(3){border-color:#2563eb;background:#eff6ff}.dynamic-phase-header:nth-child(4){border-color:#16a34a;background:#f0fdf4}.dynamic-root-row,.dynamic-attempt-row{display:grid;grid-template-columns:repeat(4,minmax(240px,1fr));gap:8px;align-items:start}.dynamic-root-row{margin:12px 0}.dynamic-branch{border:1px solid #dbe3ef;border-radius:10px;background:#fbfdff;margin-top:12px;padding:10px}.dynamic-branch-title{font-size:12px;font-weight:800;color:#475569;padding:2px 4px 8px}.dynamic-attempt-row{border-top:1px solid #e8edf4;padding-top:10px;margin-top:8px;min-height:116px}.dynamic-phase-cell{min-width:0;display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;padding:4px}.dynamic-node{width:168px;min-height:92px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;padding:10px;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,.04)}.dynamic-node:hover{border-color:#60a5fa;box-shadow:0 3px 10px rgba(37,99,235,.12)}.dynamic-node.selected{border-color:#2563eb;outline:3px solid #bfdbfe}.dynamic-node.blocked,.dynamic-node.failed{border-left:4px solid #dc2626}.dynamic-node.reviewable{border-left:4px solid #d97706;background:#fffbeb}.dynamic-node.accepted{border-left:4px solid #16a34a;background:#f0fdf4}.dynamic-node.stale{border-style:dashed}.dynamic-node-title{font-size:13px;font-weight:700;line-height:1.25}.dynamic-node-summary{font-size:11px;color:#64748b;line-height:1.35}.dynamic-edge-chip{font-size:10px;color:#475569;background:#eef2f7;border-radius:999px;padding:3px 7px;align-self:center}.dynamic-node-detail{background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}
-.workflow-attention-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:var(--wf-space-3)}.workflow-attention-card{border:1px solid #bfdbfe;border-left:4px solid var(--wf-primary);border-radius:var(--wf-radius-sm);background:#f8fbff;padding:var(--wf-space-3);cursor:pointer}.workflow-attention-card.user_action,.workflow-attention-card.blocked{border-color:#fbbf24;background:#fffbeb}.workflow-attention-card.review{border-color:#fdba74;background:#fff7ed}.dynamic-branch{position:relative;margin-left:18px}.dynamic-branch:before{content:'';position:absolute;left:-19px;top:-13px;bottom:50%;width:18px;border-left:2px solid #94a3b8;border-bottom:2px solid #94a3b8;border-radius:0 0 0 8px}.dynamic-attempt-row{position:relative}.dynamic-attempt-row:before{content:'';position:absolute;left:7%;right:7%;top:59px;border-top:2px solid #cbd5e1;z-index:0}.dynamic-attempt-row:after{content:'›';position:absolute;right:6%;top:43px;color:#94a3b8;font-size:24px;z-index:0}.dynamic-attempt-row.revision:before{border-top-style:dashed;border-color:#8b5cf6}.dynamic-phase-cell{position:relative;z-index:1}.dynamic-node.attention-user_action,.dynamic-node.attention-blocked{box-shadow:0 0 0 3px #fde68a}.dynamic-node.attention-review{box-shadow:0 0 0 3px #fed7aa}.dynamic-node.attention-active{box-shadow:0 0 0 3px #bfdbfe}.dynamic-attention-badge{font-size:10px;font-weight:800;color:#92400e;background:#fef3c7;border-radius:999px;padding:2px 7px}.dynamic-node-actions{border-left:4px solid var(--wf-primary);background:#eff6ff;border-radius:var(--wf-radius-sm);padding:var(--wf-space-4)}
+.workflow-master-detail{display:grid;grid-template-columns:minmax(0,1fr) minmax(330px,390px);gap:var(--wf-space-4);align-items:start}.workflow-graph-pane{min-width:0}.workflow-inspector-pane{min-width:0;position:sticky;top:16px}.dynamic-workflow-shell{overflow-x:auto;background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}.dynamic-workflow-canvas{min-width:0;width:max-content;min-inline-size:100%}.dynamic-phase-grid{display:flex;gap:6px;align-items:center;padding-bottom:12px;border-bottom:1px solid #e8edf4}.dynamic-phase-header{padding:5px 10px;border-radius:999px;background:#f1f5f9;font-size:11px;font-weight:700;color:#64748b}.dynamic-phase-header.has-nodes{color:#334155;background:#e2e8f0}.dynamic-phase-header.current{color:#1d4ed8;background:#dbeafe}.dynamic-root-row{display:flex;align-items:center;margin:14px 0 12px;padding-left:4px}.dynamic-branch{position:relative;border:1px solid #e2e8f0;border-radius:12px;background:#fbfdff;margin:12px 0 0 18px;padding:12px 12px 12px 18px}.dynamic-branch:before{content:'';position:absolute;left:-19px;top:-16px;width:18px;height:38px;border-left:2px solid #94a3b8;border-bottom:2px solid #94a3b8;border-radius:0 0 0 8px}.dynamic-branch-title{font-size:11px;font-weight:800;letter-spacing:.04em;color:#64748b;padding:0 2px 8px}.dynamic-branch-origin,.dynamic-attempt-row{display:flex;align-items:center;min-width:max-content;padding:3px 2px}.dynamic-attempt-row{position:relative;margin-top:7px;padding-top:10px;border-top:1px solid #edf1f5}.dynamic-attempt-row:not(.branch-origin):before{content:'';position:absolute;left:10px;top:-8px;height:18px;border-left:2px solid #94a3b8}.dynamic-attempt-row.revision{margin-left:22px;border-top-style:dashed;border-color:#c4b5fd}.dynamic-attempt-row.revision:before{content:'';position:absolute;left:-18px;top:-10px;height:30px;width:16px;border-left:2px dashed #8b5cf6;border-bottom:2px dashed #8b5cf6;border-radius:0 0 0 8px}.dynamic-graph-path{display:flex;align-items:center;min-width:max-content}.dynamic-node{width:150px;min-height:72px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;padding:9px;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,.04)}.dynamic-node:hover{border-color:#60a5fa;box-shadow:0 3px 10px rgba(37,99,235,.12)}.dynamic-node.selected{border-color:#2563eb;outline:3px solid #bfdbfe}.dynamic-node.blocked,.dynamic-node.failed{border-left:4px solid #dc2626}.dynamic-node.reviewable{border-left:4px solid #d97706;background:#fffbeb}.dynamic-node.accepted{border-left:4px solid #16a34a;background:#f0fdf4}.dynamic-node.stale{border-style:dashed}.dynamic-node-phase{font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#94a3b8}.dynamic-node-title{font-size:12px;font-weight:700;line-height:1.25}.dynamic-node-summary{font-size:10px;color:#64748b;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.dynamic-edge{display:flex;align-items:center;min-width:58px;color:#64748b}.dynamic-edge-line{height:2px;width:28px;background:#94a3b8;position:relative}.dynamic-edge-line:after{content:'›';position:absolute;right:-3px;top:-12px;font-size:20px}.dynamic-edge-label{font-size:9px;white-space:nowrap;background:#f1f5f9;border-radius:999px;padding:2px 5px;margin-left:4px}.dynamic-node-detail{background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}
+.workflow-current-task{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:12px 14px;cursor:pointer}.workflow-current-task:hover{border-color:#93c5fd}.workflow-attention-grid{display:grid;gap:7px}.workflow-attention-row{display:grid;grid-template-columns:minmax(120px,.8fr) minmax(130px,1fr) auto;align-items:center;gap:10px;border-bottom:1px solid #eef2f7;padding:9px 2px;cursor:pointer}.workflow-attention-row:last-child{border-bottom:0}.workflow-state-pill{font-size:10px;font-weight:800;border-radius:999px;padding:3px 8px;background:#dbeafe;color:#1d4ed8}.workflow-state-pill.needs_you{background:#fef3c7;color:#92400e}.workflow-state-pill.review{background:#ffedd5;color:#9a3412}.workflow-state-pill.blocked{background:#fee2e2;color:#991b1b}.workflow-state-pill.running{background:#dbeafe;color:#1d4ed8}.workflow-state-pill.accepted,.workflow-state-pill.complete{background:#dcfce7;color:#166534}.dynamic-node.attention-user_action,.dynamic-node.attention-blocked{box-shadow:0 0 0 3px #fde68a}.dynamic-node.attention-review{box-shadow:0 0 0 3px #fed7aa}.dynamic-node.attention-active,.dynamic-node.attention-running{box-shadow:0 0 0 3px #bfdbfe}.dynamic-attention-badge{font-size:9px;font-weight:800;color:#1d4ed8;background:#dbeafe;border-radius:999px;padding:2px 6px}.dynamic-attention-badge.needs_you,.dynamic-attention-badge.blocked{color:#92400e;background:#fef3c7}.dynamic-attention-badge.review{color:#9a3412;background:#ffedd5}.dynamic-node-actions{border-left:4px solid var(--wf-primary);background:#eff6ff;border-radius:var(--wf-radius-sm);padding:var(--wf-space-3)}
 .workflow-part-candidate{min-width:146px;max-width:180px;border:1px solid var(--wf-border);border-radius:999px;padding:var(--wf-space-2) var(--wf-space-3);background:#fff}.workflow-part-candidate.reference-component{border-radius:var(--wf-radius-sm);border-style:dashed;background:#f8fafc}.workflow-part-selected{border-color:var(--wf-primary);outline:2px solid #bfdbfe;outline-offset:1px}
 .stage-conclusion{border-bottom:1px solid var(--wf-border);padding-bottom:var(--wf-space-3)}.stage-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--wf-space-3)}.stage-detail-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);min-height:156px}.stage-detail-card h3{margin:0 0 var(--wf-space-2);font-size:12px;letter-spacing:.07em;color:var(--wf-muted);font-weight:700}.stage-detail-card.decision{background:#fbfcff}.stage-artifact-list{margin-top:var(--wf-space-2);padding-top:var(--wf-space-2);border-top:1px solid #eef2f7}.workflow-evidence{border-top:1px solid var(--wf-border);padding-top:var(--wf-space-3)}.workflow-disabled-reason{font-size:12px;color:var(--wf-muted)}
 .history-list{display:grid;gap:var(--wf-space-3)}.history-run-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);background:#fff;cursor:pointer}.history-run-card:hover{border-color:#94a3b8}.history-run-grid{display:grid;grid-template-columns:1.2fr repeat(4,minmax(0,1fr));gap:var(--wf-space-3)}.history-field-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--wf-muted)}
-.workbench-phase{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%;max-width:760px}.workbench-phase-item{border-top:3px solid #cbd5e1;padding-top:6px;color:var(--wf-muted);font-size:12px}.workbench-phase-item.current{border-color:var(--wf-primary);color:#1d4ed8;font-weight:700}.workbench-objective{background:linear-gradient(135deg,#eff6ff,#fff);border:1px solid #bfdbfe;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-narrative-grid{display:grid;grid-template-columns:minmax(300px,.9fr) minmax(420px,1.1fr);gap:var(--wf-space-4)}.workbench-request{background:linear-gradient(135deg,#eff6ff,#fff);border-color:#bfdbfe}.workbench-design{background:linear-gradient(135deg,#faf5ff,#fff);border-color:#ddd6fe}.workbench-revision-request{border-left:3px solid #7c3aed;background:#faf5ff;padding:var(--wf-space-3);border-radius:var(--wf-radius-sm)}.workbench-recommendation{border-left:4px solid var(--wf-primary);background:#fff;border-radius:var(--wf-radius-sm);padding:var(--wf-space-4)}.workbench-primary-grid{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(420px,1.2fr);gap:var(--wf-space-4);align-items:stretch}.workbench-panel{background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}.workbench-activity{order:1}.workbench-geometry{order:2;min-height:420px}.workbench-viewer{width:100%;height:350px;border:0;border-radius:var(--wf-radius-sm);background:#111827}.workbench-result{border:1px solid #fbbf24;border-left:4px solid #d97706;background:#fffbeb;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-result.accepted{border-color:#4ade80;background:#f0fdf4}.workbench-validation-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--wf-space-4)}.workbench-part-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--wf-space-3)}.workbench-part-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-4);background:#fff}.workbench-capability{font-size:12px;font-weight:700;letter-spacing:.03em}.workbench-advanced{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);background:#f8fafc}.workbench-advanced,.workbench-advanced *{min-width:0}.workbench-advanced pre,.workbench-advanced code{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
-@keyframes wf-pulse{50%{box-shadow:0 0 0 5px #dbeafe}}@media(max-width:1100px){.stage-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-narrative-grid{grid-template-columns:1fr}.workbench-primary-grid{grid-template-columns:minmax(250px,.85fr) minmax(360px,1.15fr)}.workbench-validation-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-geometry{min-height:380px}.workbench-viewer{height:310px}}@media(max-width:760px){.workbench-shell{flex-direction:column}.sidebar{flex:0 0 auto;width:100%;min-height:auto;max-height:280px;overflow-y:auto;border-right:0;border-bottom:1px solid var(--wf-border)}.content{width:100%;min-width:0;padding:var(--wf-space-3)}.workflow-hero,.workflow-snapshot-banner,.workflow-run-strip-panel,.workflow-stage-detail-v2{padding:var(--wf-space-3)}.workflow-graph{padding:var(--wf-space-3)}.workflow-graph-canvas{min-width:1040px}.stage-detail-grid,.history-run-grid{grid-template-columns:1fr}.workflow-lane{margin-left:170px}.workflow-branch-note{margin-left:140px}.workbench-phase{overflow-x:auto;grid-template-columns:repeat(4,minmax(112px,1fr))}.workbench-objective{padding:var(--wf-space-4)}.workbench-narrative-grid,.workbench-primary-grid{grid-template-columns:1fr}.workbench-geometry{order:1;min-height:330px}.workbench-activity{order:2}.workbench-viewer{height:280px}.workbench-validation-grid,.workbench-part-grid{grid-template-columns:1fr}}
+.workbench-phase{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%;max-width:760px}.workbench-phase-item{border-top:3px solid #cbd5e1;padding-top:6px;color:var(--wf-muted);font-size:12px}.workbench-phase-item.current{border-color:var(--wf-primary);color:#1d4ed8;font-weight:700}.workbench-objective{background:linear-gradient(135deg,#eff6ff,#fff);border:1px solid #bfdbfe;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-narrative-grid{display:grid;grid-template-columns:minmax(300px,.9fr) minmax(420px,1.1fr);gap:var(--wf-space-4)}.workbench-narrative-grid.request-only{grid-template-columns:1fr}.workbench-request{background:linear-gradient(135deg,#eff6ff,#fff);border-color:#bfdbfe}.workbench-design{background:linear-gradient(135deg,#faf5ff,#fff);border-color:#ddd6fe}.workbench-revision-request{border-left:3px solid #7c3aed;background:#faf5ff;padding:var(--wf-space-3);border-radius:var(--wf-radius-sm)}.workbench-recommendation{border:1px solid #bfdbfe;border-left:4px solid var(--wf-primary);background:#fff;border-radius:var(--wf-radius-sm);padding:var(--wf-space-4)}.workbench-primary-grid{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(420px,1.2fr);gap:var(--wf-space-4);align-items:stretch}.workbench-primary-grid.activity-only{grid-template-columns:1fr}.workbench-panel{background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}.workbench-activity{order:1}.workbench-geometry{order:2;min-height:0}.workbench-geometry.has-preview{min-height:420px}.workbench-viewer{width:100%;height:350px;border:0;border-radius:var(--wf-radius-sm);background:#111827}.workbench-empty-note{display:flex;align-items:center;gap:8px;color:#64748b;font-size:12px;padding-top:10px;margin-top:10px;border-top:1px solid #eef2f7}.workbench-agent-output-compact{display:flex;align-items:center;gap:9px;border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);background:#f8fafc;padding:10px 12px}.workbench-result{border:1px solid #fbbf24;border-left:4px solid #d97706;background:#fffbeb;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-result.accepted{border-color:#4ade80;background:#f0fdf4}.workbench-validation-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--wf-space-4)}.workbench-part-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--wf-space-3)}.workbench-part-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);background:#fff;cursor:pointer}.workbench-part-card:hover{border-color:#93c5fd}.workbench-capability{font-size:12px;font-weight:700;letter-spacing:.03em}.workbench-advanced{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);background:#f8fafc}.workbench-advanced,.workbench-advanced *{min-width:0}.workbench-advanced pre,.workbench-advanced code{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+@keyframes wf-pulse{50%{box-shadow:0 0 0 5px #dbeafe}}@media(max-width:1180px){.workflow-master-detail{grid-template-columns:1fr}.workflow-inspector-pane{position:static}}@media(max-width:1100px){.stage-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-narrative-grid{grid-template-columns:1fr}.workbench-primary-grid{grid-template-columns:minmax(250px,.85fr) minmax(360px,1.15fr)}.workbench-validation-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-viewer{height:310px}}@media(max-width:760px){.workbench-shell{flex-direction:column}.sidebar{flex:0 0 auto;width:100%;min-height:auto;max-height:280px;overflow-y:auto;border-right:0;border-bottom:1px solid var(--wf-border)}.content{width:100%;min-width:0;padding:var(--wf-space-3)}.workflow-hero,.workflow-snapshot-banner,.workflow-run-strip-panel,.workflow-stage-detail-v2{padding:var(--wf-space-3)}.workflow-graph{padding:var(--wf-space-3)}.workflow-graph-canvas{min-width:1040px}.stage-detail-grid,.history-run-grid{grid-template-columns:1fr}.workflow-lane{margin-left:170px}.workflow-branch-note{margin-left:140px}.workbench-phase{overflow-x:auto;grid-template-columns:repeat(4,minmax(112px,1fr))}.workbench-objective{padding:var(--wf-space-4)}.workbench-narrative-grid,.workbench-primary-grid{grid-template-columns:1fr}.workbench-geometry{order:1}.workbench-activity{order:2}.workbench-viewer{height:280px}.workbench-validation-grid,.workbench-part-grid{grid-template-columns:1fr}.workflow-current-task{align-items:flex-start}.workflow-attention-row{grid-template-columns:1fr auto}.workflow-attention-row .workflow-attention-summary{grid-column:1/-1}.dynamic-workflow-shell{padding:10px}.dynamic-node{width:138px}.dynamic-phase-header{font-size:10px;padding:4px 7px}}
 """
 
 ARTIFACT_PAGE_ARTIFACTS = (
@@ -1351,7 +1351,10 @@ def _render_work_overview(
     _render_action_feedback_panel(ui, state, language)
     if recovery:
         _render_recovery_card(ui, recovery, overview, actions.backend, state, refresh, language)
-    with ui.element("section").classes("workbench-narrative-grid w-full"):
+    has_agent_design = agent_design.get("evidence_status") == "persisted_summary"
+    with ui.element("section").classes(
+        "workbench-narrative-grid w-full" + ("" if has_agent_design else " request-only")
+    ):
         with ui.element("article").classes("workbench-request workbench-panel"):
             with ui.row().classes("w-full items-start justify-between gap-3"):
                 ui.label(user_input.get("title") or i18n_copy(language, "your_request")).classes("workflow-eyebrow")
@@ -1370,114 +1373,62 @@ def _render_work_overview(
                     for item in constraints:
                         ui.badge(str(item)).classes("bg-slate-100 text-slate-700")
 
-        with ui.element("article").classes("workbench-design workbench-panel"):
-            with ui.row().classes("w-full items-start justify-between gap-3"):
-                ui.label(agent_design.get("title") or i18n_copy(language, "agent_design")).classes("workflow-eyebrow")
-                ui.badge(capability.get("label") or "").classes(
-                    "bg-purple-700 workbench-capability" if capability.get("experimental") else "bg-slate-600 workbench-capability"
-                )
-            ui.label(agent_design.get("summary") or i18n_copy(language, "agent_design_evidence_gap")).classes(
-                "text-lg font-semibold leading-relaxed mt-2"
-            )
-            if agent_design.get("geometry_strategy"):
-                ui.label(i18n_copy(language, "geometry_strategy")).classes("workflow-eyebrow mt-3")
-                ui.label(str(agent_design["geometry_strategy"])).classes("text-sm text-gray-700")
-            parameters = agent_design.get("important_parameters") if isinstance(agent_design.get("important_parameters"), list) else []
-            if parameters:
-                ui.label(i18n_copy(language, "important_parameters")).classes("workflow-eyebrow mt-3")
-                with ui.row().classes("w-full gap-2 flex-wrap"):
-                    for item in parameters:
-                        if isinstance(item, dict):
-                            label = f"{item.get('name')}: {item.get('value')} {item.get('unit') or ''}".strip()
-                            ui.badge(label).classes("bg-indigo-50 text-indigo-800")
-            features = agent_design.get("functional_features") if isinstance(agent_design.get("functional_features"), list) else []
-            if features:
-                with ui.expansion(i18n_copy(language, "functional_features"), icon="construction").classes("w-full mt-2"):
-                    for item in features:
-                        ui.label(f"• {item}").classes("text-sm")
-            if agent_design.get("source_capability_mode"):
-                ui.label(
-                    f"{i18n_copy(language, 'source_capability_mode')}: {agent_design['source_capability_mode']}"
-                ).classes("text-xs text-gray-500 mt-2")
-            if capability.get("key") == "reproducible_product_golden":
-                ui.label(i18n_copy(language, "product_golden_scope")).classes("text-xs text-purple-800 mt-2")
+        if has_agent_design:
+            _render_agent_design_summary(ui, agent_design, capability, language)
 
-    with ui.element("section").classes("workbench-recommendation w-full"):
-        ui.label(i18n_copy(language, "current_recommendation")).classes("workflow-eyebrow")
-        ui.label(recommendation.get("summary") or recommendation.get("label") or "—").classes("text-base font-medium")
+    if not recovery:
+        _render_overview_current_task(
+            ui,
+            recommendation,
+            active_job,
+            result,
+            overview,
+            actions.backend,
+            state,
+            refresh,
+            language,
+        )
 
-    with ui.element("section").classes("workbench-primary-grid w-full"):
+    has_preview = bool(preview.get("viewer_url"))
+    with ui.element("section").classes(
+        "workbench-primary-grid w-full" + ("" if has_preview else " activity-only")
+    ):
         with ui.element("article").classes("workbench-panel workbench-activity"):
-            ui.label(transformation.get("title") or i18n_copy(language, "what_happened")).classes("workflow-eyebrow")
-            with ui.column().classes("w-full gap-2 mt-3"):
-                for event in transformation.get("events", []):
-                    if not isinstance(event, dict):
-                        continue
-                    complete = event.get("status") == "completed"
-                    with ui.row().classes("items-center gap-2"):
-                        ui.icon("check_circle" if complete else "radio_button_unchecked", size="xs").classes(
-                            "text-green-700" if complete else "text-gray-400"
-                        )
-                        ui.label(str(event.get("label") or "")).classes("text-sm")
-            ui.separator().classes("my-3")
             ui.label(i18n_copy(language, "agent_activity")).classes("workflow-eyebrow")
-            with ui.row().classes("items-center gap-3 mt-3"):
-                ui.icon("smart_toy").classes("text-3xl text-blue-600")
+            with ui.row().classes("items-center gap-3 mt-2"):
+                ui.icon("smart_toy").classes("text-2xl text-blue-600")
                 ui.label(activity.get("label") or "—").classes("text-lg font-semibold")
-            ui.label(activity.get("summary") or "").classes("text-sm text-gray-700 mt-2")
-            details = activity.get("details") if isinstance(activity.get("details"), list) else []
-            if details:
-                with ui.expansion(i18n_copy(language, "agent_activity_details"), icon="timeline").classes("w-full mt-3"):
-                    for item in details:
+            ui.label(activity.get("summary") or "").classes("text-sm text-gray-700 mt-1")
+            completed_events = [
+                event
+                for event in transformation.get("events", [])
+                if isinstance(event, dict) and event.get("status") == "completed"
+            ]
+            if completed_events:
+                with ui.expansion(
+                    transformation.get("title") or i18n_copy(language, "what_happened"),
+                    icon="timeline",
+                ).classes("w-full mt-2"):
+                    for event in completed_events:
                         with ui.row().classes("items-center gap-2"):
-                            ui.icon("check_circle", size="xs").classes("text-blue-600")
-                            ui.label(str(item)).classes("text-sm")
-            if recommendation.get("key") == "continue_agent" and active_job and not recovery:
-                ui.button(
-                    i18n_copy(language, "continue_agent"),
-                    icon="play_arrow",
-                    on_click=lambda: _show_continue_agent_confirmation(
-                        ui, actions.backend, overview, state, refresh, language
-                    ),
-                ).props("color=primary").classes("mt-4")
-        with ui.element("article").classes("workbench-panel workbench-geometry"):
-            with ui.row().classes("w-full items-center justify-between gap-2"):
-                ui.label(i18n_copy(language, "geometry_preview")).classes("workflow-eyebrow")
-                ui.badge(preview.get("label") or i18n_copy(language, "preview_unavailable")).classes(
-                    _badge_class(preview.get("status"))
-                )
-            if preview.get("viewer_url"):
-                ui.html(
-                    f'<iframe class="workbench-viewer" title="Geometry preview" '
-                    f'src="{html_escape(str(preview["viewer_url"]), quote=True)}"></iframe>',
-                    sanitize=False,
-                ).classes("w-full mt-3")
-            else:
-                with ui.column().classes("w-full h-72 items-center justify-center gap-2"):
-                    ui.icon("view_in_ar").classes("text-5xl text-gray-300")
-                    ui.label(preview.get("label") or i18n_copy(language, "no_candidate")).classes("text-gray-500")
-            geometry = preview.get("geometry") if isinstance(preview.get("geometry"), dict) else {}
-            bbox = geometry.get("bounding_box") if isinstance(geometry.get("bounding_box"), dict) else {}
-            if geometry:
-                with ui.row().classes("w-full gap-2 flex-wrap mt-2"):
-                    ui.badge(
-                        f"{('边界框' if language == 'zh' else 'Bounding box')}: "
-                        f"{bbox.get('x', '—')} × {bbox.get('y', '—')} × {bbox.get('z', '—')} mm"
-                    ).classes("bg-slate-100 text-slate-800")
-                    ui.badge(
-                        f"{('实体数' if language == 'zh' else 'Solid count')}: {geometry.get('solid_count', '—')}"
-                    ).classes("bg-slate-100 text-slate-800")
-                    if geometry.get("face_count") is not None:
-                        ui.badge(
-                            f"{('面数' if language == 'zh' else 'Face count')}: {geometry.get('face_count')}"
-                        ).classes("bg-slate-100 text-slate-800")
-            if preview.get("download_url"):
-                ui.link("STEP", preview["download_url"]).classes("text-sm mt-2")
+                            ui.icon("check_circle", size="xs").classes("text-green-700")
+                            ui.label(str(event.get("label") or "")).classes("text-sm")
+            if not has_preview:
+                with ui.element("div").classes("workbench-empty-note"):
+                    ui.icon("view_in_ar", size="sm")
+                    ui.label(
+                        "生成候选设计后，几何预览会显示在这里。" if language == "zh"
+                        else "Geometry will appear after a candidate is built."
+                    )
+        if has_preview:
+            _render_overview_geometry(ui, preview, language)
 
     _render_agent_output(ui, agent_output, language)
 
     if result:
-        _render_workbench_result(ui, result, overview, actions.backend, state, refresh, language)
+        _render_workbench_result(
+            ui, result, overview, actions.backend, state, refresh, language, show_actions=False
+        )
     elif recommendation.get("key") == "start_design":
         _render_workbench_start_design(ui, data, state, refresh, language)
 
@@ -1503,8 +1454,178 @@ def _render_work_overview(
     _render_workbench_advanced(ui, overview, language)
 
 
+def _render_agent_design_summary(
+    ui: Any,
+    agent_design: dict[str, Any],
+    capability: dict[str, Any],
+    language: str,
+) -> None:
+    with ui.element("article").classes("workbench-design workbench-panel"):
+        with ui.row().classes("w-full items-start justify-between gap-3"):
+            ui.label(agent_design.get("title") or i18n_copy(language, "agent_design")).classes("workflow-eyebrow")
+            ui.badge(capability.get("label") or "").classes(
+                "bg-purple-700 workbench-capability"
+                if capability.get("experimental")
+                else "bg-slate-600 workbench-capability"
+            )
+        ui.label(agent_design.get("summary") or "—").classes(
+            "text-lg font-semibold leading-relaxed mt-2"
+        )
+        if agent_design.get("geometry_strategy"):
+            ui.label(i18n_copy(language, "geometry_strategy")).classes("workflow-eyebrow mt-3")
+            ui.label(str(agent_design["geometry_strategy"])).classes("text-sm text-gray-700")
+        parameters = [
+            item
+            for item in agent_design.get("important_parameters", [])
+            if isinstance(item, dict)
+        ]
+        if parameters:
+            with ui.row().classes("w-full gap-2 flex-wrap mt-3"):
+                for item in parameters:
+                    label = f"{item.get('name')}: {item.get('value')} {item.get('unit') or ''}".strip()
+                    ui.badge(label).classes("bg-indigo-50 text-indigo-800")
+        features = [str(item) for item in agent_design.get("functional_features", [])]
+        if features:
+            with ui.expansion(i18n_copy(language, "functional_features"), icon="construction").classes("w-full mt-2"):
+                for item in features:
+                    ui.label(f"• {item}").classes("text-sm")
+        if capability.get("key") == "reproducible_product_golden":
+            ui.label(i18n_copy(language, "product_golden_scope")).classes("text-xs text-purple-800 mt-2")
+
+
+def _render_overview_current_task(
+    ui: Any,
+    recommendation: dict[str, Any],
+    active_job: dict[str, Any] | None,
+    result: dict[str, Any] | None,
+    overview: dict[str, Any],
+    backend: WorkflowConsoleBackend,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    task_state = str((active_job or {}).get("state") or "ready")
+    execution = state.get("action_execution") if isinstance(state.get("action_execution"), dict) else {}
+    action_running = execution.get("status") == "pending"
+    user_state = {
+        "design": "ready",
+        "reviewable": "review",
+        "accepted": "accepted",
+        "not_started": "ready",
+    }.get(task_state, "ready")
+    if action_running:
+        user_state = "running"
+    state_label = {
+        "ready": "就绪" if language == "zh" else "Ready",
+        "running": "运行中" if language == "zh" else "Running",
+        "review": "待审查" if language == "zh" else "Review",
+        "accepted": "已接受" if language == "zh" else "Accepted",
+    }.get(user_state, task_state)
+    with ui.element("section").classes("workbench-recommendation w-full"):
+        with ui.row().classes("w-full items-center justify-between gap-4 flex-wrap"):
+            with ui.column().classes("gap-1"):
+                ui.label("当前任务" if language == "zh" else "CURRENT TASK").classes("workflow-eyebrow")
+                title = (active_job or {}).get("name") or recommendation.get("label") or "—"
+                ui.label(str(title)).classes("text-lg font-semibold")
+                ui.label(str(recommendation.get("summary") or "")).classes("text-sm text-gray-600")
+            with ui.row().classes("items-center gap-2 flex-wrap"):
+                ui.label(state_label).classes(f"workflow-state-pill {user_state}")
+                key = str(recommendation.get("key") or "")
+                if key == "continue_agent" and active_job:
+                    button = ui.button(
+                        i18n_copy(language, "continue_agent"),
+                        icon="play_arrow",
+                        on_click=lambda: _show_continue_agent_confirmation(
+                            ui, backend, overview, state, refresh, language
+                        ),
+                    ).props("color=primary")
+                    if action_running:
+                        button.disable()
+                elif result and result.get("reviewable_result_id") and key == "accept_or_revise":
+                    part_id = str((active_job or {}).get("part_job_id") or "")
+                    result_id = str(result["reviewable_result_id"])
+                    ui.button(
+                        i18n_copy(language, "accept_result"),
+                        icon="check_circle",
+                        on_click=lambda: _show_accept_result_confirmation(
+                            ui,
+                            backend,
+                            str(_dict_get(overview.get("advanced"), "work_id")),
+                            part_id,
+                            result_id,
+                            state,
+                            refresh,
+                            language,
+                        ),
+                    ).props("color=positive")
+                    ui.button(
+                        i18n_copy(language, "revise"),
+                        icon="edit",
+                        on_click=lambda: _show_revision_dialog(
+                            ui,
+                            backend,
+                            str(_dict_get(overview.get("advanced"), "work_id")),
+                            part_id,
+                            result_id,
+                            state,
+                            refresh,
+                            language,
+                        ),
+                    ).props("flat")
+                elif result and result.get("reviewable_result_id") and key == "revise":
+                    ui.button(
+                        i18n_copy(language, "revise"),
+                        icon="edit",
+                        on_click=lambda: _show_revision_dialog(
+                            ui,
+                            backend,
+                            str(_dict_get(overview.get("advanced"), "work_id")),
+                            str((active_job or {}).get("part_job_id") or ""),
+                            str(result["reviewable_result_id"]),
+                            state,
+                            refresh,
+                            language,
+                        ),
+                    ).props("outline")
+
+
+def _render_overview_geometry(ui: Any, preview: dict[str, Any], language: str) -> None:
+    with ui.element("article").classes("workbench-panel workbench-geometry has-preview"):
+        with ui.row().classes("w-full items-center justify-between gap-2"):
+            ui.label(i18n_copy(language, "geometry_preview")).classes("workflow-eyebrow")
+            ui.badge(preview.get("label") or i18n_copy(language, "preview_unavailable")).classes(
+                _badge_class(preview.get("status"))
+            )
+        ui.html(
+            f'<iframe class="workbench-viewer" title="Geometry preview" '
+            f'src="{html_escape(str(preview["viewer_url"]), quote=True)}"></iframe>',
+            sanitize=False,
+        ).classes("w-full mt-3")
+        geometry = preview.get("geometry") if isinstance(preview.get("geometry"), dict) else {}
+        bbox = geometry.get("bounding_box") if isinstance(geometry.get("bounding_box"), dict) else {}
+        if geometry:
+            with ui.row().classes("w-full gap-2 flex-wrap mt-2"):
+                ui.badge(
+                    f"{('边界框' if language == 'zh' else 'Bounding box')}: "
+                    f"{bbox.get('x', '—')} × {bbox.get('y', '—')} × {bbox.get('z', '—')} mm"
+                ).classes("bg-slate-100 text-slate-800")
+                ui.badge(
+                    f"{('实体数' if language == 'zh' else 'Solid count')}: {geometry.get('solid_count', '—')}"
+                ).classes("bg-slate-100 text-slate-800")
+        if preview.get("download_url"):
+            ui.link("STEP", preview["download_url"]).classes("text-sm mt-2")
+
+
 def _render_agent_output(ui: Any, projection: dict[str, Any], language: str) -> None:
     items = projection.get("items") if isinstance(projection.get("items"), list) else []
+    if not items:
+        with ui.element("div").classes("workbench-agent-output-compact w-full"):
+            ui.icon("forum", size="sm").classes("text-gray-400")
+            ui.label(
+                "Agent 输出将在首次外部响应后显示。" if language == "zh"
+                else "Agent Output will appear after the first external response."
+            ).classes("text-sm text-gray-500")
+        return
     with ui.element("section").classes("workbench-panel w-full"):
         with ui.row().classes("w-full items-start justify-between gap-3"):
             with ui.column().classes("gap-1"):
@@ -1513,12 +1634,6 @@ def _render_agent_output(ui: Any, projection: dict[str, Any], language: str) -> 
             identity = projection.get("provider_identity") if isinstance(projection.get("provider_identity"), dict) else {}
             if identity:
                 ui.badge(" · ".join(str(identity.get(key)) for key in ("provider", "model") if identity.get(key))).classes("bg-blue-700")
-        if not items:
-            ui.label(
-                "尚无持久化的外部 Agent 输出。开始或继续 Agent 后会显示在这里。" if language == "zh"
-                else "No durable external Agent output yet. It will appear here after the Agent starts or continues."
-            ).classes("text-sm text-gray-500 mt-3")
-            return
         with ui.column().classes("w-full gap-3 mt-3"):
             for index, item in enumerate(items, 1):
                 if not isinstance(item, dict):
@@ -1808,7 +1923,13 @@ def _render_workbench_parts_summary(
             return
         with ui.element("div").classes("workbench-part-grid w-full mt-3"):
             for part in parts:
-                with ui.element("article").classes("workbench-part-card"):
+                card = ui.element("article").classes("workbench-part-card")
+                if on_select_page is not None:
+                    card.on(
+                        "click",
+                        lambda _event: on_select_page("workflow"),
+                    )
+                with card:
                     with ui.row().classes("w-full items-start justify-between gap-2"):
                         with ui.column().classes("gap-1"):
                             ui.label(part.get("name") or part.get("part_job_id") or "Part").classes("font-semibold")
@@ -1816,24 +1937,17 @@ def _render_workbench_parts_summary(
                         ui.badge(part.get("state_label") or part.get("state") or "—").classes(
                             _badge_class(part.get("state"))
                         )
+                    with ui.row().classes("w-full gap-2 flex-wrap mt-2"):
+                        ui.badge(
+                            f"{i18n_copy(language, 'attempts')} {part.get('attempt_count', 0)}"
+                        ).classes("bg-slate-100 text-slate-700")
+                        if part.get("has_reviewable_result"):
+                            ui.badge("待审查结果" if language == "zh" else "Reviewable result").classes("bg-orange-100 text-orange-800")
+                        if part.get("has_accepted_result"):
+                            ui.badge("已接受结果" if language == "zh" else "Accepted result").classes("bg-green-100 text-green-800")
                     ui.label(
-                        f"{i18n_copy(language, 'attempts')}: {part.get('attempt_count', 0)}"
-                    ).classes("text-sm mt-2")
-                    ui.label(
-                        (
-                            ("可审查结果：有" if part.get("has_reviewable_result") else "可审查结果：无")
-                            if language == "zh"
-                            else ("Reviewable result: available" if part.get("has_reviewable_result") else "Reviewable result: none")
-                        )
-                    ).classes("text-sm")
-                    ui.label(
-                        (
-                            ("已接受结果：有" if part.get("has_accepted_result") else "已接受结果：无")
-                            if language == "zh"
-                            else ("Accepted result: available" if part.get("has_accepted_result") else "Accepted result: none")
-                        )
-                    ).classes("text-sm")
-                    ui.label(part.get("recommended_action") or "").classes("text-sm font-medium text-blue-700 mt-2")
+                        "在工作流中查看当前步骤 →" if language == "zh" else "View current step in Workflow →"
+                    ).classes("text-xs text-blue-700 mt-2")
 
 
 def _render_workbench_advanced(
@@ -2582,9 +2696,12 @@ def _render_agent_first_workflow_page(
                 ).classes("text-sm text-gray-600")
             if graph.get("compatibility_mode"):
                 ui.badge("兼容模式 · 旧版 Work" if language == "zh" else "COMPATIBILITY MODE · LEGACY WORK").classes("bg-amber-700")
-    _render_current_attention(ui, graph, on_select_stage, language)
-    _render_dynamic_work_graph(ui, graph, on_select_stage, language)
-    _render_dynamic_node_detail(ui, page, actions, state, refresh, on_select_run, language)
+    _render_current_attention(ui, graph, on_select_stage, language, state=state)
+    with ui.element("section").classes("workflow-master-detail w-full"):
+        with ui.element("div").classes("workflow-graph-pane"):
+            _render_dynamic_work_graph(ui, graph, on_select_stage, language)
+        with ui.element("aside").classes("workflow-inspector-pane"):
+            _render_dynamic_node_detail(ui, page, actions, state, refresh, on_select_run, language)
     with ui.expansion(
         "Run 历史与谱系" if language == "zh" else "Run history and lineage",
         icon="history",
@@ -2598,31 +2715,59 @@ def _render_current_attention(
     graph: dict[str, Any],
     on_select_node: Callable[[str], None],
     language: str,
+    *,
+    state: dict[str, Any] | None = None,
 ) -> None:
     items = [item for item in graph.get("current_attention", []) if isinstance(item, dict)]
-    with ui.element("section").classes("workflow-hero w-full"):
-        ui.label("当前关注" if language == "zh" else "CURRENT ATTENTION").classes("workflow-eyebrow")
+    execution = (state or {}).get("action_execution")
+
+    def visible_state(item: dict[str, Any]) -> tuple[str, str]:
+        running = bool(
+            isinstance(execution, dict)
+            and execution.get("status") == "pending"
+            and execution.get("target_work_id")
+            and (
+                execution.get("target_run_id") == _dict_get(item.get("primary_action"), "target_run_id")
+                or execution.get("target_stage_id") == item.get("node_id")
+            )
+        )
+        if running:
+            return "running", "运行中" if language == "zh" else "Running"
+        return str(item.get("state") or "ready"), str(item.get("state_label") or "")
+    if not items:
+        return
+    if len(items) == 1:
+        item = items[0]
+        item_state, item_state_label = visible_state(item)
+        task = ui.element("section").classes("workflow-current-task w-full")
+        task.on("click", lambda _event, node_id=str(item.get("node_id")): on_select_node(node_id))
+        with task:
+            with ui.column().classes("gap-1"):
+                ui.label("当前任务" if language == "zh" else "CURRENT TASK").classes("workflow-eyebrow")
+                ui.label(
+                    f"{item.get('part_label') or item.get('part_job_id') or ''} · {item.get('label') or ''}"
+                ).classes("text-base font-semibold")
+            ui.label(item_state_label).classes(
+                f"workflow-state-pill {item_state}"
+            )
+        return
+    with ui.element("section").classes("workbench-panel w-full"):
+        ui.label("当前任务" if language == "zh" else "CURRENT TASKS").classes("workflow-eyebrow")
         ui.label(
-            "并行零件可以同时需要审查、输入或继续设计。" if language == "zh"
-            else "Parallel Parts can need review, input, or continued design at the same time."
-        ).classes("text-sm text-gray-600")
-        if not items:
-            ui.label(
-                "当前没有需要处理的节点。" if language == "zh" else "No current node needs attention."
-            ).classes("text-sm text-gray-500 mt-2")
-            return
-        with ui.element("div").classes("workflow-attention-grid w-full mt-3"):
+            "每个零件保留自己的下一步。" if language == "zh"
+            else "Each Part keeps its own next step."
+        ).classes("text-xs text-gray-500")
+        with ui.element("div").classes("workflow-attention-grid w-full mt-2"):
             for item in items:
-                card = ui.column().classes(f"workflow-attention-card {item.get('kind') or 'active'} gap-1")
-                card.on("click", lambda _event, node_id=str(item.get("node_id")): on_select_node(node_id))
-                with card:
-                    ui.label(str(item.get("label") or item.get("node_id") or "")).classes("font-semibold")
-                    if item.get("part_job_id"):
-                        ui.label(str(item["part_job_id"]).replace("_", " ").title()).classes("text-xs text-gray-500")
-                    ui.label(str(item.get("summary") or "")).classes("text-sm text-gray-700")
-                    primary = item.get("primary_action") if isinstance(item.get("primary_action"), dict) else {}
-                    if primary.get("label"):
-                        ui.label(str(primary["label"])).classes("text-sm font-semibold text-blue-700")
+                item_state, item_state_label = visible_state(item)
+                row = ui.element("div").classes("workflow-attention-row")
+                row.on("click", lambda _event, node_id=str(item.get("node_id")): on_select_node(node_id))
+                with row:
+                    ui.label(str(item.get("part_label") or item.get("part_job_id") or "")).classes("font-semibold")
+                    ui.label(str(item.get("label") or "")).classes("workflow-attention-summary text-sm text-gray-600")
+                    ui.label(item_state_label).classes(
+                        f"workflow-state-pill {item_state}"
+                    )
 
 
 def _render_dynamic_work_graph(
@@ -2637,23 +2782,35 @@ def _render_dynamic_work_graph(
         for item in graph.get("nodes", [])
         if isinstance(item, dict) and item.get("id")
     }
-    incoming: dict[str, list[str]] = {}
-    for edge in graph.get("edges", []):
-        if isinstance(edge, dict) and edge.get("target"):
-            incoming.setdefault(str(edge["target"]), []).append(str(edge.get("label") or edge.get("type") or ""))
+    edges = [item for item in graph.get("edges", []) if isinstance(item, dict)]
+    phase_labels = {str(item.get("id")): str(item.get("label") or "") for item in phases}
+    selected_group = next(
+        (str(node.get("group")) for node in nodes.values() if node.get("selected")),
+        "",
+    )
+    phase_counts = {
+        phase_id: sum(1 for node in nodes.values() if node.get("group") == phase_id)
+        for phase_id in phase_labels
+    }
 
     with ui.element("section").classes("dynamic-workflow-shell w-full"):
         with ui.element("div").classes("dynamic-workflow-canvas"):
             with ui.element("div").classes("dynamic-phase-grid"):
                 for phase in phases:
-                    ui.label(str(phase.get("label") or phase.get("id") or "")).classes("dynamic-phase-header")
+                    phase_id = str(phase.get("id") or "")
+                    phase_class = "dynamic-phase-header"
+                    if phase_counts.get(phase_id):
+                        phase_class += " has-nodes"
+                    if phase_id == selected_group:
+                        phase_class += " current"
+                    ui.label(str(phase.get("label") or phase_id)).classes(phase_class)
             with ui.element("div").classes("dynamic-root-row"):
-                for phase in phases:
-                    with ui.element("div").classes("dynamic-phase-cell"):
-                        for root_id in graph.get("root_node_ids", []):
-                            root = nodes.get(str(root_id))
-                            if root and root.get("group") == phase.get("id"):
-                                _render_dynamic_graph_node(ui, root, incoming.get(str(root_id), []), on_select_node, language)
+                for root_id in graph.get("root_node_ids", []):
+                    root = nodes.get(str(root_id))
+                    if root:
+                        _render_dynamic_graph_node(
+                            ui, root, phase_labels, on_select_node, language, show_summary=False
+                        )
             branches = [item for item in graph.get("branches", []) if isinstance(item, dict)]
             if not branches:
                 ui.label(
@@ -2664,20 +2821,19 @@ def _render_dynamic_work_graph(
             for branch in branches:
                 with ui.element("div").classes("dynamic-branch"):
                     ui.label(
-                        f"{('零件分支' if language == 'zh' else 'PART BRANCH')} · {branch.get('label') or branch.get('part_job_id')}"
+                        f"{('零件' if language == 'zh' else 'PART')} · {branch.get('label') or branch.get('part_job_id')}"
                     ).classes("dynamic-branch-title")
                     part_node = nodes.get(str(branch.get("part_node_id")))
                     with ui.element("div").classes("dynamic-attempt-row branch-origin"):
-                        for phase in phases:
-                            with ui.element("div").classes("dynamic-phase-cell"):
-                                if part_node and part_node.get("group") == phase.get("id"):
-                                    _render_dynamic_graph_node(
-                                        ui,
-                                        part_node,
-                                        incoming.get(str(part_node.get("id")), []),
-                                        on_select_node,
-                                        language,
-                                    )
+                        if part_node:
+                            _render_dynamic_graph_path(
+                                ui,
+                                [part_node],
+                                edges,
+                                phase_labels,
+                                on_select_node,
+                                language,
+                            )
                     attempts = [item for item in branch.get("attempts", []) if isinstance(item, dict)]
                     for attempt in attempts:
                         attempt_nodes = [
@@ -2691,25 +2847,58 @@ def _render_dynamic_work_graph(
                         if attempt.get("active"):
                             row_classes += " active"
                         with ui.element("div").classes(row_classes):
-                            for phase in phases:
-                                with ui.element("div").classes("dynamic-phase-cell"):
-                                    for node in attempt_nodes:
-                                        if node.get("group") == phase.get("id"):
-                                            _render_dynamic_graph_node(
-                                                ui,
-                                                node,
-                                                incoming.get(str(node.get("id")), []),
-                                                on_select_node,
-                                                language,
-                                            )
+                            _render_dynamic_graph_path(
+                                ui,
+                                attempt_nodes,
+                                edges,
+                                phase_labels,
+                                on_select_node,
+                                language,
+                            )
+
+
+def _render_dynamic_graph_path(
+    ui: Any,
+    path_nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    phase_labels: dict[str, str],
+    on_select_node: Callable[[str], None],
+    language: str,
+) -> None:
+    if not path_nodes:
+        return
+    with ui.element("div").classes("dynamic-graph-path"):
+        previous_id: str | None = None
+        for node in path_nodes:
+            node_id = str(node.get("id") or "")
+            incoming = next(
+                (
+                    edge
+                    for edge in edges
+                    if str(edge.get("target") or "") == node_id
+                    and (previous_id is None or str(edge.get("source") or "") == previous_id)
+                ),
+                None,
+            )
+            if previous_id is not None:
+                with ui.element("div").classes("dynamic-edge"):
+                    ui.element("div").classes("dynamic-edge-line")
+                    if incoming:
+                        ui.label(str(incoming.get("label") or incoming.get("type") or "")).classes("dynamic-edge-label")
+            _render_dynamic_graph_node(
+                ui, node, phase_labels, on_select_node, language
+            )
+            previous_id = node_id
 
 
 def _render_dynamic_graph_node(
     ui: Any,
     node: dict[str, Any],
-    edge_labels: list[str],
+    phase_labels: dict[str, str],
     on_select_node: Callable[[str], None],
     language: str,
+    *,
+    show_summary: bool = True,
 ) -> None:
     status = str(node.get("status") or "not_started")
     attention = str(node.get("attention") or "none")
@@ -2717,23 +2906,19 @@ def _render_dynamic_graph_node(
     card = ui.column().classes(classes)
     card.on("click", lambda _event, node_id=str(node.get("id")): on_select_node(node_id))
     with card:
-        if edge_labels:
-            ui.label(" / ".join(dict.fromkeys(edge_labels))).classes("dynamic-edge-chip")
+        ui.label(str(phase_labels.get(str(node.get("group") or ""), ""))).classes("dynamic-node-phase")
         with ui.row().classes("items-center gap-2 no-wrap"):
             ui.element("div").classes(
                 f"workflow-dot status-{_dot_status(status)} kind-{node.get('kind') or 'stage'}"
             )
             ui.label(str(node.get("label") or node.get("id") or "")).classes("dynamic-node-title")
-        ui.label(_display_status(status, language)).classes("workflow-node-status")
+        user_state = str(node.get("user_state") or "ready")
+        ui.label(str(node.get("user_state_label") or _display_status(status, language))).classes("workflow-node-status")
         if attention != "none":
-            attention_labels = {
-                "user_action": "需要操作" if language == "zh" else "ACTION NEEDED",
-                "review": "等待审查" if language == "zh" else "REVIEW",
-                "blocked": "已阻断" if language == "zh" else "BLOCKED",
-                "active": "当前" if language == "zh" else "CURRENT",
-            }
-            ui.label(attention_labels.get(attention, attention)).classes("dynamic-attention-badge")
-        if node.get("summary"):
+            ui.label(str(node.get("user_state_label") or "")).classes(
+                f"dynamic-attention-badge {user_state}"
+            )
+        if show_summary and node.get("summary"):
             ui.label(str(node["summary"])).classes("dynamic-node-summary")
 
 
@@ -2764,17 +2949,30 @@ def _render_dynamic_node_detail(
                 ui.label("所选节点" if language == "zh" else "SELECTED NODE").classes("workflow-eyebrow")
                 ui.label(str(node.get("label") or node.get("id") or "")).classes("text-xl font-semibold")
                 ui.label(str(node.get("summary") or "")).classes("text-sm text-gray-600")
-            ui.badge(_display_status(node.get("status") or "not_started", language)).classes(
-                _badge_class(node.get("status"))
+            execution = state.get("action_execution") if isinstance(state.get("action_execution"), dict) else {}
+            action_running = bool(
+                execution.get("status") == "pending"
+                and execution.get("target_work_id") == _dict_get(page.get("work"), "work_id")
+                and execution.get("target_run_id") in {None, node.get("run_id")}
+            )
+            user_state = "running" if action_running else str(node.get("user_state") or "ready")
+            user_state_label = (
+                ("运行中" if language == "zh" else "Running")
+                if action_running
+                else str(node.get("user_state_label") or _display_status(node.get("status"), language))
+            )
+            ui.label(user_state_label).classes(
+                f"workflow-state-pill {user_state}"
             )
 
         with ui.row().classes("items-center gap-2 mt-3"):
             needs_action = interaction.get("requires_user_action") is True
-            action_state_label = (
-                ("需要你的操作" if needs_action else "当前无需操作")
-                if language == "zh"
-                else ("Your action is required" if needs_action else "No action required")
-            )
+            if needs_action:
+                action_state_label = "需要你的操作" if language == "zh" else "Your action is required"
+            elif interaction.get("primary_action"):
+                action_state_label = "准备好后即可继续" if language == "zh" else "Ready when you are"
+            else:
+                action_state_label = "当前无需操作" if language == "zh" else "No action required"
             ui.label(action_state_label).classes(
                 "text-sm font-semibold " + ("text-amber-800" if needs_action else "text-gray-600")
             )
@@ -2814,11 +3012,17 @@ def _render_dynamic_node_detail(
                 "Accepted result": "available" if projected_part.get("has_accepted_result") else "none",
             })
         elif detail_type == "attempt":
-            _key_values(ui, {
-                "Attempt": detail.get("attempt_index"),
-                "Purpose": "Revision from an earlier result" if detail.get("source_result_id") else "Design attempt",
-                "Current": node.get("run_id") == next((item.get("latest_attempt_run_id") for item in overview.get("part_jobs", []) if isinstance(item, dict) and item.get("part_job_id") == node.get("part_job_id")), None),
-            })
+            ui.label(
+                (
+                    "从较早结果开始的新设计版本。"
+                    if detail.get("source_result_id") and language == "zh"
+                    else "A new design version started from an earlier result."
+                    if detail.get("source_result_id")
+                    else "当前零件的设计尝试。"
+                    if language == "zh"
+                    else "A design attempt for the current Part."
+                )
+            ).classes("text-sm text-gray-700 mt-3")
             if detail.get("prompt"):
                 ui.label("设计请求" if language == "zh" else "Design request").classes("workflow-eyebrow mt-3")
                 ui.label(str(detail["prompt"])).classes("text-sm")
@@ -2870,6 +3074,7 @@ def _render_dynamic_node_detail(
         evidence = detail.get("evidence") if isinstance(detail.get("evidence"), dict) else {}
         with ui.expansion("高级 / 技术证据" if language == "zh" else "Advanced / technical evidence", icon="data_object").classes("w-full mt-3"):
             _key_values(ui, {
+                "Domain status": node.get("status") or "—",
                 "Node": node.get("id"),
                 "Run": node.get("run_id") or "—",
                 "Artifact": node.get("artifact_id") or "—",

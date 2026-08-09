@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 from copy import deepcopy
 
@@ -187,6 +188,7 @@ def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_pa
         language="en",
     )
     assert review_page["recommended_next_action"]["key"] == "accept_reviewable_result"
+    assert review_page["selected_node"]["user_state"] == "review"
     assert review_page["recommended_next_action"]["reviewable_result_id"] == result_id
     assert [item["key"] for item in review_page["available_actions"]["secondary_actions"]] == [
         "revise_reviewable_result"
@@ -395,6 +397,23 @@ def test_workbench_keeps_existing_shell_lifecycle_viewer_and_secondary_surfaces(
     assert "workbench-primary-grid" in WORKFLOW_UI_CSS
     assert "@media(max-width:1100px)" in WORKFLOW_UI_CSS
     assert "@media(max-width:760px)" in WORKFLOW_UI_CSS
+
+
+def test_overview_has_one_dominant_action_owner_and_compact_empty_states():
+    from ai_native_cad.workflow_console import nicegui_app
+
+    overview_source = inspect.getsource(nicegui_app._render_work_overview)
+    task_source = inspect.getsource(nicegui_app._render_overview_current_task)
+    output_source = inspect.getsource(nicegui_app._render_agent_output)
+    parts_source = inspect.getsource(nicegui_app._render_workbench_parts_summary)
+
+    assert "_show_continue_agent_confirmation" not in overview_source
+    assert task_source.count("_show_continue_agent_confirmation") == 1
+    assert "if not has_preview" in overview_source
+    assert "if has_preview" in overview_source
+    assert "workbench-agent-output-compact" in output_source
+    assert "recommended_action" not in parts_source
+    assert "View current step in Workflow" in parts_source
 
 
 def test_chinese_and_english_product_copy_exist():

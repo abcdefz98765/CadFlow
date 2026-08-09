@@ -507,7 +507,7 @@ def build_agent_first_workflow_projection(
             )
             attempt_node_id = add_node({
                 "id": f"attempt:{part_job_id}:{run_id}",
-                "label": (f"尝试 {index}" if language == "zh" else f"Attempt {index}"),
+                "label": (f"设计尝试 #{index}" if language == "zh" else f"Design attempt #{index}"),
                 "kind": "attempt",
                 "status": attempt_status,
                 "group": "design",
@@ -637,6 +637,10 @@ def build_agent_first_workflow_projection(
             recovery=recovery,
             current_recovery_node_id=current_recovery_node_id,
             language=language,
+        )
+        node["user_state"] = _workflow_user_state(node)
+        node["user_state_label"] = _workflow_user_state_label(
+            node["user_state"], language
         )
         node["attention"] = "none"
     current_attention = _workflow_current_attention(nodes, branches)
@@ -881,7 +885,7 @@ def _workflow_node_interaction(
     requires_user_action = bool(
         primary
         and primary.get("key")
-        in {"answer_question", "retry_agent", "open_settings", "modify_request", "accept_reviewable_result", "continue_agent"}
+        in {"answer_question", "retry_agent", "open_settings", "modify_request", "accept_reviewable_result"}
     )
     return {
         "state": node.get("status"),
@@ -894,6 +898,48 @@ def _workflow_node_interaction(
         "business_state_owner": "domain",
         "selection_mutates_business_state": False,
     }
+
+
+def _workflow_user_state(node: dict[str, Any]) -> str:
+    """Translate graph status/actions into a small normal-user attention state."""
+
+    interaction = _dict(node.get("interaction"))
+    primary = _dict(interaction.get("primary_action"))
+    action_key = str(primary.get("key") or "")
+    status = str(node.get("status") or "not_started")
+    detail_type = str(_dict(node.get("detail")).get("type") or "")
+    if action_key == "answer_question":
+        return "needs_you"
+    if action_key == "accept_reviewable_result" or status == "reviewable":
+        return "review"
+    if status in {"blocked", "failed"} or action_key in {
+        "retry_agent", "open_settings", "modify_request"
+    }:
+        return "blocked"
+    if action_key == "continue_agent":
+        return "ready"
+    if status == "running":
+        return "running"
+    if status == "accepted" or detail_type == "accepted_result":
+        return "accepted"
+    return "complete" if status in {"completed", "contract_complete"} else "ready"
+
+
+def _workflow_user_state_label(
+    state: str,
+    language: str,
+) -> str:
+    labels = {
+        "needs_you": ("Needs you", "需要你"),
+        "ready": ("Ready", "就绪"),
+        "running": ("Running", "运行中"),
+        "review": ("Review", "待审查"),
+        "blocked": ("Blocked", "受阻"),
+        "accepted": ("Accepted", "已接受"),
+        "complete": ("Complete", "已完成"),
+    }
+    pair = labels.get(state, labels["ready"])
+    return pair[1] if language == "zh" else pair[0]
 
 
 def _workflow_current_attention(
@@ -938,18 +984,20 @@ def _workflow_current_attention(
             ),
         )[0]
         interaction = _dict(chosen.get("interaction"))
-        if chosen.get("kind") == "reviewable":
-            kind = "review"
-        elif interaction.get("requires_user_action"):
-            kind = "user_action"
-        elif chosen.get("status") in {"blocked", "failed"}:
-            kind = "blocked"
-        else:
-            kind = "active"
+        user_state = str(chosen.get("user_state") or "ready")
+        kind = {
+            "needs_you": "user_action",
+            "review": "review",
+            "blocked": "blocked",
+            "running": "running",
+        }.get(user_state, "active")
         attention.append({
             "node_id": chosen.get("id"),
             "part_job_id": branch.get("part_job_id"),
+            "part_label": branch.get("label") or branch.get("part_job_id"),
             "kind": kind,
+            "state": user_state,
+            "state_label": chosen.get("user_state_label"),
             "label": chosen.get("label"),
             "summary": chosen.get("summary"),
             "requires_user_action": interaction.get("requires_user_action") is True,
@@ -1074,12 +1122,18 @@ def _workflow_reference_node(
             source_id in accepted_input_ids
             for source_id in reference.get("source_artifact_ids", [])
         )
+        if stop_reason == "user_input_required":
+            stop_label = "需要信息" if language == "zh" else "Need information"
+        elif stop_reason in {"provider_auth_failed", "provider_failure", "policy_blocked"}:
+            stop_label = "设计受阻" if language == "zh" else "Design blocked"
+        else:
+            stop_label = "设计已停止" if language == "zh" else "Design stopped"
         return {
             "edge_type": "resumed" if resumed else "failed",
             "node": {
                 **common,
                 "id": f"recovery:{artifact_id}",
-                "label": "等待 / 已停止" if language == "zh" else "Waiting / stopped",
+                "label": stop_label,
                 "kind": "recovery",
                 "status": "blocked",
                 "summary": _stop_reason_text(stop_reason, language),

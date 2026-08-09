@@ -242,7 +242,9 @@ def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
     )
     assert waiting_question["interaction"]["primary_action"]["key"] == "answer_question"
     assert waiting_question["interaction"]["requires_user_action"] is True
+    assert waiting_question["user_state"] == "needs_you"
     assert waiting_workflow["current_attention"][0]["node_id"] == waiting_question["id"]
+    assert waiting_workflow["current_attention"][0]["state"] == "needs_you"
     backend.answer_work_part_design_question(
         started["work_id"],
         started["part_job_id"],
