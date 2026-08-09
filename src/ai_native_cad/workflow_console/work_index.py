@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -358,6 +359,7 @@ def _public_manifest(value: dict[str, Any] | None) -> dict[str, Any] | None:
             if isinstance(item, str) and item and "/" not in item and "\\" not in item and ":" not in item
         ][:200],
         "part_jobs": _safe_part_jobs(value.get("part_jobs")),
+        "work_design": deepcopy(value.get("work_design")) if isinstance(value.get("work_design"), dict) else {},
         "accepted_part_results": _safe_accepted_part_results(value.get("accepted_part_results")),
         "assembly_job": value.get("assembly_job") if isinstance(value.get("assembly_job"), dict) else None,
         "deliverable_packages": value.get("deliverable_packages") if isinstance(value.get("deliverable_packages"), list) else [],
@@ -387,6 +389,7 @@ def _entity_state(work_id: str, manifest: dict[str, Any] | None) -> dict[str, An
         "active_lineage": manifest.get("active_lineage") or _empty_active_lineage(),
         "run_ids": manifest.get("run_ids") or [],
         "part_jobs": manifest.get("part_jobs") or [],
+        "work_design": manifest.get("work_design") or {},
         "accepted_part_results": manifest.get("accepted_part_results") or {},
         "assembly_job": manifest.get("assembly_job"),
         "deliverable_packages": manifest.get("deliverable_packages") or [],
@@ -413,6 +416,7 @@ def _empty_entity_state(work_id: str) -> dict[str, Any]:
         "active_lineage": _empty_active_lineage(),
         "run_ids": [],
         "part_jobs": [],
+        "work_design": {},
         "accepted_part_results": {},
         "assembly_job": None,
         "deliverable_packages": [],

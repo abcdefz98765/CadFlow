@@ -68,6 +68,7 @@ def build_workbench_overview_view_model(
         if isinstance(item, dict)
     ]
     accepted = _dict_value(entity.get("accepted_part_results"))
+    work_design = _workbench_work_design(entity, language)
     result_records = _reviewable_records(
         backend,
         work_id,
@@ -108,11 +109,23 @@ def build_workbench_overview_view_model(
         active_record,
         language,
     )
+    if agent_design.get("evidence_status") == "insufficient" and work_design.get("present"):
+        agent_design = {
+            **agent_design,
+            "evidence_status": "persisted_work_design",
+            "summary": work_design.get("concept_summary"),
+            "concept": work_design.get("concept_summary"),
+            "interfaces": list(work_design.get("interfaces") or []),
+            "assumptions": list(work_design.get("assumptions") or []),
+            "source_capability_mode": "work_design",
+        }
     phase_key = _workbench_phase(entity, jobs, active_job)
     metadata = _dict_value(entity.get("metadata"))
     if metadata.get("example_classification") == "product_golden":
         capability_key = "reproducible_product_golden"
     elif metadata.get("example_classification") == "live_agent_example":
+        capability_key = "agentic_experimental"
+    elif work_design.get("present"):
         capability_key = "agentic_experimental"
     elif (
         isinstance(active_record, dict)
@@ -201,6 +214,7 @@ def build_workbench_overview_view_model(
             "summary": objective,
         },
         "user_input": user_input,
+        "work_design": work_design,
         "agent_design": agent_design,
         "transformation": transformation,
         "recommendation": recommendation,
@@ -236,6 +250,7 @@ def build_workbench_overview_view_model(
             "work_id": work_id,
             "run_ids": list(entity.get("run_ids", [])),
             "artifact_references": references,
+            "work_design_knowledge_ids": list(work_design.get("knowledge_ids") or []),
                 "reviewable_evidence": _advanced_reviewable_evidence(active_record),
                 "input_evidence": {
                     "durable": user_input.get("durable") is True,
@@ -354,9 +369,9 @@ def _workbench_user_input(
     attempts = [item for item in raw_job.get("attempts", []) if isinstance(item, dict)]
     first_run_id = attempts[0].get("run_id") if attempts else entity.get("root_run_id")
     active_run_id = job.get("latest_attempt_run_id") if isinstance(job, dict) else first_run_id
-    original = _read_work_prompt(backend, work_id, first_run_id)
+    original = str(entity.get("description") or "").strip() or None
     if not original:
-        original = str(entity.get("description") or "").strip() or None
+        original = _read_work_prompt(backend, work_id, first_run_id)
     active_prompt = _read_work_prompt(backend, work_id, active_run_id)
     active_attempt = attempts[-1] if attempts else {}
     is_revision = bool(
@@ -437,6 +452,31 @@ def _first_design_constraints(
         if isinstance(evidence.get("user_constraints"), list):
             return evidence["user_constraints"]
     return []
+
+
+def _workbench_work_design(entity: dict[str, Any], language: str) -> dict[str, Any]:
+    record = _dict_value(entity.get("work_design"))
+    proposal = _dict_value(record.get("current_design"))
+    parts = [dict(item) for item in proposal.get("generated_parts", []) if isinstance(item, dict)]
+    references = [dict(item) for item in proposal.get("reference_components", []) if isinstance(item, dict)]
+    return {
+        "present": bool(proposal),
+        "status": record.get("status") or "not_started",
+        "run_id": record.get("run_id"),
+        "concept_summary": proposal.get("concept_summary"),
+        "generated_parts": parts,
+        "reference_components": references,
+        "interfaces": [dict(item) for item in proposal.get("interfaces", []) if isinstance(item, dict)],
+        "dependencies": [dict(item) for item in proposal.get("dependencies", []) if isinstance(item, dict)],
+        "assumptions": list(proposal.get("assumptions") or []),
+        "unresolved_questions": list(proposal.get("unresolved_questions") or []),
+        "assembly_expected": proposal.get("assembly_expected") is True,
+        "recommendation": proposal.get("recommendation"),
+        "knowledge_ids": list(record.get("knowledge_ids") or []),
+        "scope_label": "Work 设计" if language == "zh" else "Work Design",
+        "part_job_count": len(parts),
+        "reference_component_count": len(references),
+    }
 
 
 def _workbench_agent_design(
@@ -670,7 +710,8 @@ def _workbench_phase(
     jobs: list[dict[str, Any]],
     active_job: dict[str, Any] | None,
 ) -> str:
-    if not entity.get("root_run_id") and not jobs:
+    work_design = _dict_value(entity.get("work_design"))
+    if work_design.get("status") == "not_started" and not jobs:
         return "intent"
     state = active_job.get("state") if active_job else None
     if state in {"reviewable", "accepted"}:
@@ -793,7 +834,11 @@ def _workbench_agent_activity(
         for item in references
     ):
         key = "inspecting_step"
-    elif any(item.get("trust_role") == "candidate" for item in references):
+    elif any(
+        item.get("trust_role") == "candidate"
+        and item.get("checkpoint") != "work_design"
+        for item in references
+    ):
         key = "building_geometry"
     elif any(
         item.get("checkpoint") == "contract_validation"
@@ -832,14 +877,15 @@ def _workbench_recommendation(
     record: dict[str, Any] | None,
     language: str,
 ) -> dict[str, Any]:
-    if not entity.get("root_run_id") and not job:
+    work_design = _dict_value(entity.get("work_design"))
+    if not job and work_design.get("status") != "completed":
         return {
-            "key": "start_design",
-            "label": i18n_copy(language, "start_design"),
+            "key": "continue_work_design",
+            "label": "继续 Work 设计" if language == "zh" else "Continue Work Design",
             "summary": (
-                "描述目标并开始第一个设计尝试。"
+                "让 Agent 先理解整个目标，并决定真实需要生成的零件。"
                 if language == "zh"
-                else "Describe the objective and start the first design attempt."
+                else "Let the Agent understand the whole objective and decide which Parts really need to be generated."
             ),
         }
     if job and record and job.get("state") == "reviewable":

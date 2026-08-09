@@ -323,6 +323,11 @@ def _runtime_message(action: dict[str, Any], language: str, phase: str, *, error
             "success": ("Agent activity completed", "Agent 设计活动已完成"),
             "failed": ("Agent activity could not complete", "Agent 设计活动未能完成"),
         },
+        "continue_work_design": {
+            "pending": ("The Agent is designing the Work and deciding Part boundaries…", "Agent 正在设计整个 Work 并决定零件边界……"),
+            "success": ("Work Design activity completed", "Work 设计活动已完成"),
+            "failed": ("Work Design could not complete", "Work 设计未能完成"),
+        },
         "start_design": {
             "pending": ("Starting the design…", "正在开始设计……"),
             "success": ("Design started", "设计已开始"),
@@ -1351,7 +1356,10 @@ def _render_work_overview(
     _render_action_feedback_panel(ui, state, language)
     if recovery:
         _render_recovery_card(ui, recovery, overview, actions.backend, state, refresh, language)
-    has_agent_design = agent_design.get("evidence_status") == "persisted_summary"
+    has_agent_design = agent_design.get("evidence_status") in {
+        "persisted_summary",
+        "persisted_work_design",
+    }
     with ui.element("section").classes(
         "workbench-narrative-grid w-full" + ("" if has_agent_design else " request-only")
     ):
@@ -1531,7 +1539,17 @@ def _render_overview_current_task(
             with ui.row().classes("items-center gap-2 flex-wrap"):
                 ui.label(state_label).classes(f"workflow-state-pill {user_state}")
                 key = str(recommendation.get("key") or "")
-                if key == "continue_agent" and active_job:
+                if key == "continue_work_design":
+                    button = ui.button(
+                        recommendation.get("label") or ("继续 Work 设计" if language == "zh" else "Continue Work Design"),
+                        icon="account_tree",
+                        on_click=lambda: _show_continue_work_design_confirmation(
+                            ui, backend, overview, state, refresh, language
+                        ),
+                    ).props("color=primary")
+                    if action_running:
+                        button.disable()
+                elif key == "continue_agent" and active_job:
                     button = ui.button(
                         i18n_copy(language, "continue_agent"),
                         icon="play_arrow",
@@ -1690,6 +1708,12 @@ def _render_recovery_card(
                 if active:
                     retry_action = {"key": "continue_agent", "label": action.get("label") or "Retry", "target_work_id": _dict_get(overview.get("advanced"), "work_id"), "part_job_id": active.get("part_job_id"), "target_run_id": active.get("active_attempt_run_id")}
                     ui.button(action.get("label") or "Retry", icon="refresh", on_click=lambda: _show_continue_agent_confirmation(ui, backend, overview, state, refresh, language)).props("color=primary")
+                else:
+                    ui.button(
+                        action.get("label") or "Retry",
+                        icon="refresh",
+                        on_click=lambda: _show_continue_work_design_confirmation(ui, backend, overview, state, refresh, language),
+                    ).props("color=primary")
             elif key == "answer_question":
                 questions = recovery.get("questions") if isinstance(recovery.get("questions"), list) else []
                 question = questions[0] if questions and isinstance(questions[0], dict) else {}
@@ -2075,6 +2099,46 @@ def _show_revision_dialog(
     dialog.open()
 
 
+def _show_continue_work_design_confirmation(
+    ui: Any,
+    backend: WorkflowConsoleBackend,
+    overview: dict[str, Any],
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    advanced = overview.get("advanced") if isinstance(overview.get("advanced"), dict) else {}
+    work_id = advanced.get("work_id")
+    if not isinstance(work_id, str):
+        return
+    action = {
+        "key": "continue_work_design",
+        "label": "Continue Work Design",
+        "target_work_id": work_id,
+    }
+    dialog = ui.dialog()
+    with dialog, ui.card().classes("w-[560px] max-w-full"):
+        ui.label("继续 Work 设计" if language == "zh" else "Continue Work Design").classes("text-xl font-semibold")
+        ui.label(
+            "Agent 将分析整个目标、现有上下文和接口，并提出零件边界。只有完成且有效的提案才会创建 Part Jobs。"
+            if language == "zh"
+            else "The Agent will analyze the whole objective, context, and interfaces, then propose Part boundaries. Part Jobs are created only from a completed valid proposal."
+        ).classes("text-sm text-gray-700")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button(i18n_copy(language, "cancel"), on_click=dialog.close).props("outline")
+            ui.button(
+                "继续" if language == "zh" else "Continue",
+                icon="account_tree",
+                on_click=lambda: (
+                    dialog.close(),
+                    _schedule_action(
+                        _continue_work_design_async(backend, action, state, refresh, language)
+                    ),
+                ),
+            ).props("color=primary")
+    dialog.open()
+
+
 def _show_continue_agent_confirmation(
     ui: Any,
     backend: WorkflowConsoleBackend,
@@ -2245,6 +2309,58 @@ async def _revise_reviewable_result_async(
     return result
 
 
+async def _continue_work_design_async(
+    backend: WorkflowConsoleBackend,
+    action: dict[str, Any],
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> dict[str, Any] | None:
+    from uuid import uuid4
+
+    work_id = str(action["target_work_id"])
+    before = backend._read_work_manifest(work_id)
+    accepted_before = deepcopy(before.get("accepted_part_results"))
+    reference_count = len(before.get("artifact_references", []))
+    part_count = len(before.get("part_jobs", []))
+
+    def execute() -> dict[str, Any]:
+        return backend.run_work_design_episode(
+            work_id,
+            request_id=f"work_design_{uuid4().hex}",
+        )
+
+    def verify(result: dict[str, Any]) -> tuple[bool, str | None]:
+        after = backend._read_work_manifest(work_id)
+        episode = result.get("episode") if isinstance(result.get("episode"), dict) else {}
+        evidence_persisted = len(after.get("artifact_references", [])) > reference_count
+        parts_valid = (
+            len(after.get("part_jobs", [])) > part_count
+            if episode.get("status") == "completed"
+            else len(after.get("part_jobs", [])) == part_count
+        )
+        ok = (
+            after.get("accepted_part_results") == accepted_before
+            and evidence_persisted
+            and parts_valid
+        )
+        return ok, None if ok else "Work Design evidence or Part Job transition was not persisted as expected."
+
+    result = await _execute_action_lifecycle(
+        action, state, refresh, execute, language=language, verify=verify
+    )
+    episode = result.get("episode") if isinstance(result, dict) and isinstance(result.get("episode"), dict) else {}
+    if result is not None and episode.get("status") != "completed":
+        execution = ActionExecutionState.from_action(
+            action,
+            status="succeeded",
+            message=("Work 设计已安全停止；请按恢复建议继续。" if language == "zh" else "Work Design stopped safely; use the recovery guidance to continue."),
+        )
+        _set_action_execution(state, execution, action)
+        refresh()
+    return result
+
+
 async def _continue_agent_async(
     backend: WorkflowConsoleBackend,
     action: dict[str, Any],
@@ -2308,7 +2424,12 @@ async def _answer_and_continue_agent_async(
 
     work_id = str(_dict_get(_dict_get(state.get("_last_page_data"), "selected_work"), "work_id") or state.get("selected_work_id") or "")
     part_id = str(recovery.get("part_job_id") or "")
-    action = {"key": "continue_agent", "label": "Answer and continue", "target_work_id": work_id, "part_job_id": part_id}
+    action = {
+        "key": "continue_agent" if part_id else "continue_work_design",
+        "label": "Answer and continue",
+        "target_work_id": work_id,
+        "part_job_id": part_id or None,
+    }
     if not answer or not answer.strip():
         failed = ActionExecutionState.from_action(action, status="failed", message=_runtime_message(action, language, "failed"))
         failed.error_detail = "请先回答问题。" if language == "zh" else "Answer the question first."
@@ -2320,26 +2441,34 @@ async def _answer_and_continue_agent_async(
     accepted_before = deepcopy(before.get("accepted_part_results"))
 
     def execute() -> dict[str, Any]:
-        answer_result = backend.answer_work_part_design_question(
-            work_id,
-            part_id,
-            run_id=str(recovery.get("run_id")),
-            answer_id=f"answer_{uuid4().hex}",
-            question_artifact_id=str(recovery.get("question_artifact_id")),
-            field=str(question.get("field") or "clarification"),
-            question=str(question.get("question") or recovery.get("summary") or "Clarification"),
-            answer=answer.strip(),
+        common = {
+            "run_id": str(recovery.get("run_id")),
+            "answer_id": f"answer_{uuid4().hex}",
+            "question_artifact_id": str(recovery.get("question_artifact_id")),
+            "field": str(question.get("field") or "clarification"),
+            "question": str(question.get("question") or recovery.get("summary") or "Clarification"),
+            "answer": answer.strip(),
+        }
+        objective = (
+            "Continue the design using this user clarification: "
+            f"{question.get('field') or 'clarification'} = {answer.strip()}"
         )
-        episode = backend.run_work_part_design_episode(
-            work_id,
-            part_id,
-            request_id=f"answer_continue_{uuid4().hex}",
-            attempt_run_id=str(recovery.get("run_id")),
-            objective=(
-                "Continue the design using this user clarification: "
-                f"{question.get('field') or 'clarification'} = {answer.strip()}"
-            ),
-        )
+        if part_id:
+            answer_result = backend.answer_work_part_design_question(work_id, part_id, **common)
+            episode = backend.run_work_part_design_episode(
+                work_id,
+                part_id,
+                request_id=f"answer_continue_{uuid4().hex}",
+                attempt_run_id=str(recovery.get("run_id")),
+                objective=objective,
+            )
+        else:
+            answer_result = backend.answer_work_design_question(work_id, **common)
+            episode = backend.run_work_design_episode(
+                work_id,
+                request_id=f"answer_continue_{uuid4().hex}",
+                objective=objective,
+            )
         return {"answer": answer_result, "episode": episode}
 
     def verify(_result: dict[str, Any]) -> tuple[bool, str | None]:
@@ -2811,6 +2940,21 @@ def _render_dynamic_work_graph(
                         _render_dynamic_graph_node(
                             ui, root, phase_labels, on_select_node, language, show_summary=False
                         )
+            work_path = [
+                nodes[node_id]
+                for node_id in graph.get("work_path_node_ids", [])
+                if node_id in nodes
+            ]
+            if work_path:
+                with ui.element("div").classes("dynamic-attempt-row active"):
+                    _render_dynamic_graph_path(
+                        ui,
+                        work_path,
+                        edges,
+                        phase_labels,
+                        on_select_node,
+                        language,
+                    )
             branches = [item for item in graph.get("branches", []) if isinstance(item, dict)]
             if not branches:
                 ui.label(
@@ -4872,8 +5016,8 @@ def _new_design_dialog_button(ui: Any, state: dict[str, Any], refresh: Callable[
     with ui.dialog() as dialog, ui.card().classes("w-[680px] max-w-full"):
         ui.label("新建设计" if language == "zh" else "New Design").classes("text-2xl font-semibold")
         ui.label(
-            "从你的真实要求创建一个 Work 和首个 Part Job。Agent 只会在你按下开始后运行。" if language == "zh"
-            else "Create a Work and its first Part Job from your actual request. The Agent runs only after you press Start."
+            "从你的真实要求创建一个 Work。Agent 会在你继续后先设计整个 Work，再决定是否以及如何创建 Part Jobs。" if language == "zh"
+            else "Create a Work from your actual request. When you continue, the Agent designs the whole Work before deciding whether and how to create Part Jobs."
         ).classes("text-sm text-gray-600")
         request = ui.textarea(
             "设计要求" if language == "zh" else "Design request",

@@ -198,7 +198,7 @@ def test_live_product_example_starts_at_real_beginning_and_uses_agent_projection
     assert started["accepted"] is False
     assert manifest["artifact_references"] == []
     assert manifest["accepted_part_results"] == {}
-    assert len(manifest["part_jobs"]) == 1
+    assert manifest["part_jobs"] == []
     overview = build_workbench_overview_view_model(backend, started["work_id"], language="en")
     workflow = build_workflow_page_view_model(backend, started["work_id"], language="en")
     assert overview["user_input"]["original_request"].startswith("Create a compact single-piece")
@@ -208,11 +208,11 @@ def test_live_product_example_starts_at_real_beginning_and_uses_agent_projection
     assert [phase["id"] for phase in workflow["phase_groups"]] == [
         "intent", "design", "build_evaluate", "accept_deliver"
     ]
-    assert [node["kind"] for node in workflow["nodes"]] == ["request", "part", "attempt"]
+    assert [node["kind"] for node in workflow["nodes"]] == ["request", "work_design"]
     assert workflow["workflow_graph"]["topology"] == "dynamic_work_graph"
     assert workflow["workflow_graph"]["compatibility_mode"] is False
     assert workflow["nodes"][0]["status"] == "completed"
-    assert workflow["nodes"][1]["status"] == "blocked"
+    assert workflow["nodes"][1]["status"] == "not_started"
 
 
 def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
@@ -220,11 +220,9 @@ def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
     started = backend.start_live_product_example()
     adapter = AskThenStopAdapter()
     backend.stage_runner.agent_adapter = adapter
-    first = backend.run_work_part_design_episode(
+    first = backend.run_work_design_episode(
         started["work_id"],
-        started["part_job_id"],
         request_id="ask_fixture",
-        attempt_run_id=started["attempt_run_id"],
     )
     assert first["episode"]["stop_reason"] == "user_input_required"
     overview = build_workbench_overview_view_model(backend, started["work_id"], language="en")
@@ -245,21 +243,18 @@ def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
     assert waiting_question["user_state"] == "needs_you"
     assert waiting_workflow["current_attention"][0]["node_id"] == waiting_question["id"]
     assert waiting_workflow["current_attention"][0]["state"] == "needs_you"
-    backend.answer_work_part_design_question(
+    backend.answer_work_design_question(
         started["work_id"],
-        started["part_job_id"],
-        run_id=started["attempt_run_id"],
+        run_id=first["work_design"]["run_id"],
         answer_id="spacing_answer",
         question_artifact_id=recovery["question_artifact_id"],
         field=question["field"],
         question=question["question"],
         answer="27.5 mm",
     )
-    resumed = backend.run_work_part_design_episode(
+    resumed = backend.run_work_design_episode(
         started["work_id"],
-        started["part_job_id"],
         request_id="resume_fixture",
-        attempt_run_id=started["attempt_run_id"],
         objective="Continue with servo_hole_spacing_mm = 27.5 mm",
     )
     assert resumed["episode"]["stop_reason"] == "insufficient_context"

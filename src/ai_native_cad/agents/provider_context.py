@@ -1,4 +1,9 @@
-"""Static provider context assembly for CadFlow JSON-contract calls."""
+"""Compatibility provider context for legacy stage-oriented JSON calls.
+
+Canonical Agent Episodes compile registered Skill manifests and declared
+Markdown knowledge through ``agents.registry``. This module remains only for
+the deterministic/staged compatibility routes and is not a second authority.
+"""
 
 from __future__ import annotations
 

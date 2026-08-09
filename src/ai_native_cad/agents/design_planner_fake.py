@@ -1,4 +1,4 @@
-"""Deterministic fake adapter for the LLM-shaped create workflow."""
+"""Deterministic test/example adapter for the legacy staged create workflow."""
 
 from __future__ import annotations
 

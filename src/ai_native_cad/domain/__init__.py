@@ -8,6 +8,7 @@ from ai_native_cad.domain.records import (
     advance_active_lineage,
     append_part_attempt,
     begin_work_intent,
+    begin_work_design,
     create_artifact_reference,
     create_assembly_job_record,
     create_deliverable_package_record,
@@ -15,6 +16,8 @@ from ai_native_cad.domain.records import (
     project_product_state,
     project_work_record,
     record_candidate_selection,
+    record_work_design_answer,
+    record_work_design_outcome,
     register_artifact_references,
     validate_work_record,
 )
@@ -27,6 +30,7 @@ __all__ = [
     "advance_active_lineage",
     "append_part_attempt",
     "begin_work_intent",
+    "begin_work_design",
     "create_artifact_reference",
     "create_assembly_job_record",
     "create_deliverable_package_record",
@@ -34,6 +38,8 @@ __all__ = [
     "project_product_state",
     "project_work_record",
     "record_candidate_selection",
+    "record_work_design_answer",
+    "record_work_design_outcome",
     "register_artifact_references",
     "validate_work_record",
 ]

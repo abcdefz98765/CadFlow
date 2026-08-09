@@ -170,6 +170,7 @@ def test_retry_is_exposed_only_for_retryable_current_stop(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     created = backend.create_product_design("Design a small clamp.", title="Clamp")
     work_id = created["work_id"]
+    backend.create_work_part_attempt(work_id, "clamp", role="Explicit compatibility Part")
     manifest = backend._read_work_manifest(work_id)
     job = manifest["part_jobs"][0]
     run_id = job["active_attempt_run_id"]
@@ -203,6 +204,7 @@ def test_retry_is_exposed_only_for_retryable_current_stop(tmp_path):
 
     other = backend.create_product_design("Design an unsupported mechanism.", title="Unsupported")
     other_id = other["work_id"]
+    backend.create_work_part_attempt(other_id, "mechanism", role="Explicit compatibility Part")
     other_manifest = backend._read_work_manifest(other_id)
     other_job = other_manifest["part_jobs"][0]
     other_run = other_job["active_attempt_run_id"]

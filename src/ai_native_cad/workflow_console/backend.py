@@ -706,22 +706,15 @@ class WorkflowConsoleBackend:
             break
         else:
             raise FileExistsError("live Product Example id space is exhausted")
-        attempt = self._work_orchestrator().create_part_attempt(
-            work_id,
-            "servo_mounting_bracket",
-            prompt=objective,
-            role="Single-piece micro-servo mounting bracket",
-            source="live_product_example",
-        )
         self.invalidate_work_index()
         manifest = self._read_work_manifest(work_id)
         if manifest.get("artifact_references") or manifest.get("accepted_part_results"):
             raise RuntimeError("live Product Example must start without generated or accepted evidence")
         return {
             "work_id": work_id,
-            "part_job_id": "servo_mounting_bracket",
-            "attempt_run_id": attempt["part_job"]["active_attempt_run_id"],
-            "state": "ready_to_design",
+            "part_job_id": None,
+            "attempt_run_id": None,
+            "state": "ready_for_work_design",
             "provider_requirement": self.read_provider_readiness(),
             "preloaded_design": False,
             "preloaded_geometry": False,
@@ -735,7 +728,7 @@ class WorkflowConsoleBackend:
         *,
         title: str | None = None,
     ) -> dict[str, Any]:
-        """Create one normal single-Part Job Work from the user's request."""
+        """Create one canonical Work before the Agent decides its Parts."""
         prompt = _safe_prompt_text(request)
         normalized_title = _safe_summary_text(title) or _generated_work_title(prompt)
         created = self.create_work(
@@ -744,19 +737,12 @@ class WorkflowConsoleBackend:
             metadata={"product_entry": "new_design", "work_classification": "user"},
         )
         work_id = created["work"]["work_id"]
-        attempt = self._work_orchestrator().create_part_attempt(
-            work_id,
-            "primary_part",
-            prompt=prompt,
-            role="Primary design part",
-            source="new_design",
-        )
         self.invalidate_work_index()
         return {
             "work_id": work_id,
-            "part_job_id": "primary_part",
-            "attempt_run_id": attempt["part_job"]["active_attempt_run_id"],
-            "state": "ready_to_design",
+            "part_job_id": None,
+            "attempt_run_id": None,
+            "state": "ready_for_work_design",
         }
 
     def get_golden_example_summary(self, work_id: str) -> dict[str, Any] | None:
@@ -854,6 +840,62 @@ class WorkflowConsoleBackend:
             request_id=request_id,
             attempt_run_id=attempt_run_id,
             objective=_safe_prompt_text(objective) if objective is not None else None,
+        )
+
+    def run_work_design_episode(
+        self,
+        work_id: str,
+        *,
+        request_id: str,
+        objective: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one canonical Work-scoped design/decomposition Episode."""
+
+        for value in (work_id, request_id):
+            self._require_safe_run_id(value)
+        return self._work_orchestrator().run_work_design_episode(
+            work_id,
+            request_id=request_id,
+            objective=_safe_prompt_text(objective) if objective is not None else None,
+        )
+
+    def answer_work_design_question(
+        self,
+        work_id: str,
+        *,
+        run_id: str,
+        answer_id: str,
+        question_artifact_id: str,
+        field: str,
+        question: str,
+        answer: str,
+    ) -> dict[str, Any]:
+        """Persist one Work-level clarification through the Work orchestrator."""
+
+        for value in (work_id, run_id, answer_id):
+            self._require_safe_run_id(value)
+        safe_field = _safe_workspace_text(field, "clarification field", limit=120)
+        safe_question = _safe_workspace_text(question, "clarification question", limit=1000)
+        safe_answer = _safe_workspace_text(answer, "clarification answer", limit=4000)
+        _reject_secret_fields({"field": safe_field, "question": safe_question, "answer": safe_answer})
+        payload = self.read_work_artifact_reference(work_id, question_artifact_id)
+        content = payload.get("content") if isinstance(payload, dict) else {}
+        questions = content.get("questions") if isinstance(content, dict) else []
+        if not any(
+            isinstance(item, dict)
+            and item.get("field") == safe_field
+            and item.get("question") == safe_question
+            for item in questions
+        ):
+            raise ValueError("clarification answer does not match the persisted Work question")
+        return self._work_orchestrator().answer_work_design_question(
+            work_id,
+            run_id=run_id,
+            answer_id=answer_id,
+            question_artifact_id=question_artifact_id,
+            field=safe_field,
+            question=safe_question,
+            answer=safe_answer,
         )
 
     def answer_work_part_design_question(

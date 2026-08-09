@@ -142,7 +142,7 @@ def build_agent_output_projection(
                 "field": payload.get("field"),
                 "structured": payload,
             })
-        elif checkpoint == "product_design_routing":
+        elif checkpoint in {"product_design_routing", "work_design_routing"}:
             episode = _dict(payload.get("episode"))
             if episode:
                 items.append({
@@ -444,6 +444,82 @@ def build_agent_first_workflow_projection(
 
     accepted = _dict(entity.get("accepted_part_results"))
     raw_jobs = [item for item in entity.get("part_jobs", []) if isinstance(item, dict)]
+    work_design = _dict(entity.get("work_design"))
+    work_design_status = str(work_design.get("status") or "not_started")
+    work_design_node_id: str | None = None
+    decomposition_node_id: str | None = None
+    work_path_node_ids: list[str] = []
+    if work_design_status != "not_started" or not raw_jobs:
+        work_design_node_id = add_node({
+            "id": "work:design",
+            "label": "Work 设计" if language == "zh" else "Work Design",
+            "kind": "work_design",
+            "status": (
+                "completed" if work_design_status == "completed"
+                else "blocked" if work_design_status in {"user_input_required", "blocked"}
+                else "not_started" if work_design_status == "not_started"
+                else "in_progress"
+            ),
+            "group": "design",
+            "run_id": work_design.get("run_id"),
+            "summary": (
+                _dict(overview.get("work_design")).get("concept_summary")
+                or ("理解整个目标并决定零件边界。" if language == "zh" else "Understand the whole objective and decide Part boundaries.")
+            ),
+            "detail": {
+                "type": "work_design",
+                "work_design": _dict(overview.get("work_design")),
+            },
+        })
+        work_path_node_ids.append(work_design_node_id)
+        add_edge(request_id, work_design_node_id, "designed")
+
+        work_artifact_nodes: dict[str, str] = {}
+        work_tail_id = work_design_node_id
+        for reference in references:
+            if reference.get("part_job_id") is not None:
+                continue
+            if reference.get("checkpoint") not in {"clarification_decision", "work_design_routing"}:
+                continue
+            projected = _workflow_reference_node(
+                backend, work_id, reference, overview, {}, language
+            )
+            if projected is None:
+                continue
+            node_id = add_node(projected["node"])
+            work_path_node_ids.append(node_id)
+            linked = False
+            for source_artifact_id in reference.get("source_artifact_ids", []):
+                source_node_id = work_artifact_nodes.get(str(source_artifact_id))
+                if source_node_id:
+                    add_edge(source_node_id, node_id, projected["edge_type"])
+                    linked = True
+            if not linked:
+                add_edge(work_tail_id, node_id, projected["edge_type"])
+            artifact_id = reference.get("artifact_id")
+            if isinstance(artifact_id, str):
+                work_artifact_nodes[artifact_id] = node_id
+            work_tail_id = node_id
+
+        if work_design_status == "completed":
+            decomposition_node_id = add_node({
+                "id": "work:decomposition",
+                "label": "零件分解" if language == "zh" else "Part decomposition",
+                "kind": "decomposition",
+                "status": "completed",
+                "group": "design",
+                "run_id": work_design.get("run_id"),
+                "summary": (
+                    f"{len(raw_jobs)} 个生成零件任务" if language == "zh"
+                    else f"{len(raw_jobs)} generated Part Job{'s' if len(raw_jobs) != 1 else ''}"
+                ),
+                "detail": {
+                    "type": "decomposition",
+                    "work_design": _dict(overview.get("work_design")),
+                },
+            })
+            work_path_node_ids.append(decomposition_node_id)
+            add_edge(work_design_node_id, decomposition_node_id, "decomposed")
     compatibility_sources = {
         str(item.get("source") or "")
         for item in raw_jobs
@@ -473,7 +549,7 @@ def build_agent_first_workflow_projection(
             "detail": {"type": "part_job", "part": part or raw_job},
         })
         add_edge(
-            request_id,
+            decomposition_node_id or work_design_node_id or request_id,
             part_node_id,
             "imported" if compatibility_mode else ("decomposed" if len(raw_jobs) > 1 else "created"),
         )
@@ -668,6 +744,7 @@ def build_agent_first_workflow_projection(
         "nodes": nodes,
         "edges": edges,
         "root_node_ids": [request_id],
+        "work_path_node_ids": work_path_node_ids,
         "branches": branches,
         "current_attention": current_attention,
         "selection_is_presentation_only": True,
@@ -1003,6 +1080,36 @@ def _workflow_current_attention(
             "requires_user_action": interaction.get("requires_user_action") is True,
             "primary_action": interaction.get("primary_action"),
         })
+    if not attention:
+        candidates = [
+            node
+            for node in nodes
+            if node.get("kind") in {"decision", "recovery", "work_design"}
+            and node.get("part_job_id") is None
+        ]
+        if candidates:
+            chosen = sorted(
+                candidates,
+                key=lambda node: (
+                    0 if _dict(node.get("interaction")).get("requires_user_action") else 1,
+                    0 if node.get("kind") in {"decision", "recovery"} else 1,
+                    0 if node.get("status") in {"blocked", "in_progress", "not_started"} else 1,
+                ),
+            )[0]
+            interaction = _dict(chosen.get("interaction"))
+            user_state = str(chosen.get("user_state") or "ready")
+            attention.append({
+                "node_id": chosen.get("id"),
+                "part_job_id": None,
+                "part_label": "Work Design",
+                "kind": "user_action" if interaction.get("requires_user_action") else "active",
+                "state": user_state,
+                "state_label": chosen.get("user_state_label"),
+                "label": chosen.get("label"),
+                "summary": chosen.get("summary"),
+                "requires_user_action": interaction.get("requires_user_action") is True,
+                "primary_action": interaction.get("primary_action"),
+            })
     return attention
 
 
@@ -1102,7 +1209,7 @@ def _workflow_reference_node(
                 "detail": {"type": "build", "evidence": payload, "reference": reference},
             },
         }
-    if checkpoint == "product_design_routing":
+    if checkpoint in {"product_design_routing", "work_design_routing"}:
         episode = _dict(payload.get("episode"))
         stop_reason = episode.get("stop_reason")
         if not stop_reason or episode.get("status") == "completed":
@@ -1317,6 +1424,16 @@ def _compact_work_state(
             "准备设计" if language == "zh" else "Ready to design",
             "开始设计" if language == "zh" else "Start design",
         )
+    work_design_status = str(_dict(entity.get("work_design")).get("status") or "not_started")
+    if work_design_status in {"not_started", "in_progress"} and entity.get("description"):
+        return (
+            "意图" if work_design_status == "not_started" and language == "zh"
+            else "Intent" if work_design_status == "not_started"
+            else "设计" if language == "zh"
+            else "Design",
+            "Work 设计已就绪" if language == "zh" else "Work Design ready",
+            "继续 Work 设计" if language == "zh" else "Continue Work Design",
+        )
     return (
         "意图" if language == "zh" else "Intent",
         "等待要求" if language == "zh" else "Needs a request",
@@ -1346,7 +1463,11 @@ def _unanswered_question_reference(references: list[dict[str, Any]]) -> dict[str
 
 def _latest_route_outcome(backend: Any, work_id: str, references: list[dict[str, Any]]) -> dict[str, Any]:
     reference = next(
-        (item for item in reversed(references) if item.get("checkpoint") == "product_design_routing"),
+        (
+            item
+            for item in reversed(references)
+            if item.get("checkpoint") in {"product_design_routing", "work_design_routing"}
+        ),
         None,
     )
     payload = _read_reference(backend, work_id, reference)

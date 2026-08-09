@@ -49,11 +49,13 @@ def test_current_work_does_not_fabricate_part_branches_or_legacy_graph_nodes(tmp
     assert graph["branches"] == []
     assert {item["kind"] for item in graph["nodes"]} <= {
         "request", "part", "attempt", "decision", "design", "candidate",
-        "build", "recovery", "reviewable", "accepted",
+        "build", "recovery", "reviewable", "accepted", "work_design",
     }
     assert "part_candidates" not in graph
     assert "reference_lane" not in graph
-    assert graph["edges"] == []
+    assert {(item["source"], item["target"]) for item in graph["edges"]} == {
+        ("work:request", "work:design")
+    }
 
 
 def test_current_and_snapshot_page_structure_are_distinguishable(tmp_path, monkeypatch):

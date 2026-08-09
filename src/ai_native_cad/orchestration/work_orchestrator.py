@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -16,10 +17,13 @@ from ai_native_cad.domain.records import (
     accept_part_result,
     advance_active_lineage,
     append_part_attempt,
+    begin_work_design,
     begin_work_intent,
     create_artifact_reference,
     project_product_state,
     record_candidate_selection,
+    record_work_design_answer,
+    record_work_design_outcome,
     register_artifact_references,
 )
 from ai_native_cad.orchestration.ports import (
@@ -28,6 +32,7 @@ from ai_native_cad.orchestration.ports import (
     DesignPartEpisodeRequest,
     DeterministicCompatibilityPort,
     WorkStorePort,
+    WorkDesignEpisodeRequest,
 )
 
 
@@ -176,6 +181,275 @@ class WorkOrchestrator:
                         else "Review deterministic planning result"
                     )
                 ),
+            ),
+        }
+
+    def run_work_design_episode(
+        self,
+        work_id: str,
+        *,
+        request_id: str,
+        objective: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one Work-scoped Episode, then apply only CadFlow-validated decomposition."""
+
+        if self.design is None:
+            raise ValueError("Agent Design port is unavailable")
+        work = self.store.read_work(work_id)
+        work_design = work.get("work_design") if isinstance(work.get("work_design"), dict) else {}
+        existing_episode = next(
+            (
+                item
+                for item in work_design.get("episodes", [])
+                if isinstance(item, dict) and item.get("request_id") == request_id
+            ),
+            None,
+        )
+        if work.get("part_jobs") and existing_episode is None:
+            raise ValueError(
+                "Work Design cannot replace existing Part Jobs; legacy/Part-first Works remain on their compatibility path"
+            )
+        objective_text = _require_prompt(objective or work.get("description"))
+        run_id = work_design.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            run_id = self.store.next_run_id(work_id, f"{work_id}_work_design")
+            self.deterministic.create_run(
+                work_id=work_id,
+                run_id=run_id,
+                prompt=objective_text,
+            )
+            work = begin_work_design(work, run_id=run_id, updated_at=_now())
+            self.store.write_work(work_id, work)
+            self.store.invalidate_projection()
+            work_design = work["work_design"]
+        request = WorkDesignEpisodeRequest(
+            request_id=request_id,
+            work_id=work_id,
+            run_id=run_id,
+            title=str(work.get("title") or work_id),
+            objective=objective_text,
+            previous_work_design=deepcopy(
+                work_design.get("current_design")
+                if isinstance(work_design.get("current_design"), dict)
+                else {}
+            ),
+            clarification_answers=tuple(
+                deepcopy(item)
+                for item in work_design.get("clarification_answers", [])
+                if isinstance(item, dict)
+            ),
+            existing_part_jobs=tuple(
+                deepcopy(item)
+                for item in work.get("part_jobs", [])
+                if isinstance(item, dict)
+            ),
+            accepted_part_results=deepcopy(work.get("accepted_part_results") or {}),
+        )
+        protected_before = _protected_work_state(work)
+        outcome = self.design.run_work_design_episode(request)
+        if not outcome.artifacts:
+            raise RuntimeError("Agent Design port returned no durable Work Design evidence")
+        references = [
+            create_artifact_reference(
+                artifact_id=artifact.artifact_id,
+                work_id=work_id,
+                run_id=run_id,
+                relative_path=artifact.relative_path,
+                phase="intent" if artifact.checkpoint == "clarification_decision" else "design",
+                checkpoint=artifact.checkpoint,
+                trust_role=artifact.trust_role,
+                source_artifact_ids=list(artifact.source_artifact_ids),
+                validation_status=artifact.validation_status,
+                created_at=_now(),
+            )
+            for artifact in outcome.artifacts
+        ]
+        registered = register_artifact_references(work, references, updated_at=_now())
+        if outcome.idempotent_replay:
+            if _protected_work_state(registered) != protected_before:
+                raise RuntimeError("Work Design replay attempted to mutate protected Work state")
+            return {
+                "episode": outcome.as_dict(),
+                "work_design": deepcopy(registered.get("work_design")),
+                "part_jobs": deepcopy(registered.get("part_jobs") or []),
+                "artifact_references": references,
+                "orchestration": _completion(
+                    command="run_work_design_episode",
+                    phase="design",
+                    checkpoint="work_design",
+                    postcondition=f"Work Design request {request_id} reused its append-only evidence.",
+                    next_action="Continue Part design" if registered.get("part_jobs") else "Inspect Work Design",
+                ),
+            }
+        assigned_design = None
+        if outcome.status == "completed":
+            if not outcome.part_job_creation_requested or not isinstance(outcome.work_design, dict):
+                raise RuntimeError("completed Work Design outcome lacks a decomposition request")
+            assigned_design = _assign_part_job_identities(
+                outcome.work_design,
+                existing_ids={
+                    item.get("part_job_id")
+                    for item in work.get("part_jobs", [])
+                    if isinstance(item, dict)
+                },
+            )
+        question_artifact_id = next(
+            (
+                item.artifact_id
+                for item in outcome.artifacts
+                if item.checkpoint == "clarification_decision"
+                and item.validation_status == "user_input_required"
+            ),
+            None,
+        )
+        status = (
+            "completed"
+            if outcome.status == "completed"
+            else "user_input_required"
+            if outcome.stop_reason == "user_input_required"
+            else "blocked"
+        )
+        updated = record_work_design_outcome(
+            registered,
+            run_id=run_id,
+            request_id=request_id,
+            episode_id=outcome.episode_id,
+            status=status,
+            stop_reason=outcome.stop_reason,
+            artifact_ids=[item.artifact_id for item in outcome.artifacts],
+            knowledge_ids=list(outcome.knowledge_ids),
+            assigned_design=assigned_design,
+            updated_at=_now(),
+        )
+        if question_artifact_id:
+            updated["work_design"]["question_artifact_id"] = question_artifact_id
+        created_runs = []
+        if assigned_design is not None:
+            for part in assigned_design["generated_parts"]:
+                part_job_id = part["part_job_id"]
+                part_run_id = self.store.next_run_id(work_id, f"{work_id}_{part_job_id}")
+                created = self.deterministic.create_run(
+                    work_id=work_id,
+                    run_id=part_run_id,
+                    prompt=(
+                        f"{objective_text}\n\nPart Job: {part['name']}\nRole: {part['role']}"
+                    ),
+                )
+                created_runs.append(created["run"])
+                updated = append_part_attempt(
+                    updated,
+                    part_job_id=part_job_id,
+                    run_id=part_run_id,
+                    role=part["role"],
+                    source="work_design",
+                    status="incomplete",
+                    created_at=_now(),
+                )
+        self.store.write_work(work_id, updated)
+        self.store.invalidate_projection()
+        return {
+            "episode": outcome.as_dict(),
+            "work_design": deepcopy(updated["work_design"]),
+            "part_jobs": deepcopy(updated["part_jobs"]),
+            "created_runs": created_runs,
+            "artifact_references": references,
+            "orchestration": _completion(
+                command="run_work_design_episode",
+                phase="design",
+                checkpoint="part_job_definition" if assigned_design else "work_design",
+                status="completed" if assigned_design else "blocked",
+                postcondition=(
+                    f"CadFlow validated the Work Design and created {len(updated['part_jobs'])} real Part Job(s) with assigned identities."
+                    if assigned_design
+                    else "The Work Design Episode stopped with typed durable evidence; no Part Jobs were created."
+                ),
+                next_action=(
+                    "Continue Part design"
+                    if assigned_design
+                    else "Answer the focused Work question"
+                    if outcome.stop_reason == "user_input_required"
+                    else "Inspect the typed Work Design stop"
+                ),
+            ),
+        }
+
+    def answer_work_design_question(
+        self,
+        work_id: str,
+        *,
+        run_id: str,
+        answer_id: str,
+        question_artifact_id: str,
+        field: str,
+        question: str,
+        answer: str,
+    ) -> dict[str, Any]:
+        """Append one Work-scoped answer without creating or mutating Part Jobs."""
+
+        if self.design is None:
+            raise ValueError("Agent Design port is unavailable")
+        work = self.store.read_work(work_id)
+        work_design = work.get("work_design") if isinstance(work.get("work_design"), dict) else {}
+        if work_design.get("run_id") != run_id:
+            raise ValueError("Work clarification must target the active Work Design Run")
+        question_reference = next(
+            (
+                item
+                for item in work.get("artifact_references", [])
+                if isinstance(item, dict)
+                and item.get("artifact_id") == question_artifact_id
+                and item.get("run_id") == run_id
+                and item.get("part_job_id") is None
+                and item.get("checkpoint") == "clarification_decision"
+                and item.get("validation_status") == "user_input_required"
+            ),
+            None,
+        )
+        if question_reference is None:
+            raise ValueError("Work clarification question is not registered")
+        artifact = self.design.record_work_design_answer(
+            work_id=work_id,
+            run_id=run_id,
+            answer_id=answer_id,
+            question_artifact_id=question_artifact_id,
+            field=field,
+            question=question,
+            answer=answer,
+        )
+        reference = create_artifact_reference(
+            artifact_id=artifact.artifact_id,
+            work_id=work_id,
+            run_id=run_id,
+            relative_path=artifact.relative_path,
+            phase="intent",
+            checkpoint=artifact.checkpoint,
+            trust_role=artifact.trust_role,
+            source_artifact_ids=list(artifact.source_artifact_ids),
+            validation_status=artifact.validation_status,
+            created_at=_now(),
+        )
+        updated = register_artifact_references(work, [reference], updated_at=_now())
+        updated = record_work_design_answer(
+            updated,
+            artifact_id=artifact.artifact_id,
+            question_artifact_id=question_artifact_id,
+            field=field,
+            question=question,
+            answer=answer,
+            updated_at=_now(),
+        )
+        self.store.write_work(work_id, updated)
+        self.store.invalidate_projection()
+        return {
+            "answer_artifact_id": artifact.artifact_id,
+            "run_id": run_id,
+            "scope": "work",
+            "orchestration": _completion(
+                command="answer_work_design_question",
+                phase="intent",
+                checkpoint="clarification_decision",
+                postcondition="The user's Work-level answer was appended as accepted input.",
+                next_action="Resume Work Design",
             ),
         }
 
@@ -1045,3 +1319,27 @@ def _stage_succeeded(value: Any) -> bool:
         "completed_with_assumptions",
         "ready_for_review",
     }
+
+
+def _assign_part_job_identities(
+    work_design: dict[str, Any],
+    *,
+    existing_ids: set[Any],
+) -> dict[str, Any]:
+    """Assign stable path-safe identities without accepting provider ids."""
+
+    assigned = deepcopy(work_design)
+    used = {str(item) for item in existing_ids if isinstance(item, str)}
+    for index, part in enumerate(assigned.get("generated_parts", []), start=1):
+        name = str(part.get("name") or f"Part {index}")
+        base = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")[:72]
+        if not base:
+            base = f"part_{index}"
+        candidate = base
+        suffix = 2
+        while candidate in used:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        used.add(candidate)
+        part["part_job_id"] = candidate
+    return assigned

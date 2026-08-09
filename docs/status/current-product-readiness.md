@@ -44,7 +44,7 @@ are not.
   traces, logs, or screenshots. Secret-bearing generic gate payloads now fail
   before any Run log mutation.
 - Start Product Example creates a new micro-servo bracket Work with the original
-  request and one real Part Job attempt only. It does not preload a design brief,
+  request and no preselected Part Job. It does not preload a design brief,
   candidate source, STEP/STL, reviewable result, or accepted pointer. Continue
   uses the configured adapter and existing bounded Design Episode, Tool Broker,
   sandbox, inspection, publication, Accept, and Revise boundaries.
@@ -121,6 +121,38 @@ are not.
   suite result is recorded in the Verification state section below.
 - No workflow/domain architecture, graph persistence, Work decomposition,
   Assembly, Deliverable, Provider, Agent-role, or security capability was added.
+
+## M2.9 Work Design and skill/knowledge consolidation — implemented and verified
+
+- Normal New Design and Live Product Example entry now create a Work before any
+  Part Job. The registered `work_design` v0.1 Episode reasons over the whole
+  objective, generated versus reference components, interfaces, dependencies,
+  assumptions, and material ambiguity.
+- The provider may request semantic Work context, propose a strict Work Design,
+  ask one focused Work-scoped clarification, request Part Job creation, or stop
+  honestly. It cannot assign Work/Part/Run identities or mutate the manifest.
+- `WorkOrchestrator` owns the durable transition: it validates a completed
+  proposal, assigns stable Part Job and initial Run identities, preserves
+  append-only history and accepted pointers, and creates no Assembly Job.
+- Overview and Dynamic Workflow project the same `work_design` record. The
+  graph shows User request → Work Design → optional clarification/recovery →
+  Part decomposition → real Part branches; Part Design begins only after the
+  Part Jobs exist.
+- Runtime Skill knowledge comes from bounded repository-contained Markdown
+  sources declared by the active Skill. Legacy stage prompt builders and the
+  fake planner remain explicitly labeled compatibility/test support rather than
+  parallel authorities.
+- A deterministic two-Part example uses the same product backend, Episode,
+  Orchestrator, manifest, and projection path. It treats the camera and 2020
+  extrusion as references and does not claim Assembly execution.
+- Automated verification passed with `674 passed, 9 skipped` in the clean
+  complete suite. The focused Work Design matrix covers single-Part,
+  multi-Part, reference-component, clarification/resume, unsupported, and
+  insufficient-context cases.
+- Real in-app browser verification covered the normal 0-Part New Design entry,
+  confirmation boundary, completed two-Part Overview, visible Work Design →
+  Part decomposition graph path, English/Chinese, and 1440px/1024px/414px
+  layouts. No page-level overflow or browser warning/error was observed.
 
 ## Implemented and usable now
 
@@ -406,6 +438,22 @@ Current approximate Python line distribution:
 - CAD IR: 0.6k lines;
 - CadQuery and backend layer: 0.5k lines.
 
+The M2.9 audit measured `41,702` source Python lines across the same `79`
+modules versus the `39,762`-line M2.8 baseline: `+1,940` lines (`+4.88%`) for
+the registered Skill, bounded Work Episode, durable record/Orchestrator route,
+API/UI projection, and compatibility integration. Tests moved from `15,409` to
+`15,632` Python lines (`+223`), plus an 85-line deterministic acceptance script
+and a 33-line Skill contract. No workflow engine, graph persistence, provider
+framework, Assembly runtime, or new source module was introduced.
+
+The largest source modules after M2.9 are `nicegui_app.py` (5,954),
+`pipeline/runner.py` (4,344), `workflow_console/backend.py` (2,815),
+`agents/episode.py` (1,913), `workflow_page_view_model.py` (1,841), and
+`review_surface.py` (1,613). This is acceptable for the narrow milestone but is
+a real concentration signal: the next change to Work Episode or graph behavior
+should prefer focused extraction/reuse rather than extending these files with a
+second runtime model.
+
 This reflects the former product priority. Further Workflow Cockpit polish is
 not the current milestone unless required to preserve safe operation during
 migration.
@@ -602,6 +650,16 @@ These are migration tasks, not accepted target behavior.
   skipped`. Real-browser verification and screenshots cover the simplified
   Overview, compact Current Attention, topology-first graph, nearby node
   inspector, all required owner states, and 1440px/1024px/414px layouts.
+- M2.9 Work Design verification passed on 2026-08-10. The normal UI begins
+  with the durable Work request and no Part Job, then a completed provider-
+  selected Work Design is projected through CadFlow-owned decomposition into
+  the exact real Part branches. The clean complete suite passed with `674
+  passed, 9 skipped`; the deterministic multi-Part acceptance script reported
+  `passed=true`, two generated Part Jobs, two reference components, no Assembly
+  Job, and no accepted pointer. Real in-app browser checks covered the 0-Part
+  action, completed Overview/Agent Output, visible Work path, bilingual copy,
+  and 1440px/1024px/414px responsive layouts without page overflow or console
+  warnings/errors.
 - M2.8 added only optional durable revision provenance on Part attempts because
   parent Run/result causality cannot be recovered honestly from prompt text,
   attempt order, or timestamps. No graph persistence, workflow engine, Agent

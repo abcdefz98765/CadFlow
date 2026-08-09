@@ -317,6 +317,13 @@ The Agent may:
 
 The system must not force the Agent through a fixed template catalogue or fixed stage sequence.
 
+The implemented normal entry expresses this as a Work-scoped Design Episode
+before Part Jobs. The provider proposes the concept, generated/reference
+component distinction, interfaces, and decomposition; CadFlow validates the
+proposal and owns identity assignment and manifest mutation. Only then do
+Part-scoped Design Episodes operate on the resulting Part Jobs. This is one
+live Work state graph, not a second planning workflow.
+
 ### Build & Evaluate
 
 CadFlow executes allowed candidates through the existing controlled execution boundary, generates geometry, measures/inspects it, and returns observations to the Agent.

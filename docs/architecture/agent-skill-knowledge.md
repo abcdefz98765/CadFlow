@@ -152,6 +152,15 @@ Current legacy skills map as follows:
 Migration should preserve legacy skill ids only as versioned compatibility
 aliases.
 
+The implemented M2.9 canonical entry uses `work_design` v0.1 before any Part
+Job exists. It receives Work-specific semantic context, loads only its declared
+static Markdown knowledge, and may propose generated Parts, reference
+components, interfaces, dependencies, assumptions, or a focused clarification.
+It cannot assign Work, Part Job, or Run identities and has no mutation or
+Assembly execution authority. After strict validation, `WorkOrchestrator`
+assigns identities and materializes the Part Jobs; `design_part` then operates
+on one owned Part attempt.
+
 ## Tool authority
 
 Tools are CadFlow-owned. Skills may request them; providers never receive their
@@ -371,11 +380,14 @@ Current code provides:
 
 - one broad `AgentAdapter`;
 - deterministic and JSON-contract adapters;
-- static inline skill/knowledge summaries;
+- a bounded declared-Markdown knowledge loader for registered runtime Skills;
 - a bounded episode state machine;
 - a deterministic one-shot proposer around `create_part_ir`;
 - deterministic template-backed CAD execution.
 - a typed `design_part` v0.2 runtime skill definition;
+- a typed `work_design` v0.1 runtime Skill and Work-scoped Episode before Part
+  Jobs, with clarification, proposal validation, CadFlow-owned decomposition,
+  and append-only evidence;
 - a provider-selected design episode in which the
   provider may request semantic context, create or patch a candidate, react to
   validator observations, ask the user, or stop;
