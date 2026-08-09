@@ -15,7 +15,7 @@ def build_home_view_model(
     language = "zh" if language == "zh" else "en"
     readiness = backend.read_product_readiness()
     recent = []
-    for item in works[:8]:
+    for item in works:
         work_id = item.get("work_id")
         if not isinstance(work_id, str):
             continue
@@ -42,8 +42,12 @@ def build_home_view_model(
                 "needs_user_action": recovery is not None or state in {"ready_for_review", "ready_to_design"},
                 "next_action": recovery.get("recommended_action", {}).get("label") if recovery else action,
                 "updated": _relative_time(item.get("updated_at"), language),
+                "work_classification": item.get("work_classification") or "user",
+                "example_classification": item.get("example_classification"),
             }
         )
+    live = next((item for item in works if item.get("example_classification") == "live_agent_example"), None)
+    golden = next((item for item in works if item.get("example_classification") == "product_golden"), None)
     return {
         "start": {
             "new_design": "新建设计" if language == "zh" else "New Design",
@@ -53,7 +57,118 @@ def build_home_view_model(
             "completed_example_label": "可复现脚本快照" if language == "zh" else "Reproducible scripted snapshot",
         },
         "environment": readiness,
+        "product_examples": [
+            {
+                "key": "live_agent",
+                "work_id": live.get("work_id") if live else None,
+                "title": "真实 Agent 示例" if language == "zh" else "Real Agent example",
+                "badge": "实验性 · 结果可变" if language == "zh" else "Experimental · variable",
+                "demonstrates": "观察已配置 Provider 如何选择动作、提问、修复或诚实停止。" if language == "zh" else "See the configured provider choose actions, ask questions, repair, or stop honestly.",
+                "will_see": "Agent 输出、受控执行、验证证据和恢复建议" if language == "zh" else "Agent Output, controlled execution, validation evidence, and recovery guidance",
+                "can_try": "从真实请求开始并继续同一个 Work" if language == "zh" else "Start from a real request and continue the same Work",
+                "requirements": "需要已验证的 Provider；生成几何还需要本地 CAD 执行环境。" if language == "zh" else "Requires a verified provider; geometry also needs local CAD execution.",
+                "action": "打开示例" if live and language == "zh" else "Open example" if live else "开始产品示例" if language == "zh" else "Start Product Example",
+            },
+            {
+                "key": "completed_golden",
+                "work_id": golden.get("work_id") if golden else None,
+                "title": "已完成产品示例" if language == "zh" else "Completed product example",
+                "badge": "可复现 · 无需 Provider" if language == "zh" else "Reproducible · no provider",
+                "demonstrates": "检查一个已知几何结果，并理解可审查、接受和修订的区别。" if language == "zh" else "Inspect known geometry and understand reviewable, accepted, and revised states.",
+                "will_see": "几何预览、测量证据、验证状态和明确接受操作" if language == "zh" else "Geometry preview, measured evidence, validation state, and explicit acceptance",
+                "can_try": "检查模型、接受结果或创建带谱系的修订" if language == "zh" else "Inspect the model, accept it, or create a traced revision",
+                "requirements": "无需外部 Provider 凭据。" if language == "zh" else "No external provider credential required.",
+                "action": "打开示例" if golden and language == "zh" else "Open example" if golden else "创建示例" if language == "zh" else "Create example",
+            },
+        ],
         "recent_works": recent,
+    }
+
+
+def build_agent_output_projection(
+    backend: Any,
+    work_id: str,
+    references: list[dict[str, Any]],
+    *,
+    language: str,
+) -> dict[str, Any]:
+    """Project durable Agent responses, observations, and user recovery turns."""
+
+    language = "zh" if language == "zh" else "en"
+    items: list[dict[str, Any]] = []
+    provider: dict[str, Any] = {}
+    for reference in references:
+        checkpoint = reference.get("checkpoint")
+        payload = _read_reference(backend, work_id, reference)
+        if checkpoint == "agent_output":
+            for record in payload.get("records", []):
+                if not isinstance(record, dict):
+                    continue
+                identity = _dict(record.get("provider_identity"))
+                if identity:
+                    provider = identity
+                action = str(record.get("action") or "invalid_response")
+                items.append({
+                    "kind": "agent_response",
+                    "sequence": record.get("sequence"),
+                    "title": _agent_action_label(action, language),
+                    "action": action,
+                    "summary": record.get("summary") or record.get("reason"),
+                    "questions": record.get("questions") if isinstance(record.get("questions"), list) else [],
+                    "assumptions": record.get("assumptions") if isinstance(record.get("assumptions"), list) else [],
+                    "stop_reason": record.get("stop_reason"),
+                    "structured": record,
+                })
+        elif checkpoint == "agent_activity":
+            for record in payload.get("records", []):
+                if not isinstance(record, dict):
+                    continue
+                observation = record.get("observation")
+                if observation:
+                    items.append({
+                        "kind": "system_observation",
+                        "sequence": record.get("step"),
+                        "title": "系统观察" if language == "zh" else "System observation",
+                        "summary": str(observation).replace("_", " "),
+                        "codes": record.get("codes") if isinstance(record.get("codes"), list) else [],
+                        "structured": record,
+                    })
+        elif reference.get("trust_role") == "accepted_input":
+            items.append({
+                "kind": "user_answer",
+                "title": "你的回答" if language == "zh" else "Your answer",
+                "summary": payload.get("answer"),
+                "question": payload.get("question"),
+                "field": payload.get("field"),
+                "structured": payload,
+            })
+        elif checkpoint == "product_design_routing":
+            episode = _dict(payload.get("episode"))
+            if episode:
+                items.append({
+                    "kind": "attempt_result",
+                    "title": "尝试结果" if language == "zh" else "Attempt result",
+                    "summary": _stop_reason_text(episode.get("stop_reason"), language),
+                    "stop_reason": episode.get("stop_reason"),
+                    "status": episode.get("status"),
+                    "structured": episode,
+                })
+    # Older episodes did not register the exchange file. Retain an honest
+    # result-level history and avoid inventing an Agent transcript.
+    last_action = next((item.get("action") for item in reversed(items) if item.get("kind") == "agent_response"), None)
+    last_agent_summary = next((item.get("summary") for item in reversed(items) if item.get("kind") == "agent_response" and item.get("summary")), None)
+    last_observation = next((item.get("summary") for item in reversed(items) if item.get("kind") == "system_observation"), None)
+    return {
+        "title": "Agent 输出" if language == "zh" else "Agent Output",
+        "description": "按发生顺序显示 Agent 的外部动作、系统观察和恢复输入。" if language == "zh" else "External Agent actions, system observations, and recovery input in order.",
+        "items": items,
+        "provider_identity": provider,
+        "last_action": last_action,
+        "last_agent_summary": last_agent_summary,
+        "last_observation": last_observation,
+        "private_reasoning_exposed": False,
+        "credential_material_exposed": False,
+        "has_external_responses": any(item.get("kind") == "agent_response" for item in items),
     }
 
 
@@ -64,6 +179,7 @@ def build_recovery_projection(
     references: list[dict[str, Any]],
     *,
     language: str,
+    agent_output: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     language = "zh" if language == "zh" else "en"
     question_reference = _unanswered_question_reference(references)
@@ -87,6 +203,11 @@ def build_recovery_projection(
                 "run_id": question_reference.get("run_id"),
                 "part_job_id": question_reference.get("part_job_id"),
                 "questions": questions,
+                "technical_reason": "user_input_required",
+                "last_agent_action": (agent_output or {}).get("last_action"),
+                "last_observation": (agent_output or {}).get("last_observation"),
+                "history": (agent_output or {}).get("items", []),
+                "provider_identity": (agent_output or {}).get("provider_identity", {}),
             },
         )
 
@@ -97,8 +218,9 @@ def build_recovery_projection(
     )
     metadata = _dict(entity.get("metadata"))
     product_agent_route = metadata.get("example_classification") == "live_agent_example" or metadata.get("product_entry") == "new_design"
+    route = _latest_route_outcome(backend, work_id, references)
     readiness = backend.read_provider_readiness() if product_agent_route else {"ready": True}
-    if product_agent_route and not has_reviewable and not readiness.get("ready"):
+    if product_agent_route and not has_reviewable and not readiness.get("ready") and not route.get("stop_reason"):
         auth_failed = readiness.get("last_error_category") == "auth_failed"
         return _recovery(
             category="provider_auth_failed" if auth_failed else "provider_not_configured",
@@ -123,7 +245,6 @@ def build_recovery_projection(
             language=language,
         )
 
-    route = _latest_route_outcome(backend, work_id, references)
     stop_reason = route.get("stop_reason")
     if not stop_reason or route.get("status") == "completed":
         return None
@@ -193,17 +314,47 @@ def build_recovery_projection(
             retryable=True,
             language=language,
         )
+    if stop_reason == "insufficient_context":
+        output = agent_output or {}
+        return _recovery(
+            category="insufficient_context",
+            owner="user",
+            title=("仍需要补充设计信息" if language == "zh" else "More design context is still needed"),
+            summary=str(output.get("last_agent_summary") or ("请补充剩余约束后继续。" if language == "zh" else "Add the remaining constraint before continuing.")),
+            why=("Agent 已明确停止，因为当前输入仍不足以安全完成设计。" if language == "zh" else "The Agent explicitly stopped because the current input was still insufficient to complete the design safely."),
+            action_key="modify_request",
+            action_label=("补充设计要求" if language == "zh" else "Add design context"),
+            destination="workbench_revision",
+            retryable=False,
+            language=language,
+            extra={
+                "technical_reason": stop_reason,
+                "last_agent_action": output.get("last_action"),
+                "last_observation": output.get("last_observation"),
+                "history": output.get("items", []),
+                "provider_identity": output.get("provider_identity", {}),
+            },
+        )
+    technical_reason = _stop_reason_text(stop_reason, language)
+    output = agent_output or {}
     return _recovery(
         category=str(stop_reason),
         owner="cadflow",
-        title=("设计已安全停止" if language == "zh" else "Design stopped safely"),
-        summary=("请查看技术详情后选择下一步。" if language == "zh" else "Review the technical details before choosing the next step."),
-        why=("CadFlow 阻止了不受信任或不完整的结果发布。" if language == "zh" else "CadFlow prevented an untrusted or incomplete result from being published."),
+        title=(f"设计已停止：{technical_reason}" if language == "zh" else f"Design stopped: {technical_reason}"),
+        summary=("本次尝试已保留真实 Agent 输出和系统证据。" if language == "zh" else "The actual Agent output and system evidence from this attempt were preserved."),
+        why=(f"停止原因是 {technical_reason}；未通过本地检查的结果不会发布。" if language == "zh" else f"The typed stop reason was {technical_reason}; output that did not pass local checks was not published."),
         action_key="view_details",
         action_label=("查看技术详情" if language == "zh" else "View technical details"),
         destination="advanced",
         retryable=False,
         language=language,
+        extra={
+            "technical_reason": stop_reason,
+            "last_agent_action": output.get("last_action"),
+            "last_observation": output.get("last_observation"),
+            "history": output.get("items", []),
+            "provider_identity": output.get("provider_identity", {}),
+        },
     )
 
 
@@ -391,3 +542,39 @@ def _relative_time(value: Any, language: str) -> str:
 
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _agent_action_label(action: str, language: str) -> str:
+    labels = {
+        "request_context": ("请求上下文", "Requested context"),
+        "ask_user": ("提出问题", "Asked a question"),
+        "create_contract": ("创建结构化设计", "Created a structured design"),
+        "patch_contract": ("修改结构化设计", "Revised the structured design"),
+        "submit_contract": ("提交结构化设计", "Submitted the structured design"),
+        "request_validation": ("请求验证", "Requested validation"),
+        "create_model_program": ("准备模型程序", "Prepared a model program"),
+        "patch_model_program": ("修复模型程序", "Repaired the model program"),
+        "request_execution": ("请求受控执行", "Requested controlled execution"),
+        "inspect_observation": ("检查执行结果", "Inspected the execution result"),
+        "stop": ("停止", "Stopped"),
+        "invalid_response": ("响应未通过动作合约", "Response failed the action contract"),
+    }
+    zh, en = labels.get(action, (action.replace("_", " "), action.replace("_", " ").title()))
+    return zh if language == "zh" else en
+
+
+def _stop_reason_text(reason: Any, language: str) -> str:
+    key = str(reason or "unknown_stop")
+    labels = {
+        "user_input_required": ("等待用户输入", "waiting for user input"),
+        "unsupported_capability": ("能力暂不支持", "unsupported capability"),
+        "provider_failure": ("Provider 请求失败", "provider request failure"),
+        "policy_blocked": ("动作合约或安全策略阻止", "action contract or safety policy block"),
+        "validation_exhausted": ("验证尝试已用尽", "validation attempts exhausted"),
+        "execution_exhausted": ("执行尝试已用尽", "execution attempts exhausted"),
+        "budget_exhausted": ("有界预算已用尽", "bounded budget exhausted"),
+        "sandbox_unavailable": ("隔离执行环境不可用", "isolated execution unavailable"),
+        "completed": ("已完成", "completed"),
+    }
+    zh, en = labels.get(key, (key.replace("_", " "), key.replace("_", " ")))
+    return zh if language == "zh" else en

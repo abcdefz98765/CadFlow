@@ -355,6 +355,11 @@ Scope:
 - append-only clarification answer evidence and continuation through the
   existing bounded Agent route;
 - the M2.6 Completed Product Golden retained as the deterministic snapshot.
+- explicit Product Example teaching cards and a normal/developer Work taxonomy;
+- durable sanitized Agent Output and recovery history across clarification and
+  resumed attempts;
+- credential discovery from session, process environment, or allowlisted
+  project-root `.env`, with source-only Settings presentation.
 
 Acceptance:
 

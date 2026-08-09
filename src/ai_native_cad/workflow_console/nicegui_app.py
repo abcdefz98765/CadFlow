@@ -353,7 +353,11 @@ def build_console_page_data(
     works_response = dispatch_route(
         backend,
         "list_works",
-        query={"limit": 50, "offset": 0, "show_debug": False},
+        query={
+            "limit": 50,
+            "offset": 0,
+            "show_developer": show_debug_works,
+        },
     )
     workspace_response = dispatch_route(backend, "read_workspace")
     config_response = dispatch_route(backend, "read_workspace_config")
@@ -890,6 +894,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
                     selected_stage_id=state.get("selected_stage_id"),
                     view_mode=state.get("view_mode", "current_work"),
                     language=state.get("language", "en"),
+                    show_debug_works=bool(state.get("show_developer_content")),
                     show_unclassified_runs=bool(state.get("show_unclassified_runs")),
                     show_low_level_details=bool(state.get("show_low_level_details")),
                     limit=state.get("limit", DEFAULT_RUN_PAGE_SIZE),
@@ -1147,12 +1152,35 @@ def _render_workspace_page(
             ).classes("text-base text-gray-600 max-w-2xl")
         with ui.row().classes("gap-2"):
             _new_design_dialog_button(ui, state, refresh, language)
-            live_button = ui.button(
-                "开始产品示例" if language == "zh" else "Start Product Example",
-                icon="science",
-                on_click=lambda: _schedule_action(_start_live_product_example_async(state.get("_backend"), state, refresh, language)),
-            ).props("outline")
-            live_button.tooltip("Live Agent · Experimental")
+
+    ui.label(i18n_copy(language, "product_examples")).classes("text-xl font-semibold")
+    ui.label(
+        "开始产品示例：两个示例用途不同，一个展示真实 Agent 过程，一个展示稳定的完成结果。" if language == "zh"
+        else "These teach different things: one shows a real Agent process; one shows a stable completed result."
+    ).classes("text-sm text-gray-600")
+    examples = home.get("product_examples") if isinstance(home.get("product_examples"), list) else []
+    with ui.element("section").classes("workbench-primary-grid w-full"):
+        for example in examples:
+            if not isinstance(example, dict):
+                continue
+            with ui.element("article").classes("workbench-panel"):
+                with ui.row().classes("w-full items-start justify-between gap-2"):
+                    ui.label(str(example.get("title") or "Example")).classes("text-lg font-semibold")
+                    ui.badge(str(example.get("badge") or "")).classes("bg-purple-700" if example.get("key") == "live_agent" else "bg-green-700")
+                ui.label(str(example.get("demonstrates") or "")).classes("text-sm text-gray-700 mt-2")
+                for label, key in (
+                    ("你会看到" if language == "zh" else "You will see", "will_see"),
+                    ("你可以尝试" if language == "zh" else "You can try", "can_try"),
+                    ("要求" if language == "zh" else "Requirements", "requirements"),
+                ):
+                    ui.label(f"{label}: {example.get(key) or '—'}").classes("text-xs text-gray-600 mt-1")
+                work_id = example.get("work_id")
+                if isinstance(work_id, str):
+                    ui.button(str(example.get("action") or "Open"), icon="arrow_forward", on_click=lambda _event=None, wid=work_id: on_select_work(wid)).props("outline").classes("mt-3")
+                elif example.get("key") == "live_agent":
+                    ui.button(str(example.get("action") or "Start"), icon="science", on_click=lambda: _schedule_action(_start_live_product_example_async(state.get("_backend"), state, refresh, language))).props("outline").classes("mt-3")
+                else:
+                    ui.button(str(example.get("action") or "Create"), icon="view_in_ar", on_click=lambda: _schedule_action(_open_product_example_async(state.get("_backend"), state, refresh, language))).props("outline").classes("mt-3")
 
     with ui.element("section").classes("workbench-primary-grid w-full"):
         for key, label in (("provider", "AI Provider"), ("local_execution", "Local CAD execution")):
@@ -1171,7 +1199,7 @@ def _render_workspace_page(
     recent = home.get("recent_works") if isinstance(home.get("recent_works"), list) else []
     if not recent:
         ui.label("还没有设计。新建设计开始。" if language == "zh" else "No designs yet. Start with New Design.").classes("text-gray-600")
-    for item in recent:
+    for item in recent[:8]:
         with ui.card().classes("w-full shadow-none border border-gray-200"):
             with ui.row().classes("w-full items-center justify-between gap-3"):
                 with ui.column().classes("gap-1"):
@@ -1180,11 +1208,7 @@ def _render_workspace_page(
                     ui.label(str(item.get("next_action") or "")).classes("text-sm text-blue-700")
                 ui.button("打开" if language == "zh" else "Open", icon="arrow_forward", on_click=lambda _event=None, work=item: on_select_work(work["work_id"])).props("flat")
 
-    with ui.expansion("已完成示例与高级工作区" if language == "zh" else "Completed example & advanced workspace", icon="tune").classes("w-full"):
-        ui.label("Compact Micro Servo Mounting Bracket").classes("font-semibold")
-        ui.label("可复现脚本快照，不是 Live Agent 运行。" if language == "zh" else "A reproducible scripted snapshot, not a Live Agent run.").classes("text-sm text-gray-600")
-        ui.button(i18n_copy(language, "open_product_example"), icon="view_in_ar", on_click=lambda: _schedule_action(_open_product_example_async(state.get("_backend"), state, refresh, language))).props("outline")
-        ui.separator().classes("my-3")
+    with ui.expansion("高级工作区" if language == "zh" else "Advanced workspace", icon="tune").classes("w-full"):
         ui.label(workspace.get("display_path") or "No workspace path").classes("text-sm text-gray-600 break-all")
         with ui.row().classes("gap-2"):
             _workspace_dialog_button(ui, "New Workspace", "create_new_folder", "create", workspace, state, refresh)
@@ -1298,6 +1322,7 @@ def _render_work_overview(
     preview = overview.get("preview") if isinstance(overview.get("preview"), dict) else {}
     result = overview.get("current_result") if isinstance(overview.get("current_result"), dict) else None
     recovery = overview.get("recovery") if isinstance(overview.get("recovery"), dict) else None
+    agent_output = overview.get("agent_output") if isinstance(overview.get("agent_output"), dict) else {}
     active_job = next(
         (
             item
@@ -1433,6 +1458,8 @@ def _render_work_overview(
             if preview.get("download_url"):
                 ui.link("STEP", preview["download_url"]).classes("text-sm mt-2")
 
+    _render_agent_output(ui, agent_output, language)
+
     if result:
         _render_workbench_result(ui, result, overview, actions.backend, state, refresh, language)
     elif recommendation.get("key") == "start_design":
@@ -1458,6 +1485,45 @@ def _render_work_overview(
         ).props("outline")
 
     _render_workbench_advanced(ui, overview, language)
+
+
+def _render_agent_output(ui: Any, projection: dict[str, Any], language: str) -> None:
+    items = projection.get("items") if isinstance(projection.get("items"), list) else []
+    with ui.element("section").classes("workbench-panel w-full"):
+        with ui.row().classes("w-full items-start justify-between gap-3"):
+            with ui.column().classes("gap-1"):
+                ui.label(projection.get("title") or ("Agent 输出" if language == "zh" else "Agent Output")).classes("text-xl font-semibold")
+                ui.label(str(projection.get("description") or "")).classes("text-sm text-gray-600")
+            identity = projection.get("provider_identity") if isinstance(projection.get("provider_identity"), dict) else {}
+            if identity:
+                ui.badge(" · ".join(str(identity.get(key)) for key in ("provider", "model") if identity.get(key))).classes("bg-blue-700")
+        if not items:
+            ui.label(
+                "尚无持久化的外部 Agent 输出。开始或继续 Agent 后会显示在这里。" if language == "zh"
+                else "No durable external Agent output yet. It will appear here after the Agent starts or continues."
+            ).classes("text-sm text-gray-500 mt-3")
+            return
+        with ui.column().classes("w-full gap-3 mt-3"):
+            for index, item in enumerate(items, 1):
+                if not isinstance(item, dict):
+                    continue
+                with ui.row().classes("w-full items-start gap-3"):
+                    ui.badge(str(index)).classes("bg-slate-600")
+                    with ui.column().classes("gap-1 flex-1"):
+                        ui.label(str(item.get("title") or item.get("kind") or "Event")).classes("font-semibold")
+                        if item.get("question"):
+                            ui.label(str(item["question"])).classes("text-xs text-gray-500")
+                        if item.get("summary"):
+                            ui.label(str(item["summary"])).classes("text-sm text-gray-700")
+                        questions = item.get("questions") if isinstance(item.get("questions"), list) else []
+                        for question in questions:
+                            if isinstance(question, dict):
+                                ui.label(str(question.get("question") or "")).classes("text-sm text-amber-800")
+                        assumptions = item.get("assumptions") if isinstance(item.get("assumptions"), list) else []
+                        if assumptions:
+                            ui.label(("假设：" if language == "zh" else "Assumptions: ") + " · ".join(str(value) for value in assumptions)).classes("text-xs text-gray-500")
+        with ui.expansion("结构化证据（已净化）" if language == "zh" else "Sanitized structured evidence", icon="data_object").classes("w-full mt-3"):
+            ui.markdown(f"```json\n{json.dumps(items, indent=2, ensure_ascii=False, sort_keys=True)}\n```").classes("w-full mono")
 
 
 def _render_recovery_card(
@@ -1507,20 +1573,45 @@ def _render_recovery_card(
                 ui.button(action.get("label") or "Modify request", icon="edit", on_click=lambda: _schedule_action(_revise_blocked_request_async(backend, overview, revision.value, state, refresh, language))).props("color=primary")
             else:
                 ui.button(action.get("label") or "View technical details", icon="info", on_click=lambda: _show_recovery_details_dialog(ui, recovery, language)).props("outline")
-        ui.label(
-            "重试只会创建新的有界尝试；历史证据和已接受结果保持不变。" if language == "zh"
-            else "A retry creates a new bounded attempt; historical evidence and accepted results remain unchanged."
-        ).classes("text-xs text-gray-500 mt-2")
+            if key != "view_details":
+                ui.button(
+                    "查看技术详情" if language == "zh" else "View technical details",
+                    icon="info",
+                    on_click=lambda: _show_recovery_details_dialog(ui, recovery, language),
+                ).props("outline")
+        if recovery.get("retryable"):
+            ui.label(
+                "重试只会创建新的有界尝试；历史证据和已接受结果保持不变。" if language == "zh"
+                else "A retry creates a new bounded attempt; historical evidence and accepted results remain unchanged."
+            ).classes("text-xs text-gray-500 mt-2")
 
 
 def _show_recovery_details_dialog(ui: Any, recovery: dict[str, Any], language: str) -> None:
     with ui.dialog() as dialog, ui.card().classes("w-[640px] max-w-full"):
         ui.label("技术详情" if language == "zh" else "Technical details").classes("text-xl font-semibold")
         ui.label(str(recovery.get("why_it_stopped") or recovery.get("summary") or "")).classes("text-sm")
-        ui.label(
-            "没有自动恢复操作。请保留当前证据，并根据上面的建议继续。" if language == "zh"
-            else "No automatic recovery is available. Existing evidence is preserved; continue with the recommendation above."
-        ).classes("text-sm text-gray-600")
+        _key_values(ui, {
+            "Typed stop reason": recovery.get("technical_reason") or recovery.get("category"),
+            "Last Agent action": recovery.get("last_agent_action") or "Not recorded",
+            "Last system observation": recovery.get("last_observation") or "Not recorded",
+        })
+        history = recovery.get("history") if isinstance(recovery.get("history"), list) else []
+        if history:
+            with ui.expansion("恢复历史" if language == "zh" else "Recovery history", icon="timeline").classes("w-full"):
+                for item in history:
+                    if isinstance(item, dict):
+                        ui.label(f"{item.get('title')}: {item.get('summary') or item.get('stop_reason') or '—'}").classes("text-sm")
+        recommended = recovery.get("recommended_action") if isinstance(recovery.get("recommended_action"), dict) else {}
+        if recommended.get("key") and recommended.get("key") != "view_details":
+            ui.label(
+                ("建议下一步：" if language == "zh" else "Recommended next action: ")
+                + str(recommended.get("label") or recommended.get("key"))
+            ).classes("text-sm text-blue-700")
+        else:
+            ui.label(
+                "没有自动恢复操作。请保留当前证据，并根据上面的建议继续。" if language == "zh"
+                else "No automatic recovery is available. Existing evidence is preserved; continue with the recommendation above."
+            ).classes("text-sm text-gray-600")
         ui.button("关闭" if language == "zh" else "Close", on_click=dialog.close).props("outline")
     dialog.open()
 
@@ -2178,7 +2269,13 @@ def _render_works(
         with ui.column().classes("gap-1"):
             ui.label("设计" if language == "zh" else "Works").classes("text-3xl font-semibold")
             ui.label("每个 Work 是一个可持续修改的工程目标；每次 Agent 尝试都会保留为 Run。" if language == "zh" else "Each Work is one evolving engineering objective; every Agent attempt remains as a Run.").classes("text-gray-600")
-        _new_design_dialog_button(ui, state, refresh, language)
+        with ui.column().classes("items-end gap-2"):
+            _new_design_dialog_button(ui, state, refresh, language)
+            toggle = ui.switch(
+                i18n_copy(language, "show_developer_content"),
+                value=bool(state.get("show_developer_content")),
+            )
+            toggle.on_value_change(lambda event: (state.__setitem__("show_developer_content", bool(event.value)), refresh()))
     if not recent:
         ui.label("还没有设计。" if language == "zh" else "No Works yet.").classes("text-gray-600")
         return
@@ -2194,6 +2291,23 @@ def _render_works(
                     ui.label(f"{item.get('phase')} · {item.get('state')}").classes("text-sm text-gray-700")
                     ui.label(str(item.get("next_action") or "")).classes("text-sm text-blue-700")
                     ui.label(str(item.get("updated") or "")).classes("text-xs text-gray-500")
+                    classification = str(item.get("work_classification") or "user")
+                    if state.get("show_developer_content"):
+                        labels = {
+                            "user": "User Work",
+                            "product_example": "Product example",
+                            "developer_fixture": "Developer fixture",
+                            "compatibility_regression": "Compatibility regression",
+                            "infrastructure_test": "Infrastructure test",
+                        }
+                        purposes = {
+                            "developer_fixture": "Exercises a focused recovery or UI state.",
+                            "compatibility_regression": "Preserves an older deterministic behavior contract.",
+                            "infrastructure_test": "Checks local infrastructure, not product onboarding.",
+                        }
+                        ui.badge(labels.get(classification, classification)).classes("bg-slate-600")
+                        if classification in purposes:
+                            ui.label(purposes[classification]).classes("text-xs text-gray-500")
                 ui.button("打开设计" if language == "zh" else "Open Design", icon="arrow_forward", on_click=lambda _event=None, work=item: on_select(work["work_id"])).props("outline")
 
 
@@ -3914,6 +4028,7 @@ def _render_config(
             "provider_draft_status",
             "connected" if provider_readiness.get("ready") is True else "not_tested",
         )
+    draft_credential = backend.read_provider_credential_source(str(draft.get("provider") or "deepseek"))
 
     with ui.row().classes("w-full items-start justify-between gap-3"):
         with ui.column().classes("gap-1"):
@@ -3942,7 +4057,22 @@ def _render_config(
         provider = ui.select(options={"deepseek": "DeepSeek", "openai": "OpenAI"}, value=draft["provider"], label="Provider").classes("w-full")
         model = ui.input("Model", value=draft["model"]).classes("w-full")
         api_key = ui.input("API Key", value=draft.get("api_key") or "", password=True, password_toggle_button=True).props("autocomplete=new-password").classes("w-full")
-        ui.label("密钥只保留在当前 CadFlow 进程内存中，不会写入 workspace、日志或页面数据。" if language == "zh" else "The key stays only in this CadFlow process memory; it is not written to the workspace, logs, or page data.").classes("text-xs text-gray-500")
+        credential_source = str(draft_credential.get("source") or "unavailable")
+        credential_variable = draft_credential.get("variable")
+        source_labels = {
+            "session": "当前会话" if language == "zh" else "current session",
+            "process_environment": "进程环境变量" if language == "zh" else "process environment",
+            "project_env": "项目根目录 .env" if language == "zh" else "project-root .env",
+            "unavailable": "未检测到" if language == "zh" else "not detected",
+        }
+        ui.label(
+            (f"凭据来源：{source_labels.get(credential_source, credential_source)}" if language == "zh" else f"Credential source: {source_labels.get(credential_source, credential_source)}")
+            + (f" · {credential_variable}" if credential_variable else "")
+        ).classes("text-sm text-green-700" if draft_credential.get("available") else "text-sm text-amber-700")
+        ui.label(
+            "优先级：当前会话 → 进程环境变量 → 项目根目录 .env。值从不显示，也不会写入 workspace、日志或页面数据。" if language == "zh"
+            else "Precedence: current session → process environment → project-root .env. The value is never displayed or written to workspace, logs, or page data."
+        ).classes("text-xs text-gray-500")
         provider.on_value_change(lambda event: changed("provider", event.value))
         model.on_value_change(lambda event: changed("model", event.value or ""))
         api_key.on_value_change(lambda event: changed("api_key", event.value or ""))

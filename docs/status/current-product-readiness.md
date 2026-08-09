@@ -27,16 +27,19 @@ are not.
 
 ## M2.7 onboarding, Settings, recovery, and Live Agent Example — implemented and verified
 
-- The existing NiceGUI shell now presents Home / Works / Settings and prioritizes
-  New Design, the beginning-state Live Product Example, real Provider/local-CAD
-  readiness, and recent product-language Work cards.
+- The existing NiceGUI shell presents Home / Works / Settings and prioritizes
+  New Design, two distinct teaching cards, real Provider/local-CAD readiness,
+  and recent product-language Work cards. The Real Agent example is variable;
+  the Completed Product Example is a reproducible no-Provider snapshot.
 - DeepSeek is the default external-provider choice and `deepseek-v4-flash` is
   the requested default model path. Test checks the current unsaved draft. Save
   & Verify repeats the real check, persists only non-secret configuration plus
   safe connection evidence, and restores the Connected status and adapter after
   process restart when a credential is still available from the environment.
-- API keys are supplied by `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` or a Settings
-  password field retained only in backend/browser session memory. They are not
+- API keys resolve from a Settings session value, `DEEPSEEK_API_KEY` /
+  `OPENAI_API_KEY` in the process environment, or an allowlisted project-root
+  `.env`, in that order. Settings displays only the source and variable name.
+  Values entered in Settings remain only in backend/browser session memory. They are not
   written to workspace configuration, Work manifests, Run evidence, provider
   traces, logs, or screenshots. Secret-bearing generic gate payloads now fail
   before any Run log mutation.
@@ -54,12 +57,21 @@ are not.
   and technical details route to real behavior. Focused `ask_user` questions are
   persisted, answered as append-only accepted input, and resumed through the
   existing bounded episode route.
+- `agent_exchange.jsonl` now records a sanitized external Agent response before
+  strict action-contract validation, including for safely blocked malformed
+  turns. Workbench Agent Output projects responses, questions, durable answers,
+  observations, resumed attempts, and typed stops chronologically. Candidate
+  source/parameters remain hash-only and private reasoning/credentials are not
+  retained.
+- Normal Works contain user Works and Product Examples. Developer fixtures,
+  compatibility regressions, and infrastructure tests are hidden until the
+  developer-content toggle is enabled, then display category and purpose.
 - The reproducible M2.6 Completed Product Golden remains available as a
   secondary scripted snapshot. No M3, new CAD family, Assembly, Deliverable,
   BOM/drawing, sandbox-authority, or Tool-Broker-authority expansion was made.
-- Automated verification: `656 passed, 9 skipped` in the complete repository
-  suite, plus `178 passed` in the focused M2.7/console regression during the
-  implementation cycle.
+- Automated verification after the focused correction: `659 passed, 9 skipped`
+  in the complete repository suite, plus `203 passed, 2 skipped` across the
+  expanded M2.7/console/Agent-evidence regression selection.
 - Live-provider verification: the official DeepSeek endpoint accepted Save &
   Verify with `deepseek-v4-flash`; changing the model invalidated the status and
   restoring/saving it re-established Connected. A real beginning-state Live
@@ -71,6 +83,14 @@ are not.
   states, live-example start/running/safe-stop states, four-phase Workflow, user
   clarification, unsupported capability, and configuration recovery are saved
   under `docs/ux/screenshots/onboarding-settings-recovery-live-example/`.
+- The correction pass re-audited the real in-app Home, Works, Settings, Agent
+  Output, and typed recovery-detail surfaces in English and Chinese. Eight
+  repo-owned screenshots are under
+  `docs/ux/screenshots/onboarding-settings-recovery-live-example/correction/`.
+  A hidden scripted developer fixture proves question, answer, resumed external
+  response, and second typed stop without another external Provider request.
+- After the final recovery-action polish, the directly affected browser/Agent
+  regression set also passed with `68 passed`.
 - The formal five-case M2 external-provider benchmark remains unrun and is still
   the next acceptance milestone; M2 is not complete. The live screenshot named
   `live-example-design-and-model-zh.png` intentionally shows the honest

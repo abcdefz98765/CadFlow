@@ -301,7 +301,8 @@ def test_workspace_can_seed_static_example_works_under_external_root(tmp_path, m
         "create_workspace",
         body={"path": str(external), "name": "Example Workspace", "include_examples": True},
     )
-    works = dispatch_route(backend, "list_works")
+    normal_works = dispatch_route(backend, "list_works")
+    works = dispatch_route(backend, "list_works", query={"show_developer": True})
     detail = dispatch_route(backend, "read_work", path_params={"work_id": "reviewed_one_part_enclosure_base"})
 
     assert created["ok"] is True
@@ -311,6 +312,7 @@ def test_workspace_can_seed_static_example_works_under_external_root(tmp_path, m
         "reviewed_one_part_enclosure_base",
     ]
     assert created["data"]["workspace"]["work_count"] == 3
+    assert normal_works["data"]["works"] == []
     assert (external / "works" / "single_part_mounting_plate" / "work_manifest.json").exists()
     assert (external / "works" / "multi_part_enclosure_planning" / "runs" / "multi_part_enclosure_planning_root" / "01_design" / "assembly_plan.json").exists()
     assert (external / "works" / "reviewed_one_part_enclosure_base" / "runs" / "single_part_enclosure_base_result" / "model.step").exists()

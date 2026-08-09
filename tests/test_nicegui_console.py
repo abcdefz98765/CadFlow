@@ -576,6 +576,11 @@ def test_nicegui_workspace_examples_are_visible_as_workspace_works(tmp_path):
     response = dispatch_route(backend, "create_workspace", body={"path": "workspace", "include_examples": True})
 
     workspace_data = build_console_page_data(backend, active_page="workspace")
+    developer_data = build_console_page_data(
+        backend,
+        active_page="works",
+        show_debug_works=True,
+    )
     planning_data = build_console_page_data(
         backend,
         selected_work_id="multi_part_enclosure_planning",
@@ -589,7 +594,8 @@ def test_nicegui_workspace_examples_are_visible_as_workspace_works(tmp_path):
 
     assert response["ok"] is True
     assert workspace_data["workspace"]["work_count"] == 3
-    assert {work["work_id"] for work in workspace_data["works"]} == {
+    assert workspace_data["works"] == []
+    assert {work["work_id"] for work in developer_data["works"]} == {
         "single_part_mounting_plate",
         "multi_part_enclosure_planning",
         "reviewed_one_part_enclosure_base",

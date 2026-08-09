@@ -217,16 +217,13 @@ def test_product_golden_route_uses_shared_service_and_preserves_old_golden(monke
 
 
 def test_live_product_example_is_primary_and_completed_golden_remains_secondary():
-    source = __import__(
-        "ai_native_cad.workflow_console.nicegui_app",
-        fromlist=["placeholder"],
-    ).__loader__.get_source("ai_native_cad.workflow_console.nicegui_app")
+    source = Path("src/ai_native_cad/workflow_console/product_usability.py").read_text(encoding="utf-8")
     examples_index = Path("examples/README.md").read_text(encoding="utf-8")
     robot_readme = Path("examples/golden_desktop_robot_arm/README.md").read_text(encoding="utf-8")
 
-    assert source.index('"Start Product Example"') < source.index(
-        'i18n_copy(language, "open_product_example")'
-    )
+    assert source.index('"key": "live_agent"') < source.index('"key": "completed_golden"')
+    assert "Experimental · variable" in source
+    assert "Reproducible · no provider" in source
     assert i18n_copy("en", "compatibility_examples") == "Compatibility examples"
     assert "PRODUCT GOLDEN" in examples_index
     assert "COMPATIBILITY / REGRESSION" in examples_index

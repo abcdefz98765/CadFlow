@@ -25,6 +25,14 @@ LEGACY_WORKS_DIR_NAME = "_works"
 WORKS_DIR_NAME = LEGACY_WORKS_DIR_NAME
 WORK_MANIFEST_NAME = "work_manifest.json"
 WORK_MANIFEST_SCHEMA_VERSION = WORK_SCHEMA_VERSION
+WORK_CLASSIFICATIONS = {
+    "user",
+    "product_example",
+    "developer_fixture",
+    "compatibility_regression",
+    "infrastructure_test",
+}
+NORMAL_WORK_CLASSIFICATIONS = {"user", "product_example"}
 
 
 def list_works(
@@ -37,7 +45,14 @@ def list_works(
 ) -> dict[str, Any]:
     """Return paginated inferred Works without provider or CAD execution."""
     index = index or build_work_index(backend)
-    works = [work["summary"] for work in index["works"]]
+    filters = filters or {}
+    show_developer = bool(filters.get("show_developer") or filters.get("show_debug"))
+    works = [
+        work["summary"]
+        for work in index["works"]
+        if show_developer
+        or work["summary"].get("work_classification") in NORMAL_WORK_CLASSIFICATIONS
+    ]
     works = sorted(works, key=lambda item: (item.get("updated_at") or "", item.get("work_id") or ""), reverse=True)
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
@@ -52,7 +67,7 @@ def list_works(
             "has_previous": offset > 0,
             "has_next": offset + len(page) < len(works),
         },
-        "filters": {},
+        "filters": {"show_developer": show_developer},
     }
 
 
@@ -716,6 +731,8 @@ def _build_work(
     part_counts = _part_counts(parts)
     title = DEBUG_WORK_TITLE if debug_only else ((manifest or {}).get("title") or _work_title(root_run, root_id))
     status = (manifest or {}).get("status") or "incomplete"
+    metadata = (manifest or {}).get("metadata") if isinstance((manifest or {}).get("metadata"), dict) else {}
+    classification = classify_work(root_id, str(title), metadata)
     summary = {
         "work_id": root_id,
         "title": title,
@@ -724,6 +741,8 @@ def _build_work(
         "latest_run_id": latest_run_id,
         "active_lineage": active_lineage,
         "entity_status": status,
+        "work_classification": classification,
+        "example_classification": metadata.get("example_classification"),
         "has_manifest": manifest is not None,
         "part_counts": part_counts,
         "review_status": _review_status(root_run, parts),
@@ -739,6 +758,26 @@ def _build_work(
         "diagnostic_codes": _diagnostic_codes(root_run, parts),
     }
     return {"summary": summary, "runs_by_id": runs_by_id, "entity_state": _entity_state(root_id, manifest)}
+
+
+def classify_work(work_id: str, title: str, metadata: dict[str, Any]) -> str:
+    """Classify legacy and current Works without rewriting historical data."""
+
+    declared = metadata.get("work_classification")
+    if declared in WORK_CLASSIFICATIONS:
+        return str(declared)
+    example = str(metadata.get("example_classification") or "")
+    if example in {"live_agent_example", "product_golden"}:
+        return "product_example"
+    lowered_id = work_id.lower()
+    lowered_title = title.lower()
+    if "fixture" in lowered_id or "fixture" in lowered_title:
+        return "developer_fixture"
+    if metadata.get("example") is True or metadata.get("example_kind") or metadata.get("example") == "golden_desktop_robot_arm":
+        return "compatibility_regression"
+    if lowered_id.startswith(("smoke_", "infra_")) or " smoke test" in lowered_title:
+        return "infrastructure_test"
+    return "user"
 
 
 def _build_parts(work: dict[str, Any]) -> list[dict[str, Any]]:

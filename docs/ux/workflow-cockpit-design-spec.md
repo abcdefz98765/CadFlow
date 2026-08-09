@@ -510,18 +510,33 @@ A target Workbench slice is usable when:
 ## 25. Onboarding, Settings, and recovery projection
 
 The existing shell presents its compatible `workspace`, `works`, and `config`
-page ids as Home, Works, and Settings. Home prioritizes New Design, Start
-Product Example, real environment readiness, and recent Works; filesystem and
-workspace diagnostics remain under Advanced.
+page ids as Home, Works, and Settings. Home prioritizes New Design, two distinct
+teaching examples, real environment readiness, and recent Works. The Real Agent
+example is variable and requires a verified Provider; the Completed Product
+Example is reproducible and requires no Provider. Filesystem and workspace
+diagnostics remain under Advanced.
 
 Provider connection is a session draft with explicit Not tested, Testing,
 Connected, Failed, and Changed since last test states. Test uses the current
 unsaved draft. Save & Verify persists only non-secret configuration after a
-successful real check. API keys remain environment-provided or in backend
-process memory.
+successful real check. API keys resolve from the current session, process
+environment, then an allowlisted project-root `.env`. Settings exposes the
+source and variable name, never the credential value. Keys remain local and are
+not persisted in Work or Run evidence.
 
 Every common product stop projects one resolution owner (`user`,
 `configuration`, `cadflow`, `environment`, or `unsupported`), a plain-language
 reason, and one real recovery action. The normal surface never leads with raw
 error enums. Agent-first single-Part Job Works use the four canonical phases;
 legacy compatibility Run Snapshots retain their detailed checkpoint graph.
+
+The normal Works list shows user Works and Product Examples. A deliberate
+developer-content toggle reveals fixtures, compatibility regressions, and
+infrastructure tests with category and purpose labels.
+
+Agent Output is a first-class chronological surface distinct from Agent Design
+and Agent activity. It contains durable external actions, questions, user
+answers, system observations, and attempt outcomes. Recovery reuses that
+history to show what happened, why, the last Agent action, the last observation,
+and the actual typed stop; raw source, parameters, credentials, and private
+reasoning remain outside the presentation contract.

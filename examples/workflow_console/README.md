@@ -19,5 +19,7 @@ The MVP examples cover:
   part has a reviewed single-part result.
 
 These static schema-v1 templates preserve historical console projections. They
-are not the canonical Product Golden. Use **Open Product Example** on the
-Workspace page for the current Agent-first single-Part Job experience.
+are not onboarding or Product Examples. They are hidden from the normal Works
+catalog and appear only when **Show developer content** is enabled. Use the
+explicit Real Agent Example or Completed Product Example cards on Home for the
+current Agent-first single-Part Job teaching experiences.

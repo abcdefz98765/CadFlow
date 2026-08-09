@@ -248,10 +248,19 @@ work ahead of the current milestone without an explicit architecture decision.
 - [x] Persist focused Agent questions and append user answers as accepted input;
   resume through the existing Design Episode route.
 - [x] Keep the Completed Product Golden as the deterministic secondary example.
+- [x] Separate Product Examples from developer fixtures, compatibility
+  regressions, and infrastructure tests; add an explicit developer-content
+  toggle with purpose labels.
+- [x] Persist sanitized external Agent responses before action validation and
+  project chronological Agent Output, clarification answers, resumed attempts,
+  observations, and actual typed stops.
+- [x] Discover credentials from session, process environment, or allowlisted
+  project-root `.env`; show only source metadata in Settings.
 - [x] Complete real-provider/live-browser 1440px, 1024px, and mobile evidence;
   record the safe `policy_blocked` Live Example outcome without claiming a
   generated model.
-- [x] Run and record the full regression suite (`656 passed, 9 skipped`).
+- [x] Run and record the corrected full regression suite (`659 passed, 9
+  skipped`) and expanded focused selection (`203 passed, 2 skipped`).
 - [x] Commit M2.7 on the dedicated continuation branch.
 - [ ] Push the branch when the local approval/usage gate permits remote Git
   access.

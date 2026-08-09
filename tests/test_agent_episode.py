@@ -45,6 +45,30 @@ def test_unknown_action_is_rejected(tmp_path):
     with pytest.raises(UnknownAgentActionError):
         _orchestrator(tmp_path).run(lambda state: {"action": "run_shell"})
 
+    exchange = (tmp_path / "agent_exchange.jsonl").read_text(encoding="utf-8")
+    assert '"action": "run_shell"' in exchange
+    assert '"private_reasoning_exposed": false' in exchange
+
+
+def test_invalid_agent_response_evidence_omits_secrets_and_private_reasoning(tmp_path):
+    secret = "sk-test-must-never-persist"
+    with pytest.raises(UnknownAgentActionError):
+        _orchestrator(tmp_path).run(
+            lambda state: {
+                "action": "run_shell",
+                "authorization": f"Bearer {secret}",
+                "reasoning": "private chain of thought",
+                "api_key": secret,
+            }
+        )
+
+    exchange = (tmp_path / "agent_exchange.jsonl").read_text(encoding="utf-8")
+    assert secret not in exchange
+    assert "private chain of thought" not in exchange
+    assert "authorization" not in exchange.lower()
+    assert "api_key" not in exchange.lower()
+    assert '"contract_status": "received"' in exchange
+
 
 def test_step_context_and_submission_budgets_are_enforced(tmp_path):
     result = _orchestrator(tmp_path / "steps", budget=EpisodeBudget(max_steps=1)).run(

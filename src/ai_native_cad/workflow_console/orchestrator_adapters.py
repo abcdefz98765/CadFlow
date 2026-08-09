@@ -236,12 +236,14 @@ class WorkflowConsoleAgentDesign:
                     request,
                     relative_root=relative_root,
                     stop_reason="policy_blocked",
+                    episode_dir=episode_dir,
                 )
             except Exception:
                 outcome = _blocked_design_outcome(
                     request,
                     relative_root=relative_root,
                     stop_reason="provider_failure",
+                    episode_dir=episode_dir,
                 )
             else:
                 outcome = _episode_outcome(
@@ -351,6 +353,29 @@ def _episode_outcome(
     episode_dir: Path,
 ) -> DesignPartEpisodeOutcome:
     artifacts: list[DesignEpisodeArtifact] = []
+    exchange_id = None
+    if (episode_dir / "agent_exchange.jsonl").is_file():
+        exchange_id = f"episode:{result.episode_id}:agent_output"
+        artifacts.append(
+            DesignEpisodeArtifact(
+                artifact_id=exchange_id,
+                relative_path=f"{relative_root}/agent_exchange.jsonl",
+                checkpoint="agent_output",
+                trust_role="observation",
+                validation_status="recorded",
+            )
+        )
+    if (episode_dir / "agent_events.jsonl").is_file():
+        artifacts.append(
+            DesignEpisodeArtifact(
+                artifact_id=f"episode:{result.episode_id}:agent_activity",
+                relative_path=f"{relative_root}/agent_events.jsonl",
+                checkpoint="agent_activity",
+                trust_role="observation",
+                validation_status="recorded",
+                source_artifact_ids=(exchange_id,) if exchange_id else (),
+            )
+        )
     candidate_id = None
     if result.final_contract is not None and result.contract_submission_count:
         candidate_id = f"episode:{result.episode_id}:contract"
@@ -574,8 +599,29 @@ def _blocked_design_outcome(
     *,
     relative_root: str,
     stop_reason: str,
+    episode_dir: Path | None = None,
 ) -> DesignPartEpisodeOutcome:
     episode_id = uuid4().hex
+    artifacts: list[DesignEpisodeArtifact] = []
+    if episode_dir is not None and (episode_dir / "agent_exchange.jsonl").is_file():
+        artifacts.append(
+            DesignEpisodeArtifact(
+                artifact_id=f"episode:{episode_id}:agent_output",
+                relative_path=f"{relative_root}/agent_exchange.jsonl",
+                checkpoint="agent_output",
+                trust_role="diagnostic",
+                validation_status="blocked",
+            )
+        )
+    artifacts.append(
+        DesignEpisodeArtifact(
+            artifact_id=f"episode:{episode_id}:product_route",
+            relative_path=f"{relative_root}/product_route_result.json",
+            checkpoint="product_design_routing",
+            trust_role="diagnostic",
+            validation_status="blocked",
+        )
+    )
     return DesignPartEpisodeOutcome(
         request_id=request.request_id,
         episode_id=episode_id,
@@ -583,15 +629,7 @@ def _blocked_design_outcome(
         stop_reason=stop_reason,
         capability_mode="provider_selected_design_with_attested_model_program",
         validated=False,
-        artifacts=(
-            DesignEpisodeArtifact(
-                artifact_id=f"episode:{episode_id}:product_route",
-                relative_path=f"{relative_root}/product_route_result.json",
-                checkpoint="product_design_routing",
-                trust_role="diagnostic",
-                validation_status="blocked",
-            ),
-        ),
+        artifacts=tuple(artifacts),
     )
 
 

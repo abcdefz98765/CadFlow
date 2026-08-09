@@ -144,10 +144,18 @@ def open_canonical_product_golden(
         PRODUCT_GOLDEN_PROMPT,
         work_id=work_id,
         metadata={
+            "work_classification": "product_example",
             "example_id": PRODUCT_GOLDEN_ID,
             "example_classification": "product_golden",
             "example_reproducibility": "scripted_provider",
             "external_provider_quality_claim": False,
+            "teaching_intent": {
+                "demonstrates": "How to inspect and act on a completed validated result",
+                "will_see": "Known geometry, measured evidence, Reviewable state, Accept, and Revise",
+                "can_try": "Inspect the model, accept it, or create a traced revision",
+                "understand_after": "Reviewable and accepted are distinct and history remains immutable",
+                "requirements": "No external provider credential required",
+            },
         },
     )
     attempt = backend.create_work_part_attempt(

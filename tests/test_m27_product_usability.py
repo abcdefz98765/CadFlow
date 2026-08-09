@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ai_native_cad.agents.episode import AgentAction, StopReason
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
+from ai_native_cad.workflow_console.credential_discovery import resolve_provider_credential
 from ai_native_cad.workflow_console.i18n import copy as i18n_copy
 from ai_native_cad.workflow_console.nicegui_app import (
     _mark_provider_draft_changed,
@@ -84,6 +85,8 @@ def test_top_level_product_labels_are_bilingual_and_internal_ids_remain_compatib
     assert i18n_copy("zh", "works") == "设计项目"
     assert i18n_copy("en", "settings") == "Settings"
     assert i18n_copy("zh", "settings") == "设置"
+    assert i18n_copy("en", "show_developer_content") == "Show developer content"
+    assert i18n_copy("zh", "credential_source") == "凭据来源"
     source = Path("src/ai_native_cad/workflow_console/nicegui_app.py").read_text(encoding="utf-8")
     assert '("config", "settings"' in source
     assert "首页" in source and "开始产品示例" in source and "保存并验证" in source
@@ -153,6 +156,37 @@ def test_save_verify_persists_only_safe_settings_and_home_uses_verified_readines
     assert restarted.read_provider_config()["provider_identity"]["provider"] == "deepseek"
 
 
+def test_credential_discovery_precedence_and_public_readiness_never_expose_value(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text(
+        "DEEPSEEK_API_KEY=project-env-secret\nUNRELATED_SECRET=ignore-me\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "process-secret")
+    process = resolve_provider_credential("deepseek", project_root=tmp_path)
+    session = resolve_provider_credential("deepseek", project_root=tmp_path, session_value="session-secret")
+    project = resolve_provider_credential("deepseek", project_root=tmp_path, environ={})
+    assert (process.source, process.value) == ("process_environment", "process-secret")
+    assert (session.source, session.value) == ("session", "session-secret")
+    assert (project.source, project.value) == ("project_env", "project-env-secret")
+
+    backend, _ = _backend(tmp_path)
+    backend.create_workspace()
+    backend.save_and_verify_provider("deepseek", model="deepseek-chat")
+    readiness = backend.read_provider_readiness()
+    assert readiness["credential_source"] == "process_environment"
+    assert readiness["credential_variable"] == "DEEPSEEK_API_KEY"
+    assert readiness["credential_value_exposed"] is False
+    assert "process-secret" not in json.dumps(readiness)
+    public_source = backend.read_provider_credential_source("deepseek")
+    assert public_source == {
+        "available": True,
+        "source": "process_environment",
+        "variable": "DEEPSEEK_API_KEY",
+        "secret_exposed": False,
+    }
+    assert "process-secret" not in json.dumps(public_source)
+
+
 def test_live_product_example_starts_at_real_beginning_and_uses_agent_projection(tmp_path):
     backend, _ = _backend(tmp_path)
     started = backend.start_live_product_example()
@@ -218,6 +252,25 @@ def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
     manifest = backend._read_work_manifest(started["work_id"])
     assert any(item["trust_role"] == "accepted_input" for item in manifest["artifact_references"])
     assert manifest["accepted_part_results"] == {}
+    overview = build_workbench_overview_view_model(backend, started["work_id"], language="en")
+    output = overview["agent_output"]
+    assert output["has_external_responses"] is True
+    assert any(item["kind"] == "user_answer" and item["summary"] == "27.5 mm" for item in output["items"])
+    assert any(item.get("stop_reason") == "insufficient_context" for item in output["items"])
+    assert overview["recovery"]["technical_reason"] == "insufficient_context"
+    assert overview["recovery"]["last_agent_action"] == "stop"
+    assert overview["recovery"]["recommended_action"]["key"] == "modify_request"
+    assert overview["recovery"]["summary"] == "Controlled resume fixture stop."
+
+
+def test_home_product_examples_are_explicitly_distinct(tmp_path):
+    backend, _ = _backend(tmp_path)
+    page = build_console_page_data(backend, active_page="workspace", language="en")
+    examples = page["home"]["product_examples"]
+    assert [item["key"] for item in examples] == ["live_agent", "completed_golden"]
+    assert "variable" in examples[0]["badge"].lower()
+    assert "no provider" in examples[1]["badge"].lower()
+    assert examples[0]["requirements"] != examples[1]["requirements"]
 
 
 def test_recovery_owner_mappings_do_not_offer_meaningless_retry():

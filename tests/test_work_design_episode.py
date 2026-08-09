@@ -173,7 +173,13 @@ def test_work_orchestrator_routes_validation_only_episode_without_trust_mutation
         "deliverable_packages": manifest_after["deliverable_packages"],
     }
     assert protected_after == protected_before
-    assert len(manifest_after["artifact_references"]) == 4
+    assert len(manifest_after["artifact_references"]) == 6
+    assert {item["checkpoint"] for item in manifest_after["artifact_references"]} >= {
+        "agent_output",
+        "agent_activity",
+        "contract_validation",
+        "product_design_routing",
+    }
     assert (run_dir / "prompt.txt").read_bytes() == prompt_before
     assert not any(
         (run_dir / name).exists()

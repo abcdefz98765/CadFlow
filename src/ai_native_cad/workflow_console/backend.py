@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import hashlib
 import inspect
-import os
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +31,10 @@ from ai_native_cad.workflow_console.stage_runner import (
     _safe_run_name,
 )
 from ai_native_cad.workflow_console.workflow_review import compact_workflow_review_summary
+from ai_native_cad.workflow_console.credential_discovery import (
+    CredentialResolution,
+    resolve_provider_credential,
+)
 from ai_native_cad.workflow_control import (
     ASK_USER,
     PROCEED_WITH_ASSUMPTIONS,
@@ -296,13 +299,14 @@ class WorkflowConsoleBackend:
         if normalized in {"local", "local/mock", "mock", "deterministic"}:
             self.stage_runner.agent_adapter = DeterministicAgentAdapter()
         elif normalized in {"deepseek", "openai", "oai"}:
+            credential = self._resolve_provider_credential(normalized)
             self.stage_runner.agent_adapter = self._make_provider_adapter(
                 normalized,
                 model=model,
                 base_url=base_url,
                 timeout_seconds=timeout_seconds,
                 max_retries=max_retries,
-                api_key=self._session_provider_api_keys.get(normalized),
+                api_key=credential.value,
             )
         else:
             raise ValueError(f"unsupported workflow console provider: {provider}")
@@ -330,13 +334,17 @@ class WorkflowConsoleBackend:
             if normalized in {"local", "local/mock", "mock", "deterministic"}:
                 adapter = DeterministicAgentAdapter()
             elif normalized in {"deepseek", "openai", "oai"}:
+                credential = self._resolve_provider_credential(
+                    normalized,
+                    session_value=api_key,
+                )
                 adapter = self._make_provider_adapter(
                     normalized,
                     model=model,
                     base_url=base_url,
                     timeout_seconds=timeout_seconds,
                     max_retries=max_retries,
-                    api_key=api_key or self._session_provider_api_keys.get(normalized),
+                    api_key=credential.value,
                 )
             else:
                 raise ValueError(f"unsupported workflow console provider: {provider}")
@@ -414,6 +422,7 @@ class WorkflowConsoleBackend:
         normalized = provider.lower().strip()
         if api_key and normalized in {"deepseek", "openai", "oai"}:
             self._session_provider_api_keys[normalized] = api_key.strip()
+        credential = self._resolve_provider_credential(normalized)
         safe_config: dict[str, Any] = {
             "provider": provider,
             "model": model,
@@ -447,11 +456,12 @@ class WorkflowConsoleBackend:
             "provider_identity": _compact_adapter_identity(
                 dict(getattr(self.stage_runner.agent_adapter, "provider_identity", {}) or {})
             ),
-            "credential_storage": "process_memory_or_environment",
+            "credential_storage": credential.source,
+            "credential": credential.public(),
         }
 
     def read_provider_readiness(self) -> dict[str, Any]:
-        """Return connection evidence without exposing credential source names."""
+        """Return connection and credential-source evidence without a value."""
         config = self.read_workspace_config()
         provider = str(config.get("provider") or "local/mock").lower().strip()
         is_external = provider in {"deepseek", "openai", "oai"}
@@ -469,10 +479,8 @@ class WorkflowConsoleBackend:
             and verification.get("model") == model
             and verification.get("base_url") == config.get("base_url")
         )
-        credential_available = provider in {"local", "local/mock", "mock", "deterministic"} or bool(
-            self._session_provider_api_keys.get(provider)
-            or os.environ.get("DEEPSEEK_API_KEY" if provider == "deepseek" else "OPENAI_API_KEY" if provider in {"openai", "oai"} else "")
-        )
+        credential = self._resolve_provider_credential(provider)
+        credential_available = provider in {"local", "local/mock", "mock", "deterministic"} or bool(credential.value)
         if not is_external:
             status = "needs_setup"
         elif not credential_available:
@@ -491,11 +499,19 @@ class WorkflowConsoleBackend:
             "provider": provider,
             "model": model or (DEFAULT_DEEPSEEK_MODEL if provider == "deepseek" else None),
             "credential_available": credential_available,
+            "credential_source": credential.source,
+            "credential_variable": credential.variable,
             "last_test_status": verification.get("status"),
             "last_error_category": verification.get("error_category"),
             "verified_at": verification.get("verified_at"),
             "secret_persisted": False,
+            "credential_value_exposed": False,
         }
+
+    def read_provider_credential_source(self, provider: str) -> dict[str, Any]:
+        """Describe the selected provider's local credential source, never its value."""
+
+        return self._resolve_provider_credential(provider).public()
 
     def read_local_execution_readiness(self, *, refresh: bool = False) -> dict[str, Any]:
         """Project the real model-program sandbox capability for normal UI."""
@@ -539,7 +555,7 @@ class WorkflowConsoleBackend:
         }
 
     def _restore_saved_provider_adapter(self) -> None:
-        """Restore safe adapter settings; credentials still come from memory/env."""
+        """Restore safe settings; credentials remain session/env/.env-owned."""
         config_path = self._resolve_workspace_path(WORKSPACE_CONFIG_NAME)
         if not config_path.exists():
             return
@@ -564,6 +580,23 @@ class WorkflowConsoleBackend:
             if key in signature.parameters and value is not None
         }
         return self._provider_adapter_factory(provider, **accepted)
+
+    def _resolve_provider_credential(
+        self,
+        provider: str,
+        *,
+        session_value: str | None = None,
+    ) -> CredentialResolution:
+        normalized = provider.lower().strip()
+        return resolve_provider_credential(
+            normalized,
+            project_root=self.project_root,
+            session_value=(
+                session_value
+                if isinstance(session_value, str) and session_value.strip()
+                else self._session_provider_api_keys.get(normalized)
+            ),
+        )
 
     def list_runs(
         self,
@@ -655,9 +688,17 @@ class WorkflowConsoleBackend:
                     description=objective,
                     work_id=work_id,
                     metadata={
+                        "work_classification": "product_example",
                         "example_classification": "live_agent_example",
                         "example_label": "Live Agent · Experimental",
                         "provider_route": "configured_external_provider",
+                        "teaching_intent": {
+                            "demonstrates": "How CadFlow works with the configured real Agent",
+                            "will_see": "Provider-selected actions, questions, repair, geometry, or an honest typed stop",
+                            "can_try": "Start at the real request and continue the same Work",
+                            "understand_after": "Real Agent runs are variable and remain subject to local validation",
+                            "requirements": "Verified provider credential and local CAD execution for geometry",
+                        },
                     },
                 )
             except FileExistsError:
@@ -700,7 +741,7 @@ class WorkflowConsoleBackend:
         created = self.create_work(
             normalized_title,
             description=prompt,
-            metadata={"product_entry": "new_design"},
+            metadata={"product_entry": "new_design", "work_classification": "user"},
         )
         work_id = created["work"]["work_id"]
         attempt = self._work_orchestrator().create_part_attempt(
@@ -937,16 +978,22 @@ class WorkflowConsoleBackend:
         work_id: str,
         artifact_id: str,
     ) -> dict[str, Any]:
-        """Read one registered JSON evidence record for a Work projection."""
+        """Read one registered JSON or JSONL evidence record for a Work projection."""
 
         reference, artifact_path = self.resolve_work_artifact_reference(
             work_id,
             artifact_id,
         )
-        if artifact_path.suffix.lower() != ".json":
+        suffix = artifact_path.suffix.lower()
+        if suffix not in {".json", ".jsonl"}:
             raise ValueError("workflow console Work artifact is not JSON evidence")
         try:
-            value = json.loads(artifact_path.read_text(encoding="utf-8"))
+            text = artifact_path.read_text(encoding="utf-8")
+            if suffix == ".jsonl":
+                records = [json.loads(line) for line in text.splitlines() if line.strip()]
+                value: Any = {"records": records[-128:]}
+            else:
+                value = json.loads(text)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             raise ValueError("workflow console Work artifact evidence is unreadable") from None
         return {

@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from ai_native_cad.workflow_console.review_surface import build_workflow_review_surface
 from ai_native_cad.workflow_console.product_usability import (
+    build_agent_output_projection,
     build_agent_first_workflow_projection,
     build_recovery_projection,
 )
@@ -122,12 +123,19 @@ def build_workbench_overview_view_model(
     else:
         capability_key = "deterministic_compatibility"
     preview = _workbench_preview(work_id, active_job, active_record, references, language)
+    agent_output = build_agent_output_projection(
+        backend,
+        work_id,
+        references,
+        language=language,
+    )
     recovery = build_recovery_projection(
         backend,
         work_id,
         entity,
         references,
         language=language,
+        agent_output=agent_output,
     )
     activity = _workbench_agent_activity(
         active_job,
@@ -197,6 +205,7 @@ def build_workbench_overview_view_model(
         "transformation": transformation,
         "recommendation": recommendation,
         "recovery": recovery,
+        "agent_output": agent_output,
         "capability": {
             "key": capability_key,
             "label": i18n_copy(language, capability_key),

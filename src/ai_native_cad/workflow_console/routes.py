@@ -506,6 +506,8 @@ def _list_works(
     filters = {}
     if query.get("show_debug") is not None:
         filters["show_debug"] = _optional_bool(query, "show_debug", False)
+    if query.get("show_developer") is not None:
+        filters["show_developer"] = _optional_bool(query, "show_developer", False)
     return backend.list_works(
         limit=_optional_int(query, "limit", 50),
         offset=_optional_int(query, "offset", 0),
