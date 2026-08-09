@@ -179,10 +179,16 @@ def append_part_attempt(
     source: str = "manifest",
     status: str = "incomplete",
     created_at: str | None = None,
+    parent_run_id: str | None = None,
+    source_result_id: str | None = None,
 ) -> dict[str, Any]:
     """Return a new Work record with one ordered Part Job attempt appended."""
     _require_id(part_job_id, "part_job_id")
     _require_id(run_id, "run_id")
+    if parent_run_id is not None:
+        _require_id(parent_run_id, "parent_run_id")
+    if source_result_id is not None:
+        _require_id(source_result_id, "source_result_id", allow_colon=True)
     projected = project_work_record(work)
     jobs = projected["part_jobs"]
     job = next((item for item in jobs if item["part_job_id"] == part_job_id), None)
@@ -203,6 +209,8 @@ def append_part_attempt(
             "status": status,
             "artifact_ids": [],
             "created_at": timestamp,
+            "parent_run_id": parent_run_id,
+            "source_result_id": source_result_id,
         }
     )
     job["active_attempt_run_id"] = run_id
@@ -689,6 +697,16 @@ def _project_part_jobs(value: Any) -> list[dict[str, Any]]:
                         if isinstance(attempt.get("created_at"), str)
                         else None
                     ),
+                    "parent_run_id": (
+                        attempt.get("parent_run_id")
+                        if isinstance(attempt.get("parent_run_id"), str)
+                        else None
+                    ),
+                    "source_result_id": (
+                        attempt.get("source_result_id")
+                        if isinstance(attempt.get("source_result_id"), str)
+                        else None
+                    ),
                 }
             )
         active = raw.get("active_attempt_run_id")
@@ -849,13 +867,25 @@ def _validate_part_job(job: dict[str, Any]) -> None:
     if not isinstance(attempts, list):
         raise ValueError("Part Job attempts must be a list")
     run_ids = []
+    known_prior_runs: set[str] = set()
     for index, attempt in enumerate(attempts, start=1):
         if attempt.get("record_type") != "part_job_attempt":
             raise ValueError("attempt record_type must be 'part_job_attempt'")
         if attempt.get("sequence") != index:
             raise ValueError("Part Job attempt sequence must be ordered and contiguous")
         _require_id(attempt.get("run_id"), "attempt run_id")
+        parent_run_id = attempt.get("parent_run_id")
+        if parent_run_id is not None:
+            _require_id(parent_run_id, "attempt parent_run_id")
+            if parent_run_id not in known_prior_runs:
+                raise ValueError("Part Job attempt parent must reference an earlier attempt")
+        source_result_id = attempt.get("source_result_id")
+        if source_result_id is not None:
+            _require_id(source_result_id, "attempt source_result_id", allow_colon=True)
+            if parent_run_id is None:
+                raise ValueError("attempt source_result_id requires parent_run_id")
         run_ids.append(attempt["run_id"])
+        known_prior_runs.add(attempt["run_id"])
     if len(run_ids) != len(set(run_ids)):
         raise ValueError("Part Job attempt Run ids must be unique")
     active = job.get("active_attempt_run_id")

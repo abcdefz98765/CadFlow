@@ -545,6 +545,28 @@ These are migration tasks, not accepted target behavior.
   2 skipped`. Real-browser Product Golden, bilingual, Detailed Workflow,
   Accept, accepted-result Revise, Advanced/Evidence, 1440px, 1024px, and 414px
   checks passed with the ten requested screenshots.
+- M2.8 Dynamic Work Graph verification passed on 2026-08-09. Current Work now
+  projects request, Part Job, attempt, clarification/answer/resume,
+  design/candidate/build, typed recovery, reviewable, accepted, and explicit
+  revision nodes only when their durable evidence exists. Four canonical
+  phases are orientation regions, not graph nodes. Historical Run Snapshots
+  retain the read-only compatibility graph. Real NiceGUI browser verification
+  passed for beginning, blocked, clarification/resume, reviewable, accepted,
+  revision with the accepted pointer preserved, real two-Part branching,
+  selected-node detail, Run Snapshot return, Chinese, 1440px, 1024px, and
+  390px layouts; screenshots are saved under
+  `../ux/screenshots/dynamic-work-graph/`. Focused verification passed with
+  `84 passed`; the complete suite passed with `661 passed, 9 skipped`.
+- M2.8 added only optional durable revision provenance on Part attempts because
+  parent Run/result causality cannot be recovered honestly from prompt text,
+  attempt order, or timestamps. No graph persistence, workflow engine, Agent
+  framework, Provider abstraction, Assembly execution, Deliverables, or new
+  security layer was introduced.
+- The normal product entry still creates its initial Part Job immediately after
+  Work creation. A Work-level Agent episode that can decide decomposition
+  before Part Jobs exist remains product/runtime debt. Legacy planning is not
+  treated as hidden canonical decomposition, and multi-Part graph truth comes
+  only from durable Part Jobs and their independent attempts/results.
 - Target architecture verification: M1 passed. Seven bounded M2 internal
   packages are contract-tested, and execution/publication have current-host
   WSL2 acceptance. The external-provider benchmark and user acceptance remain
@@ -568,17 +590,17 @@ These are migration tasks, not accepted target behavior.
 ## Current milestone
 
 M0 and M1 are complete. The M2 backend vertical slice is implemented through
-reviewable publication and explicit accept/revise routes. The M2.5 Workbench MVP
-usability gate and M2.6 canonical Product Golden comprehensibility gate are
-complete. The external-provider M2 benchmark is now the current milestone; M2
-itself remains unaccepted until that benchmark and an explicit user acceptance
-pass.
+reviewable publication and explicit accept/revise routes. The M2.5 Workbench,
+M2.6 Product Golden, M2.7 onboarding/recovery, and M2.8 Dynamic Work Graph
+product gates are complete. The external-provider M2 benchmark is now the
+current milestone; M2 itself remains unaccepted until that benchmark and an
+explicit user acceptance pass.
 
 Delivery order:
 
 1. run the M2 external-provider benchmark and explicit user acceptance;
-2. preserve the completed M2.5 Workbench and M2.6 Product Golden gates while
-   fixing any benchmark-driven usability defects;
+2. preserve the completed M2.5–M2.8 product gates while fixing any
+   benchmark-driven usability defects;
 3. M3 feature-graph/model-program geometry paths;
 4. M4 multi-Part Job and Assembly Job progression;
 5. M5 integrated Deliverable Package and drawings;

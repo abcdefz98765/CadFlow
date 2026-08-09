@@ -24,6 +24,7 @@ from ai_native_cad.workflow_console.nicegui_app import (
     WORK_USER_PAGES,
     PAGE_IDS,
     _page_selection_callback,
+    _run_selection_callback,
     _select_console_page,
     _select_console_run,
     _select_console_work,
@@ -91,6 +92,10 @@ def test_console_navigation_callbacks_consume_events_and_snapshot_boundaries():
     callback(object())
     assert selected_pages == ["workflow"]
     assert all(page in PAGE_IDS for page in selected_pages)
+    selected_runs = []
+    run_callback = _run_selection_callback(selected_runs.append, "run-1")
+    run_callback(object())
+    assert selected_runs == ["run-1"]
 
     state = {"selected_work_id": "work-1", "selected_node_id": "node-1", "selected_stage_id": "part_modeling"}
     refreshes = []

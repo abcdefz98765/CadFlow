@@ -23,6 +23,7 @@ from ai_native_cad.workflow_console.nicegui_app import (
 )
 from ai_native_cad.workflow_console.workflow_page_view_model import (
     build_workbench_overview_view_model,
+    build_workflow_page_view_model,
 )
 
 
@@ -229,6 +230,9 @@ def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_pa
     assert revised["orchestration"]["command"] == "revise_reviewable_part_result"
     assert final["accepted_part_results"]["mounting_bracket"] == pointer
     assert len(final["part_jobs"][0]["attempts"]) == 2
+    revision_attempt = final["part_jobs"][0]["attempts"][1]
+    assert revision_attempt["parent_run_id"] == "mounting_bracket_attempt_1"
+    assert revision_attempt["source_result_id"] == result_id
     overview = build_workbench_overview_view_model(
         backend,
         "workbench_work",
@@ -241,6 +245,17 @@ def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_pa
     assert overview["current_result"]["revision_in_progress"] is True
     assert overview["part_jobs"][0]["has_accepted_result"] is True
     assert overview["part_jobs"][0]["attempt_count"] == 2
+    workflow = build_workflow_page_view_model(backend, "workbench_work", language="zh")
+    graph_nodes = {item["id"]: item for item in workflow["nodes"]}
+    revision_node_id = f"attempt:mounting_bracket:{revision_attempt['run_id']}"
+    accepted_node_id = f"accepted:mounting_bracket:{result_id}"
+    assert graph_nodes[revision_node_id]["detail"]["source_result_id"] == result_id
+    assert graph_nodes[accepted_node_id]["status"] == "accepted"
+    assert workflow["selected_node"]["id"] == revision_node_id
+    assert any(
+        edge["target"] == revision_node_id and edge["type"] == "revised"
+        for edge in workflow["edges"]
+    )
     assert refresh_count >= 4
 
 

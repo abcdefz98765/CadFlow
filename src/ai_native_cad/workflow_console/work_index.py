@@ -513,6 +513,8 @@ def _safe_part_jobs(value: Any) -> list[dict[str, Any]]:
                     if isinstance(artifact_id, str) and artifact_id
                 ][:200] if isinstance(attempt.get("artifact_ids"), list) else [],
                 "created_at": _safe_optional_text(attempt.get("created_at"), limit=80),
+                "parent_run_id": _safe_run_ref(attempt.get("parent_run_id")),
+                "source_result_id": _safe_optional_text(attempt.get("source_result_id"), limit=200),
             })
         active_run_id = _safe_run_ref(item.get("active_attempt_run_id"))
         jobs.append({

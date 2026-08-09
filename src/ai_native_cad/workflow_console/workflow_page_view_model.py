@@ -1114,15 +1114,18 @@ def build_workflow_page_view_model(
     work = backend.get_work_detail(work_id)
     summary = work.get("summary") if isinstance(work.get("summary"), dict) else {}
     entity = work.get("entity_state") if isinstance(work.get("entity_state"), dict) else {}
-    metadata = entity.get("metadata") if isinstance(entity.get("metadata"), dict) else {}
     lineage = summary.get("active_lineage") if isinstance(summary.get("active_lineage"), dict) else {}
     active_root = lineage.get("active_root_run_id") or summary.get("root_run_id")
-    if view_mode == "current_work" and (
-        metadata.get("example_classification") == "live_agent_example"
-        or metadata.get("product_entry") == "new_design"
-    ):
+    if view_mode == "current_work":
         overview = build_workbench_overview_view_model(backend, work_id, language=language)
-        agent_page = build_agent_first_workflow_projection(overview, language=language)
+        agent_page = build_agent_first_workflow_projection(
+            backend,
+            work_id,
+            work,
+            overview,
+            selected_node_id=selected_stage_id,
+            language=language,
+        )
         agent_page.update({
             "view_mode": "current_work",
             "read_only": False,

@@ -205,12 +205,14 @@ def test_live_product_example_starts_at_real_beginning_and_uses_agent_projection
     assert overview["agent_design"]["evidence_status"] == "insufficient"
     assert overview["current_result"] is None
     assert workflow["projection_mode"] == "agent_first"
-    assert [stage["stage_id"] for stage in workflow["stages"]] == [
+    assert [phase["id"] for phase in workflow["phase_groups"]] == [
         "intent", "design", "build_evaluate", "accept_deliver"
     ]
-    assert workflow["stages"][0]["status"] == "completed"
-    assert workflow["stages"][1]["status"] == "blocked"
-    assert workflow["stages"][3]["status"] == "not_started"
+    assert [node["kind"] for node in workflow["nodes"]] == ["request", "part", "attempt"]
+    assert workflow["workflow_graph"]["topology"] == "dynamic_work_graph"
+    assert workflow["workflow_graph"]["compatibility_mode"] is False
+    assert workflow["nodes"][0]["status"] == "completed"
+    assert workflow["nodes"][1]["status"] == "blocked"
 
 
 def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
@@ -261,6 +263,17 @@ def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
     assert overview["recovery"]["last_agent_action"] == "stop"
     assert overview["recovery"]["recommended_action"]["key"] == "modify_request"
     assert overview["recovery"]["summary"] == "Controlled resume fixture stop."
+    workflow = build_workflow_page_view_model(
+        backend, started["work_id"], language="en"
+    )
+    nodes = {item["id"]: item for item in workflow["nodes"]}
+    edges = workflow["edges"]
+    question_id = next(node_id for node_id, node in nodes.items() if node["kind"] == "decision" and node["detail"]["type"] == "clarification")
+    answer_id = next(node_id for node_id, node in nodes.items() if node["kind"] == "decision" and node["detail"]["type"] == "answer")
+    resumed_id = next(node_id for node_id, node in nodes.items() if node["kind"] == "recovery" and node["detail"]["stop_reason"] == "insufficient_context")
+    assert nodes[question_id]["group"] == nodes[answer_id]["group"]
+    assert any(edge["source"] == question_id and edge["target"] == answer_id and edge["type"] == "answered" for edge in edges)
+    assert any(edge["source"] == answer_id and edge["target"] == resumed_id and edge["type"] == "resumed" for edge in edges)
 
 
 def test_home_product_examples_are_explicitly_distinct(tmp_path):

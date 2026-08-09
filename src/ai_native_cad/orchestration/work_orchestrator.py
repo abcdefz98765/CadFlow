@@ -262,6 +262,8 @@ class WorkOrchestrator:
         role: str | None = None,
         source: str = "user_revision",
         run_id: str | None = None,
+        parent_run_id: str | None = None,
+        source_result_id: str | None = None,
     ) -> dict[str, Any]:
         work = self.store.read_work(work_id)
         if run_id is None:
@@ -279,6 +281,8 @@ class WorkOrchestrator:
             source=source,
             status="incomplete",
             created_at=_now(),
+            parent_run_id=parent_run_id,
+            source_result_id=source_result_id,
         )
         lineage = candidate.get("active_lineage")
         if isinstance(lineage, dict):
@@ -374,6 +378,15 @@ class WorkOrchestrator:
         _validate_design_outcome(request, outcome, work)
 
         timestamp = _now()
+        accepted_input_ids = [
+            item["artifact_id"]
+            for item in work.get("artifact_references", [])
+            if isinstance(item, dict)
+            and item.get("run_id") == run_id
+            and item.get("part_job_id") == part_job_id
+            and item.get("trust_role") == "accepted_input"
+            and isinstance(item.get("artifact_id"), str)
+        ]
         references = [
             create_artifact_reference(
                 artifact_id=artifact.artifact_id,
@@ -384,7 +397,10 @@ class WorkOrchestrator:
                 phase=_design_artifact_phase(artifact),
                 checkpoint=artifact.checkpoint,
                 trust_role=artifact.trust_role,
-                source_artifact_ids=list(artifact.source_artifact_ids),
+                source_artifact_ids=list(dict.fromkeys([
+                    *artifact.source_artifact_ids,
+                    *(accepted_input_ids if artifact.checkpoint == "product_design_routing" else []),
+                ])),
                 validation_status=artifact.validation_status,
                 created_at=timestamp,
             )
@@ -692,6 +708,8 @@ class WorkOrchestrator:
             ),
             source="reviewable_result_revision",
             run_id=run_id,
+            parent_run_id=result_reference["run_id"],
+            source_result_id=reviewable_result_id,
         )
         after = self.store.read_work(work_id)
         if after.get("accepted_part_results") != accepted_before:

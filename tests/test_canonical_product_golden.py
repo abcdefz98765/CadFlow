@@ -247,5 +247,5 @@ def test_canonical_architecture_remains_the_four_phase_authority():
     ).read_text(encoding="utf-8")
 
     assert "Intent -> Design -> Build & Evaluate -> Accept & Deliver" in architecture
-    assert "No implementation, test fixture, legacy document, UI layout, or Golden example" in architecture
+    assert "No implementation, test fixture, legacy document, UI layout, or example may silently redefine this architecture." in architecture
     assert "M2.6" not in architecture
