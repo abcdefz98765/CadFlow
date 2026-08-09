@@ -65,6 +65,19 @@ Workflow is a live state graph, not a script.
 
 The Agent is not required to execute nodes in a fixed UI-defined sequence. The graph is produced after/because durable product state changes.
 
+Workflow is both the orientation surface and the primary command surface for
+the Current Work. Selecting a meaningful node should expose a concise
+interaction projection: current state, why it matters, whether attention is
+required, one dominant valid action, secondary valid actions, relevant
+result/Agent/validation evidence, and any honest unavailable reason. These
+actions call existing backend/orchestrator commands; the graph is not the
+command engine or state owner.
+
+**Current Attention** is a derived presentation concept, not a global current
+node. A single-Part Work may have one attention node; parallel Part Jobs may
+simultaneously expose several waiting, reviewable, blocked, or active nodes.
+Selection, attention, actions, and layout are not persisted.
+
 The graph should be built from existing:
 
 - Work state;
@@ -226,6 +239,11 @@ Select earlier state
 The graph should make the new branch understandable.
 
 Existing accepted results remain until explicitly replaced by acceptance of another result.
+
+Use wording such as **Start new version from this result**. Do not promise
+arbitrary-node replay: only reviewable/accepted results and other states backed
+by an existing safe domain command may branch. Unsupported historical nodes
+remain inspection-only with a clear explanation.
 
 ## 12. Overview / Design composition
 

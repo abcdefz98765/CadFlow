@@ -1126,6 +1126,20 @@ def build_workflow_page_view_model(
             selected_node_id=selected_stage_id,
             language=language,
         )
+        selected_node = _dict_value(agent_page.get("selected_node"))
+        interaction = _dict_value(selected_node.get("interaction"))
+        primary_action = interaction.get("primary_action") if isinstance(interaction.get("primary_action"), dict) else None
+        secondary_actions = [
+            dict(item)
+            for item in interaction.get("secondary_actions", [])
+            if isinstance(item, dict)
+        ]
+        available_actions = {
+            "primary_action": primary_action,
+            "secondary_actions": secondary_actions,
+            "disabled_actions": [],
+            "advanced_actions": [],
+        }
         agent_page.update({
             "view_mode": "current_work",
             "read_only": False,
@@ -1140,9 +1154,9 @@ def build_workflow_page_view_model(
             "lineage_inferred": bool(lineage.get("lineage_inferred")),
             "viewed_run_id": None,
             "run_strip": _run_strip(work.get("run_history"), lineage, view_mode, None),
-            "recommended_next_action": None,
-            "available_actions": {"primary_action": None, "secondary_actions": [], "disabled_actions": []},
-            "action_inventory": [],
+            "recommended_next_action": primary_action,
+            "available_actions": available_actions,
+            "action_inventory": _action_inventory(available_actions, agent_page.get("workflow_graph") or {}),
             "empty_state": None,
             "error_state": None,
             "source": {"projection": "agent_first", "overview": overview},
@@ -1205,11 +1219,92 @@ def build_workflow_page_view_model(
         "selected_stage": selected,
         "available_actions": actions,
         "action_inventory": _action_inventory(actions, graph),
+        "historical_run_summary": _historical_run_summary(
+            backend,
+            work_id,
+            run,
+            surface,
+            selected_run_id,
+            language,
+        ) if view_mode == "run_snapshot" else None,
         "empty_state": None if stages else {"title": "No workflow has started yet.", "summary": "Add a requirement to begin."},
         "error_state": None,
         # Compatibility/debug consumers can inspect the provenance without using
         # it to assemble another UI surface.
         "source": {"projection": projection, "surface": surface},
+    }
+
+
+def _historical_run_summary(
+    backend: Any,
+    work_id: str,
+    run: dict[str, Any],
+    surface: dict[str, Any],
+    run_id: str | None,
+    language: str,
+) -> dict[str, Any]:
+    """Project a task-oriented read-only summary ahead of legacy stage evidence."""
+
+    stages = [item for item in surface.get("stages", []) if isinstance(item, dict)]
+    meaningful = [
+        item
+        for item in stages
+        if item.get("status") not in {None, "not_started", "unavailable"}
+    ]
+    latest = meaningful[-1] if meaningful else (stages[0] if stages else {})
+    blocked = next(
+        (item for item in reversed(meaningful) if item.get("status") in {"blocked", "failed"}),
+        None,
+    )
+    agent_stage = next(
+        (item for item in reversed(meaningful) if _dict_value(item.get("agent_output"))),
+        None,
+    )
+    context = _dict_value(surface.get("workflow_context"))
+    prompt = _dict_value(context.get("prompt"))
+    preview = _dict_value(prompt.get("preview"))
+    prompt_text = preview.get("content") or prompt.get("content") or _read_work_prompt(backend, work_id, run_id)
+    if isinstance(prompt_text, dict):
+        prompt_text = prompt_text.get("text") or prompt_text.get("prompt")
+    raw_status = run.get("status")
+    status_value = (
+        raw_status.get("status")
+        if isinstance(raw_status, dict)
+        else raw_status
+    )
+    artifacts = [
+        item
+        for item in _dict_value(surface.get("artifact_viewer")).get("artifacts", [])
+        if isinstance(item, dict) and item.get("present")
+    ]
+    model_artifacts = [
+        item for item in artifacts
+        if item.get("name") in {"model.step", "model.stl", "preview.png", "input_ir.json"}
+    ]
+    banner = _dict_value((blocked or latest).get("status_banner"))
+    return {
+        "run_id": run_id,
+        "status": status_value or latest.get("status") or "unknown",
+        "request": prompt_text,
+        "summary": latest.get("human_summary") or latest.get("short_summary") or run.get("summary"),
+        "latest_evidence": latest.get("stage_name") or latest.get("label"),
+        "agent_output": _dict_value((agent_stage or latest).get("agent_output")),
+        "validation": {
+            "title": banner.get("title"),
+            "summary": banner.get("summary") or latest.get("human_summary"),
+            "consequence": banner.get("consequence"),
+            "blocked": blocked is not None,
+        },
+        "model_artifacts": model_artifacts,
+        "geometry_viewer_url": (
+            f"/web-viewer/index.html?file=%2Fapi%2Fdownloads%2F{run_id}%2Fmodel.stl"
+            if run_id and any(item.get("name") == "model.stl" for item in model_artifacts)
+            else None
+        ),
+        "compatibility_evidence_available": bool(stages),
+        "read_only": True,
+        "legacy_workflow_is_primary": False,
+        "title": "历史 Run 摘要" if language == "zh" else "Historical Run summary",
     }
 
 

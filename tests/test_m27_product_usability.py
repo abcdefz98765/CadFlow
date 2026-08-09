@@ -232,6 +232,17 @@ def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
     assert recovery["resolution_owner"] == "user"
     assert recovery["recommended_action"]["key"] == "answer_question"
     question = recovery["questions"][0]
+    waiting_workflow = build_workflow_page_view_model(
+        backend, started["work_id"], language="en"
+    )
+    waiting_question = next(
+        node
+        for node in waiting_workflow["nodes"]
+        if node["detail"]["type"] == "clarification"
+    )
+    assert waiting_question["interaction"]["primary_action"]["key"] == "answer_question"
+    assert waiting_question["interaction"]["requires_user_action"] is True
+    assert waiting_workflow["current_attention"][0]["node_id"] == waiting_question["id"]
     backend.answer_work_part_design_question(
         started["work_id"],
         started["part_job_id"],
@@ -272,6 +283,9 @@ def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
     answer_id = next(node_id for node_id, node in nodes.items() if node["kind"] == "decision" and node["detail"]["type"] == "answer")
     resumed_id = next(node_id for node_id, node in nodes.items() if node["kind"] == "recovery" and node["detail"]["stop_reason"] == "insufficient_context")
     assert nodes[question_id]["group"] == nodes[answer_id]["group"]
+    assert nodes[question_id]["detail"]["answered"] is True
+    assert nodes[question_id]["interaction"]["primary_action"] is None
+    assert "historical" in nodes[question_id]["interaction"]["unavailable_reason"].lower()
     assert any(edge["source"] == question_id and edge["target"] == answer_id and edge["type"] == "answered" for edge in edges)
     assert any(edge["source"] == answer_id and edge["target"] == resumed_id and edge["type"] == "resumed" for edge in edges)
 

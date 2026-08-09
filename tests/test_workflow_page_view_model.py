@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from ai_native_cad.domain.records import create_artifact_reference, register_artifact_references
 from ai_native_cad.workflow_console import WorkflowConsoleBackend
 from ai_native_cad.workflow_console.workflow_page_view_model import build_workflow_page_view_model
 
@@ -33,6 +34,43 @@ def _work_with_failed_latest_attempt(tmp_path):
     return backend
 
 
+def _register_route_stop(
+    backend: WorkflowConsoleBackend,
+    work_id: str,
+    part_job_id: str,
+    run_id: str,
+    stop_reason: str,
+) -> str:
+    artifact_id = f"route_{stop_reason}"
+    relative_path = f"episodes/design_part/{artifact_id}/product_route_result.json"
+    target = backend._work_runs_root(work_id) / run_id / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps({
+        "episode": {
+            "status": "safely_blocked",
+            "stop_reason": stop_reason,
+        }
+    }) + "\n", encoding="utf-8")
+    reference = create_artifact_reference(
+        artifact_id=artifact_id,
+        work_id=work_id,
+        run_id=run_id,
+        part_job_id=part_job_id,
+        relative_path=relative_path,
+        phase="design",
+        checkpoint="product_design_routing",
+        trust_role="diagnostic",
+        validation_status="blocked",
+    )
+    manifest = register_artifact_references(
+        backend._read_work_manifest(work_id),
+        [reference],
+    )
+    backend._write_work_manifest(work_id, manifest)
+    backend.invalidate_work_index()
+    return artifact_id
+
+
 def test_current_work_uses_explicit_active_lineage_not_latest_attempt(tmp_path):
     backend = _work_with_failed_latest_attempt(tmp_path)
 
@@ -58,6 +96,7 @@ def test_run_snapshot_is_read_only_and_uses_only_selected_run(tmp_path):
 
     assert page["read_only"] is True
     assert page["viewed_run_id"] == "failed_attempt"
+    assert page["historical_run_summary"]["request"] == "Create a failed alternative."
     assert page["selected_stage"]["user_input"]["source_run_id"] == "failed_attempt"
     assert all(action["target_run_id"] == "failed_attempt" for action in page["available_actions"]["disabled_actions"])
     assert all("read-only" in str(action.get("disabled_reason", "")).lower() for action in page["available_actions"]["disabled_actions"] if action.get("backend_action") != "run_rework")
@@ -93,6 +132,86 @@ def test_selecting_current_work_graph_node_is_presentation_only(tmp_path):
     assert page["selected_node"]["id"] == "work:request"
     assert page["workflow_graph"]["selection_is_presentation_only"] is True
     assert backend._read_work_manifest("lineage_work") == before
+
+
+def test_beginning_work_and_current_attempt_expose_existing_agent_command(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    work_id = "panel_bracket"
+    backend.create_work("Panel bracket", "Design a compact panel bracket.", work_id=work_id)
+    backend.create_work_part_attempt(
+        work_id, "primary_part", role="Primary design part", run_id="panel_bracket_attempt"
+    )
+    manifest = backend._read_work_manifest(work_id)
+    job = manifest["part_jobs"][0]
+    run_id = job["active_attempt_run_id"]
+
+    request_page = build_workflow_page_view_model(
+        backend, work_id, selected_stage_id="work:request", language="en"
+    )
+    attempt_page = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id=f"attempt:{job['part_job_id']}:{run_id}",
+        language="en",
+    )
+
+    assert request_page["recommended_next_action"]["key"] == "continue_agent"
+    assert request_page["recommended_next_action"]["label"] == "Start design"
+    assert attempt_page["available_actions"]["primary_action"]["key"] == "continue_agent"
+    assert attempt_page["action_inventory"]
+    assert all(node["interaction"]["business_state_owner"] == "domain" for node in attempt_page["nodes"])
+    assert "global_current_node" not in json.dumps(attempt_page)
+
+
+def test_retry_is_exposed_only_for_retryable_current_stop(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    created = backend.create_product_design("Design a small clamp.", title="Clamp")
+    work_id = created["work_id"]
+    manifest = backend._read_work_manifest(work_id)
+    job = manifest["part_jobs"][0]
+    run_id = job["active_attempt_run_id"]
+    historical_artifact = _register_route_stop(
+        backend, work_id, job["part_job_id"], run_id, "user_input_required"
+    )
+    retry_artifact = _register_route_stop(
+        backend, work_id, job["part_job_id"], run_id, "provider_failure"
+    )
+
+    retry_page = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id=f"recovery:{retry_artifact}",
+        language="en",
+    )
+    assert retry_page["recommended_next_action"]["key"] == "retry_agent"
+    assert retry_page["current_attention"][0]["node_id"] == f"recovery:{retry_artifact}"
+
+    historical_page = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id=f"recovery:{historical_artifact}",
+        language="en",
+    )
+    assert historical_page["recommended_next_action"] is None
+    assert historical_page["available_actions"]["secondary_actions"] == []
+    assert "historical" in historical_page["selected_node"]["interaction"]["unavailable_reason"].lower()
+
+    other = backend.create_product_design("Design an unsupported mechanism.", title="Unsupported")
+    other_id = other["work_id"]
+    other_manifest = backend._read_work_manifest(other_id)
+    other_job = other_manifest["part_jobs"][0]
+    other_run = other_job["active_attempt_run_id"]
+    unsupported_artifact = _register_route_stop(
+        backend, other_id, other_job["part_job_id"], other_run, "unsupported_capability"
+    )
+    unsupported_page = build_workflow_page_view_model(
+        backend,
+        other_id,
+        selected_stage_id=f"recovery:{unsupported_artifact}",
+        language="en",
+    )
+    assert unsupported_page["recommended_next_action"]["key"] == "modify_request"
+    assert all(action["key"] != "retry_agent" for action in unsupported_page["action_inventory"])
 
 
 def test_workflow_review_uses_human_stage_output_and_source_aware_artifact_contract(tmp_path):
@@ -168,6 +287,8 @@ def test_multi_part_current_work_has_one_branch_per_durable_part_job(tmp_path):
     } == {"base", "cover"}
     assert not any(node["kind"] == "assembly" for node in page["nodes"])
     assert page["workflow_graph"]["compatibility_mode"] is False
+    assert len(page["current_attention"]) == 2
+    assert {item["part_job_id"] for item in page["current_attention"]} == {"base", "cover"}
 
 
 def test_legacy_part_job_is_badged_as_compatibility_projection(tmp_path):
@@ -221,3 +342,6 @@ def test_contract_guidance_and_snapshot_guidance_preserve_user_workflow_semantic
     )
     assert snapshot["selected_stage"]["guidance"]["user_decision_summary"].startswith("This historical Run is read-only")
     assert snapshot["selected_stage"]["guidance"]["recovery_action"].startswith("Return to Current Work")
+    assert snapshot["historical_run_summary"]["read_only"] is True
+    assert snapshot["historical_run_summary"]["legacy_workflow_is_primary"] is False
+    assert snapshot["historical_run_summary"]["compatibility_evidence_available"] is True

@@ -180,6 +180,18 @@ def test_reviewable_overview_uses_canonical_phase_and_hides_evidence_by_default(
 
 def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_path):
     backend, result_id = _backend(tmp_path)
+    review_page = build_workflow_page_view_model(
+        backend,
+        "workbench_work",
+        selected_stage_id=f"result:{result_id}",
+        language="en",
+    )
+    assert review_page["recommended_next_action"]["key"] == "accept_reviewable_result"
+    assert review_page["recommended_next_action"]["reviewable_result_id"] == result_id
+    assert [item["key"] for item in review_page["available_actions"]["secondary_actions"]] == [
+        "revise_reviewable_result"
+    ]
+    assert review_page["current_attention"][0]["node_id"] == f"result:{result_id}"
     state = {}
     refresh_count = 0
 
@@ -208,6 +220,15 @@ def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_pa
     assert pointer["result_id"] == result_id
     assert state["action_execution"]["status"] == "succeeded"
     assert state["action_execution"]["postcondition_verified"] is True
+    accepted_page = build_workflow_page_view_model(
+        backend,
+        "workbench_work",
+        selected_stage_id=f"accepted:mounting_bracket:{result_id}",
+        language="en",
+    )
+    assert accepted_page["selected_node"]["status"] == "accepted"
+    assert accepted_page["recommended_next_action"] is None
+    assert accepted_page["available_actions"]["secondary_actions"][0]["key"] == "revise_reviewable_result"
 
     revise_action = {
         "key": "revise_reviewable_result",
@@ -233,6 +254,15 @@ def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_pa
     revision_attempt = final["part_jobs"][0]["attempts"][1]
     assert revision_attempt["parent_run_id"] == "mounting_bracket_attempt_1"
     assert revision_attempt["source_result_id"] == result_id
+    revised_page = build_workflow_page_view_model(
+        backend,
+        "workbench_work",
+        language="en",
+    )
+    assert any(node["status"] == "accepted" and node.get("result_id") == result_id for node in revised_page["nodes"])
+    assert any(edge["type"] == "revised" for edge in revised_page["edges"])
+    assert revised_page["current_attention"][0]["node_id"].startswith("attempt:mounting_bracket:")
+    assert revised_page["current_attention"][0]["primary_action"]["key"] == "continue_agent"
     overview = build_workbench_overview_view_model(
         backend,
         "workbench_work",

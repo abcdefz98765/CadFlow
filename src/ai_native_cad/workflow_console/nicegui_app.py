@@ -163,6 +163,7 @@ body{background:var(--wf-bg);color:var(--wf-ink)}
 .workflow-dot{width:18px;height:18px;border:2px solid #fff;border-radius:999px;box-shadow:0 0 0 2px #cbd5e1}.workflow-dot.status-completed,.workflow-dot.status-contract_complete{background:var(--wf-completed);box-shadow:0 0 0 2px #86efac}.workflow-dot.status-running{background:var(--wf-running);box-shadow:0 0 0 2px #93c5fd;animation:wf-pulse 1.7s infinite}.workflow-dot.status-needs_review{background:var(--wf-review);box-shadow:0 0 0 2px #fde68a}.workflow-dot.status-blocked,.workflow-dot.status-failed{background:var(--wf-blocked);box-shadow:0 0 0 2px #fecaca}.workflow-dot.status-stale{background:#fff;border:3px solid var(--wf-stale);box-shadow:0 0 0 2px #fde68a}.workflow-dot.status-user_modified{background:var(--wf-override);box-shadow:0 0 0 2px #ddd6fe}.workflow-dot.status-execution_skipped,.workflow-dot.status-skipped{background:#f8fafc;border:3px double #64748b;box-shadow:0 0 0 2px #cbd5e1}.workflow-dot.status-unavailable{background:#fff;border:2px dashed var(--wf-unavailable);box-shadow:none}.workflow-dot.status-not_started{background:#fff;border-color:#94a3b8;box-shadow:none}.workflow-dot.status-reference_only{border-radius:3px;background:#fff;border-color:var(--wf-reference);box-shadow:none}.workflow-dot.kind-review,.workflow-dot.kind-rework{transform:rotate(45deg);border-radius:3px}.workflow-dot.kind-review+label,.workflow-dot.kind-rework+label{margin-top:2px}.workflow-attention{font-size:10px;color:var(--wf-review);font-weight:700}.workflow-node-status{font-size:11px;color:var(--wf-muted);text-transform:capitalize}
 .workflow-dot.status-reviewable{background:var(--wf-review);box-shadow:0 0 0 2px #fde68a}.workflow-dot.status-accepted{background:var(--wf-completed);box-shadow:0 0 0 2px #86efac}.workflow-dot.kind-decision{transform:rotate(45deg);border-radius:3px}.workflow-dot.kind-part{border-radius:4px;background:#7c3aed;box-shadow:0 0 0 2px #ddd6fe}.workflow-dot.kind-accepted{border-radius:4px}
 .dynamic-workflow-shell{overflow-x:auto;background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}.dynamic-workflow-canvas{min-width:1080px}.dynamic-phase-grid{display:grid;grid-template-columns:repeat(4,minmax(240px,1fr));gap:8px}.dynamic-phase-header{padding:10px 12px;border-top:4px solid #94a3b8;background:#f8fafc;border-radius:6px;font-size:12px;font-weight:800;letter-spacing:.06em;color:#475569}.dynamic-phase-header:nth-child(2){border-color:#8b5cf6;background:#faf5ff}.dynamic-phase-header:nth-child(3){border-color:#2563eb;background:#eff6ff}.dynamic-phase-header:nth-child(4){border-color:#16a34a;background:#f0fdf4}.dynamic-root-row,.dynamic-attempt-row{display:grid;grid-template-columns:repeat(4,minmax(240px,1fr));gap:8px;align-items:start}.dynamic-root-row{margin:12px 0}.dynamic-branch{border:1px solid #dbe3ef;border-radius:10px;background:#fbfdff;margin-top:12px;padding:10px}.dynamic-branch-title{font-size:12px;font-weight:800;color:#475569;padding:2px 4px 8px}.dynamic-attempt-row{border-top:1px solid #e8edf4;padding-top:10px;margin-top:8px;min-height:116px}.dynamic-phase-cell{min-width:0;display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;padding:4px}.dynamic-node{width:168px;min-height:92px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;padding:10px;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,.04)}.dynamic-node:hover{border-color:#60a5fa;box-shadow:0 3px 10px rgba(37,99,235,.12)}.dynamic-node.selected{border-color:#2563eb;outline:3px solid #bfdbfe}.dynamic-node.blocked,.dynamic-node.failed{border-left:4px solid #dc2626}.dynamic-node.reviewable{border-left:4px solid #d97706;background:#fffbeb}.dynamic-node.accepted{border-left:4px solid #16a34a;background:#f0fdf4}.dynamic-node.stale{border-style:dashed}.dynamic-node-title{font-size:13px;font-weight:700;line-height:1.25}.dynamic-node-summary{font-size:11px;color:#64748b;line-height:1.35}.dynamic-edge-chip{font-size:10px;color:#475569;background:#eef2f7;border-radius:999px;padding:3px 7px;align-self:center}.dynamic-node-detail{background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}
+.workflow-attention-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:var(--wf-space-3)}.workflow-attention-card{border:1px solid #bfdbfe;border-left:4px solid var(--wf-primary);border-radius:var(--wf-radius-sm);background:#f8fbff;padding:var(--wf-space-3);cursor:pointer}.workflow-attention-card.user_action,.workflow-attention-card.blocked{border-color:#fbbf24;background:#fffbeb}.workflow-attention-card.review{border-color:#fdba74;background:#fff7ed}.dynamic-branch{position:relative;margin-left:18px}.dynamic-branch:before{content:'';position:absolute;left:-19px;top:-13px;bottom:50%;width:18px;border-left:2px solid #94a3b8;border-bottom:2px solid #94a3b8;border-radius:0 0 0 8px}.dynamic-attempt-row{position:relative}.dynamic-attempt-row:before{content:'';position:absolute;left:7%;right:7%;top:59px;border-top:2px solid #cbd5e1;z-index:0}.dynamic-attempt-row:after{content:'›';position:absolute;right:6%;top:43px;color:#94a3b8;font-size:24px;z-index:0}.dynamic-attempt-row.revision:before{border-top-style:dashed;border-color:#8b5cf6}.dynamic-phase-cell{position:relative;z-index:1}.dynamic-node.attention-user_action,.dynamic-node.attention-blocked{box-shadow:0 0 0 3px #fde68a}.dynamic-node.attention-review{box-shadow:0 0 0 3px #fed7aa}.dynamic-node.attention-active{box-shadow:0 0 0 3px #bfdbfe}.dynamic-attention-badge{font-size:10px;font-weight:800;color:#92400e;background:#fef3c7;border-radius:999px;padding:2px 7px}.dynamic-node-actions{border-left:4px solid var(--wf-primary);background:#eff6ff;border-radius:var(--wf-radius-sm);padding:var(--wf-space-4)}
 .workflow-part-candidate{min-width:146px;max-width:180px;border:1px solid var(--wf-border);border-radius:999px;padding:var(--wf-space-2) var(--wf-space-3);background:#fff}.workflow-part-candidate.reference-component{border-radius:var(--wf-radius-sm);border-style:dashed;background:#f8fafc}.workflow-part-selected{border-color:var(--wf-primary);outline:2px solid #bfdbfe;outline-offset:1px}
 .stage-conclusion{border-bottom:1px solid var(--wf-border);padding-bottom:var(--wf-space-3)}.stage-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--wf-space-3)}.stage-detail-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);min-height:156px}.stage-detail-card h3{margin:0 0 var(--wf-space-2);font-size:12px;letter-spacing:.07em;color:var(--wf-muted);font-weight:700}.stage-detail-card.decision{background:#fbfcff}.stage-artifact-list{margin-top:var(--wf-space-2);padding-top:var(--wf-space-2);border-top:1px solid #eef2f7}.workflow-evidence{border-top:1px solid var(--wf-border);padding-top:var(--wf-space-3)}.workflow-disabled-reason{font-size:12px;color:var(--wf-muted)}
 .history-list{display:grid;gap:var(--wf-space-3)}.history-run-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);background:#fff;cursor:pointer}.history-run-card:hover{border-color:#94a3b8}.history-run-grid{display:grid;grid-template-columns:1.2fr repeat(4,minmax(0,1fr));gap:var(--wf-space-3)}.history-field-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--wf-muted)}
@@ -1679,6 +1680,8 @@ def _render_workbench_result(
     state: dict[str, Any],
     refresh: Callable[[], None],
     language: str,
+    *,
+    show_actions: bool = True,
 ) -> None:
     accepted = result.get("accepted") is True
     with ui.element("section").classes(
@@ -1739,7 +1742,7 @@ def _render_workbench_result(
 
         result_id = result.get("reviewable_result_id")
         part_id = _dict_get(overview.get("work"), "active_part")
-        if isinstance(result_id, str) and isinstance(part_id, str):
+        if show_actions and isinstance(result_id, str) and isinstance(part_id, str):
             with ui.row().classes("gap-2 mt-4 flex-wrap"):
                 if not accepted:
                     accept = ui.button(
@@ -2418,8 +2421,19 @@ def _render_workflow_page_v2(
                     ui.button("返回当前 Work" if language == "zh" else "Return to Current Work", icon="undo", on_click=on_select_current_work).props("outline dense") \
                         .tooltip("离开此只读历史 Run，返回可操作的当前 Work 谱系。" if language == "zh" else "Leave this read-only historical Run and return to the actionable Current Work lineage.")
     if snapshot:
-        with ui.element("section").classes("workflow-run-strip-panel w-full"):
-            _render_run_strip(ui, page.get("run_strip"), on_select_run, on_select_current_work, language=language)
+        _render_historical_run_summary(
+            ui,
+            page,
+            data,
+            actions,
+            state,
+            refresh,
+            on_select_stage,
+            on_select_run,
+            on_select_current_work,
+            language,
+        )
+        return
     conclusion = page.get("current_conclusion") if isinstance(page.get("current_conclusion"), dict) else {}
     with ui.element("section").classes("workflow-hero w-full"):
         ui.label(("当前结论" if not snapshot else "快照结论") if language == "zh" else ("CURRENT CONCLUSION" if not snapshot else "SNAPSHOT CONCLUSION")).classes("workflow-eyebrow")
@@ -2446,6 +2460,103 @@ def _render_workflow_page_v2(
     _render_selected_stage_detail_v2(ui, page.get("selected_stage"), data, actions, state, refresh, snapshot)
 
 
+def _render_historical_run_summary(
+    ui: Any,
+    page: dict[str, Any],
+    data: dict[str, Any],
+    actions: WorkflowConsoleActions,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    on_select_stage: Callable[[str], None],
+    on_select_run: Callable[[str], None],
+    on_select_current_work: Callable[[], None],
+    language: str,
+) -> None:
+    summary = page.get("historical_run_summary") if isinstance(page.get("historical_run_summary"), dict) else {}
+    validation = summary.get("validation") if isinstance(summary.get("validation"), dict) else {}
+    with ui.element("section").classes("workflow-hero w-full"):
+        with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
+            with ui.column().classes("gap-1"):
+                ui.label(summary.get("title") or ("历史 Run 摘要" if language == "zh" else "Historical Run summary")).classes("workflow-eyebrow")
+                ui.label(str(summary.get("summary") or "Immutable attempt evidence.")).classes("text-xl font-semibold")
+                if summary.get("latest_evidence"):
+                    ui.label(
+                        ("最后有效证据：" if language == "zh" else "Latest meaningful evidence: ")
+                        + str(summary["latest_evidence"])
+                    ).classes("text-sm text-gray-600")
+            ui.badge(_display_status(summary.get("status") or "unknown", language)).classes(
+                _badge_class(summary.get("status"))
+            )
+        ui.label("原始请求" if language == "zh" else "Request represented by this Run").classes("workflow-eyebrow mt-4")
+        ui.label(str(summary.get("request") or "—")).classes("text-sm")
+
+    viewer_url = summary.get("geometry_viewer_url")
+    artifacts = [item for item in summary.get("model_artifacts", []) if isinstance(item, dict)]
+    with ui.element("section").classes("workbench-panel w-full"):
+        ui.label("结果与几何" if language == "zh" else "RESULT & GEOMETRY").classes("workflow-eyebrow")
+        if viewer_url:
+            ui.html(
+                f'<iframe class="workbench-viewer" title="Historical geometry preview" '
+                f'src="{html_escape(str(viewer_url), quote=True)}"></iframe>',
+                sanitize=False,
+            ).classes("w-full mt-3")
+        elif artifacts:
+            ui.label(
+                "该 Run 保存了模型资料，但没有可用的浏览器预览。" if language == "zh"
+                else "This Run retained model artifacts, but no browser preview is available."
+            ).classes("text-sm text-gray-600")
+        else:
+            ui.label(
+                "该 Run 没有生成可审查几何。" if language == "zh" else "This Run did not produce reviewable geometry."
+            ).classes("text-sm text-gray-600")
+        for artifact in artifacts:
+            ui.label(f"• {artifact.get('display_name') or artifact.get('name')}").classes("text-sm")
+
+    with ui.element("section").classes(
+        "workflow-action-feedback failed w-full" if validation.get("blocked") else "workbench-panel w-full"
+    ):
+        ui.label("验证 / 停止原因" if language == "zh" else "VALIDATION / STOP").classes("workflow-eyebrow")
+        ui.label(str(validation.get("title") or validation.get("summary") or "No blocking validation evidence.")).classes("font-semibold")
+        if validation.get("summary") and validation.get("summary") != validation.get("title"):
+            ui.label(str(validation["summary"])).classes("text-sm")
+        if validation.get("consequence"):
+            ui.label(str(validation["consequence"])).classes("text-sm text-gray-600")
+
+    agent_output = summary.get("agent_output") if isinstance(summary.get("agent_output"), dict) else {}
+    if agent_output:
+        with ui.element("section").classes("workbench-panel w-full"):
+            ui.label("Agent 输出" if language == "zh" else "AGENT OUTPUT").classes("workflow-eyebrow")
+            ui.label(str(agent_output.get("summary") or agent_output.get("title") or "Persisted Agent evidence is available.")).classes("text-sm")
+
+    with ui.expansion(
+        "Run 历史与谱系" if language == "zh" else "Run history and lineage",
+        icon="history",
+        value=False,
+    ).classes("workflow-run-strip-panel w-full"):
+        _render_run_strip(ui, page.get("run_strip"), on_select_run, on_select_current_work, language=language)
+
+    with ui.expansion(
+        "兼容性详情 · 旧版 Workflow 证据" if language == "zh" else "Compatibility details · Legacy Workflow evidence",
+        icon="account_tree",
+        value=False,
+    ).classes("workflow-run-strip-panel w-full"):
+        ui.label(
+            "以下固定阶段图仅用于读取旧版证据，不代表当前产品的 Work 状态模型。"
+            if language == "zh"
+            else "The fixed-stage graph below is compatibility evidence, not the Current Work product model."
+        ).classes("text-sm text-gray-600")
+        _render_workflow_stage_graph(
+            ui,
+            {"workflow_graph": page.get("workflow_graph"), "selected_stage_id": _dict_get(page.get("selected_stage"), "stage_id")},
+            on_select_stage,
+            language=language,
+            on_open_candidate=lambda candidate: _show_candidate_detail(
+                ui, candidate, data, actions, state, refresh, read_only=True
+            ),
+        )
+        _render_selected_stage_detail_v2(ui, page.get("selected_stage"), data, actions, state, refresh, True)
+
+
 def _render_agent_first_workflow_page(
     ui: Any,
     page: dict[str, Any],
@@ -2458,7 +2569,6 @@ def _render_agent_first_workflow_page(
     language: str,
 ) -> None:
     work = page.get("work") if isinstance(page.get("work"), dict) else {}
-    conclusion = page.get("current_conclusion") if isinstance(page.get("current_conclusion"), dict) else {}
     graph = page.get("workflow_graph") if isinstance(page.get("workflow_graph"), dict) else {}
     with ui.element("section").classes("workflow-hero w-full"):
         with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
@@ -2472,16 +2582,47 @@ def _render_agent_first_workflow_page(
                 ).classes("text-sm text-gray-600")
             if graph.get("compatibility_mode"):
                 ui.badge("兼容模式 · 旧版 Work" if language == "zh" else "COMPATIBILITY MODE · LEGACY WORK").classes("bg-amber-700")
-    with ui.element("section").classes("workflow-hero w-full"):
-        ui.label("当前结论" if language == "zh" else "CURRENT CONCLUSION").classes("workflow-eyebrow")
-        ui.label(conclusion.get("title") or "Design ready").classes("text-xl font-semibold")
-        ui.label(conclusion.get("summary") or "").classes("text-sm text-gray-700")
-        if conclusion.get("rationale"):
-            ui.label(str(conclusion["rationale"])).classes("text-xs text-gray-500")
+    _render_current_attention(ui, graph, on_select_stage, language)
     _render_dynamic_work_graph(ui, graph, on_select_stage, language)
     _render_dynamic_node_detail(ui, page, actions, state, refresh, on_select_run, language)
-    with ui.element("section").classes("workflow-run-strip-panel w-full"):
+    with ui.expansion(
+        "Run 历史与谱系" if language == "zh" else "Run history and lineage",
+        icon="history",
+        value=False,
+    ).classes("workflow-run-strip-panel w-full"):
         _render_run_strip(ui, page.get("run_strip"), on_select_run, on_select_current_work, language=language)
+
+
+def _render_current_attention(
+    ui: Any,
+    graph: dict[str, Any],
+    on_select_node: Callable[[str], None],
+    language: str,
+) -> None:
+    items = [item for item in graph.get("current_attention", []) if isinstance(item, dict)]
+    with ui.element("section").classes("workflow-hero w-full"):
+        ui.label("当前关注" if language == "zh" else "CURRENT ATTENTION").classes("workflow-eyebrow")
+        ui.label(
+            "并行零件可以同时需要审查、输入或继续设计。" if language == "zh"
+            else "Parallel Parts can need review, input, or continued design at the same time."
+        ).classes("text-sm text-gray-600")
+        if not items:
+            ui.label(
+                "当前没有需要处理的节点。" if language == "zh" else "No current node needs attention."
+            ).classes("text-sm text-gray-500 mt-2")
+            return
+        with ui.element("div").classes("workflow-attention-grid w-full mt-3"):
+            for item in items:
+                card = ui.column().classes(f"workflow-attention-card {item.get('kind') or 'active'} gap-1")
+                card.on("click", lambda _event, node_id=str(item.get("node_id")): on_select_node(node_id))
+                with card:
+                    ui.label(str(item.get("label") or item.get("node_id") or "")).classes("font-semibold")
+                    if item.get("part_job_id"):
+                        ui.label(str(item["part_job_id"]).replace("_", " ").title()).classes("text-xs text-gray-500")
+                    ui.label(str(item.get("summary") or "")).classes("text-sm text-gray-700")
+                    primary = item.get("primary_action") if isinstance(item.get("primary_action"), dict) else {}
+                    if primary.get("label"):
+                        ui.label(str(primary["label"])).classes("text-sm font-semibold text-blue-700")
 
 
 def _render_dynamic_work_graph(
@@ -2526,7 +2667,7 @@ def _render_dynamic_work_graph(
                         f"{('零件分支' if language == 'zh' else 'PART BRANCH')} · {branch.get('label') or branch.get('part_job_id')}"
                     ).classes("dynamic-branch-title")
                     part_node = nodes.get(str(branch.get("part_node_id")))
-                    with ui.element("div").classes("dynamic-attempt-row"):
+                    with ui.element("div").classes("dynamic-attempt-row branch-origin"):
                         for phase in phases:
                             with ui.element("div").classes("dynamic-phase-cell"):
                                 if part_node and part_node.get("group") == phase.get("id"):
@@ -2544,7 +2685,12 @@ def _render_dynamic_work_graph(
                             for node_id in attempt.get("node_ids", [])
                             if node_id in nodes
                         ]
-                        with ui.element("div").classes("dynamic-attempt-row"):
+                        row_classes = "dynamic-attempt-row"
+                        if attempt.get("revision"):
+                            row_classes += " revision"
+                        if attempt.get("active"):
+                            row_classes += " active"
+                        with ui.element("div").classes(row_classes):
                             for phase in phases:
                                 with ui.element("div").classes("dynamic-phase-cell"):
                                     for node in attempt_nodes:
@@ -2566,7 +2712,8 @@ def _render_dynamic_graph_node(
     language: str,
 ) -> None:
     status = str(node.get("status") or "not_started")
-    classes = f"dynamic-node {status}" + (" selected" if node.get("selected") else "")
+    attention = str(node.get("attention") or "none")
+    classes = f"dynamic-node {status} attention-{attention}" + (" selected" if node.get("selected") else "")
     card = ui.column().classes(classes)
     card.on("click", lambda _event, node_id=str(node.get("id")): on_select_node(node_id))
     with card:
@@ -2578,6 +2725,14 @@ def _render_dynamic_graph_node(
             )
             ui.label(str(node.get("label") or node.get("id") or "")).classes("dynamic-node-title")
         ui.label(_display_status(status, language)).classes("workflow-node-status")
+        if attention != "none":
+            attention_labels = {
+                "user_action": "需要操作" if language == "zh" else "ACTION NEEDED",
+                "review": "等待审查" if language == "zh" else "REVIEW",
+                "blocked": "已阻断" if language == "zh" else "BLOCKED",
+                "active": "当前" if language == "zh" else "CURRENT",
+            }
+            ui.label(attention_labels.get(attention, attention)).classes("dynamic-attention-badge")
         if node.get("summary"):
             ui.label(str(node["summary"])).classes("dynamic-node-summary")
 
@@ -2596,62 +2751,107 @@ def _render_dynamic_node_detail(
         return
     detail = node.get("detail") if isinstance(node.get("detail"), dict) else {}
     detail_type = str(detail.get("type") or "evidence")
+    interaction = node.get("interaction") if isinstance(node.get("interaction"), dict) else {}
     overview = _dict_get(page.get("source"), "overview") or {}
-    work_id = str(_dict_get(overview.get("advanced"), "work_id") or "")
+    node_overview = dict(overview)
+    node_work = dict(_dict_get(overview, "work") or {})
+    if node.get("part_job_id"):
+        node_work["active_part"] = node.get("part_job_id")
+    node_overview["work"] = node_work
     with ui.element("section").classes("dynamic-node-detail w-full"):
         with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
             with ui.column().classes("gap-1"):
-                ui.label("节点详情" if language == "zh" else "NODE DETAIL").classes("workflow-eyebrow")
+                ui.label("所选节点" if language == "zh" else "SELECTED NODE").classes("workflow-eyebrow")
                 ui.label(str(node.get("label") or node.get("id") or "")).classes("text-xl font-semibold")
                 ui.label(str(node.get("summary") or "")).classes("text-sm text-gray-600")
             ui.badge(_display_status(node.get("status") or "not_started", language)).classes(
                 _badge_class(node.get("status"))
             )
-        run_id = node.get("run_id")
-        if isinstance(run_id, str) and run_id:
-            ui.button(
-                "打开只读 Run 快照" if language == "zh" else "Open read-only Run Snapshot",
-                icon="history",
-                on_click=_run_selection_callback(on_select_run, run_id),
-            ).props("outline dense").classes("mt-3")
+
+        with ui.row().classes("items-center gap-2 mt-3"):
+            needs_action = interaction.get("requires_user_action") is True
+            action_state_label = (
+                ("需要你的操作" if needs_action else "当前无需操作")
+                if language == "zh"
+                else ("Your action is required" if needs_action else "No action required")
+            )
+            ui.label(action_state_label).classes(
+                "text-sm font-semibold " + ("text-amber-800" if needs_action else "text-gray-600")
+            )
+
+        _render_dynamic_node_actions(
+            ui,
+            node,
+            interaction,
+            node_overview,
+            actions.backend,
+            state,
+            refresh,
+            on_select_run,
+            language,
+        )
 
         if detail_type == "request":
             user_input = detail.get("user_input") if isinstance(detail.get("user_input"), dict) else {}
+            ui.label("原始请求" if language == "zh" else "Original request").classes("workflow-eyebrow mt-4")
             ui.label(str(user_input.get("original_request") or _dict_get(detail.get("objective"), "summary") or "—")).classes("text-base font-medium mt-3")
+            constraints = [str(item) for item in user_input.get("visible_constraints", [])]
+            if constraints:
+                ui.label("重要约束" if language == "zh" else "Important constraints").classes("workflow-eyebrow mt-3")
+                for constraint in constraints:
+                    ui.label(f"• {constraint}").classes("text-sm")
         elif detail_type == "part_job":
             part = detail.get("part") if isinstance(detail.get("part"), dict) else {}
+            projected_part = next(
+                (item for item in overview.get("part_jobs", []) if isinstance(item, dict) and item.get("part_job_id") == node.get("part_job_id")),
+                {},
+            )
             _key_values(ui, {
-                "Part Job": node.get("part_job_id"),
                 "Role": part.get("role") or "—",
                 "State": part.get("state") or node.get("status"),
-                "Active attempt": part.get("active_attempt_run_id") or node.get("run_id") or "—",
+                "Attempts": projected_part.get("attempt_count", len(part.get("attempts", []))),
+                "Reviewable result": "available" if projected_part.get("has_reviewable_result") else "none",
+                "Accepted result": "available" if projected_part.get("has_accepted_result") else "none",
             })
         elif detail_type == "attempt":
             _key_values(ui, {
                 "Attempt": detail.get("attempt_index"),
-                "Run": node.get("run_id"),
-                "Revision parent Run": detail.get("parent_run_id") or "—",
-                "Revision source result": detail.get("source_result_id") or "—",
+                "Purpose": "Revision from an earlier result" if detail.get("source_result_id") else "Design attempt",
+                "Current": node.get("run_id") == next((item.get("latest_attempt_run_id") for item in overview.get("part_jobs", []) if isinstance(item, dict) and item.get("part_job_id") == node.get("part_job_id")), None),
             })
             if detail.get("prompt"):
                 ui.label("设计请求" if language == "zh" else "Design request").classes("workflow-eyebrow mt-3")
                 ui.label(str(detail["prompt"])).classes("text-sm")
+            agent_output = _dict_get(overview, "agent_output") or {}
+            if agent_output.get("items"):
+                _render_agent_output(ui, agent_output, language)
         elif detail_type == "agent_design":
             _render_agent_output(ui, _dict_get(detail, "agent_output") or {}, language)
         elif detail_type == "clarification":
             for question in detail.get("questions", []):
                 if isinstance(question, dict):
                     ui.label(str(question.get("question") or "")).classes("text-base text-amber-800 mt-2")
-            current_recovery = _dict_get(overview, "recovery") or {}
-            if current_recovery.get("category") == _dict_get(detail.get("evidence"), "stop_reason"):
-                _render_recovery_card(ui, current_recovery, overview, actions.backend, state, refresh, language)
+                    if question.get("reason"):
+                        ui.label(str(question["reason"])).classes("text-sm text-gray-600")
+            if detail.get("answered"):
+                agent_output = _dict_get(overview, "agent_output") or {}
+                answers = [
+                    item for item in agent_output.get("items", [])
+                    if isinstance(item, dict) and item.get("kind") == "user_answer"
+                ]
+                for answer in answers[-2:]:
+                    ui.label(("你的回答：" if language == "zh" else "Your answer: ") + str(answer.get("summary") or "—")).classes("text-sm font-medium text-green-800")
         elif detail_type == "answer":
             ui.label(str(detail.get("question") or "")).classes("text-sm text-gray-600 mt-2")
             ui.label(str(detail.get("answer") or "—")).classes("text-base font-medium")
         elif detail_type == "recovery":
             recovery = detail.get("recovery") if isinstance(detail.get("recovery"), dict) else {}
             if recovery:
-                _render_recovery_card(ui, recovery, overview, actions.backend, state, refresh, language)
+                ui.label(str(recovery.get("why_it_stopped") or recovery.get("summary") or "")).classes("text-sm text-gray-700 mt-3")
+                _key_values(ui, {
+                    "Last Agent action": recovery.get("last_agent_action") or "Not recorded",
+                    "Last observation": recovery.get("last_observation") or "Not recorded",
+                })
             else:
                 ui.label(
                     "这是历史停止证据；恢复操作只在当前活动停止节点上提供。"
@@ -2660,23 +2860,104 @@ def _render_dynamic_node_detail(
                 ).classes("text-sm text-gray-600 mt-3")
         elif detail_type in {"reviewable_result", "accepted_result"}:
             result = detail.get("result") if isinstance(detail.get("result"), dict) else {}
-            node_overview = dict(overview)
-            node_work = dict(_dict_get(overview, "work") or {})
-            node_work["active_part"] = node.get("part_job_id")
-            node_overview["work"] = node_work
             _render_dynamic_preview(ui, _dict_get(overview, "preview") or {}, result, language)
-            _render_workbench_result(ui, result, node_overview, actions.backend, state, refresh, language)
+            _render_workbench_result(ui, result, node_overview, actions.backend, state, refresh, language, show_actions=False)
         else:
             evidence = detail.get("evidence") if isinstance(detail.get("evidence"), dict) else {}
             if evidence:
                 ui.label(str(evidence.get("summary") or evidence.get("status") or node.get("summary") or "")).classes("text-sm mt-3")
 
-        evidence = detail.get("evidence") if isinstance(detail.get("evidence"), dict) else None
-        if evidence:
-            with ui.expansion("高级证据" if language == "zh" else "Advanced evidence", icon="data_object").classes("w-full mt-3"):
+        evidence = detail.get("evidence") if isinstance(detail.get("evidence"), dict) else {}
+        with ui.expansion("高级 / 技术证据" if language == "zh" else "Advanced / technical evidence", icon="data_object").classes("w-full mt-3"):
+            _key_values(ui, {
+                "Node": node.get("id"),
+                "Run": node.get("run_id") or "—",
+                "Artifact": node.get("artifact_id") or "—",
+                "Source result": detail.get("source_result_id") or "—",
+            })
+            if evidence:
                 ui.markdown(
                     f"```json\n{json.dumps(evidence, indent=2, ensure_ascii=False, sort_keys=True)}\n```"
                 ).classes("w-full mono")
+
+
+def _render_dynamic_node_actions(
+    ui: Any,
+    node: dict[str, Any],
+    interaction: dict[str, Any],
+    overview: dict[str, Any],
+    backend: WorkflowConsoleBackend,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    on_select_run: Callable[[str], None],
+    language: str,
+) -> None:
+    primary = interaction.get("primary_action") if isinstance(interaction.get("primary_action"), dict) else None
+    secondary = [item for item in interaction.get("secondary_actions", []) if isinstance(item, dict)]
+    recovery = _dict_get(overview, "recovery") or {}
+    detail = node.get("detail") if isinstance(node.get("detail"), dict) else {}
+    if primary or secondary:
+        with ui.element("section").classes("dynamic-node-actions w-full mt-3"):
+            if primary:
+                key = str(primary.get("key") or "")
+                if key == "answer_question":
+                    questions = recovery.get("questions") if isinstance(recovery.get("questions"), list) else detail.get("questions", [])
+                    question = questions[0] if questions and isinstance(questions[0], dict) else {}
+                    answer = ui.input(str(question.get("question") or recovery.get("summary") or "Answer")).props("outlined").classes("min-w-[320px] w-full")
+                    ui.button(
+                        str(primary.get("label") or "Answer and continue"),
+                        icon="send",
+                        on_click=lambda: _schedule_action(_answer_and_continue_agent_async(backend, recovery, question, answer.value, state, refresh, language)),
+                    ).props("color=primary").classes("mt-2")
+                elif key in {"continue_agent", "retry_agent"}:
+                    ui.button(
+                        str(primary.get("label") or "Continue Agent"),
+                        icon="refresh" if key == "retry_agent" else "play_arrow",
+                        on_click=lambda: _show_continue_agent_confirmation(ui, backend, overview, state, refresh, language),
+                    ).props("color=primary")
+                elif key == "open_settings":
+                    ui.button(str(primary.get("label") or "Open Settings"), icon="settings", on_click=lambda: _go_to_settings(state, refresh)).props("color=primary")
+                elif key == "modify_request":
+                    revision = ui.textarea("修改后的设计要求" if language == "zh" else "Revised design request").props("outlined autogrow").classes("w-full")
+                    ui.button(
+                        str(primary.get("label") or "Modify request"),
+                        icon="edit",
+                        on_click=lambda: _schedule_action(_revise_blocked_request_async(backend, overview, revision.value, state, refresh, language)),
+                    ).props("color=primary").classes("mt-2")
+                elif key == "accept_reviewable_result":
+                    ui.button(
+                        str(primary.get("label") or "Accept result"),
+                        icon="check_circle",
+                        on_click=lambda: _show_accept_result_confirmation(
+                            ui, backend, str(primary.get("target_work_id")), str(primary.get("part_job_id")), str(primary.get("reviewable_result_id")), state, refresh, language
+                        ),
+                    ).props("color=positive")
+            if secondary:
+                with ui.row().classes("gap-2 mt-2 flex-wrap"):
+                    for secondary_action in secondary:
+                        key = str(secondary_action.get("key") or "")
+                        if key == "revise_reviewable_result":
+                            ui.button(
+                                str(secondary_action.get("label") or "Revise"),
+                                icon="fork_right",
+                                on_click=lambda _event=None, selected_action=secondary_action: _show_revision_dialog(
+                                    ui, backend, str(selected_action.get("target_work_id")), str(selected_action.get("part_job_id")), str(selected_action.get("reviewable_result_id")), state, refresh, language
+                                ),
+                            ).props("outline")
+                        elif key == "open_run" and secondary_action.get("target_run_id"):
+                            ui.button(
+                                str(secondary_action.get("label") or "Open historical Run"),
+                                icon="history",
+                                on_click=_run_selection_callback(on_select_run, str(secondary_action["target_run_id"])),
+                            ).props("outline")
+                        elif key == "technical_details" and recovery:
+                            ui.button(
+                                str(secondary_action.get("label") or "Technical details"),
+                                icon="info",
+                                on_click=lambda: _show_recovery_details_dialog(ui, recovery, language),
+                            ).props("outline")
+    elif interaction.get("unavailable_reason"):
+        ui.label(str(interaction["unavailable_reason"])).classes("workflow-disabled-reason mt-3")
 
 
 def _render_dynamic_preview(

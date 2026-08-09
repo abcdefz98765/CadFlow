@@ -613,7 +613,43 @@ def build_agent_first_workflow_projection(
             branch["attempts"] = []
         branches.append(branch)
 
-    selected = _select_workflow_node(nodes, selected_node_id)
+    jobs_by_id = {
+        str(item.get("part_job_id") or item.get("part_id")): item
+        for item in raw_jobs
+        if item.get("part_job_id") or item.get("part_id")
+    }
+    current_recovery_node_id = next(
+        (
+            str(node.get("id"))
+            for node in reversed(nodes)
+            if _dict(node.get("detail")).get("type") == "recovery"
+        ),
+        None,
+    )
+    for node in nodes:
+        node["interaction"] = _workflow_node_interaction(
+            node,
+            work_id=work_id,
+            jobs_by_id=jobs_by_id,
+            overview_parts=overview_parts,
+            references=references,
+            accepted=accepted,
+            recovery=recovery,
+            current_recovery_node_id=current_recovery_node_id,
+            language=language,
+        )
+        node["attention"] = "none"
+    current_attention = _workflow_current_attention(nodes, branches)
+    attention_ids = [str(item["node_id"]) for item in current_attention]
+    for item in current_attention:
+        attention_node = next(
+            (node for node in nodes if node.get("id") == item.get("node_id")),
+            None,
+        )
+        if attention_node is not None:
+            attention_node["attention"] = item["kind"]
+
+    selected = _select_workflow_node(nodes, selected_node_id, attention_ids)
     selected_id = selected.get("id") if selected else None
     for node in nodes:
         node["selected"] = node.get("id") == selected_id
@@ -629,6 +665,7 @@ def build_agent_first_workflow_projection(
         "edges": edges,
         "root_node_ids": [request_id],
         "branches": branches,
+        "current_attention": current_attention,
         "selection_is_presentation_only": True,
         "state_source": "work_manifest_runs_part_jobs_artifact_references",
         "compatibility_mode": compatibility_mode,
@@ -643,6 +680,7 @@ def build_agent_first_workflow_projection(
         "stages": nodes,
         "selected_node": selected,
         "selected_stage": selected,
+        "current_attention": current_attention,
         "workflow_graph": graph,
         "current_conclusion": conclusion,
         "overview_consistency": {
@@ -652,6 +690,272 @@ def build_agent_first_workflow_projection(
             "accepted": _dict(overview.get("current_result")).get("accepted") is True,
         },
     }
+
+
+def _workflow_node_interaction(
+    node: dict[str, Any],
+    *,
+    work_id: str,
+    jobs_by_id: dict[str, dict[str, Any]],
+    overview_parts: dict[str, dict[str, Any]],
+    references: list[dict[str, Any]],
+    accepted: dict[str, Any],
+    recovery: dict[str, Any] | None,
+    current_recovery_node_id: str | None,
+    language: str,
+) -> dict[str, Any]:
+    """Derive task-oriented UI actions from existing durable Work state."""
+
+    part_job_id = str(node.get("part_job_id") or "")
+    run_id = node.get("run_id")
+    raw_job = _dict(jobs_by_id.get(part_job_id))
+    part = _dict(overview_parts.get(part_job_id))
+    active_run_id = raw_job.get("active_attempt_run_id")
+    is_active_attempt = bool(run_id and run_id == active_run_id)
+    detail = _dict(node.get("detail"))
+    detail_type = str(detail.get("type") or "evidence")
+    primary: dict[str, Any] | None = None
+    secondary: list[dict[str, Any]] = []
+    unavailable_reason: str | None = None
+
+    def action(
+        key: str,
+        en: str,
+        zh: str,
+        *,
+        category: str = "workflow_command",
+        **extra: Any,
+    ) -> dict[str, Any]:
+        return {
+            "key": key,
+            "label": zh if language == "zh" else en,
+            "enabled": True,
+            "category": category,
+            "target_work_id": work_id,
+            "part_job_id": part_job_id or None,
+            "target_run_id": run_id if isinstance(run_id, str) else None,
+            **extra,
+        }
+
+    recovery_applies = bool(
+        recovery
+        and recovery.get("part_job_id") in {None, part_job_id}
+        and (
+            (detail_type == "recovery" and node.get("id") == current_recovery_node_id)
+            or (
+                detail_type == "clarification"
+                and not detail.get("answered")
+                and recovery.get("question_artifact_id") == node.get("artifact_id")
+            )
+            or (detail_type in {"part_job", "attempt"} and (detail_type == "part_job" or is_active_attempt))
+        )
+    )
+    recommended = _dict((recovery or {}).get("recommended_action")) if recovery_applies else {}
+    recovery_key = str(recommended.get("key") or "")
+    if recovery_key == "answer_question" and detail_type == "clarification" and not detail.get("answered"):
+        primary = action("answer_question", "Answer and continue", "回答并继续")
+    elif recovery_key == "retry_agent" and recovery and recovery.get("retryable") is True:
+        primary = action("retry_agent", "Retry Agent", "重试 Agent")
+    elif recovery_key in {"open_settings", "check_environment"}:
+        primary = action("open_settings", "Open Settings", "打开设置", category="navigation")
+    elif recovery_key == "modify_request":
+        primary = action("modify_request", "Modify request", "修改设计要求")
+
+    if detail_type == "request":
+        attempts = [
+            attempt
+            for job in jobs_by_id.values()
+            for attempt in job.get("attempts", [])
+            if isinstance(attempt, dict)
+        ]
+        has_design_progress = any(
+            item.get("checkpoint")
+            in {
+                "clarification_decision",
+                "design_brief",
+                "model_program_candidate",
+                "geometry_candidate",
+                "cad_ir_draft",
+                "execution_observation",
+                "product_design_routing",
+                "reviewable_result",
+            }
+            for item in references
+        )
+        if len(jobs_by_id) == 1 and attempts and not has_design_progress:
+            only_job_id, only_job = next(iter(jobs_by_id.items()))
+            target_run_id = only_job.get("active_attempt_run_id") or attempts[-1].get("run_id")
+            primary = action(
+                "continue_agent",
+                "Start design",
+                "开始设计",
+                part_job_id=only_job_id,
+                target_run_id=target_run_id,
+            )
+        elif not attempts:
+            unavailable_reason = (
+                "No Part Job attempt exists yet; Work-level decomposition is not implemented."
+                if language != "zh"
+                else "尚无零件尝试；Work 级分解能力尚未实现。"
+            )
+    elif detail_type in {"part_job", "attempt"}:
+        if primary is None and not recovery_applies and active_run_id and (detail_type == "part_job" or is_active_attempt):
+            run_references = [item for item in references if item.get("run_id") == active_run_id]
+            active_run_has_reviewable_result = any(
+                item.get("checkpoint") == "reviewable_result"
+                or item.get("trust_role") == "reviewable"
+                for item in run_references
+            )
+            if part.get("state") == "design" and not active_run_has_reviewable_result:
+                primary = action(
+                    "continue_agent",
+                    "Continue Agent" if run_references else "Start design",
+                    "继续 Agent" if run_references else "开始设计",
+                    target_run_id=active_run_id,
+                )
+        if isinstance(run_id, str):
+            secondary.append(action("open_run", "Open historical Run", "打开历史 Run", category="navigation"))
+        if detail_type == "attempt" and not is_active_attempt and primary is None:
+            unavailable_reason = (
+                "Historical attempts are inspection-only; branch from a reviewable or accepted result."
+                if language != "zh"
+                else "历史尝试仅供查看；请从可审查或已接受结果创建新版本。"
+            )
+    elif detail_type == "clarification":
+        if detail.get("answered"):
+            unavailable_reason = (
+                "This answer is historical. Changing it requires a new supported attempt."
+                if language != "zh"
+                else "该回答已成为历史证据；更改它需要创建受支持的新尝试。"
+            )
+    elif detail_type == "answer":
+        unavailable_reason = (
+            "Persisted answers are immutable evidence."
+            if language != "zh"
+            else "已保存的回答是不可变证据。"
+        )
+    elif detail_type == "recovery":
+        if primary is None:
+            unavailable_reason = (
+                "This stop is historical or has no safe automatic recovery command."
+                if language != "zh"
+                else "该停止状态是历史证据，或当前没有安全的自动恢复命令。"
+            )
+        if recovery_applies:
+            secondary.append(action("technical_details", "Technical details", "技术详情", category="presentation"))
+    elif detail_type == "reviewable_result":
+        result_id = node.get("result_id")
+        pointer = _dict(accepted.get(part_job_id))
+        if isinstance(result_id, str) and pointer.get("result_id") != result_id:
+            primary = action(
+                "accept_reviewable_result",
+                "Accept result",
+                "接受结果",
+                reviewable_result_id=result_id,
+            )
+        if isinstance(result_id, str) and detail.get("can_start_revision"):
+            secondary.append(action(
+                "revise_reviewable_result",
+                "Start new version from this result",
+                "从此结果创建新版本",
+                reviewable_result_id=result_id,
+            ))
+    elif detail_type == "accepted_result":
+        result_id = node.get("result_id")
+        if isinstance(result_id, str) and detail.get("can_start_revision"):
+            secondary.append(action(
+                "revise_reviewable_result",
+                "Start new version from this accepted result",
+                "从此已接受结果创建新版本",
+                reviewable_result_id=result_id,
+            ))
+        else:
+            unavailable_reason = (
+                "The source reviewable result is unavailable, so this accepted pointer is inspection-only."
+                if language != "zh"
+                else "源可审查结果不可用，因此该接受指针仅供查看。"
+            )
+    elif isinstance(run_id, str):
+        secondary.append(action("open_run", "Open historical Run", "打开历史 Run", category="navigation"))
+
+    requires_user_action = bool(
+        primary
+        and primary.get("key")
+        in {"answer_question", "retry_agent", "open_settings", "modify_request", "accept_reviewable_result", "continue_agent"}
+    )
+    return {
+        "state": node.get("status"),
+        "why_it_matters": node.get("summary"),
+        "requires_user_action": requires_user_action,
+        "primary_action": primary,
+        "secondary_actions": secondary,
+        "unavailable_reason": unavailable_reason,
+        "revision_supported": any(item.get("key") == "revise_reviewable_result" for item in secondary),
+        "business_state_owner": "domain",
+        "selection_mutates_business_state": False,
+    }
+
+
+def _workflow_current_attention(
+    nodes: list[dict[str, Any]],
+    branches: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Choose one derived attention point per parallel Part branch."""
+
+    by_id = {str(node.get("id")): node for node in nodes}
+    attention: list[dict[str, Any]] = []
+    priority = {"clarification": 0, "recovery": 1, "reviewable_result": 2, "attempt": 3, "accepted_result": 4}
+    for branch in branches:
+        attempts = [item for item in branch.get("attempts", []) if isinstance(item, dict)]
+        active_attempt = next((item for item in reversed(attempts) if item.get("active")), None)
+        candidates: list[dict[str, Any]] = []
+        if active_attempt:
+            candidates = [by_id[node_id] for node_id in active_attempt.get("node_ids", []) if node_id in by_id]
+        elif attempts:
+            candidates = [by_id[node_id] for node_id in attempts[-1].get("node_ids", []) if node_id in by_id]
+        if not candidates:
+            part_node = by_id.get(str(branch.get("part_node_id")))
+            candidates = [part_node] if part_node else []
+        actionable = [
+            node
+            for node in candidates
+            if _dict(node.get("interaction")).get("requires_user_action")
+            or node.get("kind") == "accepted"
+            or (
+                node.get("kind") == "reviewable"
+                and _dict(_dict(node.get("interaction")).get("primary_action")).get("key")
+                == "accept_reviewable_result"
+            )
+        ]
+        pool = actionable or candidates
+        if not pool:
+            continue
+        chosen = sorted(
+            pool,
+            key=lambda node: (
+                priority.get(str(_dict(node.get("detail")).get("type") or node.get("kind")), 9),
+                0 if _dict(node.get("interaction")).get("requires_user_action") else 1,
+            ),
+        )[0]
+        interaction = _dict(chosen.get("interaction"))
+        if chosen.get("kind") == "reviewable":
+            kind = "review"
+        elif interaction.get("requires_user_action"):
+            kind = "user_action"
+        elif chosen.get("status") in {"blocked", "failed"}:
+            kind = "blocked"
+        else:
+            kind = "active"
+        attention.append({
+            "node_id": chosen.get("id"),
+            "part_job_id": branch.get("part_job_id"),
+            "kind": kind,
+            "label": chosen.get("label"),
+            "summary": chosen.get("summary"),
+            "requires_user_action": interaction.get("requires_user_action") is True,
+            "primary_action": interaction.get("primary_action"),
+        })
+    return attention
 
 
 def _workflow_reference_node(
@@ -882,9 +1186,17 @@ def _workflow_edge_label(edge_type: str, language: str) -> str:
     return zh if language == "zh" else en
 
 
-def _select_workflow_node(nodes: list[dict[str, Any]], requested: str | None) -> dict[str, Any] | None:
+def _select_workflow_node(
+    nodes: list[dict[str, Any]],
+    requested: str | None,
+    attention_ids: list[str] | None = None,
+) -> dict[str, Any] | None:
     if requested:
         selected = next((item for item in nodes if item.get("id") == requested), None)
+        if selected:
+            return selected
+    for node_id in attention_ids or []:
+        selected = next((item for item in nodes if item.get("id") == node_id), None)
         if selected:
             return selected
     for status in ("blocked", "running", "reviewable", "accepted", "failed", "stale"):

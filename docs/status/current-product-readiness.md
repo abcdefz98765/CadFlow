@@ -557,6 +557,20 @@ These are migration tasks, not accepted target behavior.
   390px layouts; screenshots are saved under
   `../ux/screenshots/dynamic-work-graph/`. Focused verification passed with
   `84 passed`; the complete suite passed with `661 passed, 9 skipped`.
+- The M2.8 Workflow Command Surface correction passed on 2026-08-09. Current
+  Attention is now a derived per-Part presentation rather than a second global
+  state; selecting request, active attempt, clarification, recovery,
+  reviewable, accepted, or historical nodes exposes only commands already
+  authorized by the Work/Part/Run/result domain. Historical Run Snapshots show
+  the Run request, meaningful outcome, validation/stop state, and available
+  geometry before the collapsed legacy compatibility graph. Real NiceGUI
+  browser verification covered beginning Work, unanswered and answered
+  clarification, retryable and unsupported stops, reviewable acceptance,
+  accepted-result revision with the accepted pointer retained, two parallel
+  Part attention points, and a read-only historical Run. Nine screenshots are
+  saved under `../ux/screenshots/workflow-command-surface/`. Focused
+  verification passed with `69 passed`; the complete suite passed with `663
+  passed, 9 skipped`.
 - M2.8 added only optional durable revision provenance on Part attempts because
   parent Run/result causality cannot be recovered honestly from prompt text,
   attempt order, or timestamps. No graph persistence, workflow engine, Agent
