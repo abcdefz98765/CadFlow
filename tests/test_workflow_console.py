@@ -154,11 +154,15 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         "create_workspace",
         "load_workspace",
         "create_work",
+        "open_product_golden_example",
+        "start_live_product_example",
+        "create_product_design",
         "create_golden_example",
         "create_work_requirement_run",
         "create_work_part_runs",
         "create_work_part_attempt",
         "run_work_part_design_episode",
+        "answer_work_part_design_question",
         "accept_work_reviewable_result",
         "revise_work_reviewable_result",
         "create_run_by_id",
@@ -172,6 +176,8 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         "run_stage_by_id",
         "run_revision_by_id",
         "test_provider_connection",
+        "save_and_verify_provider",
+        "read_product_readiness",
         "write_workspace_config",
         "list_artifacts_by_id",
         "read_artifact_by_id",
@@ -198,12 +204,16 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
             "read_workspace",
             "create_workspace",
             "load_workspace",
-            "create_work",
-            "create_golden_example",
+                "create_work",
+                "open_product_golden_example",
+                "start_live_product_example",
+                "create_product_design",
+                "create_golden_example",
             "create_work_requirement_run",
             "create_work_part_runs",
             "create_work_part_attempt",
             "run_work_part_design_episode",
+            "answer_work_part_design_question",
             "accept_work_reviewable_result",
             "revise_work_reviewable_result",
             "get_work_detail",
@@ -212,6 +222,8 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
             "read_provider_config",
             "configure_provider",
             "test_provider_connection",
+            "save_and_verify_provider",
+            "read_product_readiness",
             "WorkflowConsoleActions.create_part_request",
             "WorkflowConsoleActions.review_part_request",
             "WorkflowConsoleActions.create_reviewed_handoff",
@@ -289,7 +301,8 @@ def test_workspace_can_seed_static_example_works_under_external_root(tmp_path, m
         "create_workspace",
         body={"path": str(external), "name": "Example Workspace", "include_examples": True},
     )
-    works = dispatch_route(backend, "list_works")
+    normal_works = dispatch_route(backend, "list_works")
+    works = dispatch_route(backend, "list_works", query={"show_developer": True})
     detail = dispatch_route(backend, "read_work", path_params={"work_id": "reviewed_one_part_enclosure_base"})
 
     assert created["ok"] is True
@@ -299,6 +312,7 @@ def test_workspace_can_seed_static_example_works_under_external_root(tmp_path, m
         "reviewed_one_part_enclosure_base",
     ]
     assert created["data"]["workspace"]["work_count"] == 3
+    assert normal_works["data"]["works"] == []
     assert (external / "works" / "single_part_mounting_plate" / "work_manifest.json").exists()
     assert (external / "works" / "multi_part_enclosure_planning" / "runs" / "multi_part_enclosure_planning_root" / "01_design" / "assembly_plan.json").exists()
     assert (external / "works" / "reviewed_one_part_enclosure_base" / "runs" / "single_part_enclosure_base_result" / "model.step").exists()
@@ -1551,17 +1565,10 @@ def test_workflow_console_dispatch_sanitizes_gate_payload_but_preserves_runtime_
         path_params={"run_id": "gate_payload", "artifact": "logs/runtime.json"},
     )
 
-    assert recorded["ok"] is True
-    assert "payload" not in recorded["data"]["decision"]
-    assert recorded["data"]["run"]["status"]["gate_decision"]["payload_summary"]["items"] == [
-        {"key": "assumption", "value": "Use selected template defaults."},
-        {"key": "field", "value": "dimensions.length"},
-    ]
-    assert "secret-token" not in json.dumps(recorded["data"])
-    assert "D:\\MyCode" not in json.dumps(recorded["data"])
+    assert recorded["ok"] is False
     assert "secret-token" not in json.dumps(runtime["data"])
     private_runtime = backend.read_artifact_by_id("gate_payload", "logs/runtime.json")
-    assert private_runtime["content"]["workflow_console"]["latest_gate_decision"]["payload"]["api_key"] == "secret-token"
+    assert "secret-token" not in json.dumps(private_runtime)
 
 
 def test_workflow_console_metadata_includes_compact_report_trace_summary(tmp_path):
@@ -2309,38 +2316,23 @@ def test_backend_exposes_safe_gate_payload_summary_only(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_run_by_id("payload_summary", "Make a mounting plate.")
 
-    recorded = backend.record_gate_decision_by_id(
-        "payload_summary",
-        stage="requirement",
-        action="proceed_with_assumptions",
-        reason="Proceed with template defaults.",
-        payload={
-            "field": "dimensions.length",
-            "assumption": "Use selected template defaults.",
-            "path": r"D:\MyCode\llm2cad\outputs\payload_summary",
-            "api_key": "secret-token",
-            "count": 3,
-            "fields": ["dimensions.length", r"D:\MyCode\llm2cad\secret.txt"],
-        },
-    )
-    metadata = backend.read_run_metadata_by_id("payload_summary")
-    runtime = backend.read_artifact_by_id("payload_summary", "logs/runtime.json")["content"]["workflow_console"]
-
-    assert recorded["decision"]["payload"]["path"].startswith("D:\\MyCode")
-    assert runtime["latest_gate_decision"]["payload"]["api_key"] == "secret-token"
-    assert metadata["status"]["gate_decision"]["payload_summary"] == {
-        "count": 6,
-        "items": [
-            {"key": "assumption", "value": "Use selected template defaults."},
-            {"key": "count", "value": 3},
-            {"key": "field", "value": "dimensions.length"},
-            {"key": "fields", "value": "dimensions.length"},
-        ],
-    }
-    assert metadata["gate_history"][0]["payload_summary"] == metadata["status"]["gate_decision"]["payload_summary"]
-    assert "payload" not in metadata["status"]["gate_decision"]
-    assert "D:\\MyCode" not in json.dumps(metadata["status"]["gate_decision"])
-    assert "secret-token" not in json.dumps(metadata["gate_history"])
+    with pytest.raises(ValueError, match="must not include secrets"):
+        backend.record_gate_decision_by_id(
+            "payload_summary",
+            stage="requirement",
+            action="proceed_with_assumptions",
+            reason="Proceed with template defaults.",
+            payload={
+                "field": "dimensions.length",
+                "assumption": "Use selected template defaults.",
+                "path": r"D:\MyCode\llm2cad\outputs\payload_summary",
+                "api_key": "secret-token",
+                "count": 3,
+                "fields": ["dimensions.length", r"D:\MyCode\llm2cad\secret.txt"],
+            },
+        )
+    runtime = backend.read_artifact_by_id("payload_summary", "logs/runtime.json")
+    assert "secret-token" not in json.dumps(runtime)
 
 
 def test_backend_rejects_invalid_gate_decision_inputs(tmp_path):

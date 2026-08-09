@@ -192,12 +192,60 @@ creation and stages are reached through a controlled compatibility adapter.
 The internal route contracts are:
 
 ```text
+POST /api/designs
+POST /api/examples/live-product
+POST /api/examples/product-golden
 POST /api/works
 POST /api/works/{work_id}/requirement-run
 POST /api/works/{work_id}/part-runs
 POST /api/works/{work_id}/parts/{part_job_id}/attempts
 POST /api/works/{work_id}/parts/{part_job_id}/design-episodes
+POST /api/works/{work_id}/parts/{part_job_id}/design-answers
+POST /workflow/provider/save-and-verify
+GET  /api/readiness
 ```
+
+Home presents two explicit teaching cards. **Real Agent Example / 真实 Agent
+示例** creates a compact micro-servo bracket Work with only the original request
+and one owned Part Job attempt. It uses the configured external provider and the
+existing real bounded Agent/runtime route; it does not preload a design, STEP,
+reviewable result, or accepted pointer. Its outcome is intentionally variable.
+**Completed Product Example / 已完成产品示例** is the reproducible scripted
+Product Golden for offline inspection, acceptance, revision, and review-state
+checks. Each card states what it demonstrates, what the user can inspect or try,
+and its Provider/local-execution requirements.
+
+Settings defaults this workspace to the requested DeepSeek Flash model,
+`deepseek-v4-flash`. `DEEPSEEK_API_KEY` and `OPENAI_API_KEY` are resolved in
+this order: the current Settings session, the process environment, then a
+literal project-root `.env` entry. The `.env` reader is allowlisted, performs no
+shell interpolation, and does not mutate the process environment. Settings
+shows the detected source and variable name, never the value. A key entered in
+Settings is retained only in the current backend process memory. `config.json`
+stores only provider, model, HTTPS base URL, timeout,
+retries, advancement mode, and safe connection evidence (status, provider,
+model, base URL, and verification timestamp). That evidence restores the
+Connected presentation after restart only when a credential remains available
+from the environment. Test connection checks the current unsaved draft; Save &
+Verify checks it again before persisting non-secret fields. No API key is
+written to workspace, Work, Run, trace, or screenshot files.
+
+The normal Works catalog contains user Works and the two Product Examples.
+Enable **Show developer content / 显示开发者内容** to include developer
+fixtures, compatibility regressions, and infrastructure tests. Those cards are
+labeled with their technical purpose; they are not presented as onboarding
+examples.
+
+On a Work, **Agent Output / Agent 输出** is separate from Agent Design and Agent
+activity. It shows a chronological, product-safe projection of external Agent
+actions, focused questions, durable user answers, CadFlow observations, and the
+typed outcome of each attempt. The underlying `agent_exchange.jsonl` is written
+before strict action-contract validation so a malformed response still leaves
+safe explanatory evidence. Candidate source and parameters are represented only
+by hashes; credential material and private reasoning are not retained.
+
+`POST /api/examples/golden-desktop-robot-arm` remains available only for the
+former Workflow/CAD IR compatibility regression.
 
 The Part Job attempt route accepts optional JSON fields `prompt`, `role`, and
 `run_id`. It appends an attempt to `part_jobs[].attempts` and does not change

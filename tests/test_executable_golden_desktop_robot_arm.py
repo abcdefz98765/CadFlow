@@ -75,7 +75,7 @@ def test_executable_golden_work_is_discoverable_by_web_backend(tmp_path, monkeyp
     module, workspace, _, _ = _run_contract(tmp_path, monkeypatch)
     backend = WorkflowConsoleBackend(project_root=tmp_path, workspace_root=workspace)
 
-    works = backend.list_works()["works"]
+    works = backend.list_works(filters={"show_developer": True})["works"]
     work = backend.get_work_detail(module.WORK_ID)
     assert module.WORK_ID in {item["work_id"] for item in works}
     assert work["summary"]["title"] == "Golden Desktop Robot Arm"

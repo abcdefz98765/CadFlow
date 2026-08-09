@@ -404,13 +404,36 @@ class EpisodeArtifactWriter:
         output_dir: Path,
         envelope: ContextEnvelope,
         tool_broker_manifest: dict[str, Any],
+        provider_identity: dict[str, Any] | None = None,
     ) -> None:
         self.output_dir = output_dir
         self.envelope = envelope
         self.tool_broker_manifest = tool_broker_manifest
         self.events: list[dict[str, Any]] = []
         self.context_manifest: list[dict[str, Any]] = []
+        self.provider_identity = _safe_provider_identity(provider_identity or {})
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def provider_response(self, number: int, value: Any) -> None:
+        """Append a product-safe external Agent response before validation.
+
+        This intentionally records the response boundary even when the action
+        contract is invalid. Source, parameters, credentials, headers, and
+        private reasoning are never retained in this projection.
+        """
+
+        entry = {
+            "schema_version": 1,
+            "sequence": number,
+            "event_type": "agent_response",
+            "provider_identity": self.provider_identity,
+            **_safe_agent_response(value),
+            "private_reasoning_exposed": False,
+            "credential_material_exposed": False,
+        }
+        path = self.output_dir / "agent_exchange.jsonl"
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(entry, sort_keys=True) + "\n")
 
     def event(self, value: dict[str, Any]) -> None:
         sanitized = sanitize_provider_payload(value)
@@ -487,8 +510,28 @@ class EpisodeArtifactWriter:
             },
         )
 
+    def user_input_request(
+        self,
+        *,
+        questions: tuple[dict[str, str], ...],
+        reason: str | None,
+    ) -> None:
+        """Persist the focused question as product-safe episode evidence."""
+        _write_json(
+            self.output_dir / "user_input_request.json",
+            {
+                "schema_version": 1,
+                "checkpoint": "clarification_decision",
+                "status": "user_input_required",
+                "questions": [dict(item) for item in questions],
+                "why_it_matters": reason,
+                "private_reasoning_exposed": False,
+            },
+        )
+
     def finish(self, result: AgentEpisodeResult) -> None:
         episode = result.as_dict()
+        episode["provider_identity"] = self.provider_identity
         episode["objective"] = {"operation": self.envelope.objective.operation, "summary": self.envelope.objective.summary}
         lineage = {
             "work_id": self.envelope.objective.work_id or self.envelope.workflow.get("work_id"),
@@ -531,6 +574,7 @@ class EpisodeOrchestrator:
         artifact_dir: Path,
         *,
         tool_broker: CadFlowToolBroker | None = None,
+        provider_identity: dict[str, Any] | None = None,
     ) -> None:
         self.objective = objective
         self.context_envelope = context_envelope
@@ -552,6 +596,7 @@ class EpisodeOrchestrator:
                 active_skill_id=capabilities.skill_id,
                 delegated_skill_ids=capabilities.delegated_skill_ids,
             ),
+            provider_identity,
         )
 
     @property
@@ -685,6 +730,7 @@ class EpisodeOrchestrator:
                     }
                 )
                 return finish(StopReason.PROVIDER_FAILURE)
+            self.writer.provider_response(steps + 1, supplied_action)
             action = AgentAction.from_value(supplied_action)
             if action.action not in self.capabilities.allowed_actions:
                 raise UnknownAgentActionError(f"action is not enabled for this episode: {action.action}")
@@ -986,6 +1032,10 @@ class EpisodeOrchestrator:
                 continue
 
             if action.action == "ask_user":
+                self.writer.user_input_request(
+                    questions=action.questions,
+                    reason=action.reason,
+                )
                 self.writer.event({"step": steps, "action": action.action, "questions": list(action.questions), "reason": action.reason})
                 return finish(StopReason.USER_INPUT_REQUIRED)
 
@@ -1282,8 +1332,79 @@ def run_design_part_episode(
         validate_contract=validate_contract,
         artifact_dir=artifact_dir,
         tool_broker=tool_broker,
+        provider_identity=dict(getattr(adapter, "provider_identity", {}) or {}),
     )
     return orchestrator.run(ProviderSelectedDesignPartSupplier(adapter, skill))
+
+
+def _safe_provider_identity(value: dict[str, Any]) -> dict[str, Any]:
+    allowed = {"provider", "model", "network_mode", "transport"}
+    return {
+        key: item
+        for key, item in value.items()
+        if key in allowed and isinstance(item, (str, int, float, bool, type(None)))
+    }
+
+
+def _safe_agent_response(value: Any) -> dict[str, Any]:
+    if isinstance(value, AgentAction):
+        raw = {
+            "action": value.action,
+            "context_key": value.context_key,
+            "reason": value.reason,
+            "contract_type": value.contract_type,
+            "stop_reason": value.stop_reason.value if value.stop_reason else None,
+            "summary": value.summary,
+            "questions": list(value.questions),
+            "assumptions": list(value.assumptions),
+            "model_program": value.model_program,
+            "contract": value.contract,
+        }
+    elif isinstance(value, dict):
+        raw = value
+    else:
+        return {"contract_status": "invalid", "response_type": type(value).__name__}
+    allowed = {
+        "action", "context_key", "reason", "contract_type", "stop_reason",
+        "summary", "questions", "assumptions",
+    }
+    result: dict[str, Any] = {
+        key: sanitize_provider_payload(raw[key])
+        for key in allowed
+        if key in raw
+    }
+    blocked_field_tokens = (
+        "authorization", "credential", "api_key", "secret", "token",
+        "password", "cookie", "reasoning", "chain_of_thought",
+    )
+    result["received_fields"] = sorted(
+        str(key) for key in raw
+        if not any(token in str(key).lower() for token in blocked_field_tokens)
+    )
+    result["contract_status"] = "received"
+    program = raw.get("model_program")
+    if isinstance(program, dict):
+        source = program.get("source")
+        parameters = program.get("parameters")
+        result["model_program"] = {
+            "api_id": program.get("api_id"),
+            "requested_outputs": program.get("requested_outputs"),
+            "source_hash": _sha256_text(source) if isinstance(source, str) else None,
+            "parameters_hash": _sha256_json(parameters) if isinstance(parameters, dict) else None,
+            "source_retained": False,
+            "parameters_retained": False,
+        }
+    contract = raw.get("contract")
+    if isinstance(contract, dict):
+        result["contract"] = {
+            "sha256": _sha256_json(contract),
+            "top_level_fields": sorted(
+                str(key) for key in contract
+                if not any(token in str(key).lower() for token in blocked_field_tokens)
+            ),
+            "content_retained": False,
+        }
+    return result
 
 
 def _reject_execution_fields(value: Any, path: str = "") -> None:

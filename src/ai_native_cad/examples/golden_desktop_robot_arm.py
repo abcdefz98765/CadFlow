@@ -277,7 +277,14 @@ def _nested(value: Any, *keys: str) -> Any:
 
 
 def _next_work_id(backend: WorkflowConsoleBackend, base: str) -> str:
-    existing = {item.get("work_id") for item in backend.list_works(limit=200).get("works", []) if isinstance(item, dict)}
+    existing = {
+        item.get("work_id")
+        for item in backend.list_works(
+            limit=200,
+            filters={"show_developer": True},
+        ).get("works", [])
+        if isinstance(item, dict)
+    }
     if base not in existing:
         return base
     for attempt in range(2, 10_000):

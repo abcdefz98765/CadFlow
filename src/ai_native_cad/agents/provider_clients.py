@@ -42,11 +42,18 @@ class OpenAICompatibleJsonContractClient:
     OpenAI-compatible chat completions API with JSON object mode.
     """
 
-    def __init__(self, endpoint: JsonProviderEndpoint, *, urlopen: UrlOpen | None = None) -> None:
+    def __init__(
+        self,
+        endpoint: JsonProviderEndpoint,
+        *,
+        urlopen: UrlOpen | None = None,
+        api_key: str | None = None,
+    ) -> None:
         if endpoint.api_shape != "chat_completions":
             raise ValueError("OpenAICompatibleJsonContractClient requires chat_completions api_shape")
         self._endpoint = endpoint
         self._urlopen = urlopen or request.urlopen
+        self._api_key = api_key
 
     @property
     def provider_identity(self) -> dict[str, Any]:
@@ -73,17 +80,25 @@ class OpenAICompatibleJsonContractClient:
             urlopen=self._urlopen,
             timeout_seconds=_request_timeout(contract_request, self._endpoint.timeout_seconds),
             max_retries=_request_retries(contract_request, self._endpoint.max_retries),
+            api_key=self._api_key,
         )
 
 
 class OpenAIResponsesJsonContractClient:
     """OpenAI Responses API client for JSON-contract generation."""
 
-    def __init__(self, endpoint: JsonProviderEndpoint, *, urlopen: UrlOpen | None = None) -> None:
+    def __init__(
+        self,
+        endpoint: JsonProviderEndpoint,
+        *,
+        urlopen: UrlOpen | None = None,
+        api_key: str | None = None,
+    ) -> None:
         if endpoint.api_shape != "responses":
             raise ValueError("OpenAIResponsesJsonContractClient requires responses api_shape")
         self._endpoint = endpoint
         self._urlopen = urlopen or request.urlopen
+        self._api_key = api_key
 
     @property
     def provider_identity(self) -> dict[str, Any]:
@@ -114,6 +129,7 @@ class OpenAIResponsesJsonContractClient:
             urlopen=self._urlopen,
             timeout_seconds=_request_timeout(contract_request, self._endpoint.timeout_seconds),
             max_retries=_request_retries(contract_request, self._endpoint.max_retries),
+            api_key=self._api_key,
         )
 
 
@@ -123,6 +139,8 @@ def make_json_contract_adapter_from_env(
     model: str | None = None,
     timeout_seconds: int | None = None,
     max_retries: int | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
     urlopen: UrlOpen | None = None,
 ) -> JsonContractAgentAdapter:
     """Create an opt-in provider-backed JsonContractAgentAdapter.
@@ -136,11 +154,29 @@ def make_json_contract_adapter_from_env(
 
     normalized = provider.lower().strip()
     if normalized == "deepseek":
-        endpoint = _deepseek_endpoint(model, timeout_seconds, max_retries)
-        client = OpenAICompatibleJsonContractClient(endpoint, urlopen=urlopen)
+        endpoint = _deepseek_endpoint(
+            model,
+            timeout_seconds,
+            max_retries,
+            base_url=base_url,
+        )
+        client = OpenAICompatibleJsonContractClient(
+            endpoint,
+            urlopen=urlopen,
+            api_key=api_key,
+        )
     elif normalized in {"openai", "oai"}:
-        endpoint = _openai_responses_endpoint(model, timeout_seconds, max_retries)
-        client = OpenAIResponsesJsonContractClient(endpoint, urlopen=urlopen)
+        endpoint = _openai_responses_endpoint(
+            model,
+            timeout_seconds,
+            max_retries,
+            base_url=base_url,
+        )
+        client = OpenAIResponsesJsonContractClient(
+            endpoint,
+            urlopen=urlopen,
+            api_key=api_key,
+        )
     else:
         raise ValueError(f"unsupported JSON contract provider: {provider}")
 
@@ -159,12 +195,14 @@ def _deepseek_endpoint(
     model: str | None,
     timeout_seconds: int | None,
     max_retries: int | None,
+    *,
+    base_url: str | None = None,
 ) -> JsonProviderEndpoint:
     return JsonProviderEndpoint(
         provider="deepseek",
         model=model or os.environ.get("CADFLOW_DEEPSEEK_MODEL", "deepseek-chat"),
         api_key_env_var="DEEPSEEK_API_KEY",
-        base_url=os.environ.get("CADFLOW_DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        base_url=base_url or os.environ.get("CADFLOW_DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
         endpoint=os.environ.get("CADFLOW_DEEPSEEK_ENDPOINT", "/v1/chat/completions"),
         api_shape="chat_completions",
         timeout_seconds=_env_int("CADFLOW_PROVIDER_TIMEOUT_SECONDS", timeout_seconds, 30),
@@ -176,12 +214,14 @@ def _openai_responses_endpoint(
     model: str | None,
     timeout_seconds: int | None,
     max_retries: int | None,
+    *,
+    base_url: str | None = None,
 ) -> JsonProviderEndpoint:
     return JsonProviderEndpoint(
         provider="openai",
         model=model or os.environ.get("CADFLOW_OPENAI_MODEL", "gpt-5.1"),
         api_key_env_var="OPENAI_API_KEY",
-        base_url=os.environ.get("CADFLOW_OPENAI_BASE_URL", "https://api.openai.com"),
+        base_url=base_url or os.environ.get("CADFLOW_OPENAI_BASE_URL", "https://api.openai.com"),
         endpoint=os.environ.get("CADFLOW_OPENAI_ENDPOINT", "/v1/responses"),
         api_shape="responses",
         timeout_seconds=_env_int("CADFLOW_PROVIDER_TIMEOUT_SECONDS", timeout_seconds, 30),
@@ -196,8 +236,9 @@ def _post_json_with_bearer_auth(
     urlopen: UrlOpen,
     timeout_seconds: int,
     max_retries: int,
+    api_key: str | None = None,
 ) -> Any:
-    api_key = os.environ.get(endpoint.api_key_env_var)
+    api_key = api_key or os.environ.get(endpoint.api_key_env_var)
     if not api_key:
         raise RuntimeError("provider credential is not configured")
 

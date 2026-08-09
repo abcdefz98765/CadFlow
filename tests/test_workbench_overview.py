@@ -235,6 +235,10 @@ def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_pa
         language="zh",
     )
     assert overview["phase"]["key"] == "design"
+    assert overview["user_input"]["source_type"] == "revision"
+    assert overview["user_input"]["revision_request"] == "Increase the length by 10 mm and change the bore to 5 mm."
+    assert overview["current_result"]["accepted"] is True
+    assert overview["current_result"]["revision_in_progress"] is True
     assert overview["part_jobs"][0]["has_accepted_result"] is True
     assert overview["part_jobs"][0]["attempt_count"] == 2
     assert refresh_count >= 4

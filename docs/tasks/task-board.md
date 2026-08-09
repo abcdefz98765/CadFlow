@@ -202,6 +202,69 @@ work ahead of the current milestone without an explicit architecture decision.
     product readiness.
 - [x] Commit and push the completed M2.5 implementation.
 
+## M2.6 — Canonical Product Example and guided design story
+
+- [x] Inventory every `examples/` entry as Product Golden, Benchmark /
+  Evaluation, Compatibility / Regression, or Infrastructure Smoke.
+- [x] Reclassify Desktop 2DOF Robot Arm as compatibility and multi-part
+  planning regression evidence without deleting its runner or tests.
+- [x] Add one reproducible current Product Golden for a compact micro-servo
+  mounting bracket through the existing model-program execution/publication
+  boundary.
+- [x] Add **Open Product Example / 打开产品示例** to Workspace and navigate to
+  Overview / Design; keep the old Golden actions secondary.
+- [x] Project durable original and revision input as **Your Request / 你的要求**.
+- [x] Persist and project the smallest concise `design_brief` needed for
+  **Agent Design**, distinct from Agent Activity and without private reasoning.
+- [x] Show the request → design → build/evaluate → result relationship and a
+  compact product-language event timeline.
+- [x] Keep geometry prominent in the existing viewer with adjacent bounding
+  box, solid count, and available face count.
+- [x] Separate verified, assumed, unverified, unsupported, and not-requested
+  facts while keeping one primary action.
+- [x] Preserve Detailed Workflow, existing Accept/Revise routes, Parts,
+  History, Run Snapshot, Artifact Viewer, and Advanced evidence.
+- [x] Add English/Chinese copy and responsive rules without a second UI system.
+- [x] Add M2.6 projection, route, example-classification, lifecycle, i18n, and
+  architecture-conformance tests.
+- [x] Run targeted and complete regression suites; results are recorded in
+  current product readiness (`148 passed, 2 skipped` focused; `657 passed,
+  2 skipped` complete with the existing WSL2 sandbox enabled).
+- [x] Verify the real-browser English/Chinese critical paths at 1440px, 1024px,
+  and 414px; save all ten requested screenshots under
+  `docs/ux/screenshots/product-golden/`.
+
+## M2.7 — Onboarding, Settings, recovery, and Live Agent Example
+
+- [x] Evolve top-level presentation to Home / Works / Settings while retaining
+  compatible internal page ids and the existing NiceGUI shell.
+- [x] Add New Design and a beginning-state Live Product Example without
+  pre-generated design, geometry, reviewable, or accepted evidence.
+- [x] Add DeepSeek-first session draft, current-draft Test, Save & Verify, and
+  real Home readiness while keeping API keys in environment or process memory.
+- [x] Reject secret-bearing gate payloads so secrets cannot reach Run logs.
+- [x] Add Agent-first four-phase Workflow and product recovery projections for
+  user, configuration, CadFlow, environment, and unsupported owners.
+- [x] Persist focused Agent questions and append user answers as accepted input;
+  resume through the existing Design Episode route.
+- [x] Keep the Completed Product Golden as the deterministic secondary example.
+- [x] Separate Product Examples from developer fixtures, compatibility
+  regressions, and infrastructure tests; add an explicit developer-content
+  toggle with purpose labels.
+- [x] Persist sanitized external Agent responses before action validation and
+  project chronological Agent Output, clarification answers, resumed attempts,
+  observations, and actual typed stops.
+- [x] Discover credentials from session, process environment, or allowlisted
+  project-root `.env`; show only source metadata in Settings.
+- [x] Complete real-provider/live-browser 1440px, 1024px, and mobile evidence;
+  record the safe `policy_blocked` Live Example outcome without claiming a
+  generated model.
+- [x] Run and record the corrected full regression suite (`659 passed, 9
+  skipped`) and expanded focused selection (`203 passed, 2 skipped`).
+- [x] Commit M2.7 on the dedicated continuation branch.
+- [ ] Push the branch when the local approval/usage gate permits remote Git
+  access.
+
 ## M2 external-provider benchmark acceptance
 
 - [ ] Define at least five non-template part prompts.

@@ -22,6 +22,7 @@
         },
         "advancement_mode": "manual_confirm",
         "metadata": {
+          "work_classification": "compatibility_regression",
           "example": true,
           "example_kind": "single_part"
         }
@@ -137,6 +138,7 @@
         },
         "advancement_mode": "manual_confirm",
         "metadata": {
+          "work_classification": "compatibility_regression",
           "example": true,
           "example_kind": "multi_part_planning"
         }
@@ -296,6 +298,7 @@
         },
         "advancement_mode": "manual_confirm",
         "metadata": {
+          "work_classification": "compatibility_regression",
           "example": true,
           "example_kind": "reviewed_one_part"
         }

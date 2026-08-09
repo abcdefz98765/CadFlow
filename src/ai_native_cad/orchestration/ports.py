@@ -98,6 +98,7 @@ class DesignEpisodeArtifact:
         if not isinstance(self.checkpoint, str) or not self.checkpoint:
             raise ValueError("artifact checkpoint is required")
         if self.trust_role not in {
+            "accepted_input",
             "candidate",
             "observation",
             "diagnostic",
@@ -332,3 +333,16 @@ class AgentDesignPort(Protocol):
         self,
         request: DesignPartEpisodeRequest,
     ) -> DesignPartEpisodeOutcome: ...
+
+    def record_part_design_answer(
+        self,
+        *,
+        work_id: str,
+        run_id: str,
+        part_job_id: str,
+        answer_id: str,
+        question_artifact_id: str,
+        field: str,
+        question: str,
+        answer: str,
+    ) -> DesignEpisodeArtifact: ...

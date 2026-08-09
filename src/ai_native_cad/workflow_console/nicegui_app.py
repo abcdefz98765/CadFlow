@@ -24,6 +24,7 @@ from ai_native_cad.workflow_console.actions import STAGE_REVIEW_STATUSES, STAGE_
 from ai_native_cad.workflow_console.artifact_display import filter_artifacts_for_display
 from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, WorkflowConsoleBackend
 from ai_native_cad.workflow_console.review_surface import REVIEW_SURFACE_ARTIFACTS, build_workflow_review_surface
+from ai_native_cad.workflow_console.product_usability import build_home_view_model
 from ai_native_cad.workflow_console.work_stage_projection import build_work_stage_projection, unavailable_work_stage_projection
 from ai_native_cad.workflow_console.workflow_page_view_model import build_workflow_page_view_model
 from ai_native_cad.workflow_console.workflow_page_view_model import build_workbench_overview_view_model
@@ -150,8 +151,8 @@ body{background:var(--wf-bg);color:var(--wf-ink)}
 .workflow-part-candidate{min-width:146px;max-width:180px;border:1px solid var(--wf-border);border-radius:999px;padding:var(--wf-space-2) var(--wf-space-3);background:#fff}.workflow-part-candidate.reference-component{border-radius:var(--wf-radius-sm);border-style:dashed;background:#f8fafc}.workflow-part-selected{border-color:var(--wf-primary);outline:2px solid #bfdbfe;outline-offset:1px}
 .stage-conclusion{border-bottom:1px solid var(--wf-border);padding-bottom:var(--wf-space-3)}.stage-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--wf-space-3)}.stage-detail-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);min-height:156px}.stage-detail-card h3{margin:0 0 var(--wf-space-2);font-size:12px;letter-spacing:.07em;color:var(--wf-muted);font-weight:700}.stage-detail-card.decision{background:#fbfcff}.stage-artifact-list{margin-top:var(--wf-space-2);padding-top:var(--wf-space-2);border-top:1px solid #eef2f7}.workflow-evidence{border-top:1px solid var(--wf-border);padding-top:var(--wf-space-3)}.workflow-disabled-reason{font-size:12px;color:var(--wf-muted)}
 .history-list{display:grid;gap:var(--wf-space-3)}.history-run-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-3);background:#fff;cursor:pointer}.history-run-card:hover{border-color:#94a3b8}.history-run-grid{display:grid;grid-template-columns:1.2fr repeat(4,minmax(0,1fr));gap:var(--wf-space-3)}.history-field-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--wf-muted)}
-.workbench-phase{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%;max-width:760px}.workbench-phase-item{border-top:3px solid #cbd5e1;padding-top:6px;color:var(--wf-muted);font-size:12px}.workbench-phase-item.current{border-color:var(--wf-primary);color:#1d4ed8;font-weight:700}.workbench-objective{background:linear-gradient(135deg,#eff6ff,#fff);border:1px solid #bfdbfe;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-recommendation{border-left:4px solid var(--wf-primary);background:#fff;border-radius:var(--wf-radius-sm);padding:var(--wf-space-4)}.workbench-primary-grid{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(420px,1.2fr);gap:var(--wf-space-4);align-items:stretch}.workbench-panel{background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}.workbench-activity{order:1}.workbench-geometry{order:2;min-height:420px}.workbench-viewer{width:100%;height:350px;border:0;border-radius:var(--wf-radius-sm);background:#111827}.workbench-result{border:1px solid #fbbf24;border-left:4px solid #d97706;background:#fffbeb;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-result.accepted{border-color:#4ade80;background:#f0fdf4}.workbench-validation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--wf-space-4)}.workbench-part-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--wf-space-3)}.workbench-part-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-4);background:#fff}.workbench-capability{font-size:12px;font-weight:700;letter-spacing:.03em}.workbench-advanced{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);background:#f8fafc}
-@keyframes wf-pulse{50%{box-shadow:0 0 0 5px #dbeafe}}@media(max-width:1100px){.stage-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-primary-grid{grid-template-columns:minmax(250px,.85fr) minmax(360px,1.15fr)}.workbench-geometry{min-height:380px}.workbench-viewer{height:310px}}@media(max-width:760px){.workbench-shell{flex-direction:column}.sidebar{flex:0 0 auto;width:100%;min-height:auto;border-right:0;border-bottom:1px solid var(--wf-border)}.content{width:100%;min-width:0;padding:var(--wf-space-3)}.workflow-hero,.workflow-snapshot-banner,.workflow-run-strip-panel,.workflow-stage-detail-v2{padding:var(--wf-space-3)}.workflow-graph{padding:var(--wf-space-3)}.workflow-graph-canvas{min-width:1040px}.stage-detail-grid,.history-run-grid{grid-template-columns:1fr}.workflow-lane{margin-left:170px}.workflow-branch-note{margin-left:140px}.workbench-phase{overflow-x:auto;grid-template-columns:repeat(4,minmax(112px,1fr))}.workbench-objective{padding:var(--wf-space-4)}.workbench-primary-grid{grid-template-columns:1fr}.workbench-geometry{order:1;min-height:330px}.workbench-activity{order:2}.workbench-viewer{height:280px}.workbench-validation-grid,.workbench-part-grid{grid-template-columns:1fr}}
+.workbench-phase{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%;max-width:760px}.workbench-phase-item{border-top:3px solid #cbd5e1;padding-top:6px;color:var(--wf-muted);font-size:12px}.workbench-phase-item.current{border-color:var(--wf-primary);color:#1d4ed8;font-weight:700}.workbench-objective{background:linear-gradient(135deg,#eff6ff,#fff);border:1px solid #bfdbfe;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-narrative-grid{display:grid;grid-template-columns:minmax(300px,.9fr) minmax(420px,1.1fr);gap:var(--wf-space-4)}.workbench-request{background:linear-gradient(135deg,#eff6ff,#fff);border-color:#bfdbfe}.workbench-design{background:linear-gradient(135deg,#faf5ff,#fff);border-color:#ddd6fe}.workbench-revision-request{border-left:3px solid #7c3aed;background:#faf5ff;padding:var(--wf-space-3);border-radius:var(--wf-radius-sm)}.workbench-recommendation{border-left:4px solid var(--wf-primary);background:#fff;border-radius:var(--wf-radius-sm);padding:var(--wf-space-4)}.workbench-primary-grid{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(420px,1.2fr);gap:var(--wf-space-4);align-items:stretch}.workbench-panel{background:#fff;border:1px solid var(--wf-border);border-radius:var(--wf-radius);padding:var(--wf-space-4)}.workbench-activity{order:1}.workbench-geometry{order:2;min-height:420px}.workbench-viewer{width:100%;height:350px;border:0;border-radius:var(--wf-radius-sm);background:#111827}.workbench-result{border:1px solid #fbbf24;border-left:4px solid #d97706;background:#fffbeb;border-radius:var(--wf-radius);padding:var(--wf-space-5)}.workbench-result.accepted{border-color:#4ade80;background:#f0fdf4}.workbench-validation-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--wf-space-4)}.workbench-part-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--wf-space-3)}.workbench-part-card{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);padding:var(--wf-space-4);background:#fff}.workbench-capability{font-size:12px;font-weight:700;letter-spacing:.03em}.workbench-advanced{border:1px solid var(--wf-border);border-radius:var(--wf-radius-sm);background:#f8fafc}.workbench-advanced,.workbench-advanced *{min-width:0}.workbench-advanced pre,.workbench-advanced code{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+@keyframes wf-pulse{50%{box-shadow:0 0 0 5px #dbeafe}}@media(max-width:1100px){.stage-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-narrative-grid{grid-template-columns:1fr}.workbench-primary-grid{grid-template-columns:minmax(250px,.85fr) minmax(360px,1.15fr)}.workbench-validation-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-geometry{min-height:380px}.workbench-viewer{height:310px}}@media(max-width:760px){.workbench-shell{flex-direction:column}.sidebar{flex:0 0 auto;width:100%;min-height:auto;max-height:280px;overflow-y:auto;border-right:0;border-bottom:1px solid var(--wf-border)}.content{width:100%;min-width:0;padding:var(--wf-space-3)}.workflow-hero,.workflow-snapshot-banner,.workflow-run-strip-panel,.workflow-stage-detail-v2{padding:var(--wf-space-3)}.workflow-graph{padding:var(--wf-space-3)}.workflow-graph-canvas{min-width:1040px}.stage-detail-grid,.history-run-grid{grid-template-columns:1fr}.workflow-lane{margin-left:170px}.workflow-branch-note{margin-left:140px}.workbench-phase{overflow-x:auto;grid-template-columns:repeat(4,minmax(112px,1fr))}.workbench-objective{padding:var(--wf-space-4)}.workbench-narrative-grid,.workbench-primary-grid{grid-template-columns:1fr}.workbench-geometry{order:1;min-height:330px}.workbench-activity{order:2}.workbench-viewer{height:280px}.workbench-validation-grid,.workbench-part-grid{grid-template-columns:1fr}}
 """
 
 ARTIFACT_PAGE_ARTIFACTS = (
@@ -286,6 +287,11 @@ def _runtime_message(action: dict[str, Any], language: str, phase: str, *, error
     part_id = str(action.get("part_id") or "")
     key = str(action.get("key") or action.get("backend_action") or "")
     product_messages = {
+        "open_product_example": {
+            "pending": ("Preparing the Product Example…", "正在准备产品示例……"),
+            "success": ("Product Example ready", "产品示例已就绪"),
+            "failed": ("Could not open the Product Example", "未能打开产品示例"),
+        },
         "accept_reviewable_result": {
             "pending": ("Accepting result…", "正在接受结果……"),
             "success": ("Result accepted", "结果已接受"),
@@ -347,7 +353,11 @@ def build_console_page_data(
     works_response = dispatch_route(
         backend,
         "list_works",
-        query={"limit": 50, "offset": 0, "show_debug": False},
+        query={
+            "limit": 50,
+            "offset": 0,
+            "show_developer": show_debug_works,
+        },
     )
     workspace_response = dispatch_route(backend, "read_workspace")
     config_response = dispatch_route(backend, "read_workspace_config")
@@ -377,6 +387,7 @@ def build_console_page_data(
             # data; history remains independently inspectable.
             work_projection = unavailable_work_stage_projection(selected_work, type(exc).__name__)
     provider = build_provider_config_data(backend) if active_page == "config" else {"provider_config": None, "provider_check": None}
+    home = build_home_view_model(backend, works, language=language)
     data = {
         "workspace": workspace_response["data"] if workspace_response["ok"] else {"present": False, "relative_path": "workspace"},
         "workspace_config": config_response["data"] if config_response["ok"] else {"advancement_mode": "manual_confirm"},
@@ -391,6 +402,8 @@ def build_console_page_data(
         "selected_node_id": selected_node_id,
         "selected_stage_id": selected_stage_id,
         "language": language,
+        "home": home,
+        "product_readiness": home.get("environment", {}),
         "selected_node": _selected_node(work_detail, selected_node_id),
         "runs": runs,
         "pagination": pagination,
@@ -807,7 +820,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
     except ImportError as exc:  # pragma: no cover - exercised only without optional dependency at runtime
         raise RuntimeError("NiceGUI is not installed. Install the web extra, for example: cadflow[web].") from exc
 
-    console_backend = backend or WorkflowConsoleBackend()
+    console_backend = backend or WorkflowConsoleBackend(restore_saved_provider=True)
     actions = WorkflowConsoleActions(console_backend)
     if WEB_VIEWER_ROOT.exists():
         app.add_static_files("/web-viewer", str(WEB_VIEWER_ROOT))
@@ -881,6 +894,7 @@ def create_nicegui_app(backend: WorkflowConsoleBackend | None = None) -> Any:
                     selected_stage_id=state.get("selected_stage_id"),
                     view_mode=state.get("view_mode", "current_work"),
                     language=state.get("language", "en"),
+                    show_debug_works=bool(state.get("show_developer_content")),
                     show_unclassified_runs=bool(state.get("show_unclassified_runs")),
                     show_low_level_details=bool(state.get("show_low_level_details")),
                     limit=state.get("limit", DEFAULT_RUN_PAGE_SIZE),
@@ -976,10 +990,11 @@ def _render_sidebar(
     ).props("dense outlined").classes("w-full")
     language.tooltip("Changes display language only; workflow artifacts and actions are unchanged.")
     ui.button("Refresh", icon="refresh", on_click=refresh).props("outline dense").classes("w-full").tooltip("重新读取当前 workspace、work 和页面数据。")
+    language_code = str(data.get("language") or "en")
     for page, icon, text in (
-        ("workspace", "folder", "Workspace"),
-        ("works", "workspaces", "Works"),
-        ("config", "settings", "Config"),
+        ("workspace", "home", "首页" if language_code == "zh" else "Home"),
+        ("works", "workspaces", "设计项目" if language_code == "zh" else "Works"),
+        ("config", "settings", "设置" if language_code == "zh" else "Settings"),
     ):
         button = ui.button(text, icon=icon, on_click=_page_selection_callback(on_select_page, page))
         button.props("flat dense" if state.get("active_page") != page else "unelevated dense color=primary").classes("nav-btn")
@@ -987,7 +1002,7 @@ def _render_sidebar(
     ui.label(f"Workspace: {workspace.get('name') or 'workspace'}").classes("text-xs text-gray-500")
     ui.label(workspace.get("display_path") or workspace.get("relative_path") or "workspace").classes("text-xs text-gray-500 break-all")
     ui.separator()
-    ui.label("Works").classes("text-sm font-medium text-gray-500")
+    ui.label("当前设计" if language_code == "zh" else "Current Designs").classes("text-sm font-medium text-gray-500")
     for work in data.get("works") or []:
         _render_sidebar_work_item(ui, work, data, state, on_select_work, on_select_page)
 
@@ -1124,46 +1139,80 @@ def _render_workspace_page(
     on_select_work: Callable[[str], None],
 ) -> None:
     workspace = data.get("workspace") if isinstance(data.get("workspace"), dict) else {}
-    config = data.get("workspace_config") if isinstance(data.get("workspace_config"), dict) else {}
-    with ui.row().classes("w-full items-center justify-between"):
+    home = data.get("home") if isinstance(data.get("home"), dict) else {}
+    environment = home.get("environment") if isinstance(home.get("environment"), dict) else {}
+    language = str(data.get("language") or "en")
+    _render_action_feedback_panel(ui, state, language)
+    with ui.row().classes("w-full items-start justify-between gap-4 flex-wrap"):
         with ui.column().classes("gap-1"):
-            _label_with_help(ui, "Workspace", "当前本地工作区。Work、配置和新的 run 都会写入这个 workspace。", "text-2xl font-semibold")
-            ui.label(workspace.get("display_path") or "No workspace path").classes("text-sm text-gray-600 break-all")
+            ui.label("开始一个 CAD 设计" if language == "zh" else "Start a CAD design").classes("text-3xl font-semibold")
+            ui.label(
+                "描述你要创建的零件，CadFlow Agent 会设计、构建并验证几何。" if language == "zh"
+                else "Describe the part you need. The CadFlow Agent will design, build, and validate its geometry."
+            ).classes("text-base text-gray-600 max-w-2xl")
+        with ui.row().classes("gap-2"):
+            _new_design_dialog_button(ui, state, refresh, language)
+
+    ui.label(i18n_copy(language, "product_examples")).classes("text-xl font-semibold")
+    ui.label(
+        "开始产品示例：两个示例用途不同，一个展示真实 Agent 过程，一个展示稳定的完成结果。" if language == "zh"
+        else "These teach different things: one shows a real Agent process; one shows a stable completed result."
+    ).classes("text-sm text-gray-600")
+    examples = home.get("product_examples") if isinstance(home.get("product_examples"), list) else []
+    with ui.element("section").classes("workbench-primary-grid w-full"):
+        for example in examples:
+            if not isinstance(example, dict):
+                continue
+            with ui.element("article").classes("workbench-panel"):
+                with ui.row().classes("w-full items-start justify-between gap-2"):
+                    ui.label(str(example.get("title") or "Example")).classes("text-lg font-semibold")
+                    ui.badge(str(example.get("badge") or "")).classes("bg-purple-700" if example.get("key") == "live_agent" else "bg-green-700")
+                ui.label(str(example.get("demonstrates") or "")).classes("text-sm text-gray-700 mt-2")
+                for label, key in (
+                    ("你会看到" if language == "zh" else "You will see", "will_see"),
+                    ("你可以尝试" if language == "zh" else "You can try", "can_try"),
+                    ("要求" if language == "zh" else "Requirements", "requirements"),
+                ):
+                    ui.label(f"{label}: {example.get(key) or '—'}").classes("text-xs text-gray-600 mt-1")
+                work_id = example.get("work_id")
+                if isinstance(work_id, str):
+                    ui.button(str(example.get("action") or "Open"), icon="arrow_forward", on_click=lambda _event=None, wid=work_id: on_select_work(wid)).props("outline").classes("mt-3")
+                elif example.get("key") == "live_agent":
+                    ui.button(str(example.get("action") or "Start"), icon="science", on_click=lambda: _schedule_action(_start_live_product_example_async(state.get("_backend"), state, refresh, language))).props("outline").classes("mt-3")
+                else:
+                    ui.button(str(example.get("action") or "Create"), icon="view_in_ar", on_click=lambda: _schedule_action(_open_product_example_async(state.get("_backend"), state, refresh, language))).props("outline").classes("mt-3")
+
+    with ui.element("section").classes("workbench-primary-grid w-full"):
+        for key, label in (("provider", "AI Provider"), ("local_execution", "Local CAD execution")):
+            readiness = environment.get(key) if isinstance(environment.get(key), dict) else {}
+            ready = readiness.get("ready") is True
+            with ui.element("article").classes("workbench-panel"):
+                with ui.row().classes("w-full items-center justify-between"):
+                    ui.label(label if language != "zh" else ("AI Provider" if key == "provider" else "本地 CAD 执行")).classes("font-semibold")
+                    ui.badge("Ready" if ready else ("需要设置" if language == "zh" else "Needs setup")).classes("bg-green-700" if ready else "bg-amber-700")
+                detail = readiness.get("model") or readiness.get("runtime") or readiness.get("status")
+                ui.label(str(detail or "—")).classes("text-sm text-gray-600")
+                if not ready:
+                    ui.button("打开设置" if language == "zh" else "Open Settings", icon="settings", on_click=lambda: _go_to_settings(state, refresh)).props("flat dense")
+
+    ui.label("最近设计" if language == "zh" else "Recent Works").classes("text-xl font-semibold")
+    recent = home.get("recent_works") if isinstance(home.get("recent_works"), list) else []
+    if not recent:
+        ui.label("还没有设计。新建设计开始。" if language == "zh" else "No designs yet. Start with New Design.").classes("text-gray-600")
+    for item in recent[:8]:
+        with ui.card().classes("w-full shadow-none border border-gray-200"):
+            with ui.row().classes("w-full items-center justify-between gap-3"):
+                with ui.column().classes("gap-1"):
+                    ui.label(item.get("title") or item.get("work_id")).classes("font-semibold")
+                    ui.label(f"{item.get('phase')} · {item.get('state')} · {item.get('updated')}").classes("text-sm text-gray-600")
+                    ui.label(str(item.get("next_action") or "")).classes("text-sm text-blue-700")
+                ui.button("打开" if language == "zh" else "Open", icon="arrow_forward", on_click=lambda _event=None, work=item: on_select_work(work["work_id"])).props("flat")
+
+    with ui.expansion("高级工作区" if language == "zh" else "Advanced workspace", icon="tune").classes("w-full"):
+        ui.label(workspace.get("display_path") or "No workspace path").classes("text-sm text-gray-600 break-all")
         with ui.row().classes("gap-2"):
             _workspace_dialog_button(ui, "New Workspace", "create_new_folder", "create", workspace, state, refresh)
             _workspace_dialog_button(ui, "Load Workspace", "folder_open", "load", workspace, state, refresh)
-    _key_values(ui, {
-        "Name": workspace.get("name") or "workspace",
-        "Initialized": workspace.get("present"),
-        "External": workspace.get("is_external"),
-        "Works": workspace.get("work_count", 0),
-        "Runs": workspace.get("run_count", 0),
-        "Advancement mode": config.get("advancement_mode") or workspace.get("advancement_mode") or "manual_confirm",
-    })
-    if state.get("workspace_result"):
-        ui.markdown(f"```json\n{json.dumps(state['workspace_result'], indent=2, sort_keys=True)}\n```").classes("w-full mono")
-    with ui.card().classes("w-full border border-amber-200 bg-amber-50 shadow-none"):
-        _label_with_help(ui, "Examples", "创建真实可运行的产品示例 Work；所有阶段都通过共享 backend service 执行。", "text-lg font-medium")
-        ui.label("Desktop 2DOF Robot Arm").classes("font-semibold text-gray-900")
-        ui.label("Contract validates CAD IR and creates input_ir without STEP/STL. Full runs CadQuery and generates STEP/STL.").classes("text-sm text-gray-700")
-        with ui.row().classes("gap-2"):
-            ui.button("Create Contract Example", icon="fact_check", on_click=lambda: _create_golden_example_ui("contract", state, refresh)).tooltip("Run through validated input_ir; CAD execution is intentionally skipped.")
-            ui.button("Create Full Example", icon="precision_manufacturing", on_click=lambda: _create_golden_example_ui("full", state, refresh)).tooltip("Run CadQuery and create STEP/STL for one generic concept part.")
-        progress = state.get("golden_example_progress") if isinstance(state.get("golden_example_progress"), list) else []
-        if progress:
-            with ui.expansion("Example progress", value=True).classes("w-full"):
-                for event in progress:
-                    if isinstance(event, dict):
-                        with ui.row().classes("w-full items-center gap-2"):
-                            ui.badge(event.get("status") or "unknown").classes(_badge_class(event.get("status")))
-                            ui.label(event.get("stage") or "stage").classes("font-medium")
-                            ui.label(event.get("message") or "").classes("text-sm text-gray-600")
-    _label_with_help(ui, "Works", "当前 workspace 中的 Work/Project 列表，点击一行可进入对应 Work。", "text-lg font-medium")
-    _render_work_table(ui, data.get("works") or [], data.get("selected_work_id"), on_select_work)
-    selected_work = data.get("selected_work") if isinstance(data.get("selected_work"), dict) else {}
-    directory_map = selected_work.get("directory_map") if isinstance(selected_work.get("directory_map"), dict) else {}
-    if directory_map:
-        _render_work_directory_map(ui, directory_map)
 
 
 def _render_work_directory_map(ui: Any, directory_map: dict[str, Any]) -> None:
@@ -1264,11 +1313,16 @@ def _render_work_overview(
         return
     work = overview.get("work") if isinstance(overview.get("work"), dict) else {}
     objective = overview.get("objective") if isinstance(overview.get("objective"), dict) else {}
+    user_input = overview.get("user_input") if isinstance(overview.get("user_input"), dict) else {}
+    agent_design = overview.get("agent_design") if isinstance(overview.get("agent_design"), dict) else {}
+    transformation = overview.get("transformation") if isinstance(overview.get("transformation"), dict) else {}
     recommendation = overview.get("recommendation") if isinstance(overview.get("recommendation"), dict) else {}
     capability = overview.get("capability") if isinstance(overview.get("capability"), dict) else {}
     activity = overview.get("agent_activity") if isinstance(overview.get("agent_activity"), dict) else {}
     preview = overview.get("preview") if isinstance(overview.get("preview"), dict) else {}
     result = overview.get("current_result") if isinstance(overview.get("current_result"), dict) else None
+    recovery = overview.get("recovery") if isinstance(overview.get("recovery"), dict) else None
+    agent_output = overview.get("agent_output") if isinstance(overview.get("agent_output"), dict) else {}
     active_job = next(
         (
             item
@@ -1279,20 +1333,58 @@ def _render_work_overview(
     )
 
     _render_action_feedback_panel(ui, state, language)
-    with ui.element("section").classes("workbench-objective w-full"):
-        with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
-            with ui.column().classes("gap-1 flex-1"):
-                ui.label(objective.get("title") or i18n_copy(language, "current_objective")).classes("workflow-eyebrow")
-                ui.label(objective.get("summary") or "—").classes("text-xl font-semibold leading-relaxed")
-            ui.badge(capability.get("label") or "").classes(
-                "bg-purple-700 workbench-capability" if capability.get("experimental") else "bg-slate-600 workbench-capability"
+    if recovery:
+        _render_recovery_card(ui, recovery, overview, actions.backend, state, refresh, language)
+    with ui.element("section").classes("workbench-narrative-grid w-full"):
+        with ui.element("article").classes("workbench-request workbench-panel"):
+            with ui.row().classes("w-full items-start justify-between gap-3"):
+                ui.label(user_input.get("title") or i18n_copy(language, "your_request")).classes("workflow-eyebrow")
+                ui.badge(user_input.get("source_label") or "").classes("bg-blue-700")
+            ui.label(user_input.get("original_request") or objective.get("summary") or "—").classes(
+                "text-lg font-semibold leading-relaxed mt-2"
             )
-        ui.label(
-            i18n_copy(
-                language,
-                "isolated_execution_verified" if capability.get("experimental") else "deterministic_compatibility",
+            if user_input.get("revision_request"):
+                with ui.element("div").classes("workbench-revision-request mt-3"):
+                    ui.label(i18n_copy(language, "request_source_revision")).classes("workflow-eyebrow")
+                    ui.label(str(user_input["revision_request"])).classes("text-base font-medium")
+            constraints = user_input.get("visible_constraints") if isinstance(user_input.get("visible_constraints"), list) else []
+            if constraints:
+                ui.label(i18n_copy(language, "visible_constraints")).classes("workflow-eyebrow mt-3")
+                with ui.row().classes("w-full gap-2 flex-wrap"):
+                    for item in constraints:
+                        ui.badge(str(item)).classes("bg-slate-100 text-slate-700")
+
+        with ui.element("article").classes("workbench-design workbench-panel"):
+            with ui.row().classes("w-full items-start justify-between gap-3"):
+                ui.label(agent_design.get("title") or i18n_copy(language, "agent_design")).classes("workflow-eyebrow")
+                ui.badge(capability.get("label") or "").classes(
+                    "bg-purple-700 workbench-capability" if capability.get("experimental") else "bg-slate-600 workbench-capability"
+                )
+            ui.label(agent_design.get("summary") or i18n_copy(language, "agent_design_evidence_gap")).classes(
+                "text-lg font-semibold leading-relaxed mt-2"
             )
-        ).classes("text-sm text-gray-600")
+            if agent_design.get("geometry_strategy"):
+                ui.label(i18n_copy(language, "geometry_strategy")).classes("workflow-eyebrow mt-3")
+                ui.label(str(agent_design["geometry_strategy"])).classes("text-sm text-gray-700")
+            parameters = agent_design.get("important_parameters") if isinstance(agent_design.get("important_parameters"), list) else []
+            if parameters:
+                ui.label(i18n_copy(language, "important_parameters")).classes("workflow-eyebrow mt-3")
+                with ui.row().classes("w-full gap-2 flex-wrap"):
+                    for item in parameters:
+                        if isinstance(item, dict):
+                            label = f"{item.get('name')}: {item.get('value')} {item.get('unit') or ''}".strip()
+                            ui.badge(label).classes("bg-indigo-50 text-indigo-800")
+            features = agent_design.get("functional_features") if isinstance(agent_design.get("functional_features"), list) else []
+            if features:
+                with ui.expansion(i18n_copy(language, "functional_features"), icon="construction").classes("w-full mt-2"):
+                    for item in features:
+                        ui.label(f"• {item}").classes("text-sm")
+            if agent_design.get("source_capability_mode"):
+                ui.label(
+                    f"{i18n_copy(language, 'source_capability_mode')}: {agent_design['source_capability_mode']}"
+                ).classes("text-xs text-gray-500 mt-2")
+            if capability.get("key") == "reproducible_product_golden":
+                ui.label(i18n_copy(language, "product_golden_scope")).classes("text-xs text-purple-800 mt-2")
 
     with ui.element("section").classes("workbench-recommendation w-full"):
         ui.label(i18n_copy(language, "current_recommendation")).classes("workflow-eyebrow")
@@ -1300,6 +1392,18 @@ def _render_work_overview(
 
     with ui.element("section").classes("workbench-primary-grid w-full"):
         with ui.element("article").classes("workbench-panel workbench-activity"):
+            ui.label(transformation.get("title") or i18n_copy(language, "what_happened")).classes("workflow-eyebrow")
+            with ui.column().classes("w-full gap-2 mt-3"):
+                for event in transformation.get("events", []):
+                    if not isinstance(event, dict):
+                        continue
+                    complete = event.get("status") == "completed"
+                    with ui.row().classes("items-center gap-2"):
+                        ui.icon("check_circle" if complete else "radio_button_unchecked", size="xs").classes(
+                            "text-green-700" if complete else "text-gray-400"
+                        )
+                        ui.label(str(event.get("label") or "")).classes("text-sm")
+            ui.separator().classes("my-3")
             ui.label(i18n_copy(language, "agent_activity")).classes("workflow-eyebrow")
             with ui.row().classes("items-center gap-3 mt-3"):
                 ui.icon("smart_toy").classes("text-3xl text-blue-600")
@@ -1312,7 +1416,7 @@ def _render_work_overview(
                         with ui.row().classes("items-center gap-2"):
                             ui.icon("check_circle", size="xs").classes("text-blue-600")
                             ui.label(str(item)).classes("text-sm")
-            if recommendation.get("key") == "continue_agent" and active_job:
+            if recommendation.get("key") == "continue_agent" and active_job and not recovery:
                 ui.button(
                     i18n_copy(language, "continue_agent"),
                     icon="play_arrow",
@@ -1336,8 +1440,25 @@ def _render_work_overview(
                 with ui.column().classes("w-full h-72 items-center justify-center gap-2"):
                     ui.icon("view_in_ar").classes("text-5xl text-gray-300")
                     ui.label(preview.get("label") or i18n_copy(language, "no_candidate")).classes("text-gray-500")
+            geometry = preview.get("geometry") if isinstance(preview.get("geometry"), dict) else {}
+            bbox = geometry.get("bounding_box") if isinstance(geometry.get("bounding_box"), dict) else {}
+            if geometry:
+                with ui.row().classes("w-full gap-2 flex-wrap mt-2"):
+                    ui.badge(
+                        f"{('边界框' if language == 'zh' else 'Bounding box')}: "
+                        f"{bbox.get('x', '—')} × {bbox.get('y', '—')} × {bbox.get('z', '—')} mm"
+                    ).classes("bg-slate-100 text-slate-800")
+                    ui.badge(
+                        f"{('实体数' if language == 'zh' else 'Solid count')}: {geometry.get('solid_count', '—')}"
+                    ).classes("bg-slate-100 text-slate-800")
+                    if geometry.get("face_count") is not None:
+                        ui.badge(
+                            f"{('面数' if language == 'zh' else 'Face count')}: {geometry.get('face_count')}"
+                        ).classes("bg-slate-100 text-slate-800")
             if preview.get("download_url"):
                 ui.link("STEP", preview["download_url"]).classes("text-sm mt-2")
+
+    _render_agent_output(ui, agent_output, language)
 
     if result:
         _render_workbench_result(ui, result, overview, actions.backend, state, refresh, language)
@@ -1364,6 +1485,135 @@ def _render_work_overview(
         ).props("outline")
 
     _render_workbench_advanced(ui, overview, language)
+
+
+def _render_agent_output(ui: Any, projection: dict[str, Any], language: str) -> None:
+    items = projection.get("items") if isinstance(projection.get("items"), list) else []
+    with ui.element("section").classes("workbench-panel w-full"):
+        with ui.row().classes("w-full items-start justify-between gap-3"):
+            with ui.column().classes("gap-1"):
+                ui.label(projection.get("title") or ("Agent 输出" if language == "zh" else "Agent Output")).classes("text-xl font-semibold")
+                ui.label(str(projection.get("description") or "")).classes("text-sm text-gray-600")
+            identity = projection.get("provider_identity") if isinstance(projection.get("provider_identity"), dict) else {}
+            if identity:
+                ui.badge(" · ".join(str(identity.get(key)) for key in ("provider", "model") if identity.get(key))).classes("bg-blue-700")
+        if not items:
+            ui.label(
+                "尚无持久化的外部 Agent 输出。开始或继续 Agent 后会显示在这里。" if language == "zh"
+                else "No durable external Agent output yet. It will appear here after the Agent starts or continues."
+            ).classes("text-sm text-gray-500 mt-3")
+            return
+        with ui.column().classes("w-full gap-3 mt-3"):
+            for index, item in enumerate(items, 1):
+                if not isinstance(item, dict):
+                    continue
+                with ui.row().classes("w-full items-start gap-3"):
+                    ui.badge(str(index)).classes("bg-slate-600")
+                    with ui.column().classes("gap-1 flex-1"):
+                        ui.label(str(item.get("title") or item.get("kind") or "Event")).classes("font-semibold")
+                        if item.get("question"):
+                            ui.label(str(item["question"])).classes("text-xs text-gray-500")
+                        if item.get("summary"):
+                            ui.label(str(item["summary"])).classes("text-sm text-gray-700")
+                        questions = item.get("questions") if isinstance(item.get("questions"), list) else []
+                        for question in questions:
+                            if isinstance(question, dict):
+                                ui.label(str(question.get("question") or "")).classes("text-sm text-amber-800")
+                        assumptions = item.get("assumptions") if isinstance(item.get("assumptions"), list) else []
+                        if assumptions:
+                            ui.label(("假设：" if language == "zh" else "Assumptions: ") + " · ".join(str(value) for value in assumptions)).classes("text-xs text-gray-500")
+        with ui.expansion("结构化证据（已净化）" if language == "zh" else "Sanitized structured evidence", icon="data_object").classes("w-full mt-3"):
+            ui.markdown(f"```json\n{json.dumps(items, indent=2, ensure_ascii=False, sort_keys=True)}\n```").classes("w-full mono")
+
+
+def _render_recovery_card(
+    ui: Any,
+    recovery: dict[str, Any],
+    overview: dict[str, Any],
+    backend: WorkflowConsoleBackend,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    owner_labels = {
+        "user": "需要你的输入" if language == "zh" else "Needs your input",
+        "configuration": "设置问题" if language == "zh" else "Setup issue",
+        "environment": "本机环境" if language == "zh" else "Local environment",
+        "cadflow": "CadFlow 已安全停止" if language == "zh" else "CadFlow stopped safely",
+        "unsupported": "当前不支持" if language == "zh" else "Not currently supported",
+    }
+    with ui.element("section").classes("workflow-action-feedback failed w-full"):
+        with ui.row().classes("w-full items-start justify-between gap-3"):
+            with ui.column().classes("gap-1"):
+                ui.label(owner_labels.get(str(recovery.get("resolution_owner")), "Recovery")).classes("workflow-eyebrow")
+                ui.label(str(recovery.get("title") or "Design needs attention")).classes("text-xl font-semibold")
+                ui.label(str(recovery.get("summary") or "")).classes("text-sm")
+                ui.label(str(recovery.get("why_it_stopped") or "")).classes("text-xs text-gray-600")
+        action = recovery.get("recommended_action") if isinstance(recovery.get("recommended_action"), dict) else {}
+        key = action.get("key")
+        with ui.row().classes("gap-2 mt-3 flex-wrap"):
+            if key == "open_settings" or key == "check_environment":
+                ui.button(action.get("label") or "Open Settings", icon="settings", on_click=lambda: _go_to_settings(state, refresh)).props("color=primary")
+            elif key == "retry_agent":
+                active = next((item for item in overview.get("part_jobs", []) if isinstance(item, dict) and item.get("part_job_id") == _dict_get(overview.get("work"), "active_part")), None)
+                if active:
+                    retry_action = {"key": "continue_agent", "label": action.get("label") or "Retry", "target_work_id": _dict_get(overview.get("advanced"), "work_id"), "part_job_id": active.get("part_job_id"), "target_run_id": active.get("active_attempt_run_id")}
+                    ui.button(action.get("label") or "Retry", icon="refresh", on_click=lambda: _show_continue_agent_confirmation(ui, backend, overview, state, refresh, language)).props("color=primary")
+            elif key == "answer_question":
+                questions = recovery.get("questions") if isinstance(recovery.get("questions"), list) else []
+                question = questions[0] if questions and isinstance(questions[0], dict) else {}
+                answer = ui.input(str(question.get("question") or recovery.get("summary") or "Answer")).props("outlined").classes("min-w-[320px] flex-1")
+                ui.button(
+                    action.get("label") or "Answer question",
+                    icon="send",
+                    on_click=lambda: _schedule_action(_answer_and_continue_agent_async(backend, recovery, question, answer.value, state, refresh, language)),
+                ).props("color=primary")
+            elif key == "modify_request":
+                revision = ui.textarea("修改后的设计要求" if language == "zh" else "Revised design request").props("outlined autogrow").classes("min-w-[360px] flex-1")
+                ui.button(action.get("label") or "Modify request", icon="edit", on_click=lambda: _schedule_action(_revise_blocked_request_async(backend, overview, revision.value, state, refresh, language))).props("color=primary")
+            else:
+                ui.button(action.get("label") or "View technical details", icon="info", on_click=lambda: _show_recovery_details_dialog(ui, recovery, language)).props("outline")
+            if key != "view_details":
+                ui.button(
+                    "查看技术详情" if language == "zh" else "View technical details",
+                    icon="info",
+                    on_click=lambda: _show_recovery_details_dialog(ui, recovery, language),
+                ).props("outline")
+        if recovery.get("retryable"):
+            ui.label(
+                "重试只会创建新的有界尝试；历史证据和已接受结果保持不变。" if language == "zh"
+                else "A retry creates a new bounded attempt; historical evidence and accepted results remain unchanged."
+            ).classes("text-xs text-gray-500 mt-2")
+
+
+def _show_recovery_details_dialog(ui: Any, recovery: dict[str, Any], language: str) -> None:
+    with ui.dialog() as dialog, ui.card().classes("w-[640px] max-w-full"):
+        ui.label("技术详情" if language == "zh" else "Technical details").classes("text-xl font-semibold")
+        ui.label(str(recovery.get("why_it_stopped") or recovery.get("summary") or "")).classes("text-sm")
+        _key_values(ui, {
+            "Typed stop reason": recovery.get("technical_reason") or recovery.get("category"),
+            "Last Agent action": recovery.get("last_agent_action") or "Not recorded",
+            "Last system observation": recovery.get("last_observation") or "Not recorded",
+        })
+        history = recovery.get("history") if isinstance(recovery.get("history"), list) else []
+        if history:
+            with ui.expansion("恢复历史" if language == "zh" else "Recovery history", icon="timeline").classes("w-full"):
+                for item in history:
+                    if isinstance(item, dict):
+                        ui.label(f"{item.get('title')}: {item.get('summary') or item.get('stop_reason') or '—'}").classes("text-sm")
+        recommended = recovery.get("recommended_action") if isinstance(recovery.get("recommended_action"), dict) else {}
+        if recommended.get("key") and recommended.get("key") != "view_details":
+            ui.label(
+                ("建议下一步：" if language == "zh" else "Recommended next action: ")
+                + str(recommended.get("label") or recommended.get("key"))
+            ).classes("text-sm text-blue-700")
+        else:
+            ui.label(
+                "没有自动恢复操作。请保留当前证据，并根据上面的建议继续。" if language == "zh"
+                else "No automatic recovery is available. Existing evidence is preserved; continue with the recommendation above."
+            ).classes("text-sm text-gray-600")
+        ui.button("关闭" if language == "zh" else "Close", on_click=dialog.close).props("outline")
+    dialog.open()
 
 
 def _render_workbench_start_design(
@@ -1454,14 +1704,19 @@ def _render_workbench_result(
                             f"{('体积' if language == 'zh' else 'Volume')}: {geometry.get('volume')} mm³"
                         ).classes("text-sm")
             with ui.column().classes("gap-2"):
-                ui.label(i18n_copy(language, "not_verified")).classes("workflow-eyebrow")
+                ui.label(i18n_copy(language, "assumptions")).classes("workflow-eyebrow")
+                for item in result.get("assumptions", []):
+                    ui.label(f"◇ {item}").classes("text-sm text-blue-800")
+                ui.label(i18n_copy(language, "not_verified")).classes("workflow-eyebrow mt-2")
                 for item in result.get("unverified", []):
                     ui.label(f"△ {item}").classes("text-sm text-amber-800")
-
-        if result.get("assumptions"):
-            with ui.expansion(i18n_copy(language, "assumptions"), icon="lightbulb").classes("w-full mt-3"):
-                for item in result["assumptions"]:
-                    ui.label(f"• {item}").classes("text-sm")
+            with ui.column().classes("gap-2"):
+                ui.label(i18n_copy(language, "unsupported")).classes("workflow-eyebrow")
+                for item in result.get("unsupported", []):
+                    ui.label(f"— {item}").classes("text-sm text-red-800")
+                ui.label(i18n_copy(language, "not_requested")).classes("workflow-eyebrow mt-2")
+                for item in result.get("not_requested", []):
+                    ui.label(f"○ {item}").classes("text-sm text-gray-700")
         if result.get("limitations"):
             with ui.expansion(i18n_copy(language, "limitations"), icon="warning_amber").classes("w-full"):
                 for item in result["limitations"]:
@@ -1495,20 +1750,21 @@ def _render_workbench_result(
                         },
                     ):
                         accept.disable()
-                ui.button(
-                    i18n_copy(language, "revise"),
-                    icon="edit",
-                    on_click=lambda: _show_revision_dialog(
-                        ui,
-                        backend,
-                        str(_dict_get(overview.get("advanced"), "work_id")),
-                        part_id,
-                        result_id,
-                        state,
-                        refresh,
-                        language,
-                    ),
-                ).props("outline")
+                if not result.get("revision_in_progress"):
+                    ui.button(
+                        i18n_copy(language, "revise"),
+                        icon="edit",
+                        on_click=lambda: _show_revision_dialog(
+                            ui,
+                            backend,
+                            str(_dict_get(overview.get("advanced"), "work_id")),
+                            part_id,
+                            result_id,
+                            state,
+                            refresh,
+                            language,
+                        ),
+                    ).props("outline")
 
 
 def _render_workbench_parts_summary(
@@ -1892,9 +2148,111 @@ async def _continue_agent_async(
         )
         return ok, None if ok else "Agent activity did not persist new evidence or changed acceptance."
 
-    return await _execute_action_lifecycle(
+    result = await _execute_action_lifecycle(
         action, state, refresh, execute, language=language, verify=verify
     )
+    episode = result.get("episode") if isinstance(result, dict) and isinstance(result.get("episode"), dict) else {}
+    if result is not None and episode.get("status") != "completed":
+        execution = ActionExecutionState.from_action(
+            action,
+            status="succeeded",
+            message=("Agent 已安全停止；请按恢复建议继续。" if language == "zh" else "The Agent stopped safely; use the recovery guidance to continue."),
+        )
+        _set_action_execution(state, execution, action)
+        refresh()
+    return result
+
+
+async def _answer_and_continue_agent_async(
+    backend: WorkflowConsoleBackend,
+    recovery: dict[str, Any],
+    question: dict[str, Any],
+    answer: str | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> dict[str, Any] | None:
+    from uuid import uuid4
+
+    work_id = str(_dict_get(_dict_get(state.get("_last_page_data"), "selected_work"), "work_id") or state.get("selected_work_id") or "")
+    part_id = str(recovery.get("part_job_id") or "")
+    action = {"key": "continue_agent", "label": "Answer and continue", "target_work_id": work_id, "part_job_id": part_id}
+    if not answer or not answer.strip():
+        failed = ActionExecutionState.from_action(action, status="failed", message=_runtime_message(action, language, "failed"))
+        failed.error_detail = "请先回答问题。" if language == "zh" else "Answer the question first."
+        _set_action_execution(state, failed, action)
+        refresh()
+        return None
+    before = backend._read_work_manifest(work_id)
+    reference_count = len(before.get("artifact_references", []))
+    accepted_before = deepcopy(before.get("accepted_part_results"))
+
+    def execute() -> dict[str, Any]:
+        answer_result = backend.answer_work_part_design_question(
+            work_id,
+            part_id,
+            run_id=str(recovery.get("run_id")),
+            answer_id=f"answer_{uuid4().hex}",
+            question_artifact_id=str(recovery.get("question_artifact_id")),
+            field=str(question.get("field") or "clarification"),
+            question=str(question.get("question") or recovery.get("summary") or "Clarification"),
+            answer=answer.strip(),
+        )
+        episode = backend.run_work_part_design_episode(
+            work_id,
+            part_id,
+            request_id=f"answer_continue_{uuid4().hex}",
+            attempt_run_id=str(recovery.get("run_id")),
+            objective=(
+                "Continue the design using this user clarification: "
+                f"{question.get('field') or 'clarification'} = {answer.strip()}"
+            ),
+        )
+        return {"answer": answer_result, "episode": episode}
+
+    def verify(_result: dict[str, Any]) -> tuple[bool, str | None]:
+        after = backend._read_work_manifest(work_id)
+        ok = after.get("accepted_part_results") == accepted_before and len(after.get("artifact_references", [])) >= reference_count + 2
+        return ok, None if ok else "Clarification evidence or resumed Agent evidence was not persisted."
+
+    return await _execute_action_lifecycle(action, state, refresh, execute, language=language, verify=verify)
+
+
+async def _revise_blocked_request_async(
+    backend: WorkflowConsoleBackend,
+    overview: dict[str, Any],
+    revision: str | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> dict[str, Any] | None:
+    from uuid import uuid4
+
+    work = overview.get("work") if isinstance(overview.get("work"), dict) else {}
+    advanced = overview.get("advanced") if isinstance(overview.get("advanced"), dict) else {}
+    work_id = str(advanced.get("work_id") or state.get("selected_work_id") or "")
+    part_id = str(work.get("active_part") or "")
+    action = {"key": "revise_result", "label": "Revise design request", "target_work_id": work_id, "part_job_id": part_id}
+    if not revision or not revision.strip():
+        failed = ActionExecutionState.from_action(action, status="failed", message=_runtime_message(action, language, "failed"))
+        failed.error_detail = "请先描述修改后的要求。" if language == "zh" else "Describe the revised request first."
+        _set_action_execution(state, failed, action)
+        refresh()
+        return None
+    before = backend._read_work_manifest(work_id)
+    accepted_before = deepcopy(before.get("accepted_part_results"))
+
+    def execute() -> dict[str, Any]:
+        attempt = backend.create_work_part_attempt(work_id, part_id, prompt=revision.strip(), role="Revised primary design part")
+        run_id = attempt["part_job"]["active_attempt_run_id"]
+        episode = backend.run_work_part_design_episode(work_id, part_id, request_id=f"revision_{uuid4().hex}", attempt_run_id=run_id, objective=revision.strip())
+        return {"attempt": attempt, "episode": episode}
+
+    def verify(_result: dict[str, Any]) -> tuple[bool, str | None]:
+        after = backend._read_work_manifest(work_id)
+        return (after.get("accepted_part_results") == accepted_before, "Revision changed an accepted-result pointer." if after.get("accepted_part_results") != accepted_before else None)
+
+    return await _execute_action_lifecycle(action, state, refresh, execute, language=language, verify=verify)
 
 
 def _render_works(
@@ -1904,29 +2262,53 @@ def _render_works(
     on_select: Callable[[str], None],
     refresh: Callable[[], None],
 ) -> None:
-    works = data.get("works") or []
-    selected = data.get("selected_work_id")
-    with ui.card().classes("w-full"):
-        _label_with_help(ui, "Create Work", "创建一个真实 Work/Project 实体，只写 manifest，不启动 provider 或 CAD。", "text-lg font-medium")
-        with ui.row().classes("w-full items-center gap-2"):
-            title = ui.input("Title").classes("flex-1")
-            _help_icon(ui, "Work 的显示标题。会用于生成默认 work_id。")
-        with ui.row().classes("w-full items-start gap-2"):
-            description = ui.textarea("Description").props("outlined autogrow").classes("flex-1")
-            _help_icon(ui, "Work 的简短说明。只保存在 workspace manifest 中。")
-        result_key = "create_work_result"
-        if state.get(result_key):
-            ui.label(str(state[result_key])).classes("text-sm text-gray-600")
-        ui.button(
-            "Create Work",
-            icon="add_circle",
-            on_click=lambda: _create_work_ui(title.value, description.value, state, result_key, refresh),
-        ).tooltip("创建 Work manifest，不创建 run，不调用 provider。")
-    _label_with_help(ui, "Works", "当前 workspace 下的 Work 列表。点击行会切换到该 Work 的 Overview。", "text-xl font-semibold")
-    if not works:
-        ui.label("No Works in this workspace yet.").classes("text-gray-600")
+    language = str(data.get("language") or "en")
+    home = data.get("home") if isinstance(data.get("home"), dict) else {}
+    recent = home.get("recent_works") if isinstance(home.get("recent_works"), list) else []
+    with ui.row().classes("w-full items-start justify-between gap-3"):
+        with ui.column().classes("gap-1"):
+            ui.label("设计" if language == "zh" else "Works").classes("text-3xl font-semibold")
+            ui.label("每个 Work 是一个可持续修改的工程目标；每次 Agent 尝试都会保留为 Run。" if language == "zh" else "Each Work is one evolving engineering objective; every Agent attempt remains as a Run.").classes("text-gray-600")
+        with ui.column().classes("items-end gap-2"):
+            _new_design_dialog_button(ui, state, refresh, language)
+            toggle = ui.switch(
+                i18n_copy(language, "show_developer_content"),
+                value=bool(state.get("show_developer_content")),
+            )
+            toggle.on_value_change(lambda event: (state.__setitem__("show_developer_content", bool(event.value)), refresh()))
+    if not recent:
+        ui.label("还没有设计。" if language == "zh" else "No Works yet.").classes("text-gray-600")
         return
-    _render_work_table(ui, works, selected, on_select)
+    for item in recent:
+        attention = item.get("needs_user_action") is True
+        with ui.card().classes("w-full shadow-none border " + ("border-amber-300" if attention else "border-gray-200")):
+            with ui.row().classes("w-full items-center justify-between gap-4"):
+                with ui.column().classes("gap-1 min-w-0"):
+                    with ui.row().classes("items-center gap-2"):
+                        ui.label(item.get("title") or item.get("work_id")).classes("text-lg font-semibold")
+                        if attention:
+                            ui.badge("需要操作" if language == "zh" else "Action needed").classes("bg-amber-700")
+                    ui.label(f"{item.get('phase')} · {item.get('state')}").classes("text-sm text-gray-700")
+                    ui.label(str(item.get("next_action") or "")).classes("text-sm text-blue-700")
+                    ui.label(str(item.get("updated") or "")).classes("text-xs text-gray-500")
+                    classification = str(item.get("work_classification") or "user")
+                    if state.get("show_developer_content"):
+                        labels = {
+                            "user": "User Work",
+                            "product_example": "Product example",
+                            "developer_fixture": "Developer fixture",
+                            "compatibility_regression": "Compatibility regression",
+                            "infrastructure_test": "Infrastructure test",
+                        }
+                        purposes = {
+                            "developer_fixture": "Exercises a focused recovery or UI state.",
+                            "compatibility_regression": "Preserves an older deterministic behavior contract.",
+                            "infrastructure_test": "Checks local infrastructure, not product onboarding.",
+                        }
+                        ui.badge(labels.get(classification, classification)).classes("bg-slate-600")
+                        if classification in purposes:
+                            ui.label(purposes[classification]).classes("text-xs text-gray-500")
+                ui.button("打开设计" if language == "zh" else "Open Design", icon="arrow_forward", on_click=lambda _event=None, work=item: on_select(work["work_id"])).props("outline")
 
 
 def _render_work_table(
@@ -1985,6 +2367,9 @@ def _render_workflow_page_v2(
         return
     snapshot = page.get("view_mode") == "run_snapshot"
     language = str(data.get("language") or "en")
+    if page.get("projection_mode") == "agent_first" and not snapshot:
+        _render_agent_first_workflow_page(ui, page, on_select_run, on_select_current_work, language)
+        return
     work = page.get("work") if isinstance(page.get("work"), dict) else {}
     lineage = page.get("active_lineage") if isinstance(page.get("active_lineage"), dict) else {}
     with ui.element("section").classes("workflow-snapshot-banner w-full" if snapshot else "workflow-hero w-full"):
@@ -2034,6 +2419,40 @@ def _render_workflow_page_v2(
         ),
     )
     _render_selected_stage_detail_v2(ui, page.get("selected_stage"), data, actions, state, refresh, snapshot)
+
+
+def _render_agent_first_workflow_page(
+    ui: Any,
+    page: dict[str, Any],
+    on_select_run: Callable[[str], None],
+    on_select_current_work: Callable[[], None],
+    language: str,
+) -> None:
+    work = page.get("work") if isinstance(page.get("work"), dict) else {}
+    conclusion = page.get("current_conclusion") if isinstance(page.get("current_conclusion"), dict) else {}
+    with ui.element("section").classes("workflow-hero w-full"):
+        ui.label("当前设计流程" if language == "zh" else "CURRENT DESIGN FLOW").classes("workflow-eyebrow")
+        ui.label(work.get("title") or "Workflow").classes("text-2xl font-semibold")
+        ui.label("同一 Work 证据的四阶段产品视图；Run 历史仍保持不可变。" if language == "zh" else "A four-phase product view over the same Work evidence; Run history remains immutable.").classes("text-sm text-gray-600")
+    with ui.element("section").classes("workflow-hero w-full"):
+        ui.label("当前结论" if language == "zh" else "CURRENT CONCLUSION").classes("workflow-eyebrow")
+        ui.label(conclusion.get("title") or "Design ready").classes("text-xl font-semibold")
+        ui.label(conclusion.get("summary") or "").classes("text-sm text-gray-700")
+        if conclusion.get("rationale"):
+            ui.label(str(conclusion["rationale"])).classes("text-xs text-gray-500")
+    with ui.row().classes("workflow-stage-row w-full"):
+        stages = [item for item in page.get("stages", []) if isinstance(item, dict)]
+        for index, stage in enumerate(stages):
+            status = str(stage.get("status") or "not_started")
+            with ui.column().classes("workflow-step" + (" workflow-step-selected" if status in {"blocked", "needs_review", "running"} else "")):
+                ui.element("div").classes(f"workflow-dot status-{_dot_status(status)} kind-stage")
+                ui.label(stage.get("label") or stage.get("stage_name") or "").classes("text-sm font-semibold text-center")
+                ui.label(_display_status(status, language)).classes("workflow-node-status text-center")
+                ui.label(stage.get("short_summary") or "").classes("text-xs text-gray-500 text-center")
+            if index < len(stages) - 1:
+                ui.element("div").classes("workflow-connector")
+    with ui.element("section").classes("workflow-run-strip-panel w-full"):
+        _render_run_strip(ui, page.get("run_strip"), on_select_run, on_select_current_work, language=language)
 
 
 def _render_run_strip(
@@ -3587,39 +4006,106 @@ def _render_config(
     state: dict[str, Any],
     refresh: Callable[[], None],
 ) -> None:
-    config = data.get("provider_config") if isinstance(data.get("provider_config"), dict) else {}
-    identity = config.get("provider_identity") if isinstance(config.get("provider_identity"), dict) else {}
     workspace_config = data.get("workspace_config") if isinstance(data.get("workspace_config"), dict) else {}
+    readiness = data.get("product_readiness") if isinstance(data.get("product_readiness"), dict) else {}
+    provider_readiness = readiness.get("provider") if isinstance(readiness.get("provider"), dict) else {}
+    local_readiness = readiness.get("local_execution") if isinstance(readiness.get("local_execution"), dict) else {}
+    language = str(data.get("language") or "en")
+    draft = state.get("provider_draft") if isinstance(state.get("provider_draft"), dict) else None
+    if draft is None:
+        saved_provider = _provider_select_value(workspace_config)
+        draft = {
+            "provider": "deepseek" if saved_provider == "local" else saved_provider,
+            "model": str(workspace_config.get("model") or "deepseek-v4-flash"),
+            "api_key": "",
+            "base_url": str(workspace_config.get("base_url") or ""),
+            "timeout_seconds": workspace_config.get("timeout_seconds") or 60,
+            "max_retries": workspace_config.get("max_retries") if workspace_config.get("max_retries") is not None else 1,
+            "advancement_mode": workspace_config.get("advancement_mode") or "manual_confirm",
+        }
+        state["provider_draft"] = draft
+        state.setdefault(
+            "provider_draft_status",
+            "connected" if provider_readiness.get("ready") is True else "not_tested",
+        )
+    draft_credential = backend.read_provider_credential_source(str(draft.get("provider") or "deepseek"))
+
+    with ui.row().classes("w-full items-start justify-between gap-3"):
+        with ui.column().classes("gap-1"):
+            ui.label("设置" if language == "zh" else "Settings").classes("text-3xl font-semibold")
+            ui.label("连接 Agent 使用的 AI Provider，并检查本机 CAD 执行环境。" if language == "zh" else "Connect the AI provider used by the Agent and check local CAD execution.").classes("text-gray-600")
+        if state.get("settings_origin_work_id"):
+            ui.button("返回设计" if language == "zh" else "Return to Design", icon="arrow_back", on_click=lambda: _return_to_design(state, refresh)).props("outline")
+
     with ui.card().classes("w-full"):
-        _label_with_help(ui, "Workspace Configuration", "当前 workspace 级配置。这里只保存 provider、模型、超时、重试和推进模式，不保存 API key。", "text-xl font-semibold")
-        _key_values(ui, {
-            "Provider": workspace_config.get("provider") or identity.get("provider") or "local/mock",
-            "Model": workspace_config.get("model") or identity.get("model") or "Empty",
-            "Timeout": workspace_config.get("timeout_seconds") or identity.get("timeout_seconds") or "Empty",
-            "Retries": workspace_config.get("max_retries") if workspace_config.get("max_retries") is not None else "Empty",
-            "Advancement mode": workspace_config.get("advancement_mode") or "manual_confirm",
-            "API keys": "Read from environment only; never shown or saved here.",
-        })
-        with ui.row().classes("w-full items-center gap-2"):
-            provider = ui.select(options=["local", "deepseek", "openai"], value=_provider_select_value(workspace_config or identity), label="Provider").classes("flex-1")
-            _help_icon(ui, "选择当前 workspace 使用的 provider。local 用于本地/mock；deepseek/openai 需要环境变量中已有 API key。")
-        with ui.row().classes("w-full items-center gap-2"):
-            mode = ui.select(options=["manual_confirm", "auto_advance"], value=workspace_config.get("advancement_mode") or "manual_confirm", label="Advancement mode").classes("flex-1")
-            _help_icon(ui, "manual_confirm 会等待人工确认再推进 part runs；auto_advance 在满足输入条件后自动创建下一步 run 容器。")
-        with ui.row().classes("w-full items-center gap-2"):
-            model = ui.input("Model", value=str(workspace_config.get("model") or "")).classes("flex-1")
-            _help_icon(ui, "provider 使用的模型名称。留空时使用后端默认模型或环境配置。")
-        with ui.row().classes("w-full items-center gap-2"):
-            timeout = ui.number("Timeout seconds", value=workspace_config.get("timeout_seconds") or None, min=1, max=300).classes("flex-1")
-            _help_icon(ui, "单次 provider 请求的超时时间，单位是秒。")
-        with ui.row().classes("w-full items-center gap-2"):
-            retries = ui.number("Max retries", value=workspace_config.get("max_retries") if workspace_config.get("max_retries") is not None else None, min=0, max=5).classes("flex-1")
-            _help_icon(ui, "provider 请求失败时的最大重试次数。")
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label("AI Provider").classes("text-xl font-semibold")
+            status = str(state.get("provider_draft_status") or "not_tested")
+            status_label_text = {
+                "not_tested": "未测试" if language == "zh" else "Not tested",
+                "testing": "测试中" if language == "zh" else "Testing…",
+                "connected": "已连接" if language == "zh" else "Connected",
+                "failed": "连接失败" if language == "zh" else "Connection failed",
+                "changed_since_test": "测试后已修改" if language == "zh" else "Changed since test",
+            }.get(status, status)
+            ui.badge(status_label_text).classes("bg-green-700" if status == "connected" else "bg-amber-700" if status in {"not_tested", "changed_since_test", "testing"} else "bg-red-700")
+
+        def changed(field: str, value: Any) -> None:
+            if _mark_provider_draft_changed(state, field, value):
+                refresh()
+
+        provider = ui.select(options={"deepseek": "DeepSeek", "openai": "OpenAI"}, value=draft["provider"], label="Provider").classes("w-full")
+        model = ui.input("Model", value=draft["model"]).classes("w-full")
+        api_key = ui.input("API Key", value=draft.get("api_key") or "", password=True, password_toggle_button=True).props("autocomplete=new-password").classes("w-full")
+        credential_source = str(draft_credential.get("source") or "unavailable")
+        credential_variable = draft_credential.get("variable")
+        source_labels = {
+            "session": "当前会话" if language == "zh" else "current session",
+            "process_environment": "进程环境变量" if language == "zh" else "process environment",
+            "project_env": "项目根目录 .env" if language == "zh" else "project-root .env",
+            "unavailable": "未检测到" if language == "zh" else "not detected",
+        }
+        ui.label(
+            (f"凭据来源：{source_labels.get(credential_source, credential_source)}" if language == "zh" else f"Credential source: {source_labels.get(credential_source, credential_source)}")
+            + (f" · {credential_variable}" if credential_variable else "")
+        ).classes("text-sm text-green-700" if draft_credential.get("available") else "text-sm text-amber-700")
+        ui.label(
+            "优先级：当前会话 → 进程环境变量 → 项目根目录 .env。值从不显示，也不会写入 workspace、日志或页面数据。" if language == "zh"
+            else "Precedence: current session → process environment → project-root .env. The value is never displayed or written to workspace, logs, or page data."
+        ).classes("text-xs text-gray-500")
+        provider.on_value_change(lambda event: changed("provider", event.value))
+        model.on_value_change(lambda event: changed("model", event.value or ""))
+        api_key.on_value_change(lambda event: changed("api_key", event.value or ""))
+
+        with ui.expansion("高级连接设置" if language == "zh" else "Advanced connection", icon="tune").classes("w-full"):
+            base_url = ui.input("Base URL", value=draft["base_url"], placeholder="https://api.deepseek.com").classes("w-full")
+            timeout = ui.number("Timeout seconds", value=draft["timeout_seconds"], min=1, max=300).classes("w-full")
+            retries = ui.number("Max retries", value=draft["max_retries"], min=0, max=5).classes("w-full")
+            mode = ui.select(options=["manual_confirm", "auto_advance"], value=draft["advancement_mode"], label="Advancement mode").classes("w-full")
+            base_url.on_value_change(lambda event: changed("base_url", event.value or ""))
+            timeout.on_value_change(lambda event: changed("timeout_seconds", event.value))
+            retries.on_value_change(lambda event: changed("max_retries", event.value))
+            mode.on_value_change(lambda event: changed("advancement_mode", event.value))
         with ui.row().classes("gap-2"):
-            ui.button("Save", icon="save", on_click=lambda: _save_workspace_config_ui(backend, provider.value, mode.value, model.value, timeout.value, retries.value, state, refresh)).tooltip("保存 workspace 级配置到 config.json，不写入 API key。")
-            ui.button("Test", icon="check_circle", on_click=lambda: _test_provider_ui(backend, state, refresh)).props("outline").tooltip("使用当前配置测试 provider 连接；API key 仍只从环境变量读取。")
-        if state.get("config_result") is not None:
-            ui.markdown(f"```json\n{json.dumps(state['config_result'], indent=2, sort_keys=True)}\n```").classes("w-full mono")
+            test_button = ui.button("测试当前草稿" if language == "zh" else "Test current draft", icon="network_check", on_click=lambda: _schedule_action(_test_provider_draft_async(backend, state, refresh, language))).props("outline")
+            save_button = ui.button("保存并验证" if language == "zh" else "Save & Verify", icon="save", on_click=lambda: _schedule_action(_save_verify_provider_draft_async(backend, state, refresh, language))).props("color=primary")
+            if status == "testing":
+                test_button.disable()
+                save_button.disable()
+        result = state.get("provider_draft_result") if isinstance(state.get("provider_draft_result"), dict) else {}
+        if status == "connected":
+            ui.label("连接已通过真实请求验证；安全配置已保存。" if language == "zh" else "The connection passed a real request and safe settings are saved.").classes("text-sm text-green-700")
+        elif status == "failed":
+            ui.label(str(result.get("message") or ("请检查密钥、模型和网络后重试。" if language == "zh" else "Check the key, model, and network, then try again."))).classes("text-sm text-red-700")
+
+    with ui.card().classes("w-full"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label("本地 CAD 执行" if language == "zh" else "Local CAD execution").classes("text-xl font-semibold")
+            ui.badge("Ready" if local_readiness.get("ready") else "Unavailable").classes("bg-green-700" if local_readiness.get("ready") else "bg-red-700")
+        ui.label(f"CadQuery · isolated execution: {local_readiness.get('isolated_execution') or 'unknown'}").classes("text-sm")
+        codes = local_readiness.get("reason_codes") if isinstance(local_readiness.get("reason_codes"), list) else []
+        if codes:
+            ui.label(", ".join(str(item) for item in codes)).classes("text-xs text-gray-500")
 
 
 def _create_work_ui(
@@ -3644,6 +4130,159 @@ def _create_work_ui(
         state["selected_work_id"] = response["data"]["work"]["work_id"]
         state["active_page"] = "overview"
     refresh()
+
+
+def _go_to_settings(state: dict[str, Any], refresh: Callable[[], None]) -> None:
+    state["settings_origin_work_id"] = state.get("selected_work_id")
+    state["active_page"] = "config"
+    refresh()
+
+
+def _new_design_dialog_button(ui: Any, state: dict[str, Any], refresh: Callable[[], None], language: str) -> None:
+    with ui.dialog() as dialog, ui.card().classes("w-[680px] max-w-full"):
+        ui.label("新建设计" if language == "zh" else "New Design").classes("text-2xl font-semibold")
+        ui.label(
+            "从你的真实要求创建一个 Work 和首个 Part Job。Agent 只会在你按下开始后运行。" if language == "zh"
+            else "Create a Work and its first Part Job from your actual request. The Agent runs only after you press Start."
+        ).classes("text-sm text-gray-600")
+        request = ui.textarea(
+            "设计要求" if language == "zh" else "Design request",
+            value=state.get("new_design_request") or "",
+            placeholder="例如：设计一个可安装到 2020 铝型材的紧凑相机支架……" if language == "zh" else "For example: Design a compact camera bracket for 2020 extrusion…",
+        ).props("outlined autogrow").classes("w-full")
+        title = ui.input("标题（可选）" if language == "zh" else "Title (optional)", value=state.get("new_design_title") or "").classes("w-full")
+        request.on_value_change(lambda event: state.__setitem__("new_design_request", event.value or ""))
+        title.on_value_change(lambda event: state.__setitem__("new_design_title", event.value or ""))
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button("取消" if language == "zh" else "Cancel", on_click=dialog.close).props("outline")
+            ui.button(
+                "创建设计" if language == "zh" else "Create Design",
+                icon="arrow_forward",
+                on_click=lambda: _create_product_design_ui(request.value, title.value, state, refresh, dialog, language),
+            ).props("color=primary")
+    ui.button("新建设计" if language == "zh" else "New Design", icon="add", on_click=dialog.open).props("color=primary")
+
+
+def _create_product_design_ui(
+    request: str | None,
+    title: str | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    dialog: Any,
+    language: str,
+) -> None:
+    backend = state.get("_backend")
+    action = {"key": "start_design", "label": "New Design"}
+    if backend is None or not isinstance(request, str) or not request.strip():
+        failed = ActionExecutionState.from_action(action, status="failed", message=_runtime_message(action, language, "failed"))
+        failed.error_detail = "请先描述设计要求。" if language == "zh" else "Describe the design request first."
+        _set_action_execution(state, failed, action)
+        refresh()
+        return
+    response = dispatch_route(backend, "create_product_design", body={"request": request.strip(), "title": (title or "").strip() or None})
+    if not response.get("ok"):
+        failed = ActionExecutionState.from_action(action, status="failed", message=_runtime_message(action, language, "failed"))
+        failed.error_detail = str(response.get("error") or "Unable to create design.")
+        _set_action_execution(state, failed, action)
+        refresh()
+        return
+    result = response["data"]
+    state["selected_work_id"] = result["work_id"]
+    state["selected_run_id"] = None
+    state["view_mode"] = "current_work"
+    state["active_page"] = "overview"
+    state["new_design_request"] = ""
+    state["new_design_title"] = ""
+    dialog.close()
+    _set_action_execution(state, ActionExecutionState.from_action(action, status="succeeded", message=_runtime_message(action, language, "success")), action)
+    refresh()
+
+
+async def _start_live_product_example_async(
+    backend: WorkflowConsoleBackend | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> dict[str, Any] | None:
+    action = {"key": "start_design", "label": "Start Product Example", "target_work_id": "new"}
+    if backend is None:
+        return None
+
+    def execute() -> dict[str, Any]:
+        return backend.start_live_product_example()
+
+    def verify(result: dict[str, Any]) -> tuple[bool, str | None]:
+        manifest = backend._read_work_manifest(str(result.get("work_id")))
+        ok = not manifest.get("artifact_references") and not manifest.get("accepted_part_results")
+        return ok, None if ok else "Live example did not begin from an empty evidence state."
+
+    result = await _execute_action_lifecycle(action, state, refresh, execute, language=language, verify=verify)
+    if result is not None:
+        state["selected_work_id"] = result["work_id"]
+        state["selected_run_id"] = None
+        state["view_mode"] = "current_work"
+        state["active_page"] = "overview"
+        refresh()
+    return result
+
+
+async def _open_product_example_async(
+    backend: WorkflowConsoleBackend | None,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> dict[str, Any] | None:
+    action = {
+        "key": "open_product_example",
+        "label": "Open Product Example",
+        "target_work_id": "product_golden",
+    }
+    if backend is None:
+        failed = ActionExecutionState.from_action(
+            action,
+            status="failed",
+            message=_runtime_message(action, language, "failed"),
+        )
+        failed.error_detail = "Backend is unavailable."
+        _set_action_execution(state, failed, action)
+        refresh()
+        return None
+
+    def execute() -> dict[str, Any]:
+        return backend.open_product_golden_example()
+
+    def verify(result: dict[str, Any]) -> tuple[bool, str | None]:
+        work_id = result.get("work_id")
+        if not isinstance(work_id, str):
+            return False, "Product Example did not return a Work."
+        manifest = backend._read_work_manifest(work_id)
+        metadata = _dict_get(manifest, "metadata") or {}
+        has_reviewable = any(
+            isinstance(item, dict)
+            and item.get("checkpoint") == "reviewable_result"
+            and item.get("trust_role") == "reviewable_result"
+            for item in manifest.get("artifact_references", [])
+        )
+        ok = metadata.get("example_classification") == "product_golden" and has_reviewable
+        return ok, None if ok else "Product Example is missing its reviewable product evidence."
+
+    result = await _execute_action_lifecycle(
+        action,
+        state,
+        refresh,
+        execute,
+        language=language,
+        verify=verify,
+    )
+    if result is not None:
+        state["selected_work_id"] = result["work_id"]
+        state["selected_run_id"] = None
+        state["view_mode"] = "current_work"
+        state["selected_node_id"] = None
+        state["selected_stage_id"] = None
+        state["active_page"] = "overview"
+        refresh()
+    return result
 
 
 def _create_golden_example_ui(mode: str, state: dict[str, Any], refresh: Callable[[], None]) -> None:
@@ -3809,6 +4448,103 @@ def _configure_provider_ui(
 
 def _test_provider_ui(backend: WorkflowConsoleBackend, state: dict[str, Any], refresh: Callable[[], None]) -> None:
     state["config_result"] = dispatch_route(backend, "test_provider_connection")
+    refresh()
+
+
+def _provider_draft_body(state: dict[str, Any]) -> dict[str, Any]:
+    draft = state.get("provider_draft") if isinstance(state.get("provider_draft"), dict) else {}
+    body: dict[str, Any] = {
+        "provider": draft.get("provider") or "deepseek",
+        "model": str(draft.get("model") or "deepseek-v4-flash").strip(),
+    }
+    for key in ("base_url", "api_key"):
+        value = draft.get(key)
+        if isinstance(value, str) and value.strip():
+            body[key] = value.strip()
+    for key in ("timeout_seconds", "max_retries"):
+        value = draft.get(key)
+        if value not in (None, ""):
+            body[key] = int(value)
+    return body
+
+
+def _mark_provider_draft_changed(state: dict[str, Any], field: str, value: Any) -> bool:
+    draft = state.setdefault("provider_draft", {})
+    draft[field] = value
+    if state.get("provider_draft_status") == "connected":
+        state["provider_draft_status"] = "changed_since_test"
+        return True
+    return False
+
+
+async def _test_provider_draft_async(
+    backend: WorkflowConsoleBackend,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    state["provider_draft_status"] = "testing"
+    state["provider_draft_result"] = {}
+    refresh()
+    response = await asyncio.to_thread(dispatch_route, backend, "test_provider_connection", body=_provider_draft_body(state))
+    result = response.get("data") if response.get("ok") and isinstance(response.get("data"), dict) else {}
+    connected = result.get("status") == "ok"
+    state["provider_draft_status"] = "connected" if connected else "failed"
+    error = result.get("error") if isinstance(result.get("error"), dict) else {}
+    state["provider_draft_result"] = {
+        "status": "connected" if connected else "failed",
+        "message": (
+            ("连接测试通过。保存并验证后会用于此工作区。" if language == "zh" else "Connection test passed. Save & Verify to use it for this workspace.")
+            if connected
+            else _provider_error_message(str(error.get("category") or response.get("error") or "connection_failed"), language)
+        ),
+    }
+    refresh()
+
+
+async def _save_verify_provider_draft_async(
+    backend: WorkflowConsoleBackend,
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    state["provider_draft_status"] = "testing"
+    state["provider_draft_result"] = {}
+    refresh()
+    response = await asyncio.to_thread(dispatch_route, backend, "save_and_verify_provider", body=_provider_draft_body(state))
+    result = response.get("data") if response.get("ok") and isinstance(response.get("data"), dict) else {}
+    connected = result.get("status") == "ok" and result.get("saved") is True
+    if connected:
+        draft = state.get("provider_draft") if isinstance(state.get("provider_draft"), dict) else {}
+        backend.write_workspace_config({"advancement_mode": draft.get("advancement_mode") or "manual_confirm"}, merge=True)
+        draft["api_key"] = ""
+    state["provider_draft_status"] = "connected" if connected else "failed"
+    verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
+    error = verification.get("error") if isinstance(verification.get("error"), dict) else {}
+    state["provider_draft_result"] = {
+        "status": "connected" if connected else "failed",
+        "message": (
+            ("连接已验证并保存。" if language == "zh" else "Connection verified and saved.")
+            if connected
+            else _provider_error_message(str(error.get("category") or response.get("error") or "connection_failed"), language)
+        ),
+    }
+    refresh()
+
+
+def _provider_error_message(category: str, language: str) -> str:
+    if "auth" in category.lower():
+        return "身份验证失败，请检查 API Key。" if language == "zh" else "Authentication failed. Check the API key."
+    if "timeout" in category.lower():
+        return "连接超时，请检查网络或增加超时时间。" if language == "zh" else "The connection timed out. Check the network or increase the timeout."
+    return "连接失败，请检查 Provider、模型、Base URL 和网络。" if language == "zh" else "Connection failed. Check the provider, model, Base URL, and network."
+
+
+def _return_to_design(state: dict[str, Any], refresh: Callable[[], None]) -> None:
+    work_id = state.pop("settings_origin_work_id", None)
+    if isinstance(work_id, str):
+        state["selected_work_id"] = work_id
+    state["active_page"] = "overview"
     refresh()
 
 

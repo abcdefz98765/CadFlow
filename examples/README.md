@@ -1,116 +1,66 @@
-# Examples
+# CadFlow Examples
 
-Examples are split by scope.
+Examples are classified by purpose. Files under `examples/` are not all
+user-facing product examples, and passing one category does not prove another.
 
-The static reviewed-part summaries in
-`reviewed_part_generic_link_like/` document domain intent normalization to a
-generic CAD IR family without committing generated STEP/STL files. Negative
-architecture examples live in `negative_no_template_fallback/`.
+## LIVE PRODUCT EXAMPLE
 
-`golden_desktop_robot_arm/` expands that contract into a complete static golden
-workflow from prompt and requirement clarification through Workflow Review. It
-contains expected summaries only and does not ship generated CAD binaries.
+The primary **Start Product Example** action creates a new micro-servo bracket
+Work at the real beginning: the original request, one owned Part Job attempt,
+and no generated design, geometry, reviewable result, or accepted pointer. It
+uses the currently configured external provider and the real bounded Agent,
+Tool Broker, sandbox, inspection, and publication route. It is experimental
+and stochastic: it may ask a question, repair, stop safely, or produce a
+different valid design. It is not a reproducibility fixture.
 
-```text
-examples/
-  parts/
-    mounting_plate/
-    circular_button/
-  prompt_pipeline/
-    run_prompt_examples.py
-  workflow_console/
-    example_works.json
-  assemblies/
-    pet_button/
-      parts/
-        pet_button_base/
-        pet_button_cap/
-        pet_button_switch_plate/
-        pet_button_tactile_switch/
-      assembly_plan.json
-      assembly_plan.md
-      assembly.json
-      constraint_assembly.json
-      README.md
-    enclosure/
-      parts/
-        enclosure_base/
-        enclosure_lid/
-        spacer/
-        wall_bracket/
-      assembly.json
-      constraint_assembly.json
-      README.md
-```
+## COMPLETED PRODUCT GOLDEN
 
-## Standalone Parts
+| Example | Purpose | Current product behavior |
+| --- | --- | --- |
+| `canonical_product_golden/` | Reproducible completed Agent-first single-Part Job snapshot | Secondary. Open it with **Open Completed Example**. It uses a scripted provider, the registered model-program path, controlled execution, STEP inspection, reviewable publication, and the existing Accept/Revise routes. |
 
-Standalone part examples live in `examples/parts/<part>/`.
+The Product Golden proves the product journey, durable projection, Workbench,
+geometry presentation, and acceptance/revision behavior. It does not prove
+external-provider design quality. It requires no external API credential.
 
-```bash
-python examples/parts/mounting_plate/model.py
-python examples/parts/circular_button/model.py
-```
+## BENCHMARK / EVALUATION
 
-`circular_button` is a pet communication button concept with a large paw-friendly
-press surface, tactile-switch pocket, terminal clearance slots, anti-slip pad
-recesses, and a wire outlet. For a realistic multi-part design, prefer the
-`examples/assemblies/pet_button/` assembly.
+| Example | Purpose | Product claim |
+| --- | --- | --- |
+| `provider_smoke/parse_requirement_smoke.py` | Real-provider JSON contract check | Provider evaluation only. |
+| `provider_smoke/create_workflow_smoke.py` | Real-provider legacy Requirement/Planning boundary | Compatibility evaluation only. |
+| `provider_smoke/provider_create_eval.py` | Curated provider-create cases | Evaluation only; not general CAD coverage. |
+| `provider_smoke/normalized_design_eval.py` | Normalized provider design cases | Evaluation only; assembly prompts stop at planning. |
+| `provider_smoke/reviewed_part_single_create_smoke.py` | Staged legacy reviewed-one-part boundary | Compatibility evaluation; never full assembly. |
+| `prompt_pipeline/` | Manual deterministic prompt-to-IR evaluation | Compatibility evaluation. |
 
-## Prompt Pipeline
+The formal five-case external-provider benchmark will assess real Agent design
+quality, strategy, repair, and `ask_user` behavior. It is intentionally not the
+Live Product Example or Completed Product Golden and is not run by M2.7.
 
-Prompt pipeline examples live in `examples/prompt_pipeline/`. They are manual
-debug runs for the full deterministic path:
+## COMPATIBILITY / REGRESSION
 
-```text
-prompt -> requirement.json -> planning_artifact.json -> input_ir.json -> model.step/model.stl -> report/trace
-```
+| Example | Purpose | Current status |
+| --- | --- | --- |
+| `golden_desktop_robot_arm/` and `scripts/run_golden_desktop_robot_arm.py` | Former Requirement/Planning/reviewed-part/CAD IR Golden | Preserved regression and multi-part planning evidence. It is not the primary product example and does not generate a complete robot arm or Assembly Job. |
+| `reviewed_part_generic_link_like/` | Generic-family reviewed-part normalization fixtures | Historical compatibility evidence. |
+| `workflow_console/` | Static schema-v1 Work templates for legacy console states | Compatibility fixtures, not the Product Golden. |
+| `ir_pipeline/` | Deterministic closed-family CAD IR executor fixtures | Regression coverage for the compatibility pipeline. |
+| `parts/` | Standalone CadQuery model scripts | Historical model regression/demo assets. |
+| `assemblies/enclosure/` and `assemblies/pet_button/` | Disconnected assembly intent, placement, and validator demos | Historical/internal; not executable canonical Assembly Jobs or Deliverables. |
+| `workflow/mounting_plate_demo.py` | Former workflow orchestration demo | Compatibility regression. |
+| `negative_no_template_fallback/` | Negative architecture assertions | Regression evidence that unrelated templates must not replace intent. |
 
-```bash
-python examples/prompt_pipeline/run_prompt_examples.py
-python examples/prompt_pipeline/run_prompt_examples.py mounting_plate_by_holes
-```
+## INFRASTRUCTURE SMOKE
 
-Generated artifacts are written to `outputs/prompt_pipeline/<case_id>/` and are
-not tracked. If Requirement or Planning returns a `return` gate decision, the
-run stops before `input_ir.json` and model artifacts, but still writes a short
-report and trace for review. Each run also writes `prompt_summary.json` and
-`prompt_summary.md` for quick inspection of requirement status, CAD Brief
-targets, measured report targets, agent attempts, and file paths. Benchmarks
-remain IR-first under `benchmarks/`.
+| Example | Purpose | Product claim |
+| --- | --- | --- |
+| `provider_smoke/tool_broker_gate_eval.py` | Tool Broker authority and fail-closed capability gate | Infrastructure boundary only. |
+| `provider_smoke/work_design_episode_eval.py` | Owned Part Job episode persistence and replay | Infrastructure route only; no geometry. |
+| `provider_smoke/model_program_policy_eval.py` | CadQuery v1 static source policy | Static policy only; no execution. |
+| `provider_smoke/model_program_episode_eval.py` | Attested WSL2 model-program episode | Internal execution acceptance, not publication. |
+| `provider_smoke/reviewable_product_route_eval.py` | Reviewable publication plus explicit Accept/Revise authority | Current-host infrastructure/product-route smoke in a temporary Workspace. |
 
-## Workflow Console Workspace Examples
-
-Workflow Console examples live in `examples/workflow_console/`. They are
-path-independent static Work templates for the NiceGUI console. In the New
-Workspace dialog, enable `Include example Works` to copy the examples into the
-selected workspace. This initializes three offline Works for single-part,
-multi-part planning, and reviewed one-part workflow inspection without calling
-providers, running CAD, or generating assemblies.
-
-## Assemblies
-
-Assembly examples live in `examples/assemblies/<assembly>/`.
-
-Each assembly owns:
-
-- `parts/`: component part scripts for that assembly.
-- `assembly_plan.json` / `assembly_plan.md`: traceable assembly intent and confirmation gate.
-- `assembly.json`: absolute placement assembly config.
-- `constraint_assembly.json`: lightweight constraint placement config.
-- `README.md`: runbook for the assembly.
-
-```bash
-python examples/assemblies/enclosure/parts/enclosure_base/model.py
-python -m ai_native_cad.assembly_validator examples/assemblies/enclosure/assembly.json
-```
-
-Pet button assembly:
-
-```bash
-python examples/assemblies/pet_button/parts/pet_button_base/model.py
-python examples/assemblies/pet_button/parts/pet_button_switch_plate/model.py
-python examples/assemblies/pet_button/parts/pet_button_tactile_switch/model.py
-python examples/assemblies/pet_button/parts/pet_button_cap/model.py
-python -m ai_native_cad.assembly_validator examples/assemblies/pet_button/assembly.json
-```
+Generated files remain ignored unless a fixture explicitly states otherwise.
+Useful regression fixtures are retained even when their original UI journey is
+no longer the canonical product experience.

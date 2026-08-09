@@ -20,6 +20,8 @@ Current delivery order:
 ```text
 M2 backend vertical slice
   -> M2.5 Workbench MVP usability gate
+  -> M2.6 canonical Product Example and guided design story
+  -> M2.7 onboarding, Settings, recovery, and Live Agent Example
   -> M2 external-provider benchmark acceptance
   -> M3 feature graph
   -> M4 assembly
@@ -290,6 +292,89 @@ Status:
 - canonical product architecture is unchanged;
 - no external-provider benchmark, sandbox/policy, feature graph, CAD family,
   Assembly execution, or Deliverable Package work is included.
+
+## M2.6 — Canonical Product Example and guided design story
+
+Goal:
+
+- make the implemented single-Part Job product understandable without internal
+  workflow, artifact, Run, or execution vocabulary.
+
+Scope:
+
+- one directly loadable compact micro-servo bracket Product Golden;
+- scripted provider for reproducibility, clearly separated from external-
+  provider design-quality acceptance;
+- durable original-request and concise Agent-design projections;
+- a compact request → design → build/evaluate → result evidence chain;
+- prominent reuse of the existing geometry viewer and measured facts;
+- explicit verified, assumed, unverified, unsupported, and not-requested scope;
+- preserved Detailed Workflow, Accept, Revise, Advanced evidence, i18n, and
+  responsive layout;
+- an audited example index that classifies product, benchmark, compatibility,
+  and infrastructure examples.
+
+Acceptance:
+
+- **Open Product Example** creates or reopens the Product Golden and navigates
+  to Overview / Design without external API credentials;
+- the former Desktop Robot Arm Golden remains regression evidence but is not
+  promoted as the current product experience;
+- a normal user can understand request, Agent design, generated geometry,
+  actual validation, current phase, and next action without raw JSON;
+- reviewable acceptance and natural-language revision preserve lineage and the
+  prior accepted result;
+- English, Chinese, 1440px, 1024px, and mobile paths pass real-browser checks.
+
+Out of scope:
+
+- the five-case external-provider benchmark;
+- new CAD families, sandbox or Tool Broker changes, feature graph, Assembly Job
+  execution, Deliverables, BOM, drawings, or canonical architecture changes.
+
+Status:
+
+- implementation complete on 2026-08-08; automated and real-browser evidence
+  is recorded in current product readiness.
+
+## M2.7 — Onboarding, Settings, recovery, and Live Agent Example
+
+Goal:
+
+- let a normal user start a real design, establish real Provider/local-CAD
+  readiness, understand a safe stop, and continue the same Work.
+
+Scope:
+
+- Home / Works / Settings product language over the existing page ids;
+- New Design and beginning-state Live Product Example actions;
+- DeepSeek-first draft, Test, and Save & Verify settings with session-memory or
+  environment credentials and no plaintext secret persistence;
+- real readiness summaries, Agent-first four-phase Workflow projection, and
+  product recovery owners/actions;
+- append-only clarification answer evidence and continuation through the
+  existing bounded Agent route;
+- the M2.6 Completed Product Golden retained as the deterministic snapshot.
+- explicit Product Example teaching cards and a normal/developer Work taxonomy;
+- durable sanitized Agent Output and recovery history across clarification and
+  resumed attempts;
+- credential discovery from session, process environment, or allowlisted
+  project-root `.env`, with source-only Settings presentation.
+
+Acceptance:
+
+- real-browser bilingual and responsive onboarding/settings/recovery/live
+  example paths pass at 1440px, 1024px, and 390–430px;
+- the real configured provider may ask, repair, fail, or publish reviewable
+  geometry honestly, and reviewable output is never auto-accepted;
+- full regression remains green. The formal five-case external-provider
+  benchmark remains the next M2 acceptance gate.
+
+Out of scope:
+
+- formal provider benchmark, M3 feature graph, new CAD families, broader
+  sandbox/Tool Broker authority, Assembly execution, Deliverable Packages,
+  BOM, drawings, or canonical architecture changes.
 
 ## M3 — General structured geometry contract
 
