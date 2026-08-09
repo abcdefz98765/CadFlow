@@ -1,516 +1,262 @@
 # CadFlow Target Milestones
 
-Status date: 2026-08-01.
+Status date: 2026-08-09.
 
-This roadmap implements the Agent-first target in `docs/FINAL-PRD.md`.
+This roadmap implements `docs/FINAL-PRD.md` and the canonical architecture.
+
+Detailed historical package evidence remains in Git history and status/acceptance records. This roadmap intentionally stays product-oriented.
 
 ## Sequencing principles
 
-- Turn each implemented backend slice into a usable product surface before
-  expanding modeling breadth.
-- Constrain side effects and publication, not the Agent's design strategy.
-- Build one end-to-end vertical slice before generalizing registries.
-- Measure progress with non-template geometry benchmarks.
-- Make Part Job attempts first-class before claiming multi-part progression.
-- Integrate assembly, BOM, and drawings into normal Work deliverables.
-- Preserve legacy Runs and deterministic tests during migration.
+1. Turn implemented backend capability into a clear user workflow before expanding backend breadth.
+2. Treat Workflow as a dynamic projection of Work/Part Job/Run/result state, not a fixed script.
+3. Constrain unsafe side effects and false publication, not useful Agent design choices.
+4. Prefer the smallest implementation that closes a real user loop.
+5. Do not generalize one current problem into a platform/framework without demonstrated need.
+6. Do not add security/audit layers after the existing trust boundary is sufficient unless a concrete gap requires them.
+7. Let real Agent failures and user experience decide whether Feature Graph, additional runtime abstraction, or other architecture expansion is necessary.
+8. Do not implement Assembly/Deliverables before Part Job workflows are clear and actually usable.
+9. Reuse existing NiceGUI, CAD, Workflow graph, viewer, action lifecycle, and open-source tooling wherever adequate.
 
 Current delivery order:
 
 ```text
-M2 backend vertical slice
-  -> M2.5 Workbench MVP usability gate
-  -> M2.6 canonical Product Example and guided design story
-  -> M2.7 onboarding, Settings, recovery, and Live Agent Example
-  -> M2 external-provider benchmark acceptance
-  -> M3 feature graph
-  -> M4 assembly
-  -> M5 deliverables
+M1 runtime/domain foundation               complete
+M2 backend Agentic vertical slice          implemented, formal acceptance pending
+M2.5 Workbench MVP                         complete
+M2.6 Product Golden / design story         complete
+M2.7 onboarding / Settings / recovery      complete
+M2.8 Dynamic Work Graph                    NEXT
+M2 external-provider product trial         after M2.8
+M3 capability-expansion decision           evidence-driven
+M4 multi-Part / Assembly                   later
+M5 Deliverables                            later
 ```
 
-## M0 — Documentation and architecture correction
+## M0 — Architecture correction
 
 Goal:
 
-- replace the former fixed workflow-first target with an Agent-first design
-  workbench target.
+- establish Agent-first Work/Run/Part Job/acceptance architecture;
+- remove the former fixed-stage product requirement.
 
-Required outcomes:
+Status: complete.
 
-- one authoritative PRD;
-- one canonical architecture;
-- four user phases;
-- structured and sandboxed model-program candidate paths;
-- updated workflow, Agent, UX, roadmap, task, and readiness contracts;
-- competing legacy architecture and roadmap documents removed;
-- implementation gaps stated honestly.
-
-Status:
-
-- complete on 2026-07-25;
-- no product behavior is changed by this milestone.
-
-## M1 — Runtime consolidation and domain foundations
+## M1 — Runtime/domain foundation
 
 Goal:
 
-- create one reliable execution spine for the new product.
+- establish reliable Work, Run, Part Job, lineage, artifact-reference, and explicit-acceptance foundations.
 
-Required outcomes:
+Key accepted behavior:
 
-- one top-level Work orchestrator for Intent, Design, Build & Evaluate, and
-  Accept & Deliver;
-- remove or isolate competing create pipelines from the product path;
-- first-class Part Job attempt lists and accepted pointers;
-- explicit Assembly Job schema;
-- typed artifact envelope and trust roles;
-- domain-state projections that do not infer trust from recursive filenames;
-- legacy adapters and Runs available through compatibility boundaries.
+- Part Jobs own ordered attempts;
+- historical Runs are immutable;
+- active lineage and accepted results are separate;
+- Work mutations route through the product orchestrator;
+- legacy deterministic paths remain compatibility evidence.
 
-Acceptance:
-
-- one Work can create two attempts for one Part Job and accept either without
-  rewriting history;
-- product state comes from manifests and artifact references;
-- existing deterministic Golden and failure-isolation tests remain green.
-
-Status:
-
-- accepted on 2026-07-27 for the M1 deterministic product scope;
-- first work package completed on 2026-07-25:
-  - accepted ADR for one product Work orchestrator;
-  - classified runtime entry-point inventory;
-  - Work-manifest v2 and nested domain-record v1 contracts;
-  - ordered Part Job attempt mutation and acceptance/lineage separation;
-  - manifest-only product-state projector;
-  - v1 Work-manifest compatibility projector;
-  - contract tests for attempt history, pointer separation, immutable Run
-    evidence, and manifest-based state;
-- one `WorkOrchestrator` now owns target-product Work creation, Intent Run
-  ownership, ordered Part Job attempts, candidate selection, active-lineage
-  changes, and accepted-result pointer changes;
-- the deterministic workflow is isolated behind one typed compatibility port;
-- legacy Run summaries are translated by an explicit, read-only compatibility
-  projector before the target product view consumes artifact references;
-- full deterministic suite is green at `550 passed, 2 skipped`;
-- contract and full Golden Desktop Robot Arm acceptance both passed;
-- a real Work acceptance retained two `upper_link` attempts, accepted the
-  earlier reviewable result, registered STEP/STL/preview references, and left
-  active root and leaf unchanged;
-- this accepts M1 only. It does not accept Agentic design, a model-program
-  sandbox, Assembly generation, a new Workbench, or any new `part_type`.
+Status: complete for deterministic/domain foundation.
 
 ## M2 — First real Agentic design vertical slice
 
 Goal:
 
-- prove that a provider can design, execute, observe, and repair geometry inside
-  controlled boundaries.
+- prove a real Provider can design, execute, observe, repair, ask the user, and produce a locally validated reviewable CAD result through controlled execution.
 
-Scope:
+Implemented foundation:
 
-- one provider;
-- one `design_part` skill;
-- minimal typed skill/tool/knowledge registry;
-- semantic Context Broker;
-- provider-selected action loop;
-- sandboxed CadQuery v1 model-program candidate;
-- existing STEP-first inspection and publication validators;
-- explicit user acceptance.
+- bounded provider-selected Agent Episode;
+- semantic context access;
+- controlled CadQuery model-program execution;
+- geometry/STEP inspection;
+- reviewable publication boundary;
+- explicit Accept and Revise;
+- Agent Output/recovery evidence;
+- Provider Settings and local readiness.
 
-Required Agent actions:
+Formal acceptance still requires:
 
-- request context;
-- propose candidate;
-- create or patch model program;
-- request execution;
-- inspect observation;
-- repair, change strategy, ask user, or stop.
+- at least five genuinely non-template real-provider design cases;
+- at least two observation-driven repairs;
+- at least one genuine focused user clarification;
+- user review/acceptance of at least one resulting reviewable result;
+- honest recording of failures and unsupported cases.
 
-Acceptance:
+Do not add more sandbox/policy/attestation architecture merely to prepare for this trial unless the trial exposes an actual security or execution defect.
 
-- at least five non-template benchmark parts generate validated STEP;
-- at least two cases require an observation-driven repair;
-- at least one case asks the user rather than guessing;
-- sandbox violations fail closed;
-- capability mode and assumptions are visible;
-- deterministic fallback remains clearly labeled.
+Status: implemented but formal external-provider acceptance pending.
 
-Out of scope:
-
-- full feature-graph IR;
-- batch assembly;
-- release-grade engineering validation.
-
-Status:
-
-- in progress;
-- first internal package implemented on 2026-08-01:
-  - `design_part` v0.1 skill contract and typed registry;
-  - provider-selected semantic context, contract creation/patching,
-    validation, focused-question, and stop actions;
-  - validation-observation-driven repair behavior;
-  - Work/Run/Part/checkpoint/trust context provenance and request/byte budgets;
-  - deterministic fallback remains a separate, explicitly labeled path;
-- full regression suite remains green at `558 passed, 2 skipped`;
-- scripted-provider file-level acceptance confirmed three provider-selected
-  actions, provenance-safe episode evidence, local validation, and zero CAD
-  product output;
-- second internal package implemented on 2026-08-01:
-  - CadFlow-owned typed Tool Broker catalog;
-  - structured-contract validation routed through Broker authorization;
-  - tool execution-profile, filesystem/network/process, evidence, limit, and
-    failure-code declarations;
-  - explicit Windows model-program capability gate with all required controls
-    reported missing;
-  - `sandbox_unavailable` returned before candidate-directory or process side
-    effects;
-- package 2 verification passed with `23 passed` targeted and
-  `565 passed, 2 skipped` full-suite results;
-- local Windows acceptance confirmed Broker-owned validation plus
-  `available=false`, `sandbox_unavailable`, `side_effect_started=false`, and no
-  candidate-directory creation;
-- third internal package implemented on 2026-08-01:
-  - typed `AgentDesignPort` and validation-only `WorkOrchestrator` command for an
-    owned Part Job attempt;
-  - append-only Run evidence, idempotent request replay, and typed Work
-    candidate/observation/diagnostic references;
-  - explicit protected-state checks that preserve lineage, acceptance,
-    Assembly Job, Deliverable Packages, Part Jobs, and Run identities;
-- package 3 verification passed with `156 passed` targeted and
-  `574 passed, 2 skipped` full-suite results;
-- scripted-provider product-route acceptance confirmed four registered
-  evidence references, exactly three provider calls, idempotent replay,
-  unchanged protected Work/Run evidence, and zero CAD or accepted products;
-- fourth internal package implemented on 2026-08-01:
-  - selected `cadquery_v1` as the first model-program source API;
-  - defined the `build_model(parameters)` contract, allowlisted imports/calls,
-    prohibited syntax/authority, and source/AST limits;
-  - routed AST-only validation through the Tool Broker with source hash and
-    sanitized typed observations;
-  - kept source retention, imports, bytecode compilation, execution, candidate
-    directories, product routing, and publication unavailable;
-- package 4 verification passed with `175 passed` targeted and
-  `596 passed, 2 skipped` full-suite results;
-- local file-level acceptance confirmed allowlisted source acceptance,
-  sanitized `socket`/`open` rejection, no source retention, and an independent
-  `sandbox_unavailable` execution block with no candidate directory;
-- fifth internal package implemented on 2026-08-02:
-  - pinned a separately imported `CadFlow-Sandbox-CQ-v1` rootfs, Python
-    3.10.12, CadQuery 2.7.0, cadquery-ocp 7.8.1.1.post1, wheel lock, WSL
-    configuration, worker, launcher, probes, and content-derived digests;
-  - added exact-profile startup attestation, systemd mount/network isolation,
-    post-bootstrap seccomp, empty capabilities, read-only system/toolchain,
-    controlled environment, private temp, and fixed resource limits;
-  - added strict Broker execution/context types, STEP-only worker output,
-    archive validation, typed failures, and append-only candidate/diagnostic
-    execution evidence;
-  - kept the primitive explicitly disabled by default and outside runtime
-    `model_program`, `design_part`, `WorkOrchestrator`, publication, acceptance,
-    and Deliverable Package authority;
-- package 5 verification passed with `53 passed` targeted and, after the STEP
-  re-import upgrade, `621 passed, 2 skipped` in the full suite with live WSL2
-  integration enabled;
-- current-host Windows/WSL2 acceptance recorded all attack probes passing, a
-  valid non-template STEP result and its hashes, and unchanged accepted-result
-  and Deliverable Package state;
-- sixth internal package implemented on 2026-08-02:
-  - registered `model_program` v0.1 as the sole declared delegate of
-    `design_part` v0.2;
-  - added strict complete-source create/replace, current-candidate execution,
-    and latest-observation inspection actions with CadFlow-owned identities;
-  - enforced source/execution/inspection/repair budgets and mandatory
-    observation inspection before repair or completion;
-  - made the owned Part Job product route execution-aware while keeping all
-    output candidate/diagnostic-only;
-- package 6 verification passed with `47 passed` targeted, `21 passed` live
-  Episode/WSL targeted, and `633 passed, 2 skipped` in 516.74 seconds for the
-  complete suite with live WSL2 enabled;
-- seventh internal package implemented on 2026-08-08:
-  - added a strict CadFlow-owned reviewable publication gate over exact
-    lineage, source/parameter/profile/toolchain/attestation digests, Broker
-    evidence, limits, STEP identity, and in-sandbox re-import facts;
-  - registered immutable reviewable-result and STEP artifact references only
-    after every gate passed; failure/tampering remains diagnostic;
-  - added explicit by-id accept and revise routes outside provider authority;
-    acceptance alone changes the accepted pointer and revision preserves prior
-    acceptance while creating a new attempt;
-  - current-host scripted-provider acceptance produced a valid 28,033-byte
-    reviewable STEP with SHA-256
-    `3dfc3bed636bb8995f9325b61bbe22eb72a03097fabfe0fec8891d4cf909826c`
-    while pre-acceptance lineage, pointers, and Deliverables remained
-    unchanged;
-- the backend vertical slice is sufficient for Workbench MVP integration;
-- external-provider benchmark execution is intentionally sequenced after the
-  M2.5 usability gate;
-- M2 remains unaccepted pending the five-part real external-provider benchmark
-  gate and explicit user acceptance of at least one resulting reviewable
-  result.
-
-## M2.5 — Agent-first Workbench MVP usability gate
+## M2.5 — Reuse-first Workbench MVP
 
 Goal:
 
-- make the implemented deterministic and bounded M2 single-Part Job loops
-  usable through the existing NiceGUI product surface before expanding CAD
-  capability.
+- make existing single-Part deterministic/Agentic state understandable and operable through the existing NiceGUI UI.
 
-Reuse-first scope:
+Status: complete.
 
-- evolve the existing Work Overview into Overview / Design;
-- preserve the NiceGUI shell, Work selection, Workflow graph, Parts, History,
-  immutable Run Snapshot, artifact viewer, action lifecycle, i18n, and
-  responsive CSS;
-- show the four canonical phases as orientation rather than a wizard;
-- make objective, Agent activity, geometry, validation, limitations, and one
-  recommendation dominate the first viewport;
-- expose reviewable-versus-accepted state with real Accept and natural-language
-  Revise actions;
-- keep ids, paths, Broker/WSL2/toolchain/attestation data, and hashes under
-  Advanced/Evidence.
-
-Acceptance:
-
-- deterministic compatibility and Agentic experimental capability are labeled
-  honestly;
-- reviewable STEP geometry is visible through the existing model-viewer
-  surface, and accepted deterministic STL remains visible;
-- Accept verifies the accepted-result pointer after refresh;
-- Revise creates one new Part Job attempt and preserves any prior accepted
-  result;
-- Workflow, Parts, History, and read-only Run Snapshot remain reachable;
-- Chinese and English main paths pass automated checks;
-- 1440px, 1024px, and 390–430px real-browser checks pass with saved evidence;
-- the complete regression suite remains green.
-
-Status:
-
-- passed on 2026-08-08: targeted and complete automated suites passed;
-  real-browser deterministic, reviewable, accepted, revision,
-  Advanced/Evidence, Workflow/Parts/History/Run Snapshot, 1440px, 1024px, and
-  397px checks passed with saved screenshots;
-- canonical product architecture is unchanged;
-- no external-provider benchmark, sandbox/policy, feature graph, CAD family,
-  Assembly execution, or Deliverable Package work is included.
-
-## M2.6 — Canonical Product Example and guided design story
+## M2.6 — Product Golden / guided design story
 
 Goal:
 
-- make the implemented single-Part Job product understandable without internal
-  workflow, artifact, Run, or execution vocabulary.
+- make request -> Agent design -> geometry -> validation -> review/revision understandable without internal artifact vocabulary.
 
-Scope:
+Status: complete.
 
-- one directly loadable compact micro-servo bracket Product Golden;
-- scripted provider for reproducibility, clearly separated from external-
-  provider design-quality acceptance;
-- durable original-request and concise Agent-design projections;
-- a compact request → design → build/evaluate → result evidence chain;
-- prominent reuse of the existing geometry viewer and measured facts;
-- explicit verified, assumed, unverified, unsupported, and not-requested scope;
-- preserved Detailed Workflow, Accept, Revise, Advanced evidence, i18n, and
-  responsive layout;
-- an audited example index that classifies product, benchmark, compatibility,
-  and infrastructure examples.
-
-Acceptance:
-
-- **Open Product Example** creates or reopens the Product Golden and navigates
-  to Overview / Design without external API credentials;
-- the former Desktop Robot Arm Golden remains regression evidence but is not
-  promoted as the current product experience;
-- a normal user can understand request, Agent design, generated geometry,
-  actual validation, current phase, and next action without raw JSON;
-- reviewable acceptance and natural-language revision preserve lineage and the
-  prior accepted result;
-- English, Chinese, 1440px, 1024px, and mobile paths pass real-browser checks.
-
-Out of scope:
-
-- the five-case external-provider benchmark;
-- new CAD families, sandbox or Tool Broker changes, feature graph, Assembly Job
-  execution, Deliverables, BOM, drawings, or canonical architecture changes.
-
-Status:
-
-- implementation complete on 2026-08-08; automated and real-browser evidence
-  is recorded in current product readiness.
-
-## M2.7 — Onboarding, Settings, recovery, and Live Agent Example
+## M2.7 — Onboarding, Settings, recovery, and Agent observability
 
 Goal:
 
-- let a normal user start a real design, establish real Provider/local-CAD
-  readiness, understand a safe stop, and continue the same Work.
+- make starting a design, Provider readiness, Product Examples, clarification/recovery, and Agent Output understandable.
 
-Scope:
+Implemented:
 
-- Home / Works / Settings product language over the existing page ids;
-- New Design and beginning-state Live Product Example actions;
-- DeepSeek-first draft, Test, and Save & Verify settings with session-memory or
-  environment credentials and no plaintext secret persistence;
-- real readiness summaries, Agent-first four-phase Workflow projection, and
-  product recovery owners/actions;
-- append-only clarification answer evidence and continuation through the
-  existing bounded Agent route;
-- the M2.6 Completed Product Golden retained as the deterministic snapshot.
-- explicit Product Example teaching cards and a normal/developer Work taxonomy;
-- durable sanitized Agent Output and recovery history across clarification and
-  resumed attempts;
-- credential discovery from session, process environment, or allowlisted
-  project-root `.env`, with source-only Settings presentation.
+- Home / Works / Settings product surfaces;
+- Real Agent and Completed Product Example separation;
+- developer-fixture visibility separation;
+- session/environment/project `.env` credential discovery without secret persistence;
+- readable sanitized Agent Output;
+- clarification answer/resume history;
+- typed recovery guidance.
 
-Acceptance:
+Status: complete and merged to `main` on 2026-08-09.
 
-- real-browser bilingual and responsive onboarding/settings/recovery/live
-  example paths pass at 1440px, 1024px, and 390–430px;
-- the real configured provider may ask, repair, fail, or publish reviewable
-  geometry honestly, and reviewable output is never auto-accepted;
-- full regression remains green. The formal five-case external-provider
-  benchmark remains the next M2 acceptance gate.
+## M2.8 — Dynamic Work Graph
 
-Out of scope:
+### Why this milestone exists
 
-- formal provider benchmark, M3 feature graph, new CAD families, broader
-  sandbox/Tool Broker authority, Assembly execution, Deliverable Packages,
-  BOM, drawings, or canonical architecture changes.
+The current Agent-first Workflow projection became too flat: the four canonical phases are being used like the graph itself. This makes it hard to understand Part Jobs, attempts, clarification, failure/repair, reviewable results, revision branches, and future multi-Part progression.
 
-## M3 — General structured geometry contract
+The correction is not a new workflow engine. It is a better projection of the domain model that already exists.
 
-Goal:
+### Goal
 
-- replace the flat closed-family CAD IR with an extensible feature graph.
+Make Workflow the clear live map of a Work while keeping Overview as the “what matters now” view.
 
-Initial operations:
+### Scope
 
-- parameters and expressions;
-- coordinate frames and datums;
-- constrained 2D sketches;
-- extrude and revolve;
-- holes and pockets;
-- booleans;
-- fillet and chamfer;
-- linear and circular patterns;
-- named faces, axes, and interfaces.
+- reuse the existing NiceGUI Workflow/dot graph renderer and interactions;
+- build one dynamic graph projection from Work manifest, Part Jobs, Runs/lineage, artifact references, persisted Agent/user decisions, validation/recovery state, and accepted pointers;
+- use Intent / Design / Build & Evaluate / Accept & Deliver as graph grouping/orientation, not as four graph nodes;
+- represent current single-Part Works clearly;
+- support real Part Job branching when multiple Part Jobs already exist;
+- show clarification/answer, attempt/revision branch, meaningful failure/repair, reviewable, accepted, blocked/stale states when real evidence exists;
+- make graph nodes selectable and reuse existing detail/viewer/Run Snapshot surfaces;
+- support `Start Revision from here` through existing child-Run semantics where the selected state can legitimately seed revision;
+- keep Agent turn/tool/provider detail under Agent Output/Advanced instead of graph nodes;
+- keep legacy compatibility Workflow readable without forcing it into the new target projection.
 
-Required outcomes:
+### Explicit non-goals
 
-- versioned feature-graph schema;
-- backend capability declarations;
-- contract validator;
-- deterministic CadQuery or build123d executor;
-- migration adapter for legacy `input_ir.json`;
-- geometry benchmarks comparing model-program and feature-graph paths.
+Do not build:
 
-Acceptance:
+- a second workflow/state engine;
+- graph-specific persistence;
+- graph database;
+- BPMN/workflow DSL;
+- configurable generic node framework;
+- new security/attestation/policy layers;
+- Feature Graph CAD capability;
+- new CAD families;
+- Assembly execution;
+- Deliverable generation;
+- formal external-provider benchmark logic.
 
-- non-template parts can be expressed without adding a new `part_type` builder;
-- unsupported operations produce typed capability feedback;
-- revision can patch parameters and ordered features.
+### Acceptance
 
-## M4 — Multi-Part Work and Assembly Job
+For real browser Works, the user can answer in a few seconds:
 
-Goal:
+- where did this Work start;
+- what is happening now;
+- which Part/attempt/result is active;
+- what was asked/answered;
+- where a failure/repair/revision occurred;
+- which result is reviewable/accepted;
+- what is blocked/waiting;
+- what can be done next.
 
-- progress from accepted Part Jobs to a validated assembly attempt.
+Required scenarios:
 
-Required outcomes:
+1. beginning-state Live Agent Work;
+2. clarification -> answer -> resume;
+3. build/validation failure or typed stop;
+4. reviewable result;
+5. accepted result;
+6. revision branch preserving the prior result;
+7. existing multi-Part compatibility/example state without fabricating unsupported Assembly behavior;
+8. Run Snapshot navigation/read-only behavior;
+9. Chinese/English desktop, 1024px, and mobile acceptance.
 
-- multiple Part Jobs with independent attempt and accepted-result histories;
-- interface identities preserved across revisions;
-- Assembly Job consumes exact accepted part-result ids;
-- placement, mate, joint, fastener, reference-component, and clearance
-  contracts;
-- isolated assembly execution;
-- native assembly and/or assembly STEP output;
-- BOM generation;
-- validation reports that separate heuristics from geometric checks.
+Overview and Workflow must agree because both derive from the same domain state.
 
-Acceptance:
+### Implementation discipline
 
-- one example contains at least three generated accepted parts and one reference
-  component;
-- changing one accepted part marks assembly evidence stale;
-- assembly regeneration preserves earlier attempts;
-- no fit, motion, or tolerance claim appears unless the check ran.
+Start with the minimum node/edge vocabulary required by the scenarios above.
 
-## M5 — Engineering deliverable package
+Do not design the final graph schema for all future Assembly/Deliverable capabilities.
 
-Goal:
+If the existing domain state cannot express one required graph fact, identify that exact gap before adding any durable field.
 
-- turn accepted model results into usable engineering handoff artifacts.
+## M2 external-provider product trial and acceptance
 
-Required outcomes:
+After M2.8, use the real Workbench and Dynamic Work Graph to run the formal Provider trial.
 
-- versioned Deliverable Package manifest;
-- accepted part and assembly STEP collection;
+The trial should happen through real Works and be inspected through the product UI, not only through offline benchmark JSON.
+
+Use the results to decide what modeling/runtime capability should be developed next.
+
+## M3 — Capability expansion decision
+
+M3 is deliberately not pre-committed to a large Feature Graph implementation.
+
+After the real-provider trial, classify actual failure modes:
+
+- model-program generation/repair limitations;
+- structured-edit/revision limitations;
+- missing CAD operations;
+- context/interface problems;
+- UI/workflow problems;
+- Provider quality problems.
+
+Then choose the smallest useful next capability.
+
+A structured Feature Graph is one possible direction when stable parametric editing/interoperability justifies it. It is not automatically the next large framework.
+
+## M4 — Multi-Part and Assembly
+
+Begin only after single-Part Agent design/revision and Workflow are genuinely usable.
+
+Goals may include:
+
+- Agent-driven decomposition into real Part Jobs;
+- accepted-part dependency visualization;
+- Assembly Job creation from exact accepted inputs;
+- placement/constraint execution and honest validation;
+- assembly result review/acceptance.
+
+Do not pre-build a general assembly solver before concrete use cases require it.
+
+## M5 — Deliverables
+
+Begin only after accepted part/assembly flows are stable.
+
+Potential outputs:
+
+- accepted STEP files;
+- assembly output;
 - BOM;
-- integrated FreeCAD TechDraw or equivalent drawing generation;
-- PDF/SVG part drawings;
-- assembly drawing or exploded view where supported;
-- source-result identity and annotation provenance;
-- visible limitations and missing deliverables.
+- drawings;
+- reports.
 
-Acceptance:
+Only implement the deliverables actually needed by validated use cases.
 
-- drawing generation runs from accepted results inside the normal Work flow;
-- drawing failures do not invalidate accepted models;
-- package contents resolve only through accepted pointers;
-- automated tests cover at least one part drawing and one assembly package.
+## Roadmap change rule
 
-## M6 — Agent-first workbench expansion
+A new milestone or major framework must answer:
 
-Goal:
+- What current user problem does it solve?
+- What real Work state/capability is missing?
+- Why can the current architecture not solve it with a smaller change?
+- What visible product behavior proves completion?
 
-- expand the reuse-first M2.5 Workbench beyond the single-Part Job MVP.
-
-Primary layout:
-
-- design objective and focused conversation;
-- model or assembly preview;
-- Agent actions, assumptions, and progress;
-- candidate comparison;
-- validation and limitations;
-- Part Jobs and accepted results;
-- one recommended action.
-
-Required outcomes:
-
-- four-phase navigation;
-- existing detailed Workflow view remains reachable for process detail and
-  diagnostics;
-- real-time pending, execution, observation, and repair feedback;
-- explicit acceptance and revision;
-- bilingual product-critical paths;
-- desktop and narrow-layout acceptance.
-
-Acceptance:
-
-- a user completes the M2 vertical slice without understanding legacy artifact
-  names;
-- no enabled action lacks a verified postcondition;
-- Work and Run Snapshot boundaries remain clear.
-
-## M7 — Engineering assurance expansion
-
-Potential domain-specific increments:
-
-- manufacturing checks;
-- tolerance and fit evidence;
-- kinematic checks;
-- load and strength analysis integrations;
-- GD&T assistance;
-- inspection planning;
-- release workflows.
-
-Each increment requires its own validator, evidence contract, benchmark, and
-claim boundary. None is implied by model generation alone.
-
-## Deferred
-
-- arbitrary external STEP feature-history recovery;
-- general mesh reverse engineering;
-- unrestricted provider code execution;
-- public cloud and multi-user collaboration;
-- automatic safety-critical release.
+Do not promote infrastructure work to a milestone merely because it is technically interesting.
