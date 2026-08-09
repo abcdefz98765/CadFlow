@@ -43,6 +43,10 @@ implementation, not the target limit of CadFlow's design capability.
 .\scripts\start_nicegui_console.ps1
 ```
 
+If the same CadFlow console is already listening on the selected port, the
+script stops that stale instance before starting the new one. It refuses to
+stop an unrelated listener unless you explicitly pass `-ForcePortCleanup`.
+
 This opens the legacy Workflow Console. It is useful for inspecting existing
 Work/Run behavior but is not the target Agent Workbench UX.
 

@@ -565,6 +565,10 @@ For the NiceGUI Workbench:
 .\scripts\start_nicegui_console.ps1
 ```
 
+The launcher automatically replaces an existing CadFlow NiceGUI process on the
+selected port. It reports and preserves unrelated listeners; use
+`-ForcePortCleanup` only when intentionally reclaiming their port.
+
 Select a Work to open **Overview / Design**, the primary Agent-first surface.
 It shows the objective, compact four-phase orientation, current recommendation,
 Agent activity, geometry, reviewable or accepted result, validation and
