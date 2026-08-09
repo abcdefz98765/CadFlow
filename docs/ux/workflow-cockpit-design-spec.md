@@ -2,224 +2,310 @@
 
 Status: target UX specification.
 
-The filename is retained for link compatibility. The former fixed checkpoint
-sequence is no longer the primary product journey.
+The filename is retained for link compatibility.
 
-The existing Workflow Cockpit implementation remains a reusable product
-surface. Its shell, navigation, workflow graph, Parts, History, Run Snapshot,
-review, artifact viewer, action feedback, i18n, and responsive components
-should be evolved and reused where they remain useful.
+The former fixed checkpoint sequence is no longer the primary product journey, but the Workflow graph remains a first-class product view and an important part of how users understand a Work.
 
-The detailed checkpoint graph may remain available as a secondary Workflow
-view for users who want process detail, history, or diagnostics. A change in
-product orientation is not a reason to reimplement mature interactions.
+CadFlow should evolve the existing NiceGUI shell, Overview, Workflow graph, Parts, History, Run Snapshot, viewer, action feedback, i18n, and responsive components rather than replacing them with a parallel UI system.
 
 ## 1. Product experience
 
-CadFlow is a design workbench where the user collaborates with an Agent and
-sees geometry, evidence, and decisions evolve.
+CadFlow is a design workbench where the user collaborates with an Agent and sees the Work evolve.
 
-The main page should answer:
+The product should make three things immediately clear:
 
-- What are we designing?
-- What is the Agent doing now?
-- What candidate geometry exists?
-- What changed after execution or repair?
-- What is validated, assumed, unverified, or unsupported?
-- What should the user do next?
+- what the user asked and what the Agent is designing;
+- what the current geometry/result actually is;
+- where the Work is in its overall state graph and what happens next.
+
+A user should not need to understand internal Run ids, artifacts, Broker details, hashes, sandbox profiles, or provider transport metadata to follow the normal workflow.
 
 ## 2. Primary navigation
 
 A selected Work has:
 
-- **Overview / Design** — the evolved existing Work Overview, with objective,
-  Agent activity, current candidate, preview, validation, and recommended
-  action;
-- **Workflow** — the existing detailed checkpoint graph, stage progress,
-  review, stale state, and process history;
-- **Parts** — Part Jobs, attempts, interfaces, and accepted results;
-- **History** — immutable Runs, comparisons, and Run Snapshots.
+- **Overview / Design** — what matters now;
+- **Workflow** — how the Work got here, its branches/states, and available transitions;
+- **Parts** — Part Jobs, attempts, results, interfaces, and acceptance;
+- **History** — immutable Runs and Run Snapshots.
 
-Advanced/Evidence on those existing surfaces contains raw artifacts, Episode
-events, and low-level evidence. Assembly and Deliverables become primary
-navigation only after their underlying product capabilities exist; the current
-Workbench must not add empty pages for them.
+Overview is the default landing page. Workflow is not merely Diagnostics; it is the first-class map of the Work.
 
-## 3. Overview / Design page
+Advanced/Evidence is progressive disclosure inside these views, not a competing product surface.
 
-The existing Work Overview is the primary implementation surface. It is
-refactored in place rather than replaced by a parallel Workbench page or state
-model.
+Assembly and Deliverables become primary navigation only after those real capabilities exist.
 
-Desktop order:
+## 3. Overview and Workflow are complementary
+
+### Overview / Design answers
+
+- What did I ask for?
+- What is the Agent proposing or doing now?
+- What geometry exists?
+- What is verified, assumed, or unverified?
+- Do I need to answer/review anything?
+- What is the single recommended next action?
+
+### Workflow answers
+
+- What has happened in this Work?
+- Which Part Jobs and attempts exist?
+- What was asked/answered?
+- What failed or was repaired?
+- Which result is reviewable/accepted/stale?
+- Where did a revision branch?
+- What is blocked or waiting?
+- What can I do next?
+
+Both views derive from the same Work/Run/Part Job state and must never contradict each other.
+
+## 4. Dynamic Workflow graph
+
+Workflow is a live state graph, not a script.
+
+The Agent is not required to execute nodes in a fixed UI-defined sequence. The graph is produced after/because durable product state changes.
+
+The graph should be built from existing:
+
+- Work state;
+- Part Jobs;
+- Runs/lineage;
+- persisted user questions/answers;
+- Agent design/result evidence;
+- validation/recovery evidence;
+- reviewable and accepted-result references;
+- later Assembly/Deliverable objects when they exist.
+
+Do not create a second browser/domain state model for the graph.
+
+## 5. Four phases are visual grouping
+
+Keep the canonical phases:
 
 ```text
-Work header and assurance mode
-Your Request and Agent Design
-Current recommendation
-
-What happened / Agent activity | Geometry preview
-
-Current candidate and validation summary
-Meaningful alternatives
-Part Jobs and assembly readiness
-Advanced evidence
+Intent
+Design
+Build & Evaluate
+Accept & Deliver
 ```
 
-Narrow order:
+Use them as orientation, lanes, regions, headings, or subtle backgrounds around graph content.
+
+Do not represent the complete Workflow as four phase dots.
+
+Do not turn the phases into a four-step wizard.
+
+A Work may move between phase regions non-linearly.
+
+## 6. Graph topology adapts to the Work
+
+### Simple single-Part Work
+
+A simple graph might look conceptually like:
 
 ```text
-Your Request
-Agent Design
-Recommended action or focused question
-Geometry preview
-Agent activity
-Current candidate
-Validation and limitations
-Alternatives
-Part Jobs
-Advanced
+Request
+  -> Part Job
+      -> Design
+      -> Build / Inspect
+      -> Reviewable
+      -> Accepted
 ```
 
-## 4. Work header
+Clarification, failure, repair, or revision appears only if it actually happens.
+
+### Multi-Part Work
+
+When the Agent/runtime genuinely creates several Part Jobs, the graph may branch:
+
+```text
+Request / Design
+      |
+      +-- Part A -> attempts/results
+      +-- Part B -> attempts/results
+      +-- Part C -> attempts/results
+```
+
+Assembly may appear only when an Assembly Job exists and its prerequisites are real.
+
+Do not draw future Parts/Assembly merely because a target architecture mentions them.
+
+## 7. What deserves a graph node
+
+Graph nodes represent meaningful durable product states or decisions.
+
+Useful examples:
+
+- user request;
+- focused clarification;
+- user answer;
+- design/decomposition decision;
+- Part Job;
+- attempt/revision branch;
+- meaningful build/validation state;
+- failure/recovery point;
+- reviewable result;
+- accepted result;
+- later Assembly or Deliverable result.
+
+Do not create nodes for every provider call, context lookup, log line, token event, or low-level tool invocation.
+
+Those belong in Agent Output or Advanced.
+
+## 8. Edges show state transition
+
+Edges should communicate meaningful transitions such as:
+
+- created;
+- decomposed;
+- asked / answered;
+- generated;
+- validated / failed;
+- repaired;
+- reviewable;
+- accepted;
+- revised;
+- stale/superseded;
+- assembled.
+
+Keep the vocabulary small and product-language-first.
+
+Do not build a generic workflow DSL just to configure edges.
+
+## 9. Dot/shape semantics
+
+Reuse the established dot graph visual vocabulary where possible.
+
+Shape or decoration may distinguish broad semantic kinds such as:
+
+- ordinary state;
+- user decision;
+- Part/Assembly object;
+- blocked/failure;
+- reviewable;
+- accepted.
+
+Color indicates status. Selection is separate from status.
+
+Do not create a large taxonomy of node classes unless real Works require it.
+
+## 10. Node interaction
+
+Clicking a node selects an existing product object/state for inspection.
+
+The detail surface should reuse existing content:
+
+- Your Request;
+- Agent Design;
+- Agent Output/activity;
+- clarification and answer;
+- Part Job/attempt;
+- geometry preview;
+- validation;
+- reviewable/accepted result;
+- recovery detail;
+- read-only Run Snapshot.
+
+Selecting a node is presentation state only.
+
+## 11. Revision / “go back” semantics
+
+Users may want to return to an earlier design/result and change it.
+
+Do not destructively roll back history.
+
+The UX should express this as:
+
+```text
+Select earlier state
+-> Start revision from here
+-> create child/new attempt Run
+-> keep prior branch visible
+```
+
+The graph should make the new branch understandable.
+
+Existing accepted results remain until explicitly replaced by acceptance of another result.
+
+## 12. Overview / Design composition
+
+The existing Work Overview remains the default landing surface.
+
+Recommended information order:
+
+1. Work title and concise current state;
+2. Your Request;
+3. Agent Design;
+4. current recommendation/question;
+5. geometry preview when available;
+6. Agent Activity / What happened;
+7. current result and validation/limitations;
+8. Part Job summary;
+9. compact Workflow status / entry into full Workflow;
+10. Advanced evidence.
+
+Do not make internal artifact names the information architecture.
+
+## 13. Agent Design, Activity, and Output
+
+Keep these distinct.
+
+### Agent Design
+
+What the Agent currently proposes to build, based only on persisted concise design evidence.
+
+### Agent Activity
+
+What is currently happening in product language.
+
+### Agent Output
+
+What the external Agent explicitly returned to CadFlow, sanitized and readable for debugging/recovery.
+
+Do not expose private chain-of-thought or credentials.
+
+Agent Output/technical evidence may be expandable and should not dominate the normal page.
+
+## 14. Geometry preview
+
+Once geometry exists, it is a primary visual anchor.
+
+Reuse the existing viewer and presentation path.
+
+Useful adjacent facts:
+
+- overall dimensions/bounding box;
+- solid count;
+- relevant measured properties;
+- reviewable/accepted status.
+
+Do not display raw file paths by default.
+
+## 15. Focused clarification
+
+When the Agent asks a material question, the question belongs inside the current Work story.
 
 Show:
 
-- Work title;
-- Intent, Design, Build & Evaluate, or Accept & Deliver;
-- Explore or Engineer assurance mode;
-- active Part Job or Assembly Job;
-- accepted-result count;
-- concise current status.
+- question;
+- why it matters when available;
+- answer input;
+- submitted answer afterward;
+- what happened after resume.
 
-Do not show raw ids or paths by default.
+The question/answer remains inspectable after the Work moves forward.
 
-## 5. Conversation panel
+## 16. Build, validation, and repair
 
-Contains:
+A user should be able to tell:
 
-- user goal and focused answers;
-- concise Agent decisions;
-- visible assumptions;
-- candidate proposals;
-- important recovery explanations.
+- what candidate/build was attempted;
+- whether geometry was produced;
+- what validation found;
+- whether the Agent repaired automatically;
+- whether user action is required.
 
-Activity events such as context retrieval and tool calls appear in a compact
-expandable timeline.
-
-The panel is not a raw provider transcript.
-
-For the current single-Part Job Workbench, the primary narrative starts with
-two explicit durable projections:
-
-- **Your Request / 你的要求** shows the original request verbatim, the active
-  revision request when applicable, user-supplied constraints, and whether the
-  source is the initial request or a revision;
-- **Agent Design / Agent 设计** shows only persisted concise design decisions:
-  concept, geometry strategy, important parameters, functional features,
-  interfaces, assumptions, trade-offs, repair changes, and capability mode.
-
-Agent Design is distinct from Agent Activity. It never reconstructs a request
-from generated summaries and never exposes private reasoning. When the current
-attempt lacks sufficient persisted design evidence, the card states that gap
-instead of inventing a design narrative.
-
-## 6. Geometry preview
-
-The preview is the primary visual anchor once a candidate exists.
-
-States:
-
-- no candidate;
-- candidate source ready;
-- executing;
-- geometry available;
-- validation failed but preview retained as diagnostic;
-- reviewable;
-- accepted;
-- assembly preview;
-- preview unavailable with explicit reason.
-
-Controls:
-
-- orbit, pan, zoom;
-- fit view;
-- candidate selector when comparison is meaningful;
-- show key measurements;
-- open accepted result;
-- compare previous/next where supported.
-
-## 7. Agent activity
-
-Represent the current action in product language:
-
-```text
-Understanding the mounting interfaces
-Preparing a bent-sheet bracket candidate
-Executing candidate 2
-Inspecting a failed boolean cut
-Repairing the pocket geometry
-Waiting for your servo mounting pattern
-```
-
-Show budgets or provider details only in Advanced.
-
-## 8. Candidate cards
-
-Each candidate contract includes:
-
-```json
-{
-  "candidate_id": "candidate_002",
-  "title": "Bent-sheet L bracket",
-  "strategy": "sheet_metal_like",
-  "execution_path": "sandboxed_model_program",
-  "status": "reviewable",
-  "summary": "Two-leg bracket with slotted base mounting.",
-  "tradeoff": "Lower material use; bend radius constrains the inside corner.",
-  "assumptions": [],
-  "validated_facts": [],
-  "limitations": []
-}
-```
-
-Candidate status and selection are separate. A candidate can be selected for
-inspection without becoming accepted.
-
-## 9. Focused user questions
-
-A question card shows:
-
-- why the information matters;
-- two or three structured options where possible;
-- a free-text answer when necessary;
-- what the Agent will do after the answer;
-- whether proceeding with an assumption is allowed.
-
-Do not display unrelated requirement fields.
-
-## 10. Build & Evaluate feedback
-
-Execution shows:
-
-- candidate identity;
-- execution path and backend;
-- pending/running state;
-- concise completed operations;
-- measured result;
-- current Agent response.
-
-Failure shows:
-
-- what failed;
-- whether a diagnostic preview exists;
-- whether the Agent will repair automatically;
-- whether user input or a capability change is needed;
-- retained evidence.
-
-## 11. Validation summary
-
-Group facts as:
+Validation facts are grouped honestly as:
 
 - verified;
 - assumed;
@@ -227,316 +313,142 @@ Group facts as:
 - unsupported;
 - not requested.
 
-Example:
+## 17. Recovery
 
-```text
-Verified
-- One valid solid
-- STEP exported
-- Overall width 42.0 mm
+Blocked is not an endpoint label; it is an explanation and next step.
 
-Assumed
-- FDM prototype process
+A recovery surface should answer:
 
-Unverified
-- Strength under the requested load
-- Servo fit
-```
+- What happened?
+- Why did it stop this time?
+- What had already succeeded?
+- What was the last meaningful Agent action/observation?
+- Who can resolve it?
+- What is the recommended action?
 
-## 12. Part Jobs
+Past clarification/recovery history should not disappear when another stop occurs.
+
+Unknown/new typed stop reasons should still expose the real trusted reason/evidence rather than collapsing to generic safety text.
+
+## 18. Part Jobs
+
+Part Jobs should be understandable both in Parts and Workflow.
 
 Each Part Job shows:
 
-- part id and engineering role;
-- interface summary;
-- current attempt;
-- attempt count;
+- name/role;
+- interfaces/purpose where useful;
+- current attempt and attempt count;
+- current state;
+- reviewable result;
 - accepted result;
-- stale state;
-- one recommended action.
+- stale/block state;
+- recommended action.
 
-Actions:
+Part creation, candidate generation, and acceptance are different events.
 
-- open design;
-- compare attempts;
-- accept reviewable result;
-- revise accepted result;
-- continue next part.
+## 19. History and Run Snapshot
 
-Creating a Part Job is not the same as generating or accepting a part.
+History is immutable evidence, not a second workflow.
 
-## 13. Assembly
+Run Snapshot is read-only.
 
-Assembly page shows:
+A historical node/Run may offer `Start Revision`, which creates a new attempt and returns the user to Current Work.
 
-- exact accepted part-result inputs;
-- reference components;
-- placement, mate, joint, fastener, and clearance intent;
-- assembly candidate preview;
-- validation categories and limitations;
-- accepted assembly result.
+## 20. Examples and developer fixtures
 
-If accepted parts are missing, show which Part Jobs block assembly and offer the
-single best next action.
+Normal users should see Product Examples with clear teaching intent.
 
-## 14. Deliverables
+Developer/UX/recovery fixtures remain available behind developer/Advanced visibility and state what they test.
 
-Deliverables page groups:
+Fixtures must not pollute the normal Works catalog or redefine product behavior.
 
-- accepted part models;
-- accepted assembly;
-- BOM;
-- drawings;
-- reports.
+## 21. Settings
 
-Each item shows:
+Settings should answer whether CadFlow can actually use the configured Provider and local CAD runtime.
 
-- human purpose;
-- source accepted result;
-- validation state;
-- preview/open/download action;
-- limitations.
+Credential source may be shown without value.
 
-Unaccepted Run products remain under Parts or History, not final Deliverables.
+Transport/security implementation details stay secondary.
 
-## 15. History and Run Snapshot
+## 22. Progressive disclosure
 
-History shows:
+Primary UI contains information required to:
 
-- Run purpose;
-- parent/child relationship;
-- target Part Job or Assembly Job;
-- candidate and result summary;
-- accepted, superseded, failed, or diagnostic state;
-- comparison entry point.
+- understand state;
+- decide;
+- verify the current result.
 
-Run Snapshot is read-only. Its main action may be "Start Revision", which
-creates a new child Run after confirmation.
+Advanced contains:
 
-## 16. Four-phase progress
+- Run/Episode ids;
+- raw/sanitized structured evidence;
+- provider/model details;
+- artifact paths;
+- source/validator/Broker evidence;
+- runtime/sandbox/attestation/hashes.
 
-Use a compact phase indicator:
+Debug evidence remains accessible without turning the product into a monitoring console.
 
-```text
-Intent — Design — Build & Evaluate — Accept & Deliver
-```
+## 23. Interaction lifecycle
 
-It communicates orientation, not a mandatory linear gate.
-
-The same Work may:
-
-- return from Build to Design after an observation;
-- remain in Design while several Part Jobs progress;
-- enter Accept & Deliver for one part while other Part Jobs are incomplete;
-- return to Design for a revision.
-
-Do not render every internal checkpoint as a dot graph on the primary page.
-
-## 17. Action hierarchy
-
-At most one dominant action:
-
-- Answer question;
-- Run candidate;
-- Let Agent repair;
-- Review result;
-- Accept result;
-- Continue next part;
-- Build assembly;
-- Generate package.
-
-Secondary actions:
-
-- compare candidates;
-- inspect measurements;
-- change strategy;
-- stop episode;
-- open history.
-
-Advanced actions:
-
-- raw artifact;
-- model source;
-- validator payload;
-- episode trace.
-
-## 18. Consequential actions
-
-Confirmation is required when:
-
-- changing an accepted upstream decision;
-- accepting or replacing a result;
-- starting revision or rework;
-- changing active design lineage;
-- starting a long or costly execution;
-- generating or replacing an assembly or deliverable package.
-
-The confirmation explains user consequences, not internal filenames.
-
-## 19. Action feedback
-
-Every enabled mutation or execution follows:
+Every enabled write/execution action has visible closure:
 
 ```text
 idle
-  -> confirming when needed
-  -> pending
-  -> Agent/backend activity
-  -> refreshed domain state
-  -> verified success or failure
+-> confirmation when consequential
+-> pending/running
+-> refreshed domain state
+-> visible success/failure
+-> next/recovery action
 ```
 
-Success requires a visible state change such as:
+Success is a real state change, not merely a returned function value.
 
-- candidate preview appeared;
-- validation status changed;
-- accepted pointer changed;
-- Part Job attempt was added;
-- assembly became ready;
-- deliverable package appeared.
+## 24. Responsive behavior
 
-## 20. Empty and unsupported states
+Reuse the existing responsive system.
 
-Good:
+At desktop, graph and detail may sit side-by-side when useful.
 
-```text
-No model candidate exists yet.
-The Agent is ready to explore a first geometry strategy.
-[Start design]
-```
+At 1024px and mobile, prioritize:
 
-```text
-Assembly is waiting for two accepted parts:
-- base
-- upper_link
-[Continue base design]
-```
+- current graph/state orientation;
+- selected node detail;
+- geometry;
+- primary action.
 
-Bad:
+The graph may scroll/zoom rather than compressing every label beyond readability.
 
-- unavailable;
-- missing artifact;
-- route not supported;
-- blank graph.
+## 25. Avoid over-designing Workflow
 
-## 21. Existing Workflow Cockpit reuse
+The Workflow goal is clarity, not a general workflow platform.
 
-The current NiceGUI shell and Workflow graph remain supported product assets.
-The graph is reachable as the secondary **Workflow** view; users can inspect
-checkpoint detail, stage review, stale state, history, and diagnostics without
-being forced to complete every node as the primary journey.
+Do not introduce without a demonstrated need:
 
-It may receive:
+- graph database;
+- BPMN engine;
+- generic workflow DSL;
+- plugin-defined node taxonomies;
+- separate graph persistence;
+- speculative Assembly/Deliverable states;
+- a second action/state framework.
 
-- safety fixes;
-- migration adapters;
-- regression maintenance;
-- new domain projections needed by the primary Overview, Parts, History, or
-  Run Snapshot surfaces;
-- focused evolution that reuses its established interaction components.
+Prefer a small projection builder over the existing domain model and reuse the current graph renderer/components.
 
-It should not turn the four canonical phases into a wizard or restore the fixed
-checkpoint sequence as mandatory primary navigation. Existing review cards,
-artifact viewing, action feedback, i18n, and responsive behavior should be
-reused rather than rebuilt.
+Implement current single-Part behavior cleanly first, but shape the projection so real multi-Part branches can appear naturally when the runtime creates them.
 
-## 22. View-model target
+## 26. Definition of done for a Workflow slice
 
-```json
-{
-  "work": {},
-  "phase": "design",
-  "objective": {},
-  "user_input": {},
-  "agent_design": {},
-  "transformation": {},
-  "recommended_action": {},
-  "conversation": [],
-  "agent_activity": {},
-  "current_candidate": {},
-  "preview": {},
-  "validation_summary": {},
-  "alternatives": [],
-  "part_jobs": [],
-  "assembly_job": null,
-  "deliverables": [],
-  "history_summary": {},
-  "advanced": {}
-}
-```
+A Workflow slice is usable when:
 
-The view model consumes explicit domain state and artifact references. It does
-not recursively infer trusted state from filenames. This target extends the
-existing Work and Workflow projections; it is not a parallel browser-owned UI
-state model.
-
-`transformation` is a compact narrative/evidence chain—User Request → Agent
-Design → Build & Evaluate → Result—not a wizard. Product-language events may
-link to the existing Detailed Workflow or Advanced evidence when more detail is
-needed.
-
-## 23. Visual acceptance scenarios
-
-Minimum scenarios:
-
-1. New Work before design.
-2. Agent asks a focused question.
-3. Candidate model program executing.
-4. Geometry available with verified and unverified facts.
-5. Validation failure followed by Agent repair.
-6. Two candidate comparison.
-7. Reviewable versus accepted part result.
-8. Multiple Part Jobs with mixed states.
-9. Assembly waiting for accepted parts.
-10. Assembly result with explicit validation scope.
-11. Deliverable package with STEP, BOM, and drawing.
-12. Immutable Run Snapshot and start-revision action.
-13. Desktop, 1024px, and 390–430px layouts.
-14. English and Chinese primary paths.
-
-## 24. Definition of done
-
-A target Workbench slice is usable when:
-
-- geometry and Agent progress dominate the first viewport;
-- the user understands the current candidate and next action;
-- focused questions explain why they matter;
-- observation-driven repair is visible;
-- trust state is not inferred from file presence;
-- acceptance and revision preserve history;
-- primary actions have verified postconditions;
-- the affected journey passes automated and real-browser checks.
-
-## 25. Onboarding, Settings, and recovery projection
-
-The existing shell presents its compatible `workspace`, `works`, and `config`
-page ids as Home, Works, and Settings. Home prioritizes New Design, two distinct
-teaching examples, real environment readiness, and recent Works. The Real Agent
-example is variable and requires a verified Provider; the Completed Product
-Example is reproducible and requires no Provider. Filesystem and workspace
-diagnostics remain under Advanced.
-
-Provider connection is a session draft with explicit Not tested, Testing,
-Connected, Failed, and Changed since last test states. Test uses the current
-unsaved draft. Save & Verify persists only non-secret configuration after a
-successful real check. API keys resolve from the current session, process
-environment, then an allowlisted project-root `.env`. Settings exposes the
-source and variable name, never the credential value. Keys remain local and are
-not persisted in Work or Run evidence.
-
-Every common product stop projects one resolution owner (`user`,
-`configuration`, `cadflow`, `environment`, or `unsupported`), a plain-language
-reason, and one real recovery action. The normal surface never leads with raw
-error enums. Agent-first single-Part Job Works use the four canonical phases;
-legacy compatibility Run Snapshots retain their detailed checkpoint graph.
-
-The normal Works list shows user Works and Product Examples. A deliberate
-developer-content toggle reveals fixtures, compatibility regressions, and
-infrastructure tests with category and purpose labels.
-
-Agent Output is a first-class chronological surface distinct from Agent Design
-and Agent activity. It contains durable external actions, questions, user
-answers, system observations, and attempt outcomes. Recovery reuses that
-history to show what happened, why, the last Agent action, the last observation,
-and the actual typed stop; raw source, parameters, credentials, and private
-reasoning remain outside the presentation contract.
+- the user can understand the Work topology in a few seconds;
+- the active state is obvious;
+- Part Jobs/attempts/results are represented from real state;
+- clarification/failure/revision branches remain understandable;
+- clicking a dot opens useful detail;
+- starting from an earlier state creates a new branch rather than rewriting history;
+- Overview and Workflow agree;
+- internal Agent turns are not mistaken for product stages;
+- the graph remains simpler than the underlying audit evidence;
+- desktop, 1024px, and mobile are manually verified.
