@@ -156,7 +156,7 @@ def test_beginning_work_and_current_attempt_expose_existing_agent_command(tmp_pa
     )
 
     assert request_page["recommended_next_action"]["key"] == "continue_agent"
-    assert request_page["recommended_next_action"]["label"] == "Start design"
+    assert request_page["recommended_next_action"]["label"] == "Start Primary Part design"
     assert attempt_page["available_actions"]["primary_action"]["key"] == "continue_agent"
     assert attempt_page["selected_node"]["user_state"] == "ready"
     assert attempt_page["selected_node"]["interaction"]["requires_user_action"] is False
@@ -299,6 +299,175 @@ def test_multi_part_current_work_has_one_branch_per_durable_part_job(tmp_path):
     assert {item["part_job_id"] for item in page["current_attention"]} == {"base", "cover"}
     assert {item["state"] for item in page["current_attention"]} == {"ready"}
     assert all(item["part_label"] for item in page["current_attention"])
+
+
+def test_two_part_selected_node_scope_isolated_from_work_and_sibling_output(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    created = backend.create_product_design(
+        "Design a camera cradle and a separate extrusion adapter.",
+        title="Scoped two-Part fixture",
+    )
+    work_id = created["work_id"]
+    backend.create_work_requirement_run(
+        work_id,
+        "Design a camera cradle and a separate extrusion adapter.",
+        run_id="work_design_run",
+    )
+    work_run_id = "work_design_run"
+    backend.create_work_part_attempt(
+        work_id,
+        "camera_cradle",
+        prompt="Part Job: Camera Cradle\nRole: Hold the camera",
+        role="Hold the camera",
+        run_id="camera_attempt_1",
+    )
+    backend.create_work_part_attempt(
+        work_id,
+        "extrusion_adapter",
+        prompt="Part Job: Extrusion Adapter\nRole: Attach the cradle to the rail",
+        role="Attach the cradle to the rail",
+        run_id="adapter_attempt_1",
+    )
+    manifest = backend._read_work_manifest(work_id)
+    manifest["work_design"].update({
+        "status": "completed",
+        "run_id": work_run_id,
+        "current_design": {
+            "concept_summary": "Keep the camera support separate from the rail adapter.",
+            "generated_parts": [
+                {"part_job_id": "camera_cradle", "name": "Camera Cradle", "role": "Hold the camera"},
+                {"part_job_id": "extrusion_adapter", "name": "Extrusion Adapter", "role": "Attach the cradle to the rail"},
+            ],
+            "reference_components": [],
+            "interfaces": [],
+            "dependencies": [],
+            "assumptions": [],
+            "unresolved_questions": [],
+            "assembly_expected": False,
+            "recommendation": "Design each Part independently.",
+        },
+    })
+    backend._write_work_manifest(work_id, manifest)
+
+    def register_output(
+        *,
+        artifact_id: str,
+        run_id: str,
+        part_job_id: str | None,
+        action: str,
+    ) -> None:
+        relative_path = f"episodes/{artifact_id}/agent_exchange.jsonl"
+        target = backend._work_runs_root(work_id) / run_id / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({
+            "event_type": "agent_response",
+            "schema_version": 1,
+            "sequence": 1,
+            "action": action,
+            "provider_identity": {"provider": "scripted", "model": artifact_id},
+        }) + "\n", encoding="utf-8")
+        reference = create_artifact_reference(
+            artifact_id=artifact_id,
+            work_id=work_id,
+            run_id=run_id,
+            part_job_id=part_job_id,
+            relative_path=relative_path,
+            phase="design",
+            checkpoint="agent_output",
+            trust_role="observation",
+            validation_status="recorded",
+        )
+        updated = register_artifact_references(
+            backend._read_work_manifest(work_id),
+            [reference],
+        )
+        backend._write_work_manifest(work_id, updated)
+        backend.invalidate_work_index()
+
+    register_output(
+        artifact_id="work_design_output",
+        run_id=work_run_id,
+        part_job_id=None,
+        action="propose_work_design",
+    )
+    register_output(
+        artifact_id="camera_output",
+        run_id="camera_attempt_1",
+        part_job_id="camera_cradle",
+        action="create_contract",
+    )
+
+    work_page = build_workflow_page_view_model(
+        backend, work_id, selected_stage_id="work:design", language="en"
+    )
+    camera_page = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id="attempt:camera_cradle:camera_attempt_1",
+        language="en",
+    )
+    adapter_page = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id="attempt:extrusion_adapter:adapter_attempt_1",
+        language="en",
+    )
+
+    def output_actions(page):
+        return [
+            item.get("action")
+            for item in page["selected_node"]["detail"]["agent_output"]["items"]
+            if item.get("kind") == "agent_response"
+        ]
+
+    assert output_actions(work_page) == ["propose_work_design"]
+    assert output_actions(camera_page) == ["create_contract"]
+    assert output_actions(adapter_page) == []
+    assert adapter_page["selected_node"]["detail"]["agent_output"]["empty_message"] == (
+        "No Part Agent output yet."
+    )
+    assert "Camera Cradle" in camera_page["selected_node"]["detail"]["prompt"]
+    assert "Extrusion Adapter" not in camera_page["selected_node"]["detail"]["prompt"]
+    assert camera_page["selected_node"]["detail"]["part"]["role"] == "Hold the camera"
+    assert adapter_page["selected_node"]["detail"]["part"]["role"] == (
+        "Attach the cradle to the rail"
+    )
+    camera_action = camera_page["available_actions"]["primary_action"]
+    adapter_action = adapter_page["available_actions"]["primary_action"]
+    assert camera_action["part_job_id"] == "camera_cradle"
+    assert camera_action["target_run_id"] == "camera_attempt_1"
+    assert camera_action["target_stage_id"] == "attempt:camera_cradle:camera_attempt_1"
+    assert adapter_action["part_job_id"] == "extrusion_adapter"
+    assert adapter_action["target_run_id"] == "adapter_attempt_1"
+    assert adapter_action["label"] == "Start Extrusion Adapter design"
+    assert {item["part_job_id"] for item in adapter_page["current_attention"]} == {
+        "camera_cradle",
+        "extrusion_adapter",
+    }
+
+    register_output(
+        artifact_id="adapter_output",
+        run_id="adapter_attempt_1",
+        part_job_id="extrusion_adapter",
+        action="create_model_program",
+    )
+    camera_after = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id="attempt:camera_cradle:camera_attempt_1",
+        language="en",
+    )
+    adapter_after = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id="attempt:extrusion_adapter:adapter_attempt_1",
+        language="en",
+    )
+    assert output_actions(camera_after) == ["create_contract"]
+    assert output_actions(adapter_after) == ["create_model_program"]
+    assert adapter_after["available_actions"]["primary_action"]["label"] == (
+        "Continue Extrusion Adapter"
+    )
 
 
 def test_legacy_part_job_is_badged_as_compatibility_projection(tmp_path):

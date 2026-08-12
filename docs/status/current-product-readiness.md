@@ -145,7 +145,7 @@ are not.
 - A deterministic two-Part example uses the same product backend, Episode,
   Orchestrator, manifest, and projection path. It treats the camera and 2020
   extrusion as references and does not claim Assembly execution.
-- Automated verification passed with `674 passed, 9 skipped` in the clean
+- Automated verification passed with `684 passed, 9 skipped` in the clean
   complete suite. The focused Work Design matrix covers single-Part,
   multi-Part, reference-component, clarification/resume, unsupported, and
   insufficient-context cases.
@@ -660,6 +660,18 @@ These are migration tasks, not accepted target behavior.
   action, completed Overview/Agent Output, visible Work path, bilingual copy,
   and 1440px/1024px/414px responsive layouts without page overflow or console
   warnings/errors.
+- The M2.9 Workflow interaction-integrity correction passed on 2026-08-12.
+  Selected Work Design, Part, attempt, recovery, and result nodes now project
+  only evidence and actions owned by their exact durable Work/Part/Run/result
+  scope. Workflow commands retain those exact target identities through
+  confirmation and execution. Pending commands render an acknowledged Running
+  state with duplicate protection, while typed Episode outcomes replace it with
+  an honest reviewable, clarification, blocked, or failed terminal state. Real
+  in-app browser verification covered independent Camera Cradle and Extrusion
+  Adapter branches, exact empty/output states, exact retry targeting, reload
+  reprojection, duplicate prevention, provider failure, and clarification
+  answer/resume evidence. Focused verification passed with `109 passed, 1
+  skipped`; the clean complete suite passed with `684 passed, 9 skipped`.
 - M2.8 added only optional durable revision provenance on Part attempts because
   parent Run/result causality cannot be recovered honestly from prompt text,
   attempt order, or timestamps. No graph persistence, workflow engine, Agent

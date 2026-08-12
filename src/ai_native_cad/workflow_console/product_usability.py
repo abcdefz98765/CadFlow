@@ -91,6 +91,7 @@ def build_agent_output_projection(
     references: list[dict[str, Any]],
     *,
     language: str,
+    scope_kind: str | None = None,
 ) -> dict[str, Any]:
     """Project durable Agent responses, observations, and user recovery turns."""
 
@@ -161,6 +162,20 @@ def build_agent_output_projection(
     return {
         "title": "Agent 输出" if language == "zh" else "Agent Output",
         "description": "按发生顺序显示 Agent 的外部动作、系统观察和恢复输入。" if language == "zh" else "External Agent actions, system observations, and recovery input in order.",
+        "empty_message": (
+            "此零件尝试尚无 Agent 输出。"
+            if language == "zh" and scope_kind == "part"
+            else "No Part Agent output yet."
+            if scope_kind == "part"
+            else "Work 设计尚无 Agent 输出。"
+            if language == "zh" and scope_kind == "work_design"
+            else "No Work Design Agent output yet."
+            if scope_kind == "work_design"
+            else "Agent 输出将在首次外部响应后显示。"
+            if language == "zh"
+            else "Agent Output will appear after the first external response."
+        ),
+        "scope_kind": scope_kind or "work",
         "items": items,
         "provider_identity": provider,
         "last_action": last_action,
@@ -399,6 +414,89 @@ def build_agent_first_workflow_projection(
     node_ids: set[str] = set()
     edge_keys: set[tuple[str, str, str]] = set()
 
+    def scoped_references(
+        part_job_id: str | None,
+        run_id: str | None,
+    ) -> list[dict[str, Any]]:
+        """Return only evidence owned by one durable Work/Part Run scope."""
+
+        return [
+            item
+            for item in references
+            if item.get("part_job_id") == part_job_id
+            and (run_id is None or item.get("run_id") == run_id)
+        ]
+
+    def scoped_agent_output(
+        part_job_id: str | None,
+        run_id: str | None,
+    ) -> dict[str, Any]:
+        return build_agent_output_projection(
+            backend,
+            work_id,
+            scoped_references(part_job_id, run_id),
+            language=language,
+            scope_kind="part" if part_job_id else "work_design",
+        )
+
+    def scoped_recovery(
+        part_job_id: str | None,
+        run_id: str | None,
+        output: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        scoped = scoped_references(part_job_id, run_id)
+        # Provider readiness is Work-level capability context, but it is not
+        # evidence for every Part attempt.  A selected attempt receives a
+        # recovery projection only from its own durable question/route record.
+        if not any(
+            item.get("checkpoint")
+            in {"clarification_decision", "product_design_routing", "work_design_routing"}
+            for item in scoped
+        ):
+            return None
+        projected = build_recovery_projection(
+            backend,
+            work_id,
+            entity,
+            scoped,
+            language=language,
+            agent_output=output,
+        )
+        if not isinstance(projected, dict):
+            return None
+        route = next(
+            (
+                item
+                for item in reversed(scoped)
+                if item.get("checkpoint")
+                in {"clarification_decision", "product_design_routing", "work_design_routing"}
+            ),
+            {},
+        )
+        return {
+            **projected,
+            "work_id": work_id,
+            "part_job_id": part_job_id,
+            "run_id": run_id or route.get("run_id"),
+            "artifact_id": route.get("artifact_id"),
+        }
+
+    def design_evidence(
+        part_job_id: str,
+        run_id: str,
+    ) -> dict[str, Any]:
+        reference = next(
+            (
+                item
+                for item in reversed(scoped_references(part_job_id, run_id))
+                if item.get("checkpoint") == "design_brief"
+            ),
+            None,
+        )
+        payload = _read_reference(backend, work_id, reference)
+        content = _dict(payload.get("content"))
+        return content or payload
+
     def add_node(node: dict[str, Any]) -> str:
         node_id = str(node["id"])
         if node_id not in node_ids:
@@ -450,6 +548,15 @@ def build_agent_first_workflow_projection(
     decomposition_node_id: str | None = None
     work_path_node_ids: list[str] = []
     if work_design_status != "not_started" or not raw_jobs:
+        work_design_run_id = (
+            str(work_design.get("run_id"))
+            if isinstance(work_design.get("run_id"), str)
+            else None
+        )
+        work_design_output = scoped_agent_output(None, work_design_run_id)
+        work_design_recovery = scoped_recovery(
+            None, work_design_run_id, work_design_output
+        )
         work_design_node_id = add_node({
             "id": "work:design",
             "label": "Work 设计" if language == "zh" else "Work Design",
@@ -469,6 +576,8 @@ def build_agent_first_workflow_projection(
             "detail": {
                 "type": "work_design",
                 "work_design": _dict(overview.get("work_design")),
+                "agent_output": work_design_output,
+                "recovery": work_design_recovery or {},
             },
         })
         work_path_node_ids.append(work_design_node_id)
@@ -482,7 +591,13 @@ def build_agent_first_workflow_projection(
             if reference.get("checkpoint") not in {"clarification_decision", "work_design_routing"}:
                 continue
             projected = _workflow_reference_node(
-                backend, work_id, reference, overview, {}, language
+                backend,
+                work_id,
+                reference,
+                overview,
+                {},
+                language,
+                all_references=references,
             )
             if projected is None:
                 continue
@@ -516,6 +631,7 @@ def build_agent_first_workflow_projection(
                 "detail": {
                     "type": "decomposition",
                     "work_design": _dict(overview.get("work_design")),
+                    "agent_output": work_design_output,
                 },
             })
             work_path_node_ids.append(decomposition_node_id)
@@ -536,7 +652,11 @@ def build_agent_first_workflow_projection(
         part = _dict(overview_parts.get(part_job_id))
         attempts = [item for item in raw_job.get("attempts", []) if isinstance(item, dict)]
         active_run_id = raw_job.get("active_attempt_run_id") or (attempts[-1].get("run_id") if attempts else None)
-        part_status = _workflow_part_status(part, recovery, part_job_id)
+        active_output = scoped_agent_output(part_job_id, active_run_id)
+        active_recovery = scoped_recovery(
+            part_job_id, active_run_id, active_output
+        )
+        part_status = _workflow_part_status(part, active_recovery, part_job_id)
         part_node_id = add_node({
             "id": f"part:{part_job_id}",
             "label": part.get("name") or part_job_id.replace("_", " ").title(),
@@ -546,7 +666,22 @@ def build_agent_first_workflow_projection(
             "part_job_id": part_job_id,
             "run_id": active_run_id,
             "summary": part.get("role") or raw_job.get("role") or ("零件任务" if language == "zh" else "Part Job"),
-            "detail": {"type": "part_job", "part": part or raw_job},
+            "detail": {
+                "type": "part_job",
+                "part": part or raw_job,
+                "prompt": (
+                    _read_run_prompt(backend, work_id, str(active_run_id))
+                    if isinstance(active_run_id, str)
+                    else None
+                ),
+                "agent_design": (
+                    design_evidence(part_job_id, str(active_run_id))
+                    if isinstance(active_run_id, str)
+                    else {}
+                ),
+                "agent_output": active_output,
+                "recovery": active_recovery or {},
+            },
         })
         add_edge(
             decomposition_node_id or work_design_node_id or request_id,
@@ -569,17 +704,16 @@ def build_agent_first_workflow_projection(
             parent_run_id = attempt.get("parent_run_id")
             source_result_id = attempt.get("source_result_id")
             revision_provenance = isinstance(parent_run_id, str) and bool(parent_run_id)
-            scoped_recovery = (
-                recovery
-                if recovery and recovery.get("part_job_id") in {None, part_job_id}
-                else None
+            attempt_output = scoped_agent_output(part_job_id, run_id)
+            attempt_recovery = scoped_recovery(
+                part_job_id, run_id, attempt_output
             )
             attempt_status = _workflow_attempt_status(
                 run_id,
                 active_run_id,
                 run_references,
                 accepted.get(part_job_id),
-                scoped_recovery,
+                attempt_recovery,
             )
             attempt_node_id = add_node({
                 "id": f"attempt:{part_job_id}:{run_id}",
@@ -602,6 +736,10 @@ def build_agent_first_workflow_projection(
                     "parent_run_id": parent_run_id,
                     "source_result_id": source_result_id,
                     "snapshot_run_id": run_id,
+                    "part": part or raw_job,
+                    "agent_design": design_evidence(part_job_id, run_id),
+                    "agent_output": attempt_output,
+                    "recovery": attempt_recovery or {},
                 },
             })
             result_source_node = (
@@ -629,6 +767,7 @@ def build_agent_first_workflow_projection(
                     overview,
                     part,
                     language,
+                    all_references=references,
                 )
                 if projected is None:
                     continue
@@ -651,6 +790,11 @@ def build_agent_first_workflow_projection(
             accepted_result_id = pointer.get("result_id")
             if pointer.get("status") == "approved" and pointer.get("attempt_run_id") == run_id and isinstance(accepted_result_id, str):
                 result_node_id = artifact_nodes.get(accepted_result_id) or f"result:{accepted_result_id}"
+                source_result_node = next(
+                    (item for item in nodes if item.get("id") == result_node_id),
+                    {},
+                )
+                source_result_detail = _dict(source_result_node.get("detail"))
                 accepted_node_id = add_node({
                     "id": f"accepted:{part_job_id}:{accepted_result_id}",
                     "label": "已接受" if language == "zh" else "Accepted",
@@ -668,7 +812,12 @@ def build_agent_first_workflow_projection(
                     "detail": {
                         "type": "accepted_result",
                         "accepted_pointer": pointer,
-                        "result": _result_detail_for_node(overview, part_job_id, accepted_result_id),
+                        "result": _dict(source_result_detail.get("result"))
+                        or _result_detail_for_node(
+                            overview, part_job_id, accepted_result_id
+                        ),
+                        "preview": _dict(source_result_detail.get("preview")),
+                        "agent_output": attempt_output,
                         "can_start_revision": result_node_id in node_ids,
                     },
                 })
@@ -694,15 +843,19 @@ def build_agent_first_workflow_projection(
         for item in raw_jobs
         if item.get("part_job_id") or item.get("part_id")
     }
-    current_recovery_node_id = next(
-        (
-            str(node.get("id"))
-            for node in reversed(nodes)
-            if _dict(node.get("detail")).get("type") == "recovery"
-        ),
-        None,
-    )
     for node in nodes:
+        node["work_id"] = work_id
+        node["scope"] = {
+            key: node.get(key)
+            for key in (
+                "work_id",
+                "part_job_id",
+                "run_id",
+                "artifact_id",
+                "result_id",
+            )
+            if node.get(key) is not None
+        }
         node["interaction"] = _workflow_node_interaction(
             node,
             work_id=work_id,
@@ -710,8 +863,6 @@ def build_agent_first_workflow_projection(
             overview_parts=overview_parts,
             references=references,
             accepted=accepted,
-            recovery=recovery,
-            current_recovery_node_id=current_recovery_node_id,
             language=language,
         )
         node["user_state"] = _workflow_user_state(node)
@@ -781,8 +932,6 @@ def _workflow_node_interaction(
     overview_parts: dict[str, dict[str, Any]],
     references: list[dict[str, Any]],
     accepted: dict[str, Any],
-    recovery: dict[str, Any] | None,
-    current_recovery_node_id: str | None,
     language: str,
 ) -> dict[str, Any]:
     """Derive task-oriented UI actions from existing durable Work state."""
@@ -795,6 +944,7 @@ def _workflow_node_interaction(
     is_active_attempt = bool(run_id and run_id == active_run_id)
     detail = _dict(node.get("detail"))
     detail_type = str(detail.get("type") or "evidence")
+    node_recovery = _dict(detail.get("recovery"))
     primary: dict[str, Any] | None = None
     secondary: list[dict[str, Any]] = []
     unavailable_reason: str | None = None
@@ -813,30 +963,44 @@ def _workflow_node_interaction(
             "enabled": True,
             "category": category,
             "target_work_id": work_id,
+            "target_stage_id": node.get("id"),
             "part_job_id": part_job_id or None,
+            "scope_label": (
+                part.get("name")
+                or (part_job_id.replace("_", " ").title() if part_job_id else None)
+                or ("Work 设计" if language == "zh" else "Work Design")
+            ),
             "target_run_id": run_id if isinstance(run_id, str) else None,
             **extra,
         }
 
     recovery_applies = bool(
-        recovery
-        and recovery.get("part_job_id") in {None, part_job_id}
+        node_recovery
+        and node_recovery.get("part_job_id") in {None, part_job_id}
         and (
-            (detail_type == "recovery" and node.get("id") == current_recovery_node_id)
+            (
+                detail_type == "recovery"
+                and node_recovery.get("artifact_id") == node.get("artifact_id")
+            )
             or (
                 detail_type == "clarification"
                 and not detail.get("answered")
-                and recovery.get("question_artifact_id") == node.get("artifact_id")
+                and node_recovery.get("question_artifact_id") == node.get("artifact_id")
             )
             or (detail_type in {"part_job", "attempt"} and (detail_type == "part_job" or is_active_attempt))
         )
     )
-    recommended = _dict((recovery or {}).get("recommended_action")) if recovery_applies else {}
+    recommended = _dict(node_recovery.get("recommended_action")) if recovery_applies else {}
     recovery_key = str(recommended.get("key") or "")
     if recovery_key == "answer_question" and detail_type == "clarification" and not detail.get("answered"):
         primary = action("answer_question", "Answer and continue", "回答并继续")
-    elif recovery_key == "retry_agent" and recovery and recovery.get("retryable") is True:
-        primary = action("retry_agent", "Retry Agent", "重试 Agent")
+    elif recovery_key == "retry_agent" and node_recovery.get("retryable") is True:
+        part_label = str(part.get("name") or part_job_id.replace("_", " ").title())
+        primary = action(
+            "retry_agent",
+            f"Retry {part_label}" if part_job_id else "Retry Work Design",
+            f"重试 {part_label}" if part_job_id else "重试 Work 设计",
+        )
     elif recovery_key in {"open_settings", "check_environment"}:
         primary = action("open_settings", "Open Settings", "打开设置", category="navigation")
     elif recovery_key == "modify_request":
@@ -866,18 +1030,32 @@ def _workflow_node_interaction(
         if len(jobs_by_id) == 1 and attempts and not has_design_progress:
             only_job_id, only_job = next(iter(jobs_by_id.items()))
             target_run_id = only_job.get("active_attempt_run_id") or attempts[-1].get("run_id")
+            only_part = _dict(overview_parts.get(only_job_id))
+            part_label = str(
+                only_part.get("name") or only_job_id.replace("_", " ").title()
+            )
             primary = action(
                 "continue_agent",
-                "Start design",
-                "开始设计",
+                f"Start {part_label} design",
+                f"开始 {part_label} 设计",
                 part_job_id=only_job_id,
+                scope_label=part_label,
                 target_run_id=target_run_id,
             )
         elif not attempts:
-            unavailable_reason = (
-                "No Part Job attempt exists yet; Work-level decomposition is not implemented."
-                if language != "zh"
-                else "尚无零件尝试；Work 级分解能力尚未实现。"
+            primary = action(
+                "continue_work_design",
+                "Continue Work Design",
+                "继续 Work 设计",
+                target_stage_id="work:design",
+                target_run_id=node.get("run_id"),
+            )
+    elif detail_type == "work_design":
+        if node.get("status") not in {"completed"}:
+            primary = action(
+                "continue_work_design",
+                "Continue Work Design",
+                "继续 Work 设计",
             )
     elif detail_type in {"part_job", "attempt"}:
         if primary is None and not recovery_applies and active_run_id and (detail_type == "part_job" or is_active_attempt):
@@ -887,11 +1065,33 @@ def _workflow_node_interaction(
                 or item.get("trust_role") == "reviewable"
                 for item in run_references
             )
+            active_run_has_agent_progress = any(
+                item.get("checkpoint")
+                in {
+                    "agent_output",
+                    "agent_activity",
+                    "design_brief",
+                    "model_program_candidate",
+                    "geometry_candidate",
+                    "cad_ir_draft",
+                    "execution_observation",
+                    "product_design_routing",
+                    "reviewable_result",
+                }
+                for item in run_references
+            )
             if part.get("state") == "design" and not active_run_has_reviewable_result:
+                part_label = str(
+                    part.get("name") or part_job_id.replace("_", " ").title()
+                )
                 primary = action(
                     "continue_agent",
-                    "Continue Agent" if run_references else "Start design",
-                    "继续 Agent" if run_references else "开始设计",
+                    f"Continue {part_label}"
+                    if active_run_has_agent_progress
+                    else f"Start {part_label} design",
+                    f"继续 {part_label}"
+                    if active_run_has_agent_progress
+                    else f"开始 {part_label} 设计",
                     target_run_id=active_run_id,
                 )
         if isinstance(run_id, str):
@@ -1120,11 +1320,26 @@ def _workflow_reference_node(
     overview: dict[str, Any],
     part: dict[str, Any],
     language: str,
+    *,
+    all_references: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     checkpoint = str(reference.get("checkpoint") or "")
     trust_role = str(reference.get("trust_role") or "")
     artifact_id = str(reference.get("artifact_id") or "")
     payload = _read_reference(backend, work_id, reference)
+    scope_references = [
+        item
+        for item in all_references
+        if item.get("part_job_id") == reference.get("part_job_id")
+        and item.get("run_id") == reference.get("run_id")
+    ]
+    scope_output = build_agent_output_projection(
+        backend,
+        work_id,
+        scope_references,
+        language=language,
+        scope_kind="part" if reference.get("part_job_id") else "work_design",
+    )
     common = {
         "part_job_id": reference.get("part_job_id"),
         "run_id": reference.get("run_id"),
@@ -1139,6 +1354,14 @@ def _workflow_reference_node(
             if isinstance(item, dict) and item.get("trust_role") == "accepted_input"
         )
         question = questions[0] if questions else {}
+        question_recovery = build_recovery_projection(
+            backend,
+            work_id,
+            {},
+            scope_references,
+            language=language,
+            agent_output=scope_output,
+        )
         return {
             "edge_type": "asked",
             "node": {
@@ -1148,7 +1371,22 @@ def _workflow_reference_node(
                 "kind": "decision",
                 "status": "completed" if answered else "blocked",
                 "summary": question.get("question") or payload.get("why_it_matters"),
-                "detail": {"type": "clarification", "questions": questions, "evidence": payload, "answered": answered},
+                "detail": {
+                    "type": "clarification",
+                    "questions": questions,
+                    "evidence": payload,
+                    "answered": answered,
+                    "agent_output": scope_output,
+                    "recovery": {
+                        **_dict(question_recovery),
+                        "work_id": work_id,
+                        "part_job_id": reference.get("part_job_id"),
+                        "run_id": reference.get("run_id"),
+                        "artifact_id": artifact_id,
+                    }
+                    if not answered
+                    else {},
+                },
             },
         }
     if checkpoint == "clarification_decision" and trust_role == "accepted_input":
@@ -1165,6 +1403,7 @@ def _workflow_reference_node(
             },
         }
     if checkpoint == "design_brief":
+        design_content = _dict(payload.get("content")) or payload
         return {
             "edge_type": "designed",
             "node": {
@@ -1173,8 +1412,13 @@ def _workflow_reference_node(
                 "label": "Agent 设计" if language == "zh" else "Agent design",
                 "kind": "design",
                 "status": "completed",
-                "summary": _dict(overview.get("agent_design")).get("summary") or ("已保存设计摘要" if language == "zh" else "Persisted design summary"),
-                "detail": {"type": "agent_design", "agent_design": _dict(overview.get("agent_design")), "agent_output": _dict(overview.get("agent_output")), "evidence": payload},
+                "summary": design_content.get("concept") or ("已保存设计摘要" if language == "zh" else "Persisted design summary"),
+                "detail": {
+                    "type": "agent_design",
+                    "agent_design": design_content,
+                    "agent_output": scope_output,
+                    "evidence": payload,
+                },
             },
         }
     if trust_role == "candidate" and checkpoint in {"model_program_candidate", "geometry_candidate", "cad_ir_draft"}:
@@ -1214,12 +1458,15 @@ def _workflow_reference_node(
         stop_reason = episode.get("stop_reason")
         if not stop_reason or episode.get("status") == "completed":
             return None
-        current_recovery = _dict(overview.get("recovery"))
-        references = [
-            item
-            for item in _dict(overview.get("advanced")).get("artifact_references", [])
-            if isinstance(item, dict)
-        ]
+        current_recovery = build_recovery_projection(
+            backend,
+            work_id,
+            _dict(_dict(overview.get("advanced")).get("entity_state")),
+            scope_references,
+            language=language,
+            agent_output=scope_output,
+        )
+        references = all_references
         accepted_input_ids = {
             str(item.get("artifact_id"))
             for item in references
@@ -1248,15 +1495,55 @@ def _workflow_reference_node(
                     "type": "recovery",
                     "stop_reason": stop_reason,
                     "episode": episode,
-                    "recovery": current_recovery if current_recovery.get("category") == stop_reason else {},
-                    "agent_output": _dict(overview.get("agent_output")),
+                    "recovery": {
+                        **_dict(current_recovery),
+                        "work_id": work_id,
+                        "part_job_id": reference.get("part_job_id"),
+                        "run_id": reference.get("run_id"),
+                        "artifact_id": artifact_id,
+                    }
+                    if _dict(current_recovery).get("category") == stop_reason
+                    else {},
+                    "agent_output": scope_output,
                     "evidence": payload,
                 },
             },
         }
     if checkpoint == "reviewable_result" and trust_role == "reviewable_result" and str(reference.get("relative_path") or "").endswith("/reviewable_result.json"):
         result_id = reference.get("artifact_id")
-        result = _result_detail_for_node(overview, str(reference.get("part_job_id") or ""), str(result_id or ""))
+        result = _result_detail_from_record(
+            payload,
+            part,
+            str(result_id or ""),
+            language,
+        )
+        step_reference = next(
+            (
+                item
+                for item in scope_references
+                if item.get("checkpoint") == "reviewable_result"
+                and item.get("trust_role") == "reviewable_result"
+                and result_id in item.get("source_artifact_ids", [])
+                and item.get("validation_status") == "passed"
+            ),
+            None,
+        )
+        preview = {
+            "status": "reviewable",
+            "label": "结果可供审查" if language == "zh" else "Result ready for review",
+            "kind": "registered_step" if step_reference else "empty",
+            "viewer_url": (
+                f"/web-viewer/index.html?file=%2Fapi%2Fwork-artifacts%2F{work_id}%2F{step_reference.get('artifact_id')}%2Fpreview.stl"
+                if step_reference
+                else None
+            ),
+            "download_url": (
+                f"/api/work-artifacts/{work_id}/{step_reference.get('artifact_id')}/download"
+                if step_reference
+                else None
+            ),
+            "geometry": _dict(payload.get("geometry")),
+        }
         return {
             "edge_type": "reviewable",
             "node": {
@@ -1273,6 +1560,8 @@ def _workflow_reference_node(
                     "record": payload,
                     "part_job_id": reference.get("part_job_id"),
                     "can_start_revision": True,
+                    "preview": preview,
+                    "agent_output": scope_output,
                 },
             },
         }
@@ -1284,7 +1573,7 @@ def _workflow_part_status(part: dict[str, Any], recovery: dict[str, Any] | None,
         return "blocked"
     state = str(part.get("state") or "not_started")
     return {
-        "design": "running",
+        "design": "not_started",
         "reviewable": "reviewable",
         "accepted": "accepted",
         "not_started": "not_started",
@@ -1305,7 +1594,10 @@ def _workflow_attempt_status(
     if any(item.get("checkpoint") == "reviewable_result" and item.get("trust_role") == "reviewable_result" for item in references):
         return "completed"
     if run_id == active_run_id:
-        return "running"
+        # A current attempt is ready, not necessarily executing.  The NiceGUI
+        # action lifecycle overlays Running only while the local command is
+        # actually in flight; no durable active indicator exists here.
+        return "not_started"
     pointer = _dict(accepted_pointer)
     if pointer.get("attempt_run_id") == run_id and pointer.get("status") == "approved":
         return "completed"
@@ -1400,6 +1692,45 @@ def _result_detail_for_node(overview: dict[str, Any], part_job_id: str, result_i
         "unsupported": [],
         "not_requested": [],
         "geometry": {},
+    }
+
+
+def _result_detail_from_record(
+    record: dict[str, Any],
+    part: dict[str, Any],
+    result_id: str,
+    language: str,
+) -> dict[str, Any]:
+    """Project one exact reviewable record without an active-Part fallback."""
+
+    geometry = _dict(record.get("geometry"))
+    validation = _dict(record.get("validation"))
+    verified: list[str] = []
+    if geometry.get("valid") is True:
+        verified.append("有效实体" if language == "zh" else "Valid solid")
+    if isinstance(record.get("step"), dict):
+        verified.append("STEP 导出成功" if language == "zh" else "STEP export passed")
+    if validation.get("step_reimport_valid") is True:
+        verified.append(
+            "STEP 重新导入验证通过"
+            if language == "zh"
+            else "STEP re-import passed"
+        )
+    return {
+        "status": "reviewable",
+        "title": "可审查结果" if language == "zh" else "Reviewable result",
+        "part": part.get("name") or part.get("part_job_id"),
+        "role": part.get("role"),
+        "reviewable_result_id": result_id,
+        "accepted": part.get("accepted_result_id") == result_id,
+        "geometry": geometry,
+        "verified": verified,
+        "assumptions": list(record.get("assumptions") or []),
+        "limitations": list(record.get("limitations") or []),
+        "unverified": list(record.get("unverified") or []),
+        "unsupported": list(record.get("unsupported") or []),
+        "not_requested": list(record.get("not_requested") or []),
+        "validation": validation,
     }
 
 

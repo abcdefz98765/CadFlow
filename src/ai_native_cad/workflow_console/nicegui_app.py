@@ -247,6 +247,7 @@ class ActionExecutionState:
     action_key: str
     status: str = "idle"
     target_work_id: str | None = None
+    target_part_job_id: str | None = None
     target_run_id: str | None = None
     target_stage_id: str | None = None
     started_at: str | None = None
@@ -255,6 +256,8 @@ class ActionExecutionState:
     error_code: str | None = None
     error_detail: str | None = None
     postcondition_verified: bool = False
+    command_acknowledged: bool = False
+    runtime_outcome: str | None = None
 
     @classmethod
     def from_action(cls, action: dict[str, Any], *, status: str = "pending", message: str | None = None) -> "ActionExecutionState":
@@ -262,6 +265,7 @@ class ActionExecutionState:
             action_key=str(action.get("key") or "workflow_action"),
             status=status,
             target_work_id=action.get("target_work_id") if isinstance(action.get("target_work_id"), str) else None,
+            target_part_job_id=action.get("part_job_id") if isinstance(action.get("part_job_id"), str) else None,
             target_run_id=action.get("target_run_id") if isinstance(action.get("target_run_id"), str) else None,
             target_stage_id=action.get("target_stage_id") if isinstance(action.get("target_stage_id"), str) else None,
             started_at=datetime.now(timezone.utc).isoformat(),
@@ -300,7 +304,11 @@ def _schedule_action(coroutine: Any) -> Any:
 
 
 def _runtime_message(action: dict[str, Any], language: str, phase: str, *, error: str | None = None) -> str:
-    part_id = str(action.get("part_id") or "")
+    part_id = str(action.get("part_id") or action.get("part_job_id") or "")
+    scope_label = str(
+        action.get("scope_label")
+        or (part_id.replace("_", " ").title() if part_id else "Work Design")
+    )
     key = str(action.get("key") or action.get("backend_action") or "")
     product_messages = {
         "open_product_example": {
@@ -319,12 +327,17 @@ def _runtime_message(action: dict[str, Any], language: str, phase: str, *, error
             "failed": ("Could not create the revision", "未能创建设计修改"),
         },
         "continue_agent": {
-            "pending": ("The Agent is designing and checking geometry…", "Agent 正在设计并检查几何……"),
-            "success": ("Agent activity completed", "Agent 设计活动已完成"),
-            "failed": ("Agent activity could not complete", "Agent 设计活动未能完成"),
+            "pending": (f"Starting {scope_label} design…", f"正在启动 {scope_label} 设计……"),
+            "success": (f"{scope_label} design completed", f"{scope_label} 设计已完成"),
+            "failed": (f"{scope_label} design failed", f"{scope_label} 设计失败"),
+        },
+        "retry_agent": {
+            "pending": (f"Restarting {scope_label} design…", f"正在重新启动 {scope_label} 设计……"),
+            "success": (f"{scope_label} design progressed", f"{scope_label} 设计已有进展"),
+            "failed": (f"{scope_label} design stopped", f"{scope_label} 设计已停止"),
         },
         "continue_work_design": {
-            "pending": ("The Agent is designing the Work and deciding Part boundaries…", "Agent 正在设计整个 Work 并决定零件边界……"),
+            "pending": ("Starting Work Design…", "正在启动 Work 设计……"),
             "success": ("Work Design activity completed", "Work 设计活动已完成"),
             "failed": ("Work Design could not complete", "Work 设计未能完成"),
         },
@@ -1550,8 +1563,9 @@ def _render_overview_current_task(
                     if action_running:
                         button.disable()
                 elif key == "continue_agent" and active_job:
+                    part_label = str(active_job.get("name") or active_job.get("part_job_id") or "Part")
                     button = ui.button(
-                        i18n_copy(language, "continue_agent"),
+                        f"继续 {part_label}" if language == "zh" else f"Continue {part_label}",
                         icon="play_arrow",
                         on_click=lambda: _show_continue_agent_confirmation(
                             ui, backend, overview, state, refresh, language
@@ -1640,8 +1654,14 @@ def _render_agent_output(ui: Any, projection: dict[str, Any], language: str) -> 
         with ui.element("div").classes("workbench-agent-output-compact w-full"):
             ui.icon("forum", size="sm").classes("text-gray-400")
             ui.label(
-                "Agent 输出将在首次外部响应后显示。" if language == "zh"
-                else "Agent Output will appear after the first external response."
+                str(
+                    projection.get("empty_message")
+                    or (
+                        "Agent 输出将在首次外部响应后显示。"
+                        if language == "zh"
+                        else "Agent Output will appear after the first external response."
+                    )
+                )
             ).classes("text-sm text-gray-500")
         return
     with ui.element("section").classes("workbench-panel w-full"):
@@ -2106,16 +2126,22 @@ def _show_continue_work_design_confirmation(
     state: dict[str, Any],
     refresh: Callable[[], None],
     language: str,
+    *,
+    scoped_action: dict[str, Any] | None = None,
 ) -> None:
     advanced = overview.get("advanced") if isinstance(overview.get("advanced"), dict) else {}
     work_id = advanced.get("work_id")
     if not isinstance(work_id, str):
         return
-    action = {
-        "key": "continue_work_design",
-        "label": "Continue Work Design",
-        "target_work_id": work_id,
-    }
+    action = (
+        dict(scoped_action)
+        if isinstance(scoped_action, dict)
+        else {
+            "key": "continue_work_design",
+            "label": "Continue Work Design",
+            "target_work_id": work_id,
+        }
+    )
     dialog = ui.dialog()
     with dialog, ui.card().classes("w-[560px] max-w-full"):
         ui.label("继续 Work 设计" if language == "zh" else "Continue Work Design").classes("text-xl font-semibold")
@@ -2146,10 +2172,16 @@ def _show_continue_agent_confirmation(
     state: dict[str, Any],
     refresh: Callable[[], None],
     language: str,
+    *,
+    scoped_action: dict[str, Any] | None = None,
 ) -> None:
     work = overview.get("work") if isinstance(overview.get("work"), dict) else {}
     advanced = overview.get("advanced") if isinstance(overview.get("advanced"), dict) else {}
-    part_id = work.get("active_part")
+    part_id = (
+        scoped_action.get("part_job_id")
+        if isinstance(scoped_action, dict)
+        else work.get("active_part")
+    )
     work_id = advanced.get("work_id")
     job = next(
         (item for item in overview.get("part_jobs", []) if isinstance(item, dict) and item.get("part_job_id") == part_id),
@@ -2157,25 +2189,35 @@ def _show_continue_agent_confirmation(
     )
     if not (isinstance(work_id, str) and isinstance(part_id, str) and isinstance(job, dict)):
         return
-    action = {
-        "key": "continue_agent",
-        "label": "Continue Agent",
-        "target_work_id": work_id,
-        "part_job_id": part_id,
-        "target_run_id": job.get("latest_attempt_run_id"),
-    }
+    action = (
+        dict(scoped_action)
+        if isinstance(scoped_action, dict)
+        else {
+            "key": "continue_agent",
+            "label": "Continue Agent",
+            "target_work_id": work_id,
+            "part_job_id": part_id,
+            "target_run_id": job.get("latest_attempt_run_id"),
+        }
+    )
+    part_label = str(action.get("scope_label") or job.get("name") or part_id)
+    action["scope_label"] = part_label
+    action_label_text = str(
+        action.get("label")
+        or (f"继续 {part_label}" if language == "zh" else f"Continue {part_label}")
+    )
     dialog = ui.dialog()
     with dialog, ui.card().classes("w-[560px] max-w-full"):
-        ui.label(i18n_copy(language, "continue_agent")).classes("text-xl font-semibold")
+        ui.label(action_label_text).classes("text-xl font-semibold")
         ui.label(
-            "Agent 将准备候选设计、在隔离环境中生成几何并检查结果。"
+            f"Agent 将为 {part_label} 准备候选设计、在隔离环境中生成几何并检查结果。"
             if language == "zh"
-            else "The Agent will prepare a candidate, build geometry in isolation, and inspect the result."
+            else f"The Agent will prepare a candidate for {part_label}, build geometry in isolation, and inspect the result."
         ).classes("text-sm text-gray-700")
         with ui.row().classes("w-full justify-end gap-2"):
             ui.button(i18n_copy(language, "cancel"), on_click=dialog.close).props("outline")
             ui.button(
-                i18n_copy(language, "continue_agent"),
+                action_label_text,
                 icon="play_arrow",
                 on_click=lambda: (
                     dialog.close(),
@@ -2347,18 +2389,103 @@ async def _continue_work_design_async(
         return ok, None if ok else "Work Design evidence or Part Job transition was not persisted as expected."
 
     result = await _execute_action_lifecycle(
-        action, state, refresh, execute, language=language, verify=verify
+        action,
+        state,
+        refresh,
+        execute,
+        language=language,
+        verify=verify,
+        terminal=lambda value: _agent_terminal_outcome(action, value, language),
     )
-    episode = result.get("episode") if isinstance(result, dict) and isinstance(result.get("episode"), dict) else {}
-    if result is not None and episode.get("status") != "completed":
-        execution = ActionExecutionState.from_action(
-            action,
-            status="succeeded",
-            message=("Work 设计已安全停止；请按恢复建议继续。" if language == "zh" else "Work Design stopped safely; use the recovery guidance to continue."),
-        )
-        _set_action_execution(state, execution, action)
-        refresh()
     return result
+
+
+def _agent_terminal_outcome(
+    action: dict[str, Any],
+    result: dict[str, Any],
+    language: str,
+) -> tuple[str, str, str]:
+    """Map persisted typed Episode evidence to a user-visible terminal state."""
+
+    container = result.get("episode") if isinstance(result, dict) else None
+    if isinstance(container, dict) and isinstance(container.get("episode"), dict):
+        container = container["episode"]
+    episode = container if isinstance(container, dict) else {}
+    scope = str(action.get("scope_label") or "Work Design")
+    status = str(episode.get("status") or "")
+    stop_reason = str(episode.get("stop_reason") or "")
+    reviewable = bool(
+        episode.get("reviewable_result_id")
+        or (isinstance(result, dict) and result.get("reviewable_result_id"))
+    )
+    if status == "completed" or stop_reason in {"completed", "completed_with_reviewable_result"}:
+        if reviewable:
+            return (
+                "succeeded",
+                f"{scope}：结果已可供审查。" if language == "zh" else f"{scope}: a result is ready for review.",
+                "reviewable_result_ready",
+            )
+        return (
+            "succeeded",
+            f"{scope}：设计活动已完成。" if language == "zh" else f"{scope}: design activity completed.",
+            "completed",
+        )
+    messages = {
+        "user_input_required": (
+            "warning",
+            f"{scope}：需要你的输入才能继续。" if language == "zh" else f"{scope}: your input is needed to continue.",
+            "user_input_required",
+        ),
+        "provider_failure": (
+            "failed",
+            f"{scope}：Provider 请求失败。" if language == "zh" else f"{scope}: the provider request failed.",
+            "provider_failure",
+        ),
+        "validation_exhausted": (
+            "failed",
+            f"{scope}：设计已停止，几何验证次数已用尽。" if language == "zh" else f"{scope}: design stopped after validation was exhausted.",
+            "validation_exhausted",
+        ),
+        "execution_exhausted": (
+            "failed",
+            f"{scope}：设计已停止，执行次数已用尽。" if language == "zh" else f"{scope}: design stopped after execution was exhausted.",
+            "execution_exhausted",
+        ),
+        "unsupported_capability": (
+            "warning",
+            f"{scope}：当前能力不支持此设计路径。" if language == "zh" else f"{scope}: this design path is not currently supported.",
+            "unsupported_capability",
+        ),
+        "sandbox_unavailable": (
+            "failed",
+            f"{scope}：本地 CAD 执行环境不可用。" if language == "zh" else f"{scope}: the local CAD runtime is unavailable.",
+            "environment_runtime_failure",
+        ),
+        "policy_blocked": (
+            "failed",
+            f"{scope}：设计被策略或动作契约阻止。" if language == "zh" else f"{scope}: design was blocked by policy or the action contract.",
+            "policy_block",
+        ),
+        "budget_exhausted": (
+            "warning",
+            f"{scope}：本次 Agent 预算已用尽。" if language == "zh" else f"{scope}: this Agent attempt exhausted its budget.",
+            "budget_exhausted",
+        ),
+        "insufficient_context": (
+            "warning",
+            f"{scope}：仍需要更多设计信息。" if language == "zh" else f"{scope}: more design context is required.",
+            "user_input_required",
+        ),
+    }
+    if stop_reason in messages:
+        return messages[stop_reason]
+    return (
+        "failed",
+        f"{scope}：设计已停止（{stop_reason or status or 'unknown'}）。"
+        if language == "zh"
+        else f"{scope}: design stopped ({stop_reason or status or 'unknown'}).",
+        stop_reason or status or "unknown_failure",
+    )
 
 
 async def _continue_agent_async(
@@ -2397,17 +2524,14 @@ async def _continue_agent_async(
         return ok, None if ok else "Agent activity did not persist new evidence or changed acceptance."
 
     result = await _execute_action_lifecycle(
-        action, state, refresh, execute, language=language, verify=verify
+        action,
+        state,
+        refresh,
+        execute,
+        language=language,
+        verify=verify,
+        terminal=lambda value: _agent_terminal_outcome(action, value, language),
     )
-    episode = result.get("episode") if isinstance(result, dict) and isinstance(result.get("episode"), dict) else {}
-    if result is not None and episode.get("status") != "completed":
-        execution = ActionExecutionState.from_action(
-            action,
-            status="succeeded",
-            message=("Agent 已安全停止；请按恢复建议继续。" if language == "zh" else "The Agent stopped safely; use the recovery guidance to continue."),
-        )
-        _set_action_execution(state, execution, action)
-        refresh()
     return result
 
 
@@ -2419,17 +2543,30 @@ async def _answer_and_continue_agent_async(
     state: dict[str, Any],
     refresh: Callable[[], None],
     language: str,
+    *,
+    source_action: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     from uuid import uuid4
 
     work_id = str(_dict_get(_dict_get(state.get("_last_page_data"), "selected_work"), "work_id") or state.get("selected_work_id") or "")
     part_id = str(recovery.get("part_job_id") or "")
     action = {
-        "key": "continue_agent" if part_id else "continue_work_design",
+        **(dict(source_action) if isinstance(source_action, dict) else {}),
+        "key": (
+            str(source_action.get("key"))
+            if isinstance(source_action, dict) and source_action.get("key")
+            else ("continue_agent" if part_id else "continue_work_design")
+        ),
         "label": "Answer and continue",
-        "target_work_id": work_id,
+        "target_work_id": (
+            source_action.get("target_work_id")
+            if isinstance(source_action, dict)
+            else work_id
+        ),
         "part_job_id": part_id or None,
+        "target_run_id": recovery.get("run_id"),
     }
+    work_id = str(action["target_work_id"])
     if not answer or not answer.strip():
         failed = ActionExecutionState.from_action(action, status="failed", message=_runtime_message(action, language, "failed"))
         failed.error_detail = "请先回答问题。" if language == "zh" else "Answer the question first."
@@ -2476,7 +2613,15 @@ async def _answer_and_continue_agent_async(
         ok = after.get("accepted_part_results") == accepted_before and len(after.get("artifact_references", [])) >= reference_count + 2
         return ok, None if ok else "Clarification evidence or resumed Agent evidence was not persisted."
 
-    return await _execute_action_lifecycle(action, state, refresh, execute, language=language, verify=verify)
+    return await _execute_action_lifecycle(
+        action,
+        state,
+        refresh,
+        execute,
+        language=language,
+        verify=verify,
+        terminal=lambda value: _agent_terminal_outcome(action, value, language),
+    )
 
 
 async def _revise_blocked_request_async(
@@ -2812,7 +2957,11 @@ def _render_agent_first_workflow_page(
     language: str,
 ) -> None:
     work = page.get("work") if isinstance(page.get("work"), dict) else {}
-    graph = page.get("workflow_graph") if isinstance(page.get("workflow_graph"), dict) else {}
+    graph = _workflow_graph_with_runtime(
+        page.get("workflow_graph") if isinstance(page.get("workflow_graph"), dict) else {},
+        state,
+        language,
+    )
     with ui.element("section").classes("workflow-hero w-full"):
         with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
             with ui.column().classes("gap-1"):
@@ -2837,6 +2986,34 @@ def _render_agent_first_workflow_page(
         value=False,
     ).classes("workflow-run-strip-panel w-full"):
         _render_run_strip(ui, page.get("run_strip"), on_select_run, on_select_current_work, language=language)
+
+
+def _workflow_graph_with_runtime(
+    graph: dict[str, Any],
+    state: dict[str, Any],
+    language: str,
+) -> dict[str, Any]:
+    """Overlay the honest in-process command state without persisting it."""
+
+    execution = state.get("action_execution")
+    if not isinstance(execution, dict) or execution.get("status") != "pending":
+        return graph
+    target_node_id = execution.get("target_stage_id")
+    if not isinstance(target_node_id, str):
+        return graph
+    projected = deepcopy(graph)
+    for node in projected.get("nodes", []):
+        if isinstance(node, dict) and node.get("id") == target_node_id:
+            node["status"] = "running"
+            node["user_state"] = "running"
+            node["user_state_label"] = "运行中" if language == "zh" else "Running"
+            node["attention"] = "running"
+    for item in projected.get("current_attention", []):
+        if isinstance(item, dict) and item.get("node_id") == target_node_id:
+            item["state"] = "running"
+            item["state_label"] = "运行中" if language == "zh" else "Running"
+            item["kind"] = "running"
+    return projected
 
 
 def _render_current_attention(
@@ -3088,17 +3265,35 @@ def _render_dynamic_node_detail(
         node_work["active_part"] = node.get("part_job_id")
     node_overview["work"] = node_work
     with ui.element("section").classes("dynamic-node-detail w-full"):
+        _render_action_feedback_panel(ui, state, language)
         with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
             with ui.column().classes("gap-1"):
                 ui.label("所选节点" if language == "zh" else "SELECTED NODE").classes("workflow-eyebrow")
-                ui.label(str(node.get("label") or node.get("id") or "")).classes("text-xl font-semibold")
+                part = detail.get("part") if isinstance(detail.get("part"), dict) else {}
+                part_name = str(part.get("name") or node.get("part_job_id") or "")
+                title = str(node.get("label") or node.get("id") or "")
+                if node.get("part_job_id") and part_name and detail_type == "attempt":
+                    title = part_name
+                ui.label(title).classes("text-xl font-semibold")
+                if detail_type == "attempt":
+                    attempt_index = detail.get("attempt_index") or "—"
+                    ui.label(
+                        f"零件设计 · 尝试 #{attempt_index}"
+                        if language == "zh"
+                        else f"Part design · Attempt #{attempt_index}"
+                    ).classes("text-sm font-medium text-blue-700")
+                elif node.get("part_job_id"):
+                    ui.label(
+                        "零件范围" if language == "zh" else "Part scope"
+                    ).classes("text-sm font-medium text-blue-700")
                 ui.label(str(node.get("summary") or "")).classes("text-sm text-gray-600")
             execution = state.get("action_execution") if isinstance(state.get("action_execution"), dict) else {}
-            action_running = bool(
-                execution.get("status") == "pending"
-                and execution.get("target_work_id") == _dict_get(page.get("work"), "work_id")
-                and execution.get("target_run_id") in {None, node.get("run_id")}
+            primary_action = (
+                interaction.get("primary_action")
+                if isinstance(interaction.get("primary_action"), dict)
+                else {}
             )
+            action_running = bool(primary_action and _pending_action_matches(state, primary_action))
             user_state = "running" if action_running else str(node.get("user_state") or "ready")
             user_state_label = (
                 ("运行中" if language == "zh" else "Running")
@@ -3142,6 +3337,18 @@ def _render_dynamic_node_detail(
                 ui.label("重要约束" if language == "zh" else "Important constraints").classes("workflow-eyebrow mt-3")
                 for constraint in constraints:
                     ui.label(f"• {constraint}").classes("text-sm")
+        elif detail_type in {"work_design", "decomposition"}:
+            work_design = detail.get("work_design") if isinstance(detail.get("work_design"), dict) else {}
+            _key_values(ui, {
+                "Scope": "Work Design",
+                "State": work_design.get("status") or node.get("status"),
+                "Generated Parts": work_design.get("part_job_count", len(work_design.get("generated_parts", []))),
+                "Reference components": work_design.get("reference_component_count", len(work_design.get("reference_components", []))),
+            })
+            if work_design.get("concept_summary"):
+                ui.label("Agent 设计" if language == "zh" else "Agent Design").classes("workflow-eyebrow mt-3")
+                ui.label(str(work_design["concept_summary"])).classes("text-sm")
+            _render_agent_output(ui, _dict_get(detail, "agent_output") or {}, language)
         elif detail_type == "part_job":
             part = detail.get("part") if isinstance(detail.get("part"), dict) else {}
             projected_part = next(
@@ -3155,6 +3362,10 @@ def _render_dynamic_node_detail(
                 "Reviewable result": "available" if projected_part.get("has_reviewable_result") else "none",
                 "Accepted result": "available" if projected_part.get("has_accepted_result") else "none",
             })
+            if detail.get("prompt"):
+                ui.label("设计请求" if language == "zh" else "Design request").classes("workflow-eyebrow mt-3")
+                ui.label(str(detail["prompt"])).classes("text-sm")
+            _render_agent_output(ui, _dict_get(detail, "agent_output") or {}, language)
         elif detail_type == "attempt":
             ui.label(
                 (
@@ -3167,13 +3378,40 @@ def _render_dynamic_node_detail(
                     else "A design attempt for the current Part."
                 )
             ).classes("text-sm text-gray-700 mt-3")
+            part = detail.get("part") if isinstance(detail.get("part"), dict) else {}
+            _key_values(ui, {
+                "Part": part.get("name") or node.get("part_job_id") or "—",
+                "Role": part.get("role") or "—",
+                "Run": node.get("run_id") or "—",
+            })
             if detail.get("prompt"):
                 ui.label("设计请求" if language == "zh" else "Design request").classes("workflow-eyebrow mt-3")
                 ui.label(str(detail["prompt"])).classes("text-sm")
-            agent_output = _dict_get(overview, "agent_output") or {}
-            if agent_output.get("items"):
-                _render_agent_output(ui, agent_output, language)
+            agent_design = _dict_get(detail, "agent_design") or {}
+            if agent_design:
+                normalized_design = {
+                    "title": "Agent 设计" if language == "zh" else "Agent Design",
+                    "summary": agent_design.get("concept") or agent_design.get("summary"),
+                    "geometry_strategy": agent_design.get("geometry_strategy"),
+                    "important_parameters": agent_design.get("important_parameters") or [],
+                    "functional_features": agent_design.get("functional_features") or [],
+                }
+                _render_agent_design_summary(ui, normalized_design, {}, language)
+            _render_agent_output(ui, _dict_get(detail, "agent_output") or {}, language)
         elif detail_type == "agent_design":
+            agent_design = _dict_get(detail, "agent_design") or {}
+            _render_agent_design_summary(
+                ui,
+                {
+                    "title": "Agent 设计" if language == "zh" else "Agent Design",
+                    "summary": agent_design.get("concept") or agent_design.get("summary"),
+                    "geometry_strategy": agent_design.get("geometry_strategy"),
+                    "important_parameters": agent_design.get("important_parameters") or [],
+                    "functional_features": agent_design.get("functional_features") or [],
+                },
+                {},
+                language,
+            )
             _render_agent_output(ui, _dict_get(detail, "agent_output") or {}, language)
         elif detail_type == "clarification":
             for question in detail.get("questions", []):
@@ -3182,7 +3420,7 @@ def _render_dynamic_node_detail(
                     if question.get("reason"):
                         ui.label(str(question["reason"])).classes("text-sm text-gray-600")
             if detail.get("answered"):
-                agent_output = _dict_get(overview, "agent_output") or {}
+                agent_output = _dict_get(detail, "agent_output") or {}
                 answers = [
                     item for item in agent_output.get("items", [])
                     if isinstance(item, dict) and item.get("kind") == "user_answer"
@@ -3206,9 +3444,10 @@ def _render_dynamic_node_detail(
                     if language == "zh"
                     else "This is historical stop evidence; recovery actions are available only for the current active stop."
                 ).classes("text-sm text-gray-600 mt-3")
+            _render_agent_output(ui, _dict_get(detail, "agent_output") or {}, language)
         elif detail_type in {"reviewable_result", "accepted_result"}:
             result = detail.get("result") if isinstance(detail.get("result"), dict) else {}
-            _render_dynamic_preview(ui, _dict_get(overview, "preview") or {}, result, language)
+            _render_dynamic_preview(ui, _dict_get(detail, "preview") or {}, result, language)
             _render_workbench_result(ui, result, node_overview, actions.backend, state, refresh, language, show_actions=False)
         else:
             evidence = detail.get("evidence") if isinstance(detail.get("evidence"), dict) else {}
@@ -3219,10 +3458,13 @@ def _render_dynamic_node_detail(
         with ui.expansion("高级 / 技术证据" if language == "zh" else "Advanced / technical evidence", icon="data_object").classes("w-full mt-3"):
             _key_values(ui, {
                 "Domain status": node.get("status") or "—",
+                "Work": node.get("work_id") or "—",
+                "Part Job": node.get("part_job_id") or "—",
                 "Node": node.get("id"),
                 "Run": node.get("run_id") or "—",
                 "Artifact": node.get("artifact_id") or "—",
                 "Source result": detail.get("source_result_id") or "—",
+                "Episode": _dict_get(detail, "episode").get("episode_id") if isinstance(_dict_get(detail, "episode"), dict) else "—",
             })
             if evidence:
                 ui.markdown(
@@ -3243,8 +3485,8 @@ def _render_dynamic_node_actions(
 ) -> None:
     primary = interaction.get("primary_action") if isinstance(interaction.get("primary_action"), dict) else None
     secondary = [item for item in interaction.get("secondary_actions", []) if isinstance(item, dict)]
-    recovery = _dict_get(overview, "recovery") or {}
     detail = node.get("detail") if isinstance(node.get("detail"), dict) else {}
+    recovery = _dict_get(detail, "recovery") or {}
     if primary or secondary:
         with ui.element("section").classes("dynamic-node-actions w-full mt-3"):
             if primary:
@@ -3253,17 +3495,56 @@ def _render_dynamic_node_actions(
                     questions = recovery.get("questions") if isinstance(recovery.get("questions"), list) else detail.get("questions", [])
                     question = questions[0] if questions and isinstance(questions[0], dict) else {}
                     answer = ui.input(str(question.get("question") or recovery.get("summary") or "Answer")).props("outlined").classes("min-w-[320px] w-full")
-                    ui.button(
+                    button = ui.button(
                         str(primary.get("label") or "Answer and continue"),
                         icon="send",
-                        on_click=lambda: _schedule_action(_answer_and_continue_agent_async(backend, recovery, question, answer.value, state, refresh, language)),
+                        on_click=lambda: _schedule_action(
+                            _answer_and_continue_agent_async(
+                                backend,
+                                recovery,
+                                question,
+                                answer.value,
+                                state,
+                                refresh,
+                                language,
+                                source_action=primary,
+                            )
+                        ),
                     ).props("color=primary").classes("mt-2")
+                    if _pending_action_matches(state, primary):
+                        button.disable()
                 elif key in {"continue_agent", "retry_agent"}:
-                    ui.button(
+                    button = ui.button(
                         str(primary.get("label") or "Continue Agent"),
                         icon="refresh" if key == "retry_agent" else "play_arrow",
-                        on_click=lambda: _show_continue_agent_confirmation(ui, backend, overview, state, refresh, language),
+                        on_click=lambda: _show_continue_agent_confirmation(
+                            ui,
+                            backend,
+                            overview,
+                            state,
+                            refresh,
+                            language,
+                            scoped_action=primary,
+                        ),
                     ).props("color=primary")
+                    if _pending_action_matches(state, primary):
+                        button.disable()
+                elif key == "continue_work_design":
+                    button = ui.button(
+                        str(primary.get("label") or "Continue Work Design"),
+                        icon="account_tree",
+                        on_click=lambda: _show_continue_work_design_confirmation(
+                            ui,
+                            backend,
+                            overview,
+                            state,
+                            refresh,
+                            language,
+                            scoped_action=primary,
+                        ),
+                    ).props("color=primary")
+                    if _pending_action_matches(state, primary):
+                        button.disable()
                 elif key == "open_settings":
                     ui.button(str(primary.get("label") or "Open Settings"), icon="settings", on_click=lambda: _go_to_settings(state, refresh)).props("color=primary")
                 elif key == "modify_request":
@@ -3368,12 +3649,30 @@ def _render_action_feedback_panel(ui: Any, state: dict[str, Any], language: str)
     if not isinstance(execution, dict) or execution.get("status") in {None, "idle", "confirming"}:
         return
     status = str(execution.get("status"))
-    title_key = "pending" if status == "pending" else "completed" if status == "succeeded" else "failed"
+    outcome = str(execution.get("runtime_outcome") or "")
+    if status == "pending":
+        title = "命令已接受" if language == "zh" else "Command accepted"
+    elif outcome == "user_input_required":
+        title = "需要你的输入" if language == "zh" else "Needs your input"
+    elif outcome == "reviewable_result_ready":
+        title = "可供审查" if language == "zh" else "Ready for review"
+    elif status == "succeeded":
+        title = "已完成" if language == "zh" else "Completed"
+    elif status == "warning":
+        title = "设计已停止" if language == "zh" else "Design stopped"
+    else:
+        title = "设计失败" if language == "zh" else "Design failed"
     with ui.element("section").classes(f"workflow-action-feedback {status} w-full"):
         with ui.row().classes("w-full items-start justify-between gap-3"):
             with ui.column().classes("gap-1"):
-                ui.label(i18n_copy(language, title_key)).classes("text-sm font-semibold")
+                ui.label(title).classes("text-sm font-semibold")
                 ui.label(str(execution.get("message") or "")).classes("text-sm")
+                if status == "pending":
+                    ui.label(
+                        "运行中；完成后将显示实际 Episode 结果。"
+                        if language == "zh"
+                        else "Running; the actual Episode outcome will replace this acknowledgement."
+                    ).classes("text-xs text-blue-800")
                 if status == "succeeded" and execution.get("action_key") == "select_candidate_part":
                     ui.label("装配计划已保存为用户覆盖版本。零件请求及后续阶段已标记为过期。已有 Run 和已批准结果保持不变。" if language == "zh" else "The Assembly Plan was saved as a user override. Part Request and downstream stages are stale. Existing Runs and accepted results are unchanged.").classes("text-xs")
                     ui.label(i18n_copy(language, "next_create_part_request")).classes("text-xs font-medium")
@@ -3381,11 +3680,11 @@ def _render_action_feedback_panel(ui: Any, state: dict[str, Any], language: str)
                     ui.label(i18n_copy(language, "accept_success_detail")).classes("text-xs")
                 if status == "succeeded" and execution.get("action_key") == "revise_reviewable_result":
                     ui.label(i18n_copy(language, "revise_success_detail")).classes("text-xs")
-                if status == "failed" and execution.get("error_detail"):
+                if status in {"failed", "warning"} and execution.get("error_detail"):
                     with ui.expansion(i18n_copy(language, "details"), icon="error_outline").classes("w-full"):
                         ui.label(str(execution["error_detail"])).classes("text-xs whitespace-pre-wrap")
                 with ui.expansion(i18n_copy(language, "action_details"), icon="rule").classes("w-full"):
-                    target = {key: execution.get(key) for key in ("action_key", "target_work_id", "target_run_id", "target_stage_id")}
+                    target = {key: execution.get(key) for key in ("action_key", "target_work_id", "target_part_job_id", "target_run_id", "target_stage_id", "runtime_outcome")}
                     ui.label(json.dumps(target, ensure_ascii=False, sort_keys=True)).classes("text-xs whitespace-pre-wrap workflow-meta")
             close = ui.button(icon="close", on_click=lambda: state.__setitem__("action_execution", None)).props("flat round dense")
             close.tooltip(i18n_copy(language, "close"))
@@ -4051,11 +4350,14 @@ async def _execute_action_lifecycle(
     *,
     language: str,
     verify: Callable[[dict[str, Any]], tuple[bool, str | None]] | None = None,
+    terminal: Callable[[dict[str, Any]], tuple[str, str, str]] | None = None,
 ) -> dict[str, Any] | None:
     """Execute one write once, surface pending, then verify its persisted effect."""
     if _pending_action_matches(state, action):
         return None
     pending = ActionExecutionState.from_action(action, message=_runtime_message(action, language, "pending"))
+    pending.command_acknowledged = True
+    pending.runtime_outcome = "running"
     _set_action_execution(state, pending, action)
     refresh()
     # Yield after the render so browser users observe pending state before a
@@ -4067,9 +4369,24 @@ async def _execute_action_lifecycle(
         if not verified:
             raise RuntimeError(detail or "backend result did not satisfy its postcondition")
         state["surface_action_result"] = result
-        completed = ActionExecutionState.from_action(action, status="succeeded", message=_runtime_message(action, language, "success"))
+        terminal_status, terminal_message, runtime_outcome = (
+            terminal(result)
+            if terminal
+            else (
+                "succeeded",
+                _runtime_message(action, language, "success"),
+                "completed",
+            )
+        )
+        completed = ActionExecutionState.from_action(
+            action,
+            status=terminal_status,
+            message=terminal_message,
+        )
         completed.completed_at = datetime.now(timezone.utc).isoformat()
         completed.postcondition_verified = True
+        completed.command_acknowledged = True
+        completed.runtime_outcome = runtime_outcome
         _set_action_execution(state, completed, action)
         return result
     except Exception as exc:
@@ -4077,6 +4394,8 @@ async def _execute_action_lifecycle(
         failed.completed_at = datetime.now(timezone.utc).isoformat()
         failed.error_code = type(exc).__name__
         failed.error_detail = str(exc)
+        failed.command_acknowledged = True
+        failed.runtime_outcome = "environment_runtime_failure"
         _set_action_execution(state, failed, action)
         state["surface_action_result"] = {"ok": False, "error": str(exc)}
         return None

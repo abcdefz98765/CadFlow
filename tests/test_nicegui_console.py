@@ -1,6 +1,7 @@
 import importlib.util
 import asyncio
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,10 @@ from ai_native_cad.workflow_console.nicegui_app import (
     _part_viewer_url,
     _run_workflow_page_action,
     _execute_action_lifecycle,
+    _agent_terminal_outcome,
+    _continue_agent_async,
+    _pending_action_matches,
+    _workflow_graph_with_runtime,
     _save_artifact_override_ui,
 )
 from ai_native_cad.workflow_console.routes import dispatch_route
@@ -172,6 +177,159 @@ def test_action_lifecycle_reports_failed_postcondition_and_rejects_duplicate_cli
     assert state["action_execution"]["status"] == "failed"
     assert state["action_execution"]["postcondition_verified"] is False
     assert "postcondition mismatch" in state["action_execution"]["error_detail"]
+
+
+def test_agent_action_is_pending_disabled_and_running_before_terminal_success():
+    state = {}
+    refresh_states = []
+    started = threading.Event()
+    release = threading.Event()
+    action = {
+        "key": "continue_agent",
+        "label": "Start Camera Cradle design",
+        "scope_label": "Camera Cradle",
+        "target_work_id": "scope_work",
+        "part_job_id": "camera_cradle",
+        "target_run_id": "camera_attempt_1",
+        "target_stage_id": "attempt:camera_cradle:camera_attempt_1",
+    }
+
+    def refresh():
+        refresh_states.append(dict(state.get("action_execution") or {}))
+
+    def execute():
+        started.set()
+        assert release.wait(timeout=5)
+        return {
+            "episode": {
+                "status": "completed",
+                "stop_reason": "completed_with_reviewable_result",
+                "reviewable_result_id": "camera_result_1",
+            }
+        }
+
+    async def exercise():
+        task = asyncio.create_task(
+            _execute_action_lifecycle(
+                action,
+                state,
+                refresh,
+                execute,
+                language="en",
+                terminal=lambda value: _agent_terminal_outcome(action, value, "en"),
+            )
+        )
+        while not started.is_set():
+            await asyncio.sleep(0.01)
+        assert state["action_execution"]["status"] == "pending"
+        assert state["action_execution"]["command_acknowledged"] is True
+        assert state["action_execution"]["runtime_outcome"] == "running"
+        assert _pending_action_matches(state, action) is True
+        graph = _workflow_graph_with_runtime(
+            {
+                "nodes": [{"id": action["target_stage_id"], "status": "not_started"}],
+                "current_attention": [{"node_id": action["target_stage_id"], "state": "ready"}],
+            },
+            state,
+            "en",
+        )
+        assert graph["nodes"][0]["status"] == "running"
+        assert graph["current_attention"][0]["state"] == "running"
+        duplicate = await _execute_action_lifecycle(
+            action,
+            state,
+            refresh,
+            lambda: pytest.fail("duplicate invocation reached the backend"),
+            language="en",
+        )
+        assert duplicate is None
+        release.set()
+        return await task
+
+    result = asyncio.run(exercise())
+    assert result["episode"]["reviewable_result_id"] == "camera_result_1"
+    assert refresh_states[0]["status"] == "pending"
+    assert refresh_states[0]["message"] == "Starting Camera Cradle design…"
+    assert state["action_execution"]["status"] == "succeeded"
+    assert state["action_execution"]["runtime_outcome"] == "reviewable_result_ready"
+    assert "ready for review" in state["action_execution"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("stop_reason", "expected_status", "expected_outcome", "message_fragment"),
+    [
+        ("user_input_required", "warning", "user_input_required", "input is needed"),
+        ("provider_failure", "failed", "provider_failure", "provider request failed"),
+        ("validation_exhausted", "failed", "validation_exhausted", "validation was exhausted"),
+        ("unsupported_capability", "warning", "unsupported_capability", "not currently supported"),
+        ("sandbox_unavailable", "failed", "environment_runtime_failure", "runtime is unavailable"),
+        ("policy_blocked", "failed", "policy_block", "blocked by policy"),
+        ("budget_exhausted", "warning", "budget_exhausted", "exhausted its budget"),
+    ],
+)
+def test_agent_terminal_feedback_uses_typed_episode_outcome(
+    stop_reason, expected_status, expected_outcome, message_fragment
+):
+    status, message, outcome = _agent_terminal_outcome(
+        {"scope_label": "Extrusion Adapter"},
+        {"episode": {"status": "safely_blocked", "stop_reason": stop_reason}},
+        "en",
+    )
+
+    assert status == expected_status
+    assert outcome == expected_outcome
+    assert message_fragment in message
+
+
+def test_continue_agent_executes_exact_selected_part_and_run():
+    class Backend:
+        def __init__(self):
+            self.manifest = {"accepted_part_results": {}, "artifact_references": []}
+            self.calls = []
+
+        def _read_work_manifest(self, work_id):
+            assert work_id == "two_part_work"
+            return {
+                "accepted_part_results": dict(self.manifest["accepted_part_results"]),
+                "artifact_references": list(self.manifest["artifact_references"]),
+            }
+
+        def run_work_part_design_episode(
+            self, work_id, part_job_id, *, request_id, attempt_run_id
+        ):
+            self.calls.append((work_id, part_job_id, attempt_run_id, request_id))
+            self.manifest["artifact_references"].append({"artifact_id": "adapter_route"})
+            return {
+                "episode": {
+                    "status": "safely_blocked",
+                    "stop_reason": "provider_failure",
+                }
+            }
+
+    backend = Backend()
+    state = {}
+    action = {
+        "key": "continue_agent",
+        "label": "Start Extrusion Adapter design",
+        "scope_label": "Extrusion Adapter",
+        "target_work_id": "two_part_work",
+        "part_job_id": "extrusion_adapter",
+        "target_run_id": "adapter_attempt_1",
+        "target_stage_id": "attempt:extrusion_adapter:adapter_attempt_1",
+    }
+
+    result = asyncio.run(
+        _continue_agent_async(backend, action, state, lambda: None, "en")
+    )
+
+    assert result["episode"]["stop_reason"] == "provider_failure"
+    assert backend.calls[0][:3] == (
+        "two_part_work",
+        "extrusion_adapter",
+        "adapter_attempt_1",
+    )
+    assert state["action_execution"]["status"] == "failed"
+    assert state["action_execution"]["runtime_outcome"] == "provider_failure"
 
 
 def _does_not_contain_text(value, blocked):
