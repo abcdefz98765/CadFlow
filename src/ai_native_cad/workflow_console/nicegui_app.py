@@ -40,8 +40,6 @@ WEB_VIEWER_ROOT = Path(__file__).resolve().parents[3] / "web-viewer"
 WORK_USER_PAGES = (
     ("overview", "dashboard", "Overview"),
     ("workflow", "account_tree", "Workflow"),
-    ("parts", "view_list", "Parts"),
-    ("history", "history", "History"),
 )
 PAGE_IDS = frozenset({
     "workspace",
@@ -403,17 +401,30 @@ def build_console_page_data(
     pagination = _empty_pagination(limit, offset)
     run_filters: dict[str, Any] = {}
     selected = selected_run_id or _dict_get(work_detail.get("summary"), "latest_run_id")
-    load_runs = selected_run_id is not None
+    load_runs = selected_run_id is not None and not (
+        selected_work
+        and active_page in {"overview", "workflow", "parts"}
+        and view_mode == "current_work"
+    )
     if active_page in {"runs", "history"}:
         runs = [_run_history_row_as_run(row) for row in work_detail.get("run_history", []) if isinstance(row, dict)]
         selected = selected_run_id or (runs[0]["run_id"] if runs else selected)
     run_data = (
         build_selected_run_data(backend, selected, root=root, selected_stage_id=selected_stage_id, language=language)
-        if selected and (active_page in {"workflow", "review", "products", "runs", "history"} or selected_run_id is not None or load_runs)
+        if selected
+        and (
+            active_page in {"review", "products", "runs", "history"}
+            or view_mode == "run_snapshot"
+            or load_runs
+        )
         else empty_selected_run_data()
     )
     work_projection = None
-    if selected_work and active_page in {"workflow", "review"}:
+    compatibility_work = (
+        _dict_get(work_detail.get("entity_state"), "state_authority")
+        == "compatibility"
+    )
+    if selected_work and active_page == "review" and compatibility_work:
         try:
             work_projection = build_work_stage_projection(backend, selected_work)
         except (FileNotFoundError, ValueError) as exc:
@@ -458,14 +469,6 @@ def build_console_page_data(
             language=language,
             projection=work_projection,
         )
-        data["workflow_page"] = build_workflow_page_view_model(
-            backend,
-            selected_work,
-            view_mode="run_snapshot" if view_mode == "run_snapshot" else "current_work",
-            selected_run_id=selected_run_id if view_mode == "run_snapshot" else None,
-            selected_stage_id=selected_stage_id,
-            language=language,
-        )
     data["view_mode"] = "run_snapshot" if view_mode == "run_snapshot" else "current_work"
     if selected_work and active_page in {"overview", "workflow", "parts", "history"}:
         try:
@@ -476,6 +479,16 @@ def build_console_page_data(
             )
         except (FileNotFoundError, ValueError):
             data["workbench_overview"] = {}
+    if selected_work and active_page == "workflow":
+        data["workflow_page"] = build_workflow_page_view_model(
+            backend,
+            selected_work,
+            view_mode="run_snapshot" if view_mode == "run_snapshot" else "current_work",
+            selected_run_id=selected_run_id if view_mode == "run_snapshot" else None,
+            selected_stage_id=selected_stage_id,
+            language=language,
+            overview=data.get("workbench_overview"),
+        )
     return data
 
 
@@ -641,7 +654,11 @@ def empty_selected_run_data() -> dict[str, Any]:
             "parts": [],
         },
         "part_workflow": {"actions": []},
-        "workflow_review_surface": build_workflow_review_surface(WorkflowConsoleBackend(), None, {}),
+        "workflow_review_surface": {
+            "stages": [],
+            "selected_stage": None,
+            "workflow_graph": {"nodes": [], "edges": []},
+        },
         "workflow_review": build_workflow_review_data({}),
         "stage_review": build_stage_review_data({}),
         "artifacts_page": {"artifacts": [], "downloadables": [], "model_files": []},
@@ -1104,13 +1121,14 @@ def _render_work_header(ui: Any, data: dict[str, Any]) -> None:
         with ui.row().classes("gap-2"):
             if phase.get("label"):
                 ui.badge(phase["label"]).classes("bg-blue-600")
+            part_count = int(workbench_work.get("part_count") or counts.get("total") or 0)
             ui.badge(
-                (
-                    f"已接受 {workbench_work.get('accepted_part_count', counts.get('accepted', 0))} 个零件"
-                    if language == "zh"
-                    else f"{workbench_work.get('accepted_part_count', counts.get('accepted', 0))} accepted parts"
-                )
-            ).classes("bg-green-700" if workbench_work.get("accepted_part_count") else "bg-gray-500")
+                f"{part_count} 个零件" if language == "zh" else f"{part_count} Part{'s' if part_count != 1 else ''}"
+            ).classes("bg-slate-600")
+            if workbench_work.get("accepted_part_count"):
+                ui.badge(
+                    f"已接受 {workbench_work['accepted_part_count']} 个" if language == "zh" else f"{workbench_work['accepted_part_count']} accepted"
+                ).classes("bg-green-700")
     if phase.get("items"):
         with ui.element("div").classes("workbench-phase"):
             for item in phase["items"]:
@@ -1453,7 +1471,9 @@ def _render_work_overview(
     elif recommendation.get("key") == "start_design":
         _render_workbench_start_design(ui, data, state, refresh, language)
 
-    _render_workbench_parts_summary(ui, overview, on_select_page, language)
+    parts = [item for item in overview.get("part_jobs", []) if isinstance(item, dict)]
+    if len(parts) > 1:
+        _render_workbench_parts_summary(ui, overview, on_select_page, language)
 
     with ui.row().classes("w-full gap-2 flex-wrap"):
         ui.button(
@@ -1461,16 +1481,19 @@ def _render_work_overview(
             icon="account_tree",
             on_click=_page_selection_callback(on_select_page, "workflow"),
         ).props("outline")
-        ui.button(
-            i18n_copy(language, "part_jobs"),
-            icon="view_list",
-            on_click=_page_selection_callback(on_select_page, "parts"),
-        ).props("outline")
-        ui.button(
-            i18n_copy(language, "history"),
-            icon="history",
-            on_click=_page_selection_callback(on_select_page, "history"),
-        ).props("outline")
+        if len(parts) > 1:
+            ui.button(
+                i18n_copy(language, "part_jobs"),
+                icon="view_list",
+                on_click=_page_selection_callback(on_select_page, "parts"),
+            ).props("flat")
+        history = overview.get("history") if isinstance(overview.get("history"), dict) else {}
+        if int(history.get("run_count") or 0) > 1:
+            ui.button(
+                i18n_copy(language, "history"),
+                icon="history",
+                on_click=_page_selection_callback(on_select_page, "history"),
+            ).props("flat")
 
     _render_workbench_advanced(ui, overview, language)
 
@@ -1573,7 +1596,7 @@ def _render_overview_current_task(
                     ).props("color=primary")
                     if action_running:
                         button.disable()
-                elif result and result.get("reviewable_result_id") and key == "accept_or_revise":
+                elif result and result.get("reviewable_result_id") and key == "accept_reviewable_result":
                     part_id = str((active_job or {}).get("part_job_id") or "")
                     result_id = str(result["reviewable_result_id"])
                     ui.button(
@@ -1604,7 +1627,7 @@ def _render_overview_current_task(
                             language,
                         ),
                     ).props("flat")
-                elif result and result.get("reviewable_result_id") and key == "revise":
+                elif result and result.get("reviewable_result_id") and key == "revise_reviewable_result":
                     ui.button(
                         i18n_copy(language, "revise"),
                         icon="edit",

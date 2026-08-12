@@ -73,7 +73,7 @@ def test_current_and_snapshot_page_structure_are_distinguishable(tmp_path, monke
     assert snapshot["read_only"] is True
     assert "read-only" in snapshot["read_only_reason"].lower()
     assert "stage_spine" in snapshot["workflow_graph"]
-    assert [page for page, _icon, _label in WORK_USER_PAGES] == ["overview", "workflow", "parts", "history"]
+    assert [page for page, _icon, _label in WORK_USER_PAGES] == ["overview", "workflow"]
     assert "grid-template-columns:repeat(4" in WORKFLOW_UI_CSS
     assert ".workflow-inspector-pane{min-width:0;position:sticky" in WORKFLOW_UI_CSS
     assert "@media(max-width:760px)" in WORKFLOW_UI_CSS

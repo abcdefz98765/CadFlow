@@ -48,9 +48,9 @@ def test_web_route_creates_contract_example_with_product_status(tmp_path, monkey
         active_page="workflow",
         selected_stage_id="part_modeling",
     )
-    stages = {stage["key"]: stage for stage in data["workflow_review_surface"]["stages"]}
-    assert stages["part_modeling"]["status"] == "execution_skipped"
-    assert stages["part_modeling"]["status"] != "blocked"
+    assert data["workflow_page"]["projection_mode"] == "agent_first"
+    assert data["workflow_review_surface"]["stages"] == []
+    assert all(node.get("id") != "part_modeling" for node in data["workflow_page"]["nodes"])
 
 
 def test_web_backend_calls_shared_service_for_full_mode(tmp_path, monkeypatch):

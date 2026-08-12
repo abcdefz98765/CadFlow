@@ -417,6 +417,16 @@ Legacy fixed Workflow evidence and deterministic paths remain readable for compa
 
 They do not define the target product.
 
+Every loaded Work must expose its state authority. Schema-v2 Works created by
+the current product are `canonical`; explicitly imported, migrated, or
+deterministic compatibility Works are `compatibility`. Normal Current Work may
+derive presentation only from the canonical Work manifest, Part Jobs, accepted
+pointers, and registered artifact references. It must not call a compatibility
+projector as a fallback, infer active lineage from directory order or
+timestamps, or infer product state from filenames. Compatibility projection is
+allowed only after the Work has been classified as compatibility data and must
+not mutate historical evidence.
+
 The target Workflow is the dynamic Work graph described above. Existing graph/rendering/navigation components should be reused where possible rather than discarded.
 
 Current implementation gaps belong in readiness/task documents, not in this canonical contract.

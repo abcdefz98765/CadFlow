@@ -75,7 +75,7 @@ def test_golden_full_projection_completes_modeling_and_result_review(tmp_path, m
     assert outputs["model.stl"]["source_relative_path"].endswith("single_part_upper_link/model.stl")
 
 
-def test_work_graph_and_detail_share_projection_when_latest_run_is_child(tmp_path, monkeypatch):
+def test_selected_child_run_evidence_is_not_augmented_from_its_parent(tmp_path, monkeypatch):
     backend, result, run = _golden_contract(tmp_path, monkeypatch)
     child = run.parent / "workflow_review_child"
     child.mkdir()
@@ -93,13 +93,14 @@ def test_work_graph_and_detail_share_projection_when_latest_run_is_child(tmp_pat
         selected_work_id=result["work_id"],
         active_page="workflow",
         selected_stage_id="part_modeling",
+        view_mode="run_snapshot",
     )
     surface = data["workflow_review_surface"]
     nodes = surface["graph_nodes"]
 
     assert data["selected_run_id"] == child.name  # history/default audit selection is still independent
-    assert {node["stage_id"]: node["status"] for node in nodes}["requirement"] == "completed"
-    assert surface["selected_stage"]["status"] == "execution_skipped"
+    assert {node["stage_id"]: node["status"] for node in nodes}["requirement"] == "not_started"
+    assert surface["selected_stage"]["status"] == "not_started"
     assert {stage["key"]: stage["status"] for stage in surface["stages"]}["part_modeling"] == surface["selected_stage"]["status"]
     for node in nodes:
         assert node["stage_id"]

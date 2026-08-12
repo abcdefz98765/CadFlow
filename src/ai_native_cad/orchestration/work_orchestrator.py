@@ -483,6 +483,13 @@ class WorkOrchestrator:
         if not planned_parts:
             raise ValueError("Work has no planned parts to create attempts for")
 
+        # This command intentionally consumes a legacy Assembly Plan. Mark the
+        # Work's read authority before materializing its compatibility Part
+        # rows so normal canonical projections never infer from that file.
+        work = deepcopy(work)
+        work.setdefault("metadata", {})["state_authority"] = "compatibility"
+        self.store.write_work(work_id, work)
+
         existing = {
             item["part_job_id"]: item
             for item in work.get("part_jobs", [])

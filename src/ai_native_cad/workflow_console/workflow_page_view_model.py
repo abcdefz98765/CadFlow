@@ -11,6 +11,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Literal
 
+from ai_native_cad.workflow_console.canonical_interaction import (
+    project_canonical_interaction,
+)
 from ai_native_cad.workflow_console.review_surface import build_workflow_review_surface
 from ai_native_cad.workflow_console.product_usability import (
     build_agent_output_projection,
@@ -79,7 +82,15 @@ def build_workbench_overview_view_model(
         accepted,
         references,
         result_records,
-        [item for item in work.get("parts", []) if isinstance(item, dict)],
+        (
+            []
+            if entity.get("state_authority") == "canonical"
+            else [
+                item
+                for item in work.get("parts", [])
+                if isinstance(item, dict)
+            ]
+        ),
         language,
     )
     active_job = _active_workbench_part(jobs)
@@ -169,6 +180,23 @@ def build_workbench_overview_view_model(
         language,
         design_evidence=design_evidence,
     )
+    command_authority = project_canonical_interaction(
+        work_id=work_id,
+        work_design=work_design,
+        parts=jobs,
+        current_result=current_result,
+        recovery=recovery,
+        language=language,
+    )
+    primary_command = _dict_value(
+        _dict_value(command_authority.get("work")).get("primary_action")
+    )
+    if primary_command:
+        recommendation = {
+            **primary_command,
+            "summary": recommendation.get("summary")
+            or primary_command.get("label"),
+        }
     transformation = _workbench_transformation(
         user_input,
         agent_design,
@@ -218,6 +246,7 @@ def build_workbench_overview_view_model(
         "agent_design": agent_design,
         "transformation": transformation,
         "recommendation": recommendation,
+        "command_authority": command_authority,
         "recovery": recovery,
         "agent_output": agent_output,
         "capability": {
@@ -640,6 +669,22 @@ def _workbench_part_jobs(
             state = "design"
         else:
             state = "not_started"
+        has_agent_progress = any(
+            item.get("run_id") == latest_run_id
+            and item.get("checkpoint")
+            in {
+                "agent_activity",
+                "agent_output",
+                "cad_ir_draft",
+                "design_brief",
+                "execution_observation",
+                "geometry_candidate",
+                "model_program_candidate",
+                "product_design_routing",
+                "reviewable_result",
+            }
+            for item in references
+        )
         jobs.append(
             {
                 "part_job_id": part_id,
@@ -648,6 +693,7 @@ def _workbench_part_jobs(
                 "attempt_count": len(attempts),
                 "latest_attempt_run_id": latest_run_id,
                 "latest_attempt_source": attempts[-1].get("source") if attempts else None,
+                "has_agent_progress": has_agent_progress,
                 "state": state,
                 "state_label": status_label(language, state),
                 "reviewable_result_id": latest_result_id,
@@ -767,6 +813,46 @@ def _workbench_preview(
                 ),
                 "download_url": f"/api/work-artifacts/{work_id}/{artifact_id}/download",
                 "geometry": _dict_value(record.get("geometry")),
+            }
+    if job:
+        registered = [
+            item
+            for item in references
+            if isinstance(item, dict)
+            and item.get("part_job_id") == job.get("part_job_id")
+            and item.get("checkpoint") == "reviewable_result"
+            and item.get("trust_role") == "reviewable_result"
+            and item.get("validation_status") == "passed"
+        ]
+        stl = next(
+            (
+                item
+                for item in registered
+                if str(item.get("relative_path") or "").lower().endswith(".stl")
+            ),
+            None,
+        )
+        step = next(
+            (
+                item
+                for item in registered
+                if str(item.get("relative_path") or "").lower().endswith(".step")
+            ),
+            None,
+        )
+        if stl:
+            artifact_id = stl.get("artifact_id")
+            return {
+                "status": job.get("state"),
+                "label": i18n_copy(language, "model_ready"),
+                "kind": "registered_stl",
+                "viewer_url": f"/web-viewer/index.html?file=%2Fapi%2Fwork-artifacts%2F{work_id}%2F{artifact_id}%2Fdownload",
+                "download_url": (
+                    f"/api/work-artifacts/{work_id}/{step.get('artifact_id')}/download"
+                    if step
+                    else None
+                ),
+                "geometry": {},
             }
     if job and job.get("legacy_has_stl") and job.get("legacy_download_run_id"):
         run_id = job["legacy_download_run_id"]
@@ -1153,6 +1239,7 @@ def build_workflow_page_view_model(
     selected_run_id: str | None = None,
     selected_stage_id: str | None = None,
     language: str = "en",
+    overview: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one coherent Workflow page for a Work or immutable Run snapshot."""
     if view_mode not in {"current_work", "run_snapshot"}:
@@ -1163,7 +1250,13 @@ def build_workflow_page_view_model(
     lineage = summary.get("active_lineage") if isinstance(summary.get("active_lineage"), dict) else {}
     active_root = lineage.get("active_root_run_id") or summary.get("root_run_id")
     if view_mode == "current_work":
-        overview = build_workbench_overview_view_model(backend, work_id, language=language)
+        overview = (
+            overview
+            if isinstance(overview, dict) and overview
+            else build_workbench_overview_view_model(
+                backend, work_id, language=language
+            )
+        )
         agent_page = build_agent_first_workflow_projection(
             backend,
             work_id,

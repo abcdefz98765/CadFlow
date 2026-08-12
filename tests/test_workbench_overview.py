@@ -188,9 +188,15 @@ def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_pa
         language="en",
     )
     assert review_page["recommended_next_action"]["key"] == "accept_reviewable_result"
+    authority = review_page["source"]["overview"]["command_authority"]["parts"]["mounting_bracket"]
+    assert review_page["recommended_next_action"]["key"] == authority["primary_action"]["key"]
+    assert review_page["recommended_next_action"]["target_run_id"] == authority["primary_action"]["target_run_id"]
     assert review_page["selected_node"]["user_state"] == "review"
     assert review_page["recommended_next_action"]["reviewable_result_id"] == result_id
     assert [item["key"] for item in review_page["available_actions"]["secondary_actions"]] == [
+        "revise_reviewable_result"
+    ]
+    assert [item["key"] for item in authority["secondary_actions"]] == [
         "revise_reviewable_result"
     ]
     assert review_page["current_attention"][0]["node_id"] == f"result:{result_id}"
@@ -229,8 +235,8 @@ def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_pa
         language="en",
     )
     assert accepted_page["selected_node"]["status"] == "accepted"
-    assert accepted_page["recommended_next_action"] is None
-    assert accepted_page["available_actions"]["secondary_actions"][0]["key"] == "revise_reviewable_result"
+    assert accepted_page["recommended_next_action"]["key"] == "revise_reviewable_result"
+    assert accepted_page["available_actions"]["secondary_actions"] == []
 
     revise_action = {
         "key": "revise_reviewable_result",
@@ -368,8 +374,8 @@ def test_deterministic_work_is_honestly_labeled_and_reuses_stl_preview(tmp_path)
 
     assert overview["capability"]["key"] == "deterministic_compatibility"
     assert overview["capability"]["label"] == "确定性兼容模式"
-    assert overview["preview"]["kind"] == "legacy_stl"
-    assert "model.stl" in overview["preview"]["viewer_url"]
+    assert overview["preview"]["kind"] == "registered_stl"
+    assert "deterministic_stl" in overview["preview"]["viewer_url"]
     assert overview["part_jobs"][0]["state"] == "accepted"
 
 

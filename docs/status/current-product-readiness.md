@@ -1,6 +1,6 @@
 # Current Product Readiness
 
-Status date: 2026-08-09.
+Status date: 2026-08-13.
 
 This document distinguishes the Agent-first target architecture from the
 implemented deterministic product, accepted M1 runtime foundation, bounded M2
@@ -24,6 +24,41 @@ the M2.6 canonical Product Golden and M2.7 usability integration are implemented
 external-provider M2
 acceptance and later-milestone modeling, Assembly, and Deliverable capabilities
 are not.
+
+## V1 canonical consolidation — implemented and automated verified
+
+- Normal Current Work reads schema-v2 Work manifests, Part Jobs, accepted
+  pointers, and registered artifact references directly. It does not invoke the
+  legacy product projector, infer lineage from directories/timestamps, scan
+  filenames for product state, or build the fixed-stage Run review surface.
+- The manifest exposes `state_authority` as `canonical` or `compatibility`.
+  Legacy/imported Works remain readable, but their projector and fixed-stage
+  review model are confined to the compatibility boundary and Run Snapshot.
+- A small canonical interaction projection owns current state facts and
+  state-changing command keys/targets. Overview, Workflow selected nodes, and
+  Part scope consume that inventory; selected historical evidence remains
+  inspectable and cannot invent a mutation.
+- Normal selected-Work navigation is Overview and Workflow. Parts appears as a
+  contextual destination when decomposition is meaningful; History remains a
+  subordinate immutable-evidence destination. Current Work no longer eagerly
+  loads a selected Run merely because a legacy run id is present.
+- Explicit developer/test Works are written under
+  `workspace/.internal/dev-works` and enter the index only when developer
+  content is requested. Existing user workspace material was not deleted or
+  moved by this migration.
+- The registered Work Design Skill now owns concise missing-information,
+  analysis, decomposition, risk/confirmation, and routing knowledge. A neutral
+  provider-sanitization module and registered-Skill request compiler separate
+  provider transport from Skill semantics; the JSON-contract adapter retains
+  only compatibility wrappers around that compiler.
+- No Assembly, Deliverable, Feature Graph, provider framework, workflow engine,
+  graph persistence, or trust-boundary expansion was introduced. Controlled
+  execution, inspection, reviewable publication, explicit acceptance, revision
+  lineage, immutable history, secret handling, and Broker boundaries remain in
+  place.
+- Automated verification passed with `688 passed, 9 skipped`. The final
+  clean-suite result and real-browser evidence are recorded in the Verification
+  state section.
 
 ## M2.7 onboarding, Settings, recovery, and Live Agent Example — implemented and verified
 
@@ -400,8 +435,8 @@ one-shot orchestration, not Agentic design.
 - Work / Part Job projection: v2 manifests own ordered attempt histories, while
   legacy evidence with incomplete ownership remains compatibility-projected.
 - Current Work presentation: the target product projection is manifest and
-  artifact-reference based. Legacy stage/availability presentation still reads
-  sanitized Run metadata through an explicit compatibility boundary.
+  artifact-reference based. Legacy stage/availability presentation is confined
+  to compatibility reads and immutable Run Snapshot.
 - Provider usage: different entry points do not consistently use the configured
   adapter.
 - Revision: narrow field-level native CAD IR patches only.
@@ -438,7 +473,7 @@ Current approximate Python line distribution:
 - CAD IR: 0.6k lines;
 - CadQuery and backend layer: 0.5k lines.
 
-The M2.9 audit measured `41,702` source Python lines across the same `79`
+The M2.9 audit measured `41,702` source Python lines across `79`
 modules versus the `39,762`-line M2.8 baseline: `+1,940` lines (`+4.88%`) for
 the registered Skill, bounded Work Episode, durable record/Orchestrator route,
 API/UI projection, and compatibility integration. Tests moved from `15,409` to
@@ -454,6 +489,19 @@ a real concentration signal: the next change to Work Episode or graph behavior
 should prefer focused extraction/reuse rather than extending these files with a
 second runtime model.
 
+The V1 consolidation measures approximately `42,945` source Python lines across
+`82` modules, `81` top-level source classes, and `16,029` test lines with the
+same counting method used by the pre-change audit (`42,338` source lines, `79`
+modules, `81` top-level source classes, `15,935` test lines).
+The `+598` source-line and `+3` module change reflects three narrow boundaries:
+canonical interaction, registered-Skill request compilation, and neutral
+provider sanitization. The largest files remain `nicegui_app.py` (6,840
+physical lines), `pipeline/runner.py` (4,732), `backend.py` (3,125),
+`agents/episode.py` (2,054), `workflow_page_view_model.py` (2,050), and
+`product_usability.py` (2,028). This consolidation removed dead legacy Work
+scanning helpers, but further decomposition of the NiceGUI and backend modules
+remains warranted only when it closes a concrete product loop.
+
 This reflects the former product priority. Further Workflow Cockpit polish is
 not the current milestone unless required to preserve safe operation during
 migration.
@@ -466,8 +514,8 @@ architecture:
 - flat closed-family CAD IR;
 - deterministic fixed-action behavior in the current `create_part_ir`
   compatibility product path;
-- detailed Workflow still contains legacy stage/availability compatibility
-  presentation, but it is secondary to the manifest-derived Overview;
+- compatibility Run Snapshot retains legacy fixed-stage presentation; normal
+  Current Work Workflow does not;
 - hard-coded capability labeling in reviewed-part results;
 - multiple compatibility/evaluation entry points remain callable outside
   product authority;
@@ -477,6 +525,15 @@ These are migration tasks, not accepted target behavior.
 
 ## Verification state
 
+- V1 canonical consolidation passed on 2026-08-13 with `688 passed, 9 skipped`
+  in the complete repository suite. Real NiceGUI verification covered Home,
+  0-Part New Work, completed Work Design, multi-Part branches, focused
+  clarification recovery, Part design, reviewable geometry and Accept,
+  selected Workflow nodes, and immutable History. Chinese and English were
+  exercised; 1440px, 1024px, and 414px had no page-level horizontal overflow;
+  no browser warning/error was recorded. Eleven screenshots are under
+  `../ux/screenshots/v1-canonical-consolidation/`. Browser verification exposed
+  and then re-verified the isolated developer-Work index/detail resolver.
 - Automated verified for Package 3 on 2026-08-08: `160 passed` targeted,
   including live WSL2 product/attack coverage, and `644 passed, 2 skipped` in
   576.21 seconds for the complete suite with the live sandbox enabled.
@@ -677,11 +734,10 @@ These are migration tasks, not accepted target behavior.
   attempt order, or timestamps. No graph persistence, workflow engine, Agent
   framework, Provider abstraction, Assembly execution, Deliverables, or new
   security layer was introduced.
-- The normal product entry still creates its initial Part Job immediately after
-  Work creation. A Work-level Agent episode that can decide decomposition
-  before Part Jobs exist remains product/runtime debt. Legacy planning is not
-  treated as hidden canonical decomposition, and multi-Part graph truth comes
-  only from durable Part Jobs and their independent attempts/results.
+- The normal product entry creates a 0-Part Work and runs Work Design before
+  durable Part Job creation. Legacy planning is not treated as hidden canonical
+  decomposition, and multi-Part graph truth comes only from durable Part Jobs
+  and their independent attempts/results.
 - Target architecture verification: M1 passed. Seven bounded M2 internal
   packages are contract-tested, and execution/publication have current-host
   WSL2 acceptance. The external-provider benchmark and user acceptance remain
@@ -714,12 +770,12 @@ explicit user acceptance pass.
 Delivery order:
 
 1. run the M2 external-provider benchmark and explicit user acceptance;
-2. preserve the completed M2.5–M2.8 product gates while fixing any
+2. preserve the completed M2.5–M2.9 and V1 consolidation product gates while fixing any
    benchmark-driven usability defects;
 3. M3 feature-graph/model-program geometry paths;
 4. M4 multi-Part Job and Assembly Job progression;
 5. M5 integrated Deliverable Package and drawings;
-6. M6 Workbench expansion beyond the single-Part Job MVP.
+6. M6 Workbench expansion beyond the current Work Design/Part Job MVP.
 
 See:
 

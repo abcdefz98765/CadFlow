@@ -406,27 +406,27 @@ RUNTIME_KNOWLEDGE = (
     KnowledgeDefinition(
         knowledge_id="work_design_missing_information",
         scope="skill_private",
-        source="skills/requirement/knowledge/missing_info_policy.md",
+        source="skills/work_design/knowledge/missing_information.md",
     ),
     KnowledgeDefinition(
         knowledge_id="work_design_analysis",
         scope="skill_private",
-        source="skills/planning/knowledge/design_analysis.md",
+        source="skills/work_design/knowledge/design_analysis.md",
     ),
     KnowledgeDefinition(
         knowledge_id="work_design_decomposition",
         scope="skill_private",
-        source="skills/planning/knowledge/product_decomposition.md",
+        source="skills/work_design/knowledge/decomposition.md",
     ),
     KnowledgeDefinition(
         knowledge_id="work_design_risk_confirmation",
         scope="skill_private",
-        source="skills/planning/knowledge/risk_and_confirmation_gates.md",
+        source="skills/work_design/knowledge/risk_and_confirmation.md",
     ),
     KnowledgeDefinition(
         knowledge_id="work_design_routing",
         scope="skill_private",
-        source="skills/planning/knowledge/workflow_routing.md",
+        source="skills/work_design/knowledge/routing.md",
     ),
 )
 

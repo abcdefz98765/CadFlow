@@ -203,7 +203,8 @@ def test_overview_and_dynamic_graph_share_work_design_state(tmp_path: Path) -> N
     )
     work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
     initial = build_workbench_overview_view_model(backend, work_id)
-    assert initial["recommendation"]["key"] == "continue_work_design"
+    assert initial["recommendation"]["key"] == "open_settings"
+    assert initial["command_authority"]["work"]["primary_action"]["key"] == "open_settings"
     assert initial["work"]["part_count"] == 0
     backend.run_work_design_episode(work_id, request_id="graph_case")
     overview = build_workbench_overview_view_model(backend, work_id)

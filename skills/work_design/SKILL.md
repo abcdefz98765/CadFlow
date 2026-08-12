@@ -42,7 +42,6 @@ questions, Assembly expectation, and recommendation.
 
 ## Knowledge
 
-The runtime selects the declared Intent and Design guidance under the legacy
-`requirement/knowledge/` and `planning/knowledge/` directories. Those files are
-retained as canonical source material while their former stage runtimes remain
-compatibility-only.
+The typed runtime registry is the machine authority. It selects bounded static
+guidance from `knowledge/` in this Skill. Legacy requirement/planning guides
+remain compatibility-only and are not dependencies of canonical prompts.

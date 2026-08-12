@@ -333,6 +333,13 @@ Runtime prompt text should be compiled from this registry and source skill
 documents. Inline duplicated skill guides in provider adapters are migration
 debt, not an acceptable second authority.
 
+Current implementation follows that boundary: the registered-Skill adapter
+compiles runtime requests from registry entries and declared Markdown
+knowledge; provider sanitization is transport-neutral; provider adapters submit
+the compiled request and parse typed responses. Compatibility adapter methods
+may delegate to this compiler, but they must not own a second copy of Skill
+semantics or select undeclared knowledge.
+
 The registry is an enabling slice of the Agentic vertical milestone. It must not
 become a long standalone governance project that delays the first real Design
 Episode.

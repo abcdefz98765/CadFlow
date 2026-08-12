@@ -26,8 +26,12 @@ A selected Work has:
 
 - **Overview / Design** — what matters now;
 - **Workflow** — how the Work got here, its branches/states, and available transitions;
-- **Parts** — Part Jobs, attempts, results, interfaces, and acceptance;
-- **History** — immutable Runs and Run Snapshots.
+
+These are the two persistent primary destinations. **Parts** is shown as a
+contextual destination when a Work has meaningful decomposition (normally more
+than one Part Job). **History** is a subordinate immutable-evidence destination
+when Runs exist, not an equal-priority step in the normal design journey. Their
+routes and mature inspection components remain available.
 
 Overview is the default landing page. Workflow is not merely Diagnostics; it is the first-class map of the Work.
 

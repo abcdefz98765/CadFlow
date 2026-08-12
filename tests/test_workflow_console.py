@@ -29,6 +29,7 @@ from ai_native_cad.workflow_console.artifact_display import (
     filter_artifacts_for_display,
 )
 from ai_native_cad.workflow_console.review_surface import build_workflow_review_surface
+from ai_native_cad.workflow_console.work_index import build_work_index
 
 
 def _does_not_contain_keys(value, keys):
@@ -37,6 +38,60 @@ def _does_not_contain_keys(value, keys):
     if isinstance(value, list):
         return all(_does_not_contain_keys(item, keys) for item in value)
     return True
+
+
+def test_canonical_work_never_invokes_legacy_product_inference(tmp_path, monkeypatch):
+    backend = WorkflowConsoleBackend(
+        project_root=tmp_path, workspace_root=tmp_path / "workspace"
+    )
+    backend.create_workspace()
+    backend.create_work("Canonical", "Design one bracket.", work_id="canonical")
+    backend.create_work_requirement_run(
+        "canonical", "Design one bracket.", run_id="canonical_root"
+    )
+    run_dir = backend._work_runs_root("canonical") / "canonical_root"
+    (run_dir / "assembly_plan.json").write_text(
+        json.dumps({"parts": [{"part_id": "inferred_part"}]}) + "\n",
+        encoding="utf-8",
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("canonical read invoked compatibility inference")
+
+    monkeypatch.setattr(
+        "ai_native_cad.workflow_console.work_index.project_legacy_product_references",
+        forbidden,
+    )
+    backend.invalidate_work_index()
+    detail = backend.get_work_detail("canonical")
+
+    assert detail["entity_state"]["state_authority"] == "canonical"
+    assert detail["parts"] == []
+    assert detail["available_actions"] == []
+    assert detail["summary"]["active_lineage"]["lineage_inferred"] is False
+    assert {node["id"] for node in detail["nodes"]} == {"request", "work:design"}
+
+
+def test_developer_works_use_isolated_storage_and_explicit_catalog_visibility(tmp_path):
+    backend = WorkflowConsoleBackend(
+        project_root=tmp_path, workspace_root=tmp_path / "workspace"
+    )
+    backend.create_workspace()
+    backend.create_work(
+        "Browser fixture",
+        work_id="browser_fixture",
+        metadata={"work_classification": "developer_fixture"},
+    )
+
+    isolated = tmp_path / "workspace" / ".internal" / "dev-works" / "browser_fixture"
+    assert (isolated / "work_manifest.json").is_file()
+    assert not (tmp_path / "workspace" / "works" / "browser_fixture").exists()
+    assert backend.get_work_detail("browser_fixture")["summary"]["work_id"] == "browser_fixture"
+    assert build_work_index(backend)["works"] == []
+    debug_index = build_work_index(backend, include_debug=True)
+    assert [item["summary"]["work_id"] for item in debug_index["works"]] == [
+        "browser_fixture"
+    ]
 
 
 def _does_not_contain_absolute_paths(value):

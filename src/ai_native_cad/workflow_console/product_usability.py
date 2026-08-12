@@ -863,6 +863,7 @@ def build_agent_first_workflow_projection(
             overview_parts=overview_parts,
             references=references,
             accepted=accepted,
+            command_authority=_dict(overview.get("command_authority")),
             language=language,
         )
         node["user_state"] = _workflow_user_state(node)
@@ -932,6 +933,7 @@ def _workflow_node_interaction(
     overview_parts: dict[str, dict[str, Any]],
     references: list[dict[str, Any]],
     accepted: dict[str, Any],
+    command_authority: dict[str, Any],
     language: str,
 ) -> dict[str, Any]:
     """Derive task-oriented UI actions from existing durable Work state."""
@@ -1159,6 +1161,99 @@ def _workflow_node_interaction(
     elif isinstance(run_id, str):
         secondary.append(action("open_run", "Open historical Run", "打开历史 Run", category="navigation"))
 
+    work_authority = _dict(command_authority.get("work"))
+    part_authority = _dict(_dict(command_authority.get("parts")).get(part_job_id))
+    work_primary = _dict(work_authority.get("primary_action"))
+    authority_scope = (
+        work_authority
+        if detail_type in {"clarification", "recovery"}
+        and primary is not None
+        and primary.get("key") == work_primary.get("key")
+        else part_authority
+        if part_job_id
+        else work_authority
+    )
+    authority_command = _dict(authority_scope.get("primary_action"))
+    authority_secondary = [
+        _dict(item)
+        for item in authority_scope.get("secondary_actions", [])
+        if isinstance(item, dict)
+    ]
+    authority_result_id = authority_command.get("reviewable_result_id")
+    selected_result_id = node.get("result_id")
+    authority_applies = bool(
+        authority_command
+        and (
+            (
+                not part_job_id
+                and detail_type in {"request", "work_design", "recovery"}
+            )
+            or (
+                part_job_id
+                and detail_type == "part_job"
+            )
+            or (
+                part_job_id
+                and detail_type == "attempt"
+                and is_active_attempt
+            )
+            or (
+                part_job_id
+                and detail_type in {"reviewable_result", "accepted_result"}
+                and isinstance(selected_result_id, str)
+                and selected_result_id == authority_result_id
+            )
+            or (
+                detail_type in {"clarification", "recovery"}
+                and primary is not None
+                and primary.get("key") == authority_command.get("key")
+            )
+        )
+    )
+    state_changing_keys = {
+        "accept_reviewable_result",
+        "answer_question",
+        "continue_agent",
+        "continue_work_design",
+        "modify_request",
+        "open_settings",
+        "retry_agent",
+        "revise_reviewable_result",
+    }
+    if authority_applies:
+        page_context = {
+            "category": "workflow_command",
+            "target_stage_id": node.get("id"),
+            "scope_label": (
+                part.get("name")
+                or (part_job_id.replace("_", " ").title() if part_job_id else None)
+                or ("Work 设计" if language == "zh" else "Work Design")
+            ),
+        }
+        primary = {**authority_command, **page_context}
+        navigation = [
+            item
+            for item in secondary
+            if item.get("key") not in state_changing_keys
+        ]
+        secondary = [
+            {**item, **page_context}
+            for item in authority_secondary
+        ] + navigation
+    elif primary and primary.get("key") in state_changing_keys:
+        # Selected historical evidence is inspectable, but it cannot invent a
+        # state-changing command outside the shared Work command inventory.
+        unavailable_reason = unavailable_reason or (
+            "This evidence is inspection-only in the current Work state."
+            if language != "zh"
+            else "该证据在当前 Work 状态中仅供查看。"
+        )
+        primary = None
+        secondary = [
+            item
+            for item in secondary
+            if item.get("key") not in state_changing_keys
+        ]
     requires_user_action = bool(
         primary
         and primary.get("key")
@@ -1173,6 +1268,7 @@ def _workflow_node_interaction(
         "unavailable_reason": unavailable_reason,
         "revision_supported": any(item.get("key") == "revise_reviewable_result" for item in secondary),
         "business_state_owner": "domain",
+        "command_authority_key": authority_command.get("key"),
         "selection_mutates_business_state": False,
     }
 

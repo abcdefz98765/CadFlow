@@ -1,4 +1,8 @@
-"""Deterministic Work view-model inference for the local workflow console."""
+"""Work catalog with an explicit canonical/compatibility read boundary.
+
+Canonical Works are projected only from their manifest and registered evidence.
+Legacy filename/stage inference is retained for explicitly compatible history.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ from ai_native_cad.domain.records import (
     project_work_record,
 )
 from ai_native_cad.workflow_console.artifact_display import filter_artifacts_for_display
-from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, STAGED_ARTIFACT_DIRS
+from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES
 from ai_native_cad.workflow_console.legacy_product_projector import (
     PRODUCT_OUTPUT_NAMES,
     project_legacy_product_references,
@@ -22,8 +26,8 @@ from ai_native_cad.workflow_console.legacy_product_projector import (
 DEBUG_WORK_ID = "__debug_runs__"
 DEBUG_WORK_TITLE = "Unclassified / Debug Runs"
 WORKSPACE_WORKS_DIR_NAME = "works"
+DEVELOPER_WORKS_DIR_NAME = ".internal/dev-works"
 LEGACY_WORKS_DIR_NAME = "_works"
-WORKS_DIR_NAME = LEGACY_WORKS_DIR_NAME
 WORK_MANIFEST_NAME = "work_manifest.json"
 WORK_MANIFEST_SCHEMA_VERSION = WORK_SCHEMA_VERSION
 WORK_CLASSIFICATIONS = {
@@ -83,14 +87,19 @@ def get_work_summary_from_index(index: dict[str, Any], work_id: str) -> dict[str
 
 
 def get_work_detail(backend: Any, work_id: str, *, index: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Return detail for one inferred Work with current state separated from history."""
+    """Return one Work with canonical current state separated from compatibility."""
     work = _find_work(index or build_work_index(backend), work_id)
     summary = work["summary"]
     active_lineage = summary.get("active_lineage") if isinstance(summary.get("active_lineage"), dict) else {}
     current_run_id = active_lineage.get("active_root_run_id") or summary.get("root_run_id")
     current_run = work["runs_by_id"].get(current_run_id) or {}
     parts = _build_parts(work)
-    nodes = _build_nodes(work, parts)
+    canonical = _is_canonical_entity(work.get("entity_state"))
+    nodes = (
+        _build_canonical_nodes(work, parts)
+        if canonical
+        else _build_nodes(work, parts)
+    )
     run_history = _build_run_history(work, active_lineage)
     products = _build_products(work)
     return {
@@ -111,8 +120,17 @@ def get_work_detail(backend: Any, work_id: str, *, index: dict[str, Any] | None 
         "nodes": nodes,
         "run_history": run_history,
         "products": products,
-        "directory_map": _build_directory_map(summary, current_run, parts, products, run_history),
-        "available_actions": _available_actions(current_run),
+        "directory_map": (
+            {
+                "work_id": summary["work_id"],
+                "parts": {"title": "Parts", "items": parts},
+                "history": {"title": "History", "items": run_history},
+                "state_authority": "canonical",
+            }
+            if canonical
+            else _build_directory_map(summary, current_run, parts, products, run_history)
+        ),
+        "available_actions": [] if canonical else _available_actions(current_run),
         "history_semantics": {
             "runs_are_immutable": True,
             "rework_creates_new_runs": True,
@@ -123,7 +141,7 @@ def get_work_detail(backend: Any, work_id: str, *, index: dict[str, Any] | None 
 
 def build_work_index(backend: Any, *, include_debug: bool = False) -> dict[str, Any]:
     """Load only manifest-backed Works and their Work-contained runs."""
-    manifests = _load_work_manifests(backend)
+    manifests = _load_work_manifests(backend, include_debug=include_debug)
     works = []
     for work_id, manifest in sorted(manifests.items()):
         runs = _load_work_runs(backend, work_id)
@@ -159,11 +177,16 @@ def create_work_manifest(
     if metadata is not None and not isinstance(metadata, dict):
         raise ValueError("workflow console work metadata must be a dictionary")
     safe_metadata = _safe_metadata(metadata or {})
-    works_root = _works_root(backend)
+    safe_metadata.setdefault("state_authority", "canonical")
+    classification = safe_metadata.get("work_classification", "user")
+    works_root = _works_root(
+        backend,
+        developer=classification not in NORMAL_WORK_CLASSIFICATIONS,
+    )
+    if backend._work_manifest_path(work_id).exists():
+        raise FileExistsError(f"workflow console work already exists: {work_id}")
     work_dir = backend._require_child_path(works_root, work_id)
     manifest_path = backend._require_child_path(work_dir, WORK_MANIFEST_NAME)
-    if manifest_path.exists():
-        raise FileExistsError(f"workflow console work already exists: {work_id}")
     work_dir.mkdir(parents=True, exist_ok=False)
     backend._require_child_path(work_dir, "runs").mkdir(parents=True, exist_ok=False)
     now = _now_timestamp()
@@ -191,108 +214,11 @@ def _load_work_runs(backend: Any, work_id: str) -> dict[str, dict[str, Any]]:
     }
 
 
-def _load_debug_runs(backend: Any, excluded_run_ids: set[str]) -> dict[str, dict[str, Any]]:
-    paths: dict[str, Path] = {}
-    seen: set[Path] = set()
-    for root in backend._resolved_run_roots():
-        if not root.exists():
-            continue
-        directories = [root, *sorted((path for path in root.rglob("*") if path.is_dir()), key=lambda path: str(path))]
-        for path in directories:
-            if path.name in STAGED_ARTIFACT_DIRS or path.name in {WORKSPACE_WORKS_DIR_NAME, LEGACY_WORKS_DIR_NAME}:
-                continue
-            if _work_storage_dir_in_parts(path.relative_to(root).parts):
-                continue
-            resolved = path.resolve()
-            if resolved in seen:
-                continue
-            if not _has_artifact(path):
-                continue
-            seen.add(resolved)
-            paths[path.name] = path
-
-    return {
-        name: _cheap_debug_run(path)
-        for name, path in paths.items()
-        if name not in excluded_run_ids
-    }
-
-
-def _cheap_debug_run(path: Path) -> dict[str, Any]:
-    stat = path.stat()
-    return {
-        "run_id": path.name,
-        "updated_at": _timestamp(stat.st_mtime),
-        "status": {"status": "debug_only"},
-        "selected_part_id": None,
-        "workflow_review_summary": {},
-        "rework_decision_summary": {},
-        "has_step": (path / "model.step").exists(),
-        "has_stl": (path / "model.stl").exists(),
-        "child_run_count": 0,
-        "downloadables": [],
-        "artifacts": [],
-    }
-
-
-def _find_root_candidate_paths(backend: Any) -> set[Path]:
-    candidates: set[Path] = set()
-    for root in backend._resolved_run_roots():
-        if not root.exists():
-            continue
-        for artifact in (
-            "assembly_plan.json",
-            "workflow_review.json",
-            "stage_review.json",
-            "rework_decision.json",
-            "part_result_review.json",
-        ):
-            for path in root.rglob(artifact):
-                owner = _artifact_owner_dir(root, path)
-                if owner is not None and _has_artifact(owner):
-                    candidates.add(owner)
-    return candidates
-
-
-def _artifact_owner_dir(root: Path, artifact_path: Path) -> Path | None:
-    try:
-        parts = artifact_path.relative_to(root).parts
-    except ValueError:
-        return None
-    if _work_storage_dir_in_parts(parts):
-        return None
-    parent = artifact_path.parent
-    if parent.name in STAGED_ARTIFACT_DIRS:
-        parent = parent.parent
-    if parent.name in STAGED_ARTIFACT_DIRS or parent == root:
-        return None
-    return parent
-
-
-def _find_run_path_by_name(backend: Any, run_id: str) -> Path | None:
-    try:
-        backend._require_safe_run_id(run_id)
-    except ValueError:
-        return None
-    for root in backend._resolved_run_roots():
-        direct = root / run_id
-        if direct.is_dir() and _has_artifact(direct):
-            return direct
-        for path in root.rglob(run_id):
-            try:
-                parts = path.relative_to(root).parts
-            except ValueError:
-                continue
-            if _work_storage_dir_in_parts(parts):
-                continue
-            if path.name == run_id and path.is_dir() and _has_artifact(path):
-                return path
-    return None
-
-
-def _load_work_manifests(backend: Any) -> dict[str, dict[str, Any]]:
+def _load_work_manifests(
+    backend: Any, *, include_debug: bool = False
+) -> dict[str, dict[str, Any]]:
     manifests = {}
-    for works_root in _work_manifest_roots(backend):
+    for works_root in _work_manifest_roots(backend, include_debug=include_debug):
         if not works_root.exists():
             continue
         for manifest_path in sorted(works_root.glob(f"*/{WORK_MANIFEST_NAME}"), key=lambda path: str(path)):
@@ -309,16 +235,19 @@ def _read_metadata(backend: Any, path: Path) -> dict[str, Any]:
     return metadata
 
 
-def _works_root(backend: Any) -> Path:
-    return backend._resolve_workspace_path(WORKSPACE_WORKS_DIR_NAME)
+def _works_root(backend: Any, *, developer: bool = False) -> Path:
+    return backend._resolve_workspace_path(
+        DEVELOPER_WORKS_DIR_NAME if developer else WORKSPACE_WORKS_DIR_NAME
+    )
 
 
-def _work_manifest_roots(backend: Any) -> list[Path]:
-    return [_works_root(backend)]
-
-
-def _work_storage_dir_in_parts(parts: tuple[str, ...]) -> bool:
-    return WORKSPACE_WORKS_DIR_NAME in parts or LEGACY_WORKS_DIR_NAME in parts
+def _work_manifest_roots(
+    backend: Any, *, include_debug: bool = False
+) -> list[Path]:
+    roots = [_works_root(backend)]
+    if include_debug:
+        roots.append(_works_root(backend, developer=True))
+    return roots
 
 
 def _read_json_if_present(path: Path) -> dict[str, Any] | None:
@@ -334,6 +263,7 @@ def _read_json_if_present(path: Path) -> dict[str, Any] | None:
 def _public_manifest(value: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
+    source_value = value
     try:
         value = project_work_record(value)
     except ValueError:
@@ -368,8 +298,39 @@ def _public_manifest(value: dict[str, Any] | None) -> dict[str, Any] | None:
         "requirement": _safe_requirement_state(value.get("requirement")),
         "advancement_mode": value.get("advancement_mode") if value.get("advancement_mode") in {"manual_confirm", "auto_advance"} else "manual_confirm",
         "metadata": _safe_metadata(value.get("metadata") if isinstance(value.get("metadata"), dict) else {}),
+        "state_authority": _manifest_state_authority(source_value, value),
     }
     return public
+
+
+def _manifest_state_authority(
+    source: dict[str, Any], projected: dict[str, Any]
+) -> str:
+    """Discriminate canonical Works without inspecting Run files.
+
+    A stored v2 Work record is canonical unless its own durable metadata/Part
+    records explicitly identify a compatibility import.  In-memory v1
+    projection remains compatibility.  New callers may declare the boundary
+    directly in metadata; no third hybrid mode exists.
+    """
+
+    metadata = projected.get("metadata") if isinstance(projected.get("metadata"), dict) else {}
+    declared = metadata.get("state_authority")
+    if declared in {"canonical", "compatibility"}:
+        return str(declared)
+    if source.get("schema_version") != WORK_SCHEMA_VERSION or source.get("record_type") != "work":
+        return "compatibility"
+    if metadata.get("work_classification") == "compatibility_regression":
+        return "compatibility"
+    compatibility_sources = {"assembly_plan", "legacy", "legacy_acceptance", "manifest"}
+    for job in projected.get("part_jobs", []):
+        if isinstance(job, dict) and job.get("source") in compatibility_sources:
+            return "compatibility"
+    return "canonical"
+
+
+def _is_canonical_entity(value: Any) -> bool:
+    return isinstance(value, dict) and value.get("state_authority") == "canonical"
 
 
 def _entity_state(work_id: str, manifest: dict[str, Any] | None) -> dict[str, Any]:
@@ -398,6 +359,7 @@ def _entity_state(work_id: str, manifest: dict[str, Any] | None) -> dict[str, An
         "requirement": manifest.get("requirement") or {},
         "advancement_mode": manifest.get("advancement_mode") or "manual_confirm",
         "metadata": manifest.get("metadata") or {},
+        "state_authority": manifest.get("state_authority") or "compatibility",
     }
 
 
@@ -424,6 +386,7 @@ def _empty_entity_state(work_id: str) -> dict[str, Any]:
         "requirement": {"status": "not_started", "root_run_id": None},
         "advancement_mode": "manual_confirm",
         "metadata": {},
+        "state_authority": "compatibility",
     }
 
 
@@ -634,37 +597,10 @@ def _now_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _timestamp(seconds: float) -> str:
-    from datetime import datetime, timezone
-
-    return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
-
-
 def _has_artifact(path: Path) -> bool:
     from ai_native_cad.workflow_console.backend import _has_workflow_artifact
 
     return _has_workflow_artifact(path)
-
-
-def _path_is_root_candidate(path: Path) -> bool:
-    return any(
-        (path / name).exists()
-        for name in (
-            "assembly_plan.json",
-            "01_design/assembly_plan.json",
-            "workflow_review.json",
-            "stage_review.json",
-        )
-    )
-
-
-def _is_root_candidate(run: dict[str, Any]) -> bool:
-    artifacts = _artifact_names(run)
-    reviewed = _dict(run.get("reviewed_part_summary"))
-    assembly = _dict(reviewed.get("assembly_plan"))
-    return any(name in artifacts for name in ("assembly_plan.json", "workflow_review.json", "stage_review.json")) or bool(
-        assembly.get("present")
-    )
 
 
 def _resolve_active_lineage(
@@ -672,6 +608,8 @@ def _resolve_active_lineage(
     runs: dict[str, dict[str, Any]],
     root_run_id: str | None,
     latest_attempt_run_id: str | None,
+    *,
+    canonical: bool = False,
 ) -> dict[str, Any]:
     """Resolve an explicit Work pointer, or a conservative legacy projection.
 
@@ -695,6 +633,16 @@ def _resolve_active_lineage(
             "latest_attempt_run_id": lineage["latest_attempt_run_id"] or latest_attempt_run_id,
             "lineage_inferred": False,
         }
+    if canonical:
+        return {
+            **lineage,
+            "active_root_run_id": lineage.get("active_root_run_id"),
+            "active_leaf_run_id": lineage.get("active_leaf_run_id"),
+            "accepted_run_ids": [run_id for run_id in lineage["accepted_run_ids"] if run_id in runs],
+            "superseded_run_ids": [run_id for run_id in lineage["superseded_run_ids"] if run_id in runs],
+            "latest_attempt_run_id": lineage.get("latest_attempt_run_id"),
+            "lineage_inferred": False,
+        }
     root = root_run_id if root_run_id in runs else None
     return {
         "active_root_run_id": root,
@@ -715,22 +663,47 @@ def _build_work(
     manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     runs_by_id = {run_id: runs[run_id] for run_id in member_ids if run_id in runs}
-    if manifest is not None:
+    canonical = _is_canonical_entity(manifest)
+    if manifest is not None and not canonical:
         manifest = project_legacy_product_references(
             manifest,
             _iter_run_output_records(runs_by_id),
         )
-    latest_run_id = (
-        manifest.get("current_run_id")
-        if manifest and isinstance(manifest.get("current_run_id"), str) and manifest.get("current_run_id") in runs_by_id
-        else _latest_work_state_run_id(root_id, runs_by_id)
-    ) or (member_ids[0] if member_ids else None)
-    root_run_id = (
-        manifest.get("root_run_id")
-        if manifest and isinstance(manifest.get("root_run_id"), str) and manifest.get("root_run_id") in runs_by_id
-        else (None if debug_only else (root_id if root_id in runs_by_id else latest_run_id))
+    if canonical:
+        latest_run_id = (
+            manifest.get("current_run_id")
+            if isinstance(manifest.get("current_run_id"), str)
+            and manifest.get("current_run_id") in runs_by_id
+            else None
+        )
+        root_run_id = (
+            manifest.get("root_run_id")
+            if isinstance(manifest.get("root_run_id"), str)
+            and manifest.get("root_run_id") in runs_by_id
+            else None
+        )
+    else:
+        latest_run_id = (
+            manifest.get("current_run_id")
+            if manifest
+            and isinstance(manifest.get("current_run_id"), str)
+            and manifest.get("current_run_id") in runs_by_id
+            else _latest_work_state_run_id(root_id, runs_by_id)
+        ) or (member_ids[0] if member_ids else None)
+        root_run_id = (
+            manifest.get("root_run_id")
+            if manifest
+            and isinstance(manifest.get("root_run_id"), str)
+            and manifest.get("root_run_id") in runs_by_id
+            else (
+                None
+                if debug_only
+                else (root_id if root_id in runs_by_id else latest_run_id)
+            )
+        )
+    active_lineage = _resolve_active_lineage(
+        manifest, runs_by_id, root_run_id, latest_run_id, canonical=canonical
     )
-    active_lineage = _resolve_active_lineage(manifest, runs_by_id, root_run_id, latest_run_id)
     active_root_run_id = active_lineage.get("active_root_run_id") or root_run_id
     root_run = runs_by_id.get(active_root_run_id) or runs_by_id.get(root_run_id) or runs_by_id.get(root_id) or {}
     parts = _build_parts({"summary": {"root_run_id": root_run_id or root_id}, "runs_by_id": runs_by_id, "entity_state": _entity_state(root_id, manifest)})
@@ -739,10 +712,25 @@ def _build_work(
     status = (manifest or {}).get("status") or "incomplete"
     metadata = (manifest or {}).get("metadata") if isinstance((manifest or {}).get("metadata"), dict) else {}
     classification = classify_work(root_id, str(title), metadata)
+    canonical_summary = _canonical_summary(manifest or {}, parts) if canonical else {}
+    if canonical:
+        overall_status = canonical_summary["overall_status"]
+        review_status = canonical_summary["review_status"]
+        report_status = canonical_summary["report_status"]
+        readiness_score = canonical_summary["readiness_score"]
+        risk_level = canonical_summary["risk_level"]
+        next_action = canonical_summary["next_action"]
+    else:
+        overall_status = _overall_status(part_counts, root_run)
+        review_status = _review_status(root_run, parts)
+        report_status = _report_status(root_run)
+        readiness_score = _readiness_score(root_run, part_counts)
+        risk_level = _risk_level(root_run, part_counts)
+        next_action = _next_action(part_counts, root_run)
     summary = {
         "work_id": root_id,
         "title": title,
-        "overall_status": "debug_only" if debug_only else _overall_status(part_counts, root_run),
+        "overall_status": "debug_only" if debug_only else overall_status,
         "root_run_id": root_run_id,
         "latest_run_id": latest_run_id,
         "active_lineage": active_lineage,
@@ -751,14 +739,14 @@ def _build_work(
         "example_classification": metadata.get("example_classification"),
         "has_manifest": manifest is not None,
         "part_counts": part_counts,
-        "review_status": _review_status(root_run, parts),
-        "report_status": _report_status(root_run),
-        "readiness_score": _readiness_score(root_run, part_counts),
-        "risk_level": _risk_level(root_run, part_counts),
+        "review_status": review_status,
+        "report_status": report_status,
+        "readiness_score": readiness_score,
+        "risk_level": risk_level,
         "next_action": (
             "Create Part Request"
             if _dict(_entity_state(root_id, manifest).get("candidate_selection")).get("selected_candidate")
-            else _next_action(part_counts, root_run)
+            else next_action
         ),
         "updated_at": max([str((manifest or {}).get("updated_at") or ""), *[run.get("updated_at") or "" for run in runs_by_id.values()]], default=None),
         "diagnostic_codes": _diagnostic_codes(root_run, parts),
@@ -786,7 +774,170 @@ def classify_work(work_id: str, title: str, metadata: dict[str, Any]) -> str:
     return "user"
 
 
+def _build_canonical_parts(entity: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project Part rows only from durable Part Jobs, references, and pointers."""
+
+    references = [
+        item for item in entity.get("artifact_references", []) if isinstance(item, dict)
+    ]
+    accepted = _dict(entity.get("accepted_part_results"))
+    rows: list[dict[str, Any]] = []
+    for job in entity.get("part_jobs", []):
+        if not isinstance(job, dict):
+            continue
+        part_id = job.get("part_job_id") or job.get("part_id")
+        if not isinstance(part_id, str) or not part_id:
+            continue
+        attempts = [item for item in job.get("attempts", []) if isinstance(item, dict)]
+        run_id = job.get("active_attempt_run_id") or (
+            attempts[-1].get("run_id") if attempts else None
+        )
+        pointer = _dict(accepted.get(part_id))
+        part_references = [item for item in references if item.get("part_job_id") == part_id]
+        reviewable = next(
+            (
+                item
+                for item in reversed(part_references)
+                if item.get("trust_role") == "reviewable_result"
+                or item.get("checkpoint") == "reviewable_result"
+            ),
+            None,
+        )
+        active_attempt = next(
+            (item for item in attempts if item.get("run_id") == run_id),
+            attempts[-1] if attempts else {},
+        )
+        attempt_status = str(active_attempt.get("status") or job.get("status") or "")
+        if pointer.get("status") == "approved" and pointer.get("attempt_run_id") == run_id:
+            status = "accepted"
+        elif reviewable is not None and reviewable.get("run_id") == run_id:
+            status = "needs_review"
+        elif attempt_status in {"blocked", "failed", "error"}:
+            status = "blocked"
+        else:
+            status = "incomplete"
+        artifact_ids = {
+            artifact_id
+            for artifact_id in pointer.get("artifact_ids", [])
+            if isinstance(artifact_id, str)
+        }
+        accepted_step = next(
+            (
+                item
+                for item in part_references
+                if item.get("artifact_id") in artifact_ids
+                and str(item.get("relative_path") or "").lower().endswith(".step")
+            ),
+            None,
+        )
+        rows.append(
+            {
+                "part_id": part_id,
+                "role": job.get("role"),
+                "status": status,
+                "result_status": "accepted" if status == "accepted" else "ready_for_review" if status == "needs_review" else status,
+                "user_review_status": pointer.get("status") or "not_reviewed",
+                "current_stage": "review" if status == "needs_review" else "part_design",
+                "latest_run_id": run_id,
+                "download_run_id": accepted_step.get("run_id") if accepted_step else None,
+                "attempt_count": len(attempts),
+                "has_step": any(str(item.get("relative_path") or "").lower().endswith(".step") for item in part_references),
+                "has_stl": any(str(item.get("relative_path") or "").lower().endswith(".stl") for item in part_references),
+                "has_preview": False,
+                "deliverable_available": accepted_step is not None,
+                "review_status": pointer.get("status"),
+                "next_action": _part_next_action(status),
+                "state_authority": "canonical",
+            }
+        )
+    return rows
+
+
+def _build_canonical_nodes(
+    work: dict[str, Any], parts: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Small compatibility-shaped node list backed only by canonical objects."""
+
+    entity = _dict(work.get("entity_state"))
+    nodes = [
+        {
+            "id": "request",
+            "label": "User request",
+            "kind": "intent",
+            "status": "completed"
+            if entity.get("description") or entity.get("title")
+            else "not_started",
+            "summary": entity.get("description") or entity.get("title") or "",
+            "artifacts": [],
+            "actions": [],
+        }
+    ]
+    design = _dict(entity.get("work_design"))
+    if entity.get("root_run_id") or design.get("status") not in {None, "not_started"}:
+        nodes.append(
+            {
+                "id": "work:design",
+                "label": "Work Design",
+                "kind": "design",
+                "status": design.get("status") or "not_started",
+                "summary": _dict(design.get("current_design")).get("concept_summary") or "",
+                "artifacts": list(design.get("artifact_ids") or []),
+                "actions": [],
+            }
+        )
+    nodes.extend(
+        {
+            "id": f"part:{part.get('part_id')}",
+            "label": part.get("part_id") or "Part",
+            "kind": "part",
+            "status": part.get("status") or "incomplete",
+            "summary": part.get("role") or "",
+            "artifacts": [],
+            "actions": [],
+        }
+        for part in parts
+    )
+    return nodes
+
+
+def _canonical_summary(
+    entity: dict[str, Any], parts: list[dict[str, Any]]
+) -> dict[str, Any]:
+    counts = _part_counts(parts)
+    design = _dict(entity.get("work_design"))
+    if counts["blocked"]:
+        overall = "blocked"
+    elif counts["needs_review"]:
+        overall = "needs_review"
+    elif counts["total"] and counts["accepted"] == counts["total"]:
+        overall = "accepted"
+    elif design.get("status") == "user_input_required":
+        overall = "needs_input"
+    elif entity.get("root_run_id"):
+        overall = "active"
+    else:
+        overall = "incomplete"
+    if overall == "needs_review":
+        next_action = "Review result"
+    elif overall == "accepted":
+        next_action = "Start a revision when needed"
+    elif design.get("status") in {None, "not_started", "in_progress", "blocked", "user_input_required"} and not parts:
+        next_action = "Continue Work Design"
+    else:
+        next_action = "Continue Part Design"
+    return {
+        "overall_status": overall,
+        "review_status": "needs_review" if counts["needs_review"] else "approved" if counts["accepted"] else "not_reviewed",
+        "report_status": "canonical_evidence",
+        "readiness_score": 100 if overall == "accepted" else 75 if overall == "needs_review" else 40 if entity.get("root_run_id") else 10,
+        "risk_level": "attention" if overall in {"blocked", "needs_input"} else "normal",
+        "next_action": next_action,
+    }
+
+
 def _build_parts(work: dict[str, Any]) -> list[dict[str, Any]]:
+    if _is_canonical_entity(work.get("entity_state")):
+        return _build_canonical_parts(_dict(work.get("entity_state")))
     root_run = work["runs_by_id"].get(work["summary"].get("root_run_id")) or _latest_run(work["runs_by_id"]) or {}
     assembly_parts = _assembly_parts(root_run)
     rows = []

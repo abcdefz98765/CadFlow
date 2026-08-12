@@ -617,7 +617,7 @@ class WorkflowConsoleBackend:
         from ai_native_cad.workflow_console.work_index import list_works
 
         filters = filters or {}
-        show_debug = bool(filters.get("show_debug"))
+        show_debug = bool(filters.get("show_debug") or filters.get("show_developer"))
         return list_works(self, limit=limit, offset=offset, filters=filters, index=self._get_work_index(show_debug=show_debug))
 
     def create_work(
@@ -1048,14 +1048,16 @@ class WorkflowConsoleBackend:
         from ai_native_cad.workflow_console.work_index import get_work_summary_from_index
 
         self._require_safe_run_id(work_id)
-        return get_work_summary_from_index(self._get_work_index(show_debug=work_id == "__debug_runs__"), work_id)
+        show_debug = work_id == "__debug_runs__" or self._is_developer_work(work_id)
+        return get_work_summary_from_index(self._get_work_index(show_debug=show_debug), work_id)
 
     def get_work_detail(self, work_id: str) -> dict[str, Any]:
         """Return one inferred Work detail with current state and history separated."""
         from ai_native_cad.workflow_console.work_index import get_work_detail
 
         self._require_safe_run_id(work_id)
-        detail = get_work_detail(self, work_id, index=self._get_work_index(show_debug=work_id == "__debug_runs__"))
+        show_debug = work_id == "__debug_runs__" or self._is_developer_work(work_id)
+        detail = get_work_detail(self, work_id, index=self._get_work_index(show_debug=show_debug))
         if work_id != "__debug_runs__":
             detail["golden_example"] = self.get_golden_example_summary(work_id)
         return detail
@@ -1112,13 +1114,37 @@ class WorkflowConsoleBackend:
         )
 
     def _work_manifest_path(self, work_id: str) -> Path:
-        work_dir = self._require_child_path(self._resolve_workspace_path("works"), work_id)
+        work_dir = self._work_storage_dir(work_id)
         return self._require_child_path(work_dir, "work_manifest.json")
 
     def _work_runs_root(self, work_id: str) -> Path:
         self._require_safe_run_id(work_id)
-        work_dir = self._require_child_path(self._resolve_workspace_path("works"), work_id)
+        work_dir = self._work_storage_dir(work_id)
         return self._require_child_path(work_dir, "runs")
+
+    def _work_storage_dir(self, work_id: str) -> Path:
+        """Resolve user or isolated developer Work storage without inference."""
+
+        self._require_safe_run_id(work_id)
+        normal = self._require_child_path(
+            self._resolve_workspace_path("works"), work_id
+        )
+        developer = self._require_child_path(
+            self._resolve_workspace_path(".internal/dev-works"), work_id
+        )
+        if (normal / "work_manifest.json").is_file():
+            return normal
+        if (developer / "work_manifest.json").is_file():
+            return developer
+        return normal
+
+    def _is_developer_work(self, work_id: str) -> bool:
+        self._require_safe_run_id(work_id)
+        manifest = self._require_child_path(
+            self._resolve_workspace_path(".internal/dev-works"),
+            f"{work_id}/work_manifest.json",
+        )
+        return manifest.is_file()
 
     def read_work_run_prompt(self, work_id: str, run_id: str) -> str | None:
         """Read immutable prompt evidence for an exact manifest-owned Run."""
@@ -2032,10 +2058,19 @@ class WorkflowConsoleBackend:
         self.invalidate_work_index()
 
     def _workspace_work_ids(self) -> list[str]:
-        works_root = self._resolve_workspace_path("works")
-        if not works_root.exists():
-            return []
-        return [path.name for path in sorted(works_root.iterdir(), key=lambda item: item.name) if path.is_dir() and (path / "work_manifest.json").exists()]
+        roots = (
+            self._resolve_workspace_path("works"),
+            self._resolve_workspace_path(".internal/dev-works"),
+        )
+        return list(
+            dict.fromkeys(
+                path.name
+                for root in roots
+                if root.exists()
+                for path in sorted(root.iterdir(), key=lambda item: item.name)
+                if path.is_dir() and (path / "work_manifest.json").exists()
+            )
+        )
 
     def _resolve_developer_run_root(self) -> Path:
         """Keep low-level developer runs outside user-visible Work storage."""

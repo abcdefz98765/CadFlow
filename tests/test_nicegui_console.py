@@ -60,6 +60,35 @@ def _does_not_contain_absolute_paths(value, root: Path):
     return True
 
 
+def test_current_work_page_assembly_does_not_build_legacy_surfaces(tmp_path, monkeypatch):
+    backend = WorkflowConsoleBackend(
+        project_root=tmp_path, workspace_root=tmp_path / "workspace"
+    )
+    backend.create_workspace()
+    backend.create_work("Canonical", "Design one bracket.", work_id="canonical")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("current canonical page assembled a compatibility surface")
+
+    monkeypatch.setattr(
+        "ai_native_cad.workflow_console.nicegui_app.build_work_stage_projection",
+        forbidden,
+    )
+    monkeypatch.setattr(
+        "ai_native_cad.workflow_console.nicegui_app.build_workflow_review_surface",
+        forbidden,
+    )
+    data = build_console_page_data(
+        backend,
+        selected_work_id="canonical",
+        active_page="workflow",
+    )
+
+    assert data["workflow_page"]["projection_mode"] == "agent_first"
+    assert data["workflow_review_surface"]["stages"] == []
+    assert data["selected_run"] is None
+
+
 def test_console_page_navigation_contract_preserves_work_and_reaches_workflow_view_model(tmp_path):
     _sample_work(tmp_path)
     backend = WorkflowConsoleBackend(project_root=tmp_path)
@@ -690,6 +719,25 @@ def test_nicegui_work_dashboard_does_not_mix_debug_group_into_work_list(tmp_path
     assert "__debug_runs__" not in {work["work_id"] for work in shown["works"]}
 
 
+def test_nicegui_developer_toggle_loads_isolated_developer_work(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work(
+        "Browser review fixture",
+        work_id="browser_review_fixture",
+        metadata={"work_classification": "developer_fixture"},
+    )
+
+    hidden = build_console_page_data(backend, active_page="works")
+    shown = build_console_page_data(
+        backend,
+        active_page="works",
+        show_debug_works=True,
+    )
+
+    assert "browser_review_fixture" not in {work["work_id"] for work in hidden["works"]}
+    assert "browser_review_fixture" in {work["work_id"] for work in shown["works"]}
+
+
 def test_nicegui_real_work_entity_can_be_created_without_runs_or_cad(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
 
@@ -829,7 +877,7 @@ def test_nicegui_user_pages_hide_review_and_products_from_work_nav_contract():
 
     assert "review" not in user_pages
     assert "products" not in user_pages
-    assert user_pages == ["overview", "workflow", "parts", "history"]
+    assert user_pages == ["overview", "workflow"]
 
 
 def test_nicegui_legacy_work_manifest_under_outputs_is_not_indexed(tmp_path):
