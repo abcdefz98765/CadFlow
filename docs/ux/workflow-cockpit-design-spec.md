@@ -279,7 +279,7 @@ progress and Part cards navigate to their current graph state; neither repeats
 that dominant command. Empty Agent Design, geometry, and Agent Output states
 stay compact until durable evidence exists.
 
-## 13. Agent Design, Activity, and Output
+## 13. Agent Design, Activity, and Technical Evidence
 
 Keep these distinct.
 
@@ -291,13 +291,15 @@ What the Agent currently proposes to build, based only on persisted concise desi
 
 What is currently happening in product language.
 
-### Agent Output
+### Technical Evidence
 
-What the external Agent explicitly returned to CadFlow, sanitized and readable for debugging/recovery.
+What the external Agent explicitly returned to CadFlow plus exact scoped
+runtime evidence, sanitized and readable for debugging/recovery. It is loaded
+only on explicit disclosure and browser rendering is bounded.
 
 Do not expose private chain-of-thought or credentials.
 
-Agent Output/technical evidence may be expandable and should not dominate the normal page.
+Technical Evidence is expandable and must not dominate the normal page.
 
 ## 14. Geometry preview
 

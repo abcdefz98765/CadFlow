@@ -1447,6 +1447,53 @@ def _historical_run_summary(
     }
 
 
+def select_projected_workflow_node(
+    page: dict[str, Any], node_id: str
+) -> dict[str, Any]:
+    """Apply presentation-only selection to an already projected Current Work.
+
+    No backend read, canonical reprojection, command execution, or technical
+    evidence load occurs here. The node already carries its scoped interaction
+    projection from the durable Work state used to build ``page``.
+    """
+
+    if page.get("projection_mode") != "agent_first" or page.get("read_only"):
+        raise ValueError("local node selection requires an actionable Agent-first page")
+    nodes = [item for item in page.get("nodes", []) if isinstance(item, dict)]
+    selected = next((item for item in nodes if item.get("id") == node_id), None)
+    if selected is None:
+        raise ValueError(f"unknown projected workflow node: {node_id}")
+    for node in nodes:
+        node["selected"] = node is selected
+    graph = _dict_value(page.get("workflow_graph"))
+    for node in graph.get("nodes", []):
+        if isinstance(node, dict):
+            node["selected"] = node.get("id") == node_id
+    interaction = _dict_value(selected.get("interaction"))
+    primary = (
+        interaction.get("primary_action")
+        if isinstance(interaction.get("primary_action"), dict)
+        else None
+    )
+    actions = {
+        "primary_action": primary,
+        "secondary_actions": [
+            dict(item)
+            for item in interaction.get("secondary_actions", [])
+            if isinstance(item, dict)
+        ],
+        "disabled_actions": [],
+        "advanced_actions": [],
+    }
+    page["selected_node"] = selected
+    page["selected_stage"] = selected
+    page["selected_stage_id"] = node_id
+    page["recommended_next_action"] = primary
+    page["available_actions"] = actions
+    page["action_inventory"] = _action_inventory(actions, graph)
+    return page
+
+
 def _with_guidance(stage: dict[str, Any], language: str, view_mode: ViewMode) -> dict[str, Any]:
     """Attach the complete, localized user-guidance contract to every stage."""
     result = dict(stage)

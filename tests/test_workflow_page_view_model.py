@@ -184,23 +184,21 @@ def test_retry_is_exposed_only_for_retryable_current_stop(tmp_path):
     retry_page = build_workflow_page_view_model(
         backend,
         work_id,
-        selected_stage_id=f"recovery:{retry_artifact}",
+        selected_stage_id=f"attempt:{job['part_job_id']}:{run_id}",
         language="en",
     )
     assert retry_page["recommended_next_action"]["key"] == "retry_agent"
-    assert retry_page["current_attention"][0]["node_id"] == f"recovery:{retry_artifact}"
+    assert retry_page["current_attention"][0]["node_id"] == f"attempt:{job['part_job_id']}:{run_id}"
     assert retry_page["selected_node"]["user_state"] == "blocked"
     assert retry_page["current_attention"][0]["state"] == "blocked"
-
-    historical_page = build_workflow_page_view_model(
-        backend,
-        work_id,
-        selected_stage_id=f"recovery:{historical_artifact}",
-        language="en",
-    )
-    assert historical_page["recommended_next_action"] is None
-    assert historical_page["available_actions"]["secondary_actions"] == []
-    assert "historical" in historical_page["selected_node"]["interaction"]["unavailable_reason"].lower()
+    assert not any(node["kind"] == "recovery" for node in retry_page["nodes"])
+    evidence_ids = {
+        item["artifact_id"]
+        for item in retry_page["selected_node"]["detail"]["agent_output"][
+            "technical_evidence_references"
+        ]
+    }
+    assert {historical_artifact, retry_artifact} <= evidence_ids
 
     other = backend.create_product_design("Design an unsupported mechanism.", title="Unsupported")
     other_id = other["work_id"]
@@ -214,7 +212,7 @@ def test_retry_is_exposed_only_for_retryable_current_stop(tmp_path):
     unsupported_page = build_workflow_page_view_model(
         backend,
         other_id,
-        selected_stage_id=f"recovery:{unsupported_artifact}",
+        selected_stage_id=f"attempt:{other_job['part_job_id']}:{other_run}",
         language="en",
     )
     assert unsupported_page["recommended_next_action"]["key"] == "modify_request"

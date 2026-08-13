@@ -60,6 +60,33 @@ are not.
   clean-suite result and real-browser evidence are recorded in the Verification
   state section.
 
+## V1 workflow-native UI recovery — implemented and browser verified
+
+- Overview is state-specific and Workflow is the live Work spine. New Work no
+  longer renders empty CAD/Agent panels; reviewable geometry is central; one
+  failed Part attempt owns one blocked attempt node and exact recovery.
+- Completed Work Design and User request nodes do not inherit a sibling Part
+  failure. Selected-node commands are gated to the exact Part/Run scope, so a
+  later sibling failure cannot replace the selected attempt's recovery.
+- Agent Design, Activity, and Technical Evidence are distinct. Activity is
+  concise product language; exact sanitized protocol evidence is lazy, bounded,
+  and outside the initial DOM.
+- The policy-block owner fixture uses the real bounded Episode and records that
+  `create_contract` contained an executable-source field outside the Skill
+  action. CadFlow rejected it before execution: no geometry, no CAD result, no
+  user input required, and a new bounded retry is useful.
+- NiceGUI ownership was decomposed into focused action-lifecycle, graph,
+  stopped-attempt, Activity/evidence, Work Design, and style modules.
+  `nicegui_app.py` decreased from 6,840 to 5,974 physical lines. No parallel
+  domain/workflow state or new product capability was introduced.
+- Real browser verification covered Home, New Work, Work Design, multi-Part,
+  ready, running, blocked, clarification, reviewable, selected attempt,
+  Activity, Technical Evidence, history, English/Chinese, 1440/1024/414, and a
+  real command lifecycle. All 17 distinct captures and timing/method details
+  are recorded in `../ux/workflow-native-ui-verification.md`.
+- Focused Workflow-native projection/UI verification passed with `87 passed`.
+  The complete final suite result is recorded in the Verification state below.
+
 ## M2.7 onboarding, Settings, recovery, and Live Agent Example — implemented and verified
 
 - The existing NiceGUI shell presents Home / Works / Settings and prioritizes
@@ -525,6 +552,13 @@ These are migration tasks, not accepted target behavior.
 
 ## Verification state
 
+- V1 workflow-native UI recovery passed on 2026-08-13 with `693 passed, 9
+  skipped` in 404.88 seconds in the complete repository suite, plus `87 passed`
+  in the focused projection/UI set. Real in-app browser verification covered
+  17 distinct required states, lazy evidence, exact selected Part/Run command
+  scope, stable viewer disclosure, English/Chinese, and 1440/1024/414 layouts
+  without page-level horizontal overflow. Evidence and SHA-256 hashes are in
+  `../ux/workflow-native-ui-verification.md`.
 - V1 canonical consolidation passed on 2026-08-13 with `688 passed, 9 skipped`
   in the complete repository suite. Real NiceGUI verification covered Home,
   0-Part New Work, completed Work Design, multi-Part branches, focused

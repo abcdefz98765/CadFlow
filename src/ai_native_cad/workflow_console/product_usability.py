@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ai_native_cad.workflow_console.work_outcome import project_stopped_attempt
+
 
 def build_home_view_model(
     backend: Any,
@@ -64,7 +66,7 @@ def build_home_view_model(
                 "title": "真实 Agent 示例" if language == "zh" else "Real Agent example",
                 "badge": "实验性 · 结果可变" if language == "zh" else "Experimental · variable",
                 "demonstrates": "观察已配置 Provider 如何选择动作、提问、修复或诚实停止。" if language == "zh" else "See the configured provider choose actions, ask questions, repair, or stop honestly.",
-                "will_see": "Agent 输出、受控执行、验证证据和恢复建议" if language == "zh" else "Agent Output, controlled execution, validation evidence, and recovery guidance",
+                "will_see": "Agent 设计、活动、受控执行、验证和恢复建议" if language == "zh" else "Agent Design, Activity, controlled execution, validation, and recovery guidance",
                 "can_try": "从真实请求开始并继续同一个 Work" if language == "zh" else "Start from a real request and continue the same Work",
                 "requirements": "需要已验证的 Provider；生成几何还需要本地 CAD 执行环境。" if language == "zh" else "Requires a verified provider; geometry also needs local CAD execution.",
                 "action": "打开示例" if live and language == "zh" else "Open example" if live else "开始产品示例" if language == "zh" else "Start Product Example",
@@ -109,6 +111,7 @@ def build_agent_output_projection(
                 if identity:
                     provider = identity
                 action = str(record.get("action") or "invalid_response")
+                contract = _dict(record.get("contract"))
                 items.append({
                     "kind": "agent_response",
                     "sequence": record.get("sequence"),
@@ -118,7 +121,7 @@ def build_agent_output_projection(
                     "questions": record.get("questions") if isinstance(record.get("questions"), list) else [],
                     "assumptions": record.get("assumptions") if isinstance(record.get("assumptions"), list) else [],
                     "stop_reason": record.get("stop_reason"),
-                    "structured": record,
+                    "contract_fields": list(contract.get("top_level_fields") or []),
                 })
         elif checkpoint == "agent_activity":
             for record in payload.get("records", []):
@@ -132,7 +135,6 @@ def build_agent_output_projection(
                         "title": "系统观察" if language == "zh" else "System observation",
                         "summary": str(observation).replace("_", " "),
                         "codes": record.get("codes") if isinstance(record.get("codes"), list) else [],
-                        "structured": record,
                     })
         elif reference.get("trust_role") == "accepted_input":
             items.append({
@@ -141,7 +143,6 @@ def build_agent_output_projection(
                 "summary": payload.get("answer"),
                 "question": payload.get("question"),
                 "field": payload.get("field"),
-                "structured": payload,
             })
         elif checkpoint in {"product_design_routing", "work_design_routing"}:
             episode = _dict(payload.get("episode"))
@@ -152,7 +153,6 @@ def build_agent_output_projection(
                     "summary": _stop_reason_text(episode.get("stop_reason"), language),
                     "stop_reason": episode.get("stop_reason"),
                     "status": episode.get("status"),
-                    "structured": episode,
                 })
     # Older episodes did not register the exchange file. Retain an honest
     # result-level history and avoid inventing an Agent transcript.
@@ -160,8 +160,8 @@ def build_agent_output_projection(
     last_agent_summary = next((item.get("summary") for item in reversed(items) if item.get("kind") == "agent_response" and item.get("summary")), None)
     last_observation = next((item.get("summary") for item in reversed(items) if item.get("kind") == "system_observation"), None)
     return {
-        "title": "Agent 输出" if language == "zh" else "Agent Output",
-        "description": "按发生顺序显示 Agent 的外部动作、系统观察和恢复输入。" if language == "zh" else "External Agent actions, system observations, and recovery input in order.",
+        "title": "活动" if language == "zh" else "Activity",
+        "description": "重要的设计动作和结果；精确协议记录位于技术证据中。" if language == "zh" else "Significant design actions and outcomes; exact protocol records are in Technical Evidence.",
         "empty_message": (
             "此零件尝试尚无 Agent 输出。"
             if language == "zh" and scope_kind == "part"
@@ -173,7 +173,7 @@ def build_agent_output_projection(
             if scope_kind == "work_design"
             else "Agent 输出将在首次外部响应后显示。"
             if language == "zh"
-            else "Agent Output will appear after the first external response."
+            else "Activity will appear after the first meaningful Agent action."
         ),
         "scope_kind": scope_kind or "work",
         "items": items,
@@ -184,6 +184,23 @@ def build_agent_output_projection(
         "private_reasoning_exposed": False,
         "credential_material_exposed": False,
         "has_external_responses": any(item.get("kind") == "agent_response" for item in items),
+        "technical_evidence_lazy": True,
+        "technical_evidence_references": [
+            {
+                key: reference.get(key)
+                for key in (
+                    "artifact_id",
+                    "checkpoint",
+                    "trust_role",
+                    "validation_status",
+                    "run_id",
+                    "part_job_id",
+                )
+            }
+            for reference in references
+            if reference.get("artifact_id")
+        ],
+        "work_id": work_id,
     }
 
 
@@ -233,6 +250,20 @@ def build_recovery_projection(
     )
     metadata = _dict(entity.get("metadata"))
     product_agent_route = metadata.get("example_classification") == "live_agent_example" or metadata.get("product_entry") == "new_design"
+    route_reference = next(
+        (
+            item
+            for item in reversed(references)
+            if item.get("checkpoint")
+            in {"product_design_routing", "work_design_routing"}
+        ),
+        {},
+    )
+    route_scope = {
+        "part_job_id": route_reference.get("part_job_id"),
+        "run_id": route_reference.get("run_id"),
+        "artifact_id": route_reference.get("artifact_id"),
+    }
     route = _latest_route_outcome(backend, work_id, references)
     readiness = backend.read_provider_readiness() if product_agent_route else {"ready": True}
     if product_agent_route and not has_reviewable and not readiness.get("ready") and not route.get("stop_reason"):
@@ -258,6 +289,7 @@ def build_recovery_projection(
             destination="config",
             retryable=False,
             language=language,
+            extra=route_scope,
         )
 
     stop_reason = route.get("stop_reason")
@@ -276,6 +308,7 @@ def build_recovery_projection(
             destination="config#local-execution",
             retryable=False,
             language=language,
+            extra=route_scope,
         )
     if stop_reason == "unsupported_capability":
         return _recovery(
@@ -289,6 +322,7 @@ def build_recovery_projection(
             destination="workbench_revision",
             retryable=False,
             language=language,
+            extra=route_scope,
         )
     if stop_reason in {"validation_exhausted", "execution_exhausted"}:
         return _recovery(
@@ -315,6 +349,7 @@ def build_recovery_projection(
             destination="workbench",
             retryable=True,
             language=language,
+            extra=route_scope,
         )
     if stop_reason == "budget_exhausted":
         return _recovery(
@@ -328,6 +363,7 @@ def build_recovery_projection(
             destination="workbench",
             retryable=True,
             language=language,
+            extra=route_scope,
         )
     if stop_reason == "insufficient_context":
         output = agent_output or {}
@@ -343,11 +379,47 @@ def build_recovery_projection(
             retryable=False,
             language=language,
             extra={
+                **route_scope,
                 "technical_reason": stop_reason,
                 "last_agent_action": output.get("last_action"),
                 "last_observation": output.get("last_observation"),
                 "history": output.get("items", []),
                 "provider_identity": output.get("provider_identity", {}),
+            },
+        )
+    if stop_reason == "policy_blocked":
+        part_job_id = str(route_reference.get("part_job_id") or "")
+        scope_label = (
+            part_job_id.replace("_", " ").title()
+            if part_job_id
+            else ("Work 设计" if language == "zh" else "Work Design")
+        )
+        outcome = project_stopped_attempt(
+            stop_reason=stop_reason,
+            episode=route,
+            agent_items=list((agent_output or {}).get("items") or []),
+            scope_label=scope_label,
+            language=language,
+        )
+        retryable = outcome.get("retryable") is True
+        return _recovery(
+            category="policy_blocked",
+            owner="cadflow",
+            title=str(outcome["title"]),
+            summary=str(outcome["what_happened"]),
+            why=str(outcome["why"]),
+            action_key="retry_agent" if retryable else "view_details",
+            action_label=str(outcome["next_action"]),
+            destination="workbench" if retryable else "advanced",
+            retryable=retryable,
+            language=language,
+            extra={
+                **route_scope,
+                **outcome,
+                "last_agent_action": (agent_output or {}).get("last_action"),
+                "last_observation": (agent_output or {}).get("last_observation"),
+                "history": (agent_output or {}).get("items", []),
+                "provider_identity": (agent_output or {}).get("provider_identity", {}),
             },
         )
     technical_reason = _stop_reason_text(stop_reason, language)
@@ -364,6 +436,7 @@ def build_recovery_projection(
         retryable=False,
         language=language,
         extra={
+            **route_scope,
             "technical_reason": stop_reason,
             "last_agent_action": output.get("last_action"),
             "last_observation": output.get("last_observation"),
@@ -588,7 +661,7 @@ def build_agent_first_workflow_projection(
         for reference in references:
             if reference.get("part_job_id") is not None:
                 continue
-            if reference.get("checkpoint") not in {"clarification_decision", "work_design_routing"}:
+            if reference.get("checkpoint") != "clarification_decision":
                 continue
             projected = _workflow_reference_node(
                 backend,
@@ -717,13 +790,16 @@ def build_agent_first_workflow_projection(
             )
             attempt_node_id = add_node({
                 "id": f"attempt:{part_job_id}:{run_id}",
-                "label": (f"设计尝试 #{index}" if language == "zh" else f"Design attempt #{index}"),
+                "label": (f"尝试 #{index}" if language == "zh" else f"Attempt #{index}"),
                 "kind": "attempt",
                 "status": attempt_status,
                 "group": "design",
                 "part_job_id": part_job_id,
                 "run_id": run_id,
                 "summary": (
+                    str(attempt_recovery.get("what_happened") or attempt_recovery.get("summary"))
+                    if attempt_recovery
+                    else
                     ("从较早结果开始的修订" if language == "zh" else "Revision from an earlier result")
                     if revision_provenance
                     else ("当前设计尝试" if run_id == active_run_id and language == "zh" else "Current design attempt" if run_id == active_run_id else "较早尝试" if language == "zh" else "Earlier attempt")
@@ -760,6 +836,14 @@ def build_agent_first_workflow_projection(
             attempt_node_ids = [attempt_node_id]
             artifact_nodes: dict[str, str] = {}
             for reference in run_references:
+                # The attempt node already owns its terminal route outcome.
+                # Rendering every routing/stop record as another recovery node
+                # turns one blocked attempt into several visible failures.
+                if reference.get("checkpoint") in {
+                    "product_design_routing",
+                    "work_design_routing",
+                }:
+                    continue
                 projected = _workflow_reference_node(
                     backend,
                     work_id,
@@ -1181,12 +1265,53 @@ def _workflow_node_interaction(
     ]
     authority_result_id = authority_command.get("reviewable_result_id")
     selected_result_id = node.get("result_id")
+    authority_is_work_scoped = not (
+        authority_command.get("part_job_id") or authority_command.get("part_id")
+    )
+    authority_part_id = authority_command.get("part_job_id") or authority_command.get("part_id")
+    authority_run_id = authority_command.get("target_run_id")
+    authority_matches_selected_scope = bool(
+        (
+            not part_job_id
+            and (
+                authority_is_work_scoped
+                or (
+                    detail_type == "request"
+                    and primary is not None
+                    and authority_command.get("key") == primary.get("key")
+                )
+            )
+        )
+        or (
+            part_job_id
+            and authority_part_id == part_job_id
+            and (
+                detail_type != "attempt"
+                or not authority_run_id
+                or authority_run_id == run_id
+            )
+        )
+    )
     authority_applies = bool(
         authority_command
+        and authority_matches_selected_scope
+        and (
+            not recovery_applies
+            or primary is None
+            or authority_command.get("key") == primary.get("key")
+        )
         and (
             (
                 not part_job_id
                 and detail_type in {"request", "work_design", "recovery"}
+                and (
+                    authority_is_work_scoped
+                    or (
+                        detail_type == "request"
+                        and primary is not None
+                        and authority_command.get("key") == primary.get("key")
+                    )
+                )
             )
             or (
                 part_job_id
@@ -1240,7 +1365,7 @@ def _workflow_node_interaction(
             {**item, **page_context}
             for item in authority_secondary
         ] + navigation
-    elif primary and primary.get("key") in state_changing_keys:
+    elif primary and primary.get("key") in state_changing_keys and not recovery_applies:
         # Selected historical evidence is inspectable, but it cannot invent a
         # state-changing command outside the shared Work command inventory.
         unavailable_reason = unavailable_reason or (
@@ -2017,7 +2142,7 @@ def _stop_reason_text(reason: Any, language: str) -> str:
         "user_input_required": ("等待用户输入", "waiting for user input"),
         "unsupported_capability": ("能力暂不支持", "unsupported capability"),
         "provider_failure": ("Provider 请求失败", "provider request failure"),
-        "policy_blocked": ("动作合约或安全策略阻止", "action contract or safety policy block"),
+        "policy_blocked": ("CadFlow 拒绝了 Agent 动作", "CadFlow rejected the Agent action"),
         "validation_exhausted": ("验证尝试已用尽", "validation attempts exhausted"),
         "execution_exhausted": ("执行尝试已用尽", "execution attempts exhausted"),
         "budget_exhausted": ("有界预算已用尽", "bounded budget exhausted"),

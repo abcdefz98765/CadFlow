@@ -278,13 +278,14 @@ def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
     edges = workflow["edges"]
     question_id = next(node_id for node_id, node in nodes.items() if node["kind"] == "decision" and node["detail"]["type"] == "clarification")
     answer_id = next(node_id for node_id, node in nodes.items() if node["kind"] == "decision" and node["detail"]["type"] == "answer")
-    resumed_id = next(node_id for node_id, node in nodes.items() if node["kind"] == "recovery" and node["detail"]["stop_reason"] == "insufficient_context")
+    work_design_node = nodes["work:design"]
     assert nodes[question_id]["group"] == nodes[answer_id]["group"]
     assert nodes[question_id]["detail"]["answered"] is True
     assert nodes[question_id]["interaction"]["primary_action"] is None
     assert "historical" in nodes[question_id]["interaction"]["unavailable_reason"].lower()
     assert any(edge["source"] == question_id and edge["target"] == answer_id and edge["type"] == "answered" for edge in edges)
-    assert any(edge["source"] == answer_id and edge["target"] == resumed_id and edge["type"] == "resumed" for edge in edges)
+    assert work_design_node["detail"]["recovery"]["technical_reason"] == "insufficient_context"
+    assert not any(node["kind"] == "recovery" for node in nodes.values())
 
 
 def test_home_product_examples_are_explicitly_distinct(tmp_path):

@@ -407,17 +407,20 @@ def test_workbench_keeps_existing_shell_lifecycle_viewer_and_secondary_surfaces(
 
 def test_overview_has_one_dominant_action_owner_and_compact_empty_states():
     from ai_native_cad.workflow_console import nicegui_app
+    from ai_native_cad.workflow_console import agent_activity_ui
 
     overview_source = inspect.getsource(nicegui_app._render_work_overview)
     task_source = inspect.getsource(nicegui_app._render_overview_current_task)
-    output_source = inspect.getsource(nicegui_app._render_agent_output)
+    activity_source = inspect.getsource(agent_activity_ui.render_agent_activity)
     parts_source = inspect.getsource(nicegui_app._render_workbench_parts_summary)
 
     assert "_show_continue_agent_confirmation" not in overview_source
     assert task_source.count("_show_continue_agent_confirmation") == 1
-    assert "if not has_preview" in overview_source
     assert "if has_preview" in overview_source
-    assert "workbench-agent-output-compact" in output_source
+    assert "if has_activity" in overview_source
+    assert "technical_evidence_references" in activity_source
+    assert "on_value_change=open_evidence" in activity_source
+    assert "workbench-agent-output-compact" not in activity_source
     assert "recommended_action" not in parts_source
     assert "View current step in Workflow" in parts_source
 

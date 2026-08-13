@@ -37,13 +37,20 @@ def project_canonical_interaction(
         recommended = recovery.get("recommended_action") if isinstance(recovery.get("recommended_action"), dict) else {}
         key = str(recommended.get("key") or "")
         if key:
-            primary = _command(
+            recovery_command = _command(
                 key,
                 str(recommended.get("label") or key.replace("_", " ").title()),
                 work_id,
                 part_job_id=recovery.get("part_job_id"),
                 target_run_id=recovery.get("run_id"),
             )
+            primary = recovery_command
+            recovery_part_id = recovery.get("part_job_id")
+            if isinstance(recovery_part_id, str) and recovery_part_id in part_commands:
+                part_commands[recovery_part_id] = {
+                    **part_commands[recovery_part_id],
+                    "primary_action": recovery_command,
+                }
         attention = "needs_you" if key == "answer_question" else "blocked"
     elif not parts and work_design.get("status") != "completed":
         primary = _command(
