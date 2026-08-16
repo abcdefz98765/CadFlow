@@ -1,6 +1,6 @@
 # Current Product Readiness
 
-Status date: 2026-08-13.
+Status date: 2026-08-16.
 
 This document distinguishes the Agent-first target architecture from the
 implemented deterministic product, accepted M1 runtime foundation, bounded M2
@@ -24,6 +24,48 @@ the M2.6 canonical Product Golden and M2.7 usability integration are implemented
 external-provider M2
 acceptance and later-milestone modeling, Assembly, and Deliverable capabilities
 are not.
+
+## V1 failure causality and NiceGUI boundaries — implemented and automated verified
+
+- New bounded Episode rejections persist a small `failure_diagnostic` at the
+  real Agent-action, context, tool, execution-environment, or publication
+  boundary. The diagnostic records exact typed facts needed for recovery and
+  excludes provider source, credentials, exception prose, and hidden
+  reasoning. Existing historical evidence is not rewritten.
+- Current Work projects modern policy blocks into product categories with an
+  owner, output status, and a real next action. Historical policy blocks that
+  lack the new diagnostic explicitly say that their exact cause is unknown;
+  the UI does not reconstruct causality from an Agent payload.
+- A blocked Run attempt remains a blocked Attempt. Its Part remains incomplete
+  and needs attention. Reviewable and accepted result semantics, accepted
+  pointers, revision lineage, and historical Run immutability are unchanged.
+- Workflow node selection uses the already projected page and replaces only
+  the selected inspector. It does not read the backend, reproject the Work,
+  rebuild the graph/sidebar/viewer, or create graph persistence. Server-side
+  selection measured 2.6-5.8 ms in real NiceGUI tracing.
+- Activity disclosure is browser-local. Technical Evidence remains secondary
+  and reads only exact scoped JSON/JSONL references through one bounded lookup
+  when opened. A refresh-local evidence map deduplicates projection reads and
+  is discarded after the refresh.
+- State-changing actions retain confirmation, immediate pending feedback,
+  duplicate protection, backend execution, and terminal canonical refresh.
+  Pending feedback reuses the current projection; it does not fabricate a
+  durable Run state.
+- Real-browser verification covered modern and historical blocked states,
+  zero-Part, reviewable Accept/Revise, Chinese primary copy, one English pass,
+  and exact 1440/1024/414 layouts. There was no page-level horizontal overflow,
+  no off-screen interactive control, and no console/runtime error. The mobile
+  graph alone retains intentional local horizontal scrolling.
+
+The browser-control wall-clock floor was 264-310 ms. Consequently, the
+requested 150 ms median / 200 ms p95 selection target cannot be demonstrated
+through that transport: final wall time was 282 ms median / 299 ms p95 while
+the traced server work was 2.6-5.8 ms with no I/O or full refresh. First lazy
+Technical Evidence expansion improved from 451-459 ms to 288 ms wall time and
+met its 300 ms target.
+
+Focused affected-suite verification passed with `90 passed`; the clean complete
+repository suite passed with `702 passed, 9 skipped` in 439.36 seconds.
 
 ## V1 canonical consolidation — implemented and automated verified
 

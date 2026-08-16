@@ -208,6 +208,31 @@ def test_action_lifecycle_reports_failed_postcondition_and_rejects_duplicate_cli
     assert "postcondition mismatch" in state["action_execution"]["error_detail"]
 
 
+def test_action_lifecycle_uses_cached_pending_refresh_then_full_terminal_refresh():
+    state = {}
+    refreshes = []
+
+    def refresh():
+        refreshes.append("terminal")
+
+    def refresh_pending():
+        refreshes.append("pending_cached")
+
+    refresh.pending = refresh_pending
+    result = asyncio.run(
+        _execute_action_lifecycle(
+            {"key": "continue_agent", "target_work_id": "work"},
+            state,
+            refresh,
+            lambda: {"ok": True},
+            language="en",
+        )
+    )
+
+    assert result == {"ok": True}
+    assert refreshes == ["pending_cached", "terminal"]
+
+
 def test_agent_action_is_pending_disabled_and_running_before_terminal_success():
     state = {}
     refresh_states = []

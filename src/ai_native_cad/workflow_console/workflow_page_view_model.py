@@ -53,6 +53,8 @@ def build_workbench_overview_view_model(
     work_id: str,
     *,
     language: str = "en",
+    work_detail: dict[str, Any] | None = None,
+    reference_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Project the existing Current Work surface into the Agent-first Overview.
 
@@ -62,7 +64,8 @@ def build_workbench_overview_view_model(
     """
 
     language = "zh" if language == "zh" else "en"
-    work = backend.get_work_detail(work_id)
+    work = work_detail if isinstance(work_detail, dict) else backend.get_work_detail(work_id)
+    reference_cache = reference_cache if reference_cache is not None else {}
     summary = _dict_value(work.get("summary"))
     entity = _dict_value(work.get("entity_state"))
     references = [
@@ -152,6 +155,7 @@ def build_workbench_overview_view_model(
         work_id,
         references,
         language=language,
+        reference_cache=reference_cache,
     )
     recovery = build_recovery_projection(
         backend,
@@ -160,6 +164,7 @@ def build_workbench_overview_view_model(
         references,
         language=language,
         agent_output=agent_output,
+        reference_cache=reference_cache,
     )
     activity = _workbench_agent_activity(
         active_job,
@@ -1240,11 +1245,14 @@ def build_workflow_page_view_model(
     selected_stage_id: str | None = None,
     language: str = "en",
     overview: dict[str, Any] | None = None,
+    work_detail: dict[str, Any] | None = None,
+    reference_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build one coherent Workflow page for a Work or immutable Run snapshot."""
     if view_mode not in {"current_work", "run_snapshot"}:
         raise ValueError("workflow view mode must be current_work or run_snapshot")
-    work = backend.get_work_detail(work_id)
+    work = work_detail if isinstance(work_detail, dict) else backend.get_work_detail(work_id)
+    reference_cache = reference_cache if reference_cache is not None else {}
     summary = work.get("summary") if isinstance(work.get("summary"), dict) else {}
     entity = work.get("entity_state") if isinstance(work.get("entity_state"), dict) else {}
     lineage = summary.get("active_lineage") if isinstance(summary.get("active_lineage"), dict) else {}
@@ -1254,7 +1262,11 @@ def build_workflow_page_view_model(
             overview
             if isinstance(overview, dict) and overview
             else build_workbench_overview_view_model(
-                backend, work_id, language=language
+                backend,
+                work_id,
+                language=language,
+                work_detail=work,
+                reference_cache=reference_cache,
             )
         )
         agent_page = build_agent_first_workflow_projection(
@@ -1264,6 +1276,7 @@ def build_workflow_page_view_model(
             overview,
             selected_node_id=selected_stage_id,
             language=language,
+            reference_cache=reference_cache,
         )
         selected_node = _dict_value(agent_page.get("selected_node"))
         interaction = _dict_value(selected_node.get("interaction"))

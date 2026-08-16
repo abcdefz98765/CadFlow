@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ai_native_cad.workflow_console.work_outcome import project_stopped_attempt
+from ai_native_cad.workflow_console.ui_performance import ui_trace_event, ui_trace_start
 
 
 def build_home_view_model(
@@ -94,6 +95,7 @@ def build_agent_output_projection(
     *,
     language: str,
     scope_kind: str | None = None,
+    reference_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Project durable Agent responses, observations, and user recovery turns."""
 
@@ -102,8 +104,10 @@ def build_agent_output_projection(
     provider: dict[str, Any] = {}
     for reference in references:
         checkpoint = reference.get("checkpoint")
-        payload = _read_reference(backend, work_id, reference)
         if checkpoint == "agent_output":
+            payload = _read_reference(
+                backend, work_id, reference, reference_cache=reference_cache
+            )
             for record in payload.get("records", []):
                 if not isinstance(record, dict):
                     continue
@@ -124,6 +128,9 @@ def build_agent_output_projection(
                     "contract_fields": list(contract.get("top_level_fields") or []),
                 })
         elif checkpoint == "agent_activity":
+            payload = _read_reference(
+                backend, work_id, reference, reference_cache=reference_cache
+            )
             for record in payload.get("records", []):
                 if not isinstance(record, dict):
                     continue
@@ -137,6 +144,9 @@ def build_agent_output_projection(
                         "codes": record.get("codes") if isinstance(record.get("codes"), list) else [],
                     })
         elif reference.get("trust_role") == "accepted_input":
+            payload = _read_reference(
+                backend, work_id, reference, reference_cache=reference_cache
+            )
             items.append({
                 "kind": "user_answer",
                 "title": "你的回答" if language == "zh" else "Your answer",
@@ -145,6 +155,9 @@ def build_agent_output_projection(
                 "field": payload.get("field"),
             })
         elif checkpoint in {"product_design_routing", "work_design_routing"}:
+            payload = _read_reference(
+                backend, work_id, reference, reference_cache=reference_cache
+            )
             episode = _dict(payload.get("episode"))
             if episode:
                 items.append({
@@ -212,11 +225,14 @@ def build_recovery_projection(
     *,
     language: str,
     agent_output: dict[str, Any] | None = None,
+    reference_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     language = "zh" if language == "zh" else "en"
     question_reference = _unanswered_question_reference(references)
     if question_reference is not None:
-        question_payload = _read_reference(backend, work_id, question_reference)
+        question_payload = _read_reference(
+            backend, work_id, question_reference, reference_cache=reference_cache
+        )
         questions = question_payload.get("questions") if isinstance(question_payload.get("questions"), list) else []
         question = questions[0] if questions and isinstance(questions[0], dict) else {}
         return _recovery(
@@ -264,7 +280,9 @@ def build_recovery_projection(
         "run_id": route_reference.get("run_id"),
         "artifact_id": route_reference.get("artifact_id"),
     }
-    route = _latest_route_outcome(backend, work_id, references)
+    route = _latest_route_outcome(
+        backend, work_id, references, reference_cache=reference_cache
+    )
     readiness = backend.read_provider_readiness() if product_agent_route else {"ready": True}
     if product_agent_route and not has_reviewable and not readiness.get("ready") and not route.get("stop_reason"):
         auth_failed = readiness.get("last_error_category") == "auth_failed"
@@ -295,7 +313,9 @@ def build_recovery_projection(
     stop_reason = route.get("stop_reason")
     if not stop_reason or route.get("status") == "completed":
         return None
-    sandbox_codes = _latest_execution_codes(backend, work_id, references)
+    sandbox_codes = _latest_execution_codes(
+        backend, work_id, references, reference_cache=reference_cache
+    )
     if "sandbox_unavailable" in sandbox_codes or stop_reason == "sandbox_unavailable":
         return _recovery(
             category="environment_unavailable",
@@ -400,17 +420,31 @@ def build_recovery_projection(
             agent_items=list((agent_output or {}).get("items") or []),
             scope_label=scope_label,
             language=language,
+            failure_diagnostic=(
+                route.get("failure_diagnostic")
+                if isinstance(route.get("failure_diagnostic"), dict)
+                else None
+            ),
         )
         retryable = outcome.get("retryable") is True
+        action_key = str(outcome.get("recovery_action_key") or "view_details")
         return _recovery(
-            category="policy_blocked",
-            owner="cadflow",
+            category=str(outcome.get("cause_category") or "policy_blocked"),
+            owner=str(outcome.get("resolution_owner") or "cadflow"),
             title=str(outcome["title"]),
             summary=str(outcome["what_happened"]),
             why=str(outcome["why"]),
-            action_key="retry_agent" if retryable else "view_details",
+            action_key=action_key,
             action_label=str(outcome["next_action"]),
-            destination="workbench" if retryable else "advanced",
+            destination=(
+                "config#local-execution"
+                if action_key == "check_environment"
+                else "workbench_revision"
+                if action_key == "modify_request"
+                else "workbench"
+                if action_key == "start_new_attempt"
+                else "advanced"
+            ),
             retryable=retryable,
             language=language,
             extra={
@@ -454,6 +488,7 @@ def build_agent_first_workflow_projection(
     *,
     selected_node_id: str | None = None,
     language: str,
+    reference_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Project one current Work into a small, evidence-backed state graph.
 
@@ -463,6 +498,7 @@ def build_agent_first_workflow_projection(
     """
 
     language = "zh" if language == "zh" else "en"
+    reference_cache = reference_cache if reference_cache is not None else {}
     entity = _dict(work.get("entity_state"))
     references = [
         dict(item)
@@ -510,6 +546,7 @@ def build_agent_first_workflow_projection(
             scoped_references(part_job_id, run_id),
             language=language,
             scope_kind="part" if part_job_id else "work_design",
+            reference_cache=reference_cache,
         )
 
     def scoped_recovery(
@@ -534,6 +571,7 @@ def build_agent_first_workflow_projection(
             scoped,
             language=language,
             agent_output=output,
+            reference_cache=reference_cache,
         )
         if not isinstance(projected, dict):
             return None
@@ -566,7 +604,9 @@ def build_agent_first_workflow_projection(
             ),
             None,
         )
-        payload = _read_reference(backend, work_id, reference)
+        payload = _read_reference(
+            backend, work_id, reference, reference_cache=reference_cache
+        )
         content = _dict(payload.get("content"))
         return content or payload
 
@@ -671,6 +711,7 @@ def build_agent_first_workflow_projection(
                 {},
                 language,
                 all_references=references,
+                reference_cache=reference_cache,
             )
             if projected is None:
                 continue
@@ -852,6 +893,7 @@ def build_agent_first_workflow_projection(
                     part,
                     language,
                     all_references=references,
+                    reference_cache=reference_cache,
                 )
                 if projected is None:
                     continue
@@ -1086,6 +1128,14 @@ def _workflow_node_interaction(
             "retry_agent",
             f"Retry {part_label}" if part_job_id else "Retry Work Design",
             f"重试 {part_label}" if part_job_id else "重试 Work 设计",
+        )
+    elif recovery_key == "start_new_attempt":
+        part_label = str(part.get("name") or part_job_id.replace("_", " ").title())
+        primary = action(
+            "retry_agent",
+            f"Start a new {part_label} attempt" if part_job_id else "Start a new Work Design attempt",
+            f"开始新的 {part_label} 尝试" if part_job_id else "开始新的 Work 设计尝试",
+            recovery_mode="new_attempt",
         )
     elif recovery_key in {"open_settings", "check_environment"}:
         primary = action("open_settings", "Open Settings", "打开设置", category="navigation")
@@ -1406,6 +1456,8 @@ def _workflow_user_state(node: dict[str, Any]) -> str:
     action_key = str(primary.get("key") or "")
     status = str(node.get("status") or "not_started")
     detail_type = str(_dict(node.get("detail")).get("type") or "")
+    if detail_type == "part_job" and status == "incomplete":
+        return "attention"
     if action_key == "answer_question":
         return "needs_you"
     if action_key == "accept_reviewable_result" or status == "reviewable":
@@ -1432,6 +1484,7 @@ def _workflow_user_state_label(
         "ready": ("Ready", "就绪"),
         "running": ("Running", "运行中"),
         "review": ("Review", "待审查"),
+        "attention": ("Attempt needs attention", "尝试需要处理"),
         "blocked": ("Blocked", "受阻"),
         "accepted": ("Accepted", "已接受"),
         "complete": ("Complete", "已完成"),
@@ -1543,11 +1596,29 @@ def _workflow_reference_node(
     language: str,
     *,
     all_references: list[dict[str, Any]],
+    reference_cache: dict[str, dict[str, Any]],
 ) -> dict[str, Any] | None:
     checkpoint = str(reference.get("checkpoint") or "")
     trust_role = str(reference.get("trust_role") or "")
     artifact_id = str(reference.get("artifact_id") or "")
-    payload = _read_reference(backend, work_id, reference)
+    node_checkpoint = checkpoint in {
+        "clarification_decision",
+        "design_brief",
+        "model_program_candidate",
+        "geometry_candidate",
+        "cad_ir_draft",
+        "execution_observation",
+        "product_design_routing",
+        "work_design_routing",
+        "reviewable_result",
+    }
+    if not node_checkpoint:
+        # Diagnostic/source/STEP payloads remain lazy Technical Evidence. They
+        # do not become graph nodes and should not be read during projection.
+        return None
+    payload = _read_reference(
+        backend, work_id, reference, reference_cache=reference_cache
+    )
     scope_references = [
         item
         for item in all_references
@@ -1560,6 +1631,7 @@ def _workflow_reference_node(
         scope_references,
         language=language,
         scope_kind="part" if reference.get("part_job_id") else "work_design",
+        reference_cache=reference_cache,
     )
     common = {
         "part_job_id": reference.get("part_job_id"),
@@ -1582,6 +1654,7 @@ def _workflow_reference_node(
             scope_references,
             language=language,
             agent_output=scope_output,
+            reference_cache=reference_cache,
         )
         return {
             "edge_type": "asked",
@@ -1686,6 +1759,7 @@ def _workflow_reference_node(
             scope_references,
             language=language,
             agent_output=scope_output,
+            reference_cache=reference_cache,
         )
         references = all_references
         accepted_input_ids = {
@@ -1791,7 +1865,8 @@ def _workflow_reference_node(
 
 def _workflow_part_status(part: dict[str, Any], recovery: dict[str, Any] | None, part_job_id: str) -> str:
     if recovery and recovery.get("part_job_id") in {None, part_job_id}:
-        return "blocked"
+        # The Part Job still exists; its active Attempt owns the terminal block.
+        return "incomplete"
     state = str(part.get("state") or "not_started")
     return {
         "design": "not_started",
@@ -1799,7 +1874,7 @@ def _workflow_part_status(part: dict[str, Any], recovery: dict[str, Any] | None,
         "accepted": "accepted",
         "not_started": "not_started",
         "stale": "stale",
-        "blocked": "blocked",
+        "blocked": "incomplete",
     }.get(state, "not_started")
 
 
@@ -2013,7 +2088,13 @@ def _unanswered_question_reference(references: list[dict[str, Any]]) -> dict[str
     )
 
 
-def _latest_route_outcome(backend: Any, work_id: str, references: list[dict[str, Any]]) -> dict[str, Any]:
+def _latest_route_outcome(
+    backend: Any,
+    work_id: str,
+    references: list[dict[str, Any]],
+    *,
+    reference_cache: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     reference = next(
         (
             item
@@ -2022,27 +2103,64 @@ def _latest_route_outcome(backend: Any, work_id: str, references: list[dict[str,
         ),
         None,
     )
-    payload = _read_reference(backend, work_id, reference)
+    payload = _read_reference(
+        backend, work_id, reference, reference_cache=reference_cache
+    )
     return _dict(payload.get("episode"))
 
 
-def _latest_execution_codes(backend: Any, work_id: str, references: list[dict[str, Any]]) -> set[str]:
+def _latest_execution_codes(
+    backend: Any,
+    work_id: str,
+    references: list[dict[str, Any]],
+    *,
+    reference_cache: dict[str, dict[str, Any]] | None = None,
+) -> set[str]:
     reference = next(
         (item for item in reversed(references) if item.get("checkpoint") == "execution_observation"),
         None,
     )
-    payload = _read_reference(backend, work_id, reference)
+    payload = _read_reference(
+        backend, work_id, reference, reference_cache=reference_cache
+    )
     return {str(item) for item in payload.get("codes", []) if isinstance(item, str)}
 
 
-def _read_reference(backend: Any, work_id: str, reference: dict[str, Any] | None) -> dict[str, Any]:
+def _read_reference(
+    backend: Any,
+    work_id: str,
+    reference: dict[str, Any] | None,
+    *,
+    reference_cache: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     if not isinstance(reference, dict) or not isinstance(reference.get("artifact_id"), str):
         return {}
+    artifact_id = reference["artifact_id"]
+    if reference_cache is not None and artifact_id in reference_cache:
+        cache_started = ui_trace_start()
+        ui_trace_event(
+            "artifact_reference_read",
+            cache_started,
+            cache_hit=True,
+            checkpoint=str(reference.get("checkpoint") or ""),
+        )
+        return reference_cache[artifact_id]
+    read_started = ui_trace_start()
     try:
-        payload = backend.read_work_artifact_reference(work_id, reference["artifact_id"])
+        payload = backend.read_work_artifact_reference(work_id, artifact_id)
     except (FileNotFoundError, ValueError):
-        return {}
-    return _dict(payload.get("content"))
+        content: dict[str, Any] = {}
+    else:
+        content = _dict(payload.get("content"))
+    if reference_cache is not None:
+        reference_cache[artifact_id] = content
+    ui_trace_event(
+        "artifact_reference_read",
+        read_started,
+        cache_hit=False,
+        checkpoint=str(reference.get("checkpoint") or ""),
+    )
+    return content
 
 
 def _recovery(

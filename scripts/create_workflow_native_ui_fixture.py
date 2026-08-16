@@ -1,4 +1,4 @@
-"""Create the isolated Workflow-native UI owner fixture.
+"""Create the isolated Workflow-native failure-causality fixture.
 
 The fixture uses the real Work, Part Job, Design Episode, policy, and evidence
 paths.  It is developer-only catalog data and never appears with normal Works.
@@ -12,7 +12,7 @@ from ai_native_cad.agents import JsonContractAgentAdapter
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
 
 
-WORK_ID = "workflow_native_ui_owner_fixture"
+WORK_ID = "failure_causality_ui_fixture"
 REQUEST = (
     "Design a camera cradle that attaches to a 2020 extrusion through a "
     "separate adapter. Keep the camera cradle and extrusion adapter as "
@@ -21,7 +21,7 @@ REQUEST = (
 
 
 class _BlockedCameraCradleClient:
-    """Return one safely rejected provider response for the owner scenario."""
+    """Return one safely rejected provider response for the causality scenario."""
 
     provider_identity = {
         "provider": "scripted-owner-fixture",
@@ -66,15 +66,15 @@ def create_fixture(backend: WorkflowConsoleBackend | None = None) -> dict[str, o
 
     backend.create_workspace()
     backend.create_work(
-        "Camera Mount Workflow · Owner Fixture",
+        "Camera Mount Workflow · Failure Causality Fixture",
         description=REQUEST,
         work_id=WORK_ID,
         metadata={
             "product_entry": "new_design",
             "work_classification": "developer_fixture",
             "fixture_purpose": (
-                "Workflow-native UI blocked-attempt, selected-scope, and "
-                "lazy-evidence verification"
+                "Persisted rejection causality, blocked-attempt, selected-scope, "
+                "and lazy-evidence verification"
             ),
         },
     )
@@ -169,7 +169,7 @@ def create_fixture(backend: WorkflowConsoleBackend | None = None) -> dict[str, o
         attempt_run_id="camera_cradle_attempt_1",
     )
     if outcome["episode"]["stop_reason"] != "policy_blocked":
-        raise RuntimeError("owner fixture did not reach the expected policy_blocked outcome")
+        raise RuntimeError("causality fixture did not reach the expected policy_blocked outcome")
     return {"work_id": WORK_ID, "created": True, "outcome": outcome}
 
 

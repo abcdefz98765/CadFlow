@@ -244,12 +244,13 @@ class WorkflowConsoleAgentDesign:
                     artifact_dir=episode_dir,
                     run_id=request.run_id,
                 )
-            except (EpisodeContractError, UnknownAgentActionError):
+            except (EpisodeContractError, UnknownAgentActionError) as exc:
                 outcome = _blocked_work_design_outcome(
                     request,
                     relative_root=relative_root,
                     stop_reason="policy_blocked",
                     episode_dir=episode_dir,
+                    failure_diagnostic=exc.failure_diagnostic,
                 )
             except Exception:
                 outcome = _blocked_work_design_outcome(
@@ -370,12 +371,13 @@ class WorkflowConsoleAgentDesign:
                     run_id=request.run_id,
                     objective_summary=request.objective,
                 )
-            except (EpisodeContractError, UnknownAgentActionError):
+            except (EpisodeContractError, UnknownAgentActionError) as exc:
                 outcome = _blocked_design_outcome(
                     request,
                     relative_root=relative_root,
                     stop_reason="policy_blocked",
                     episode_dir=episode_dir,
+                    failure_diagnostic=exc.failure_diagnostic,
                 )
             except Exception:
                 outcome = _blocked_design_outcome(
@@ -494,6 +496,13 @@ def _work_design_outcome(
                 source_artifact_ids=(exchange_id,) if exchange_id else (),
             )
         )
+    _append_failure_diagnostic_artifact(
+        artifacts,
+        failure_diagnostic=result.failure_diagnostic,
+        episode_dir=episode_dir,
+        relative_root=relative_root,
+        artifact_id=f"work_design:{result.episode_id}:failure_diagnostic",
+    )
     design_id = None
     if result.work_design is not None and result.proposal_count:
         design_id = f"work_design:{result.episode_id}:proposal"
@@ -560,6 +569,7 @@ def _work_design_outcome(
         part_job_creation_requested=result.part_job_creation_requested,
         knowledge_ids=knowledge_ids,
         artifacts=tuple(artifacts),
+        failure_diagnostic=result.failure_diagnostic,
     )
 
 
@@ -569,6 +579,7 @@ def _blocked_work_design_outcome(
     relative_root: str,
     stop_reason: str,
     episode_dir: Path | None = None,
+    failure_diagnostic: dict[str, Any] | None = None,
 ) -> WorkDesignEpisodeOutcome:
     episode_id = uuid4().hex
     artifacts: list[DesignEpisodeArtifact] = []
@@ -581,6 +592,14 @@ def _blocked_work_design_outcome(
                 trust_role="diagnostic",
                 validation_status="blocked",
             )
+        )
+    if episode_dir is not None:
+        _append_failure_diagnostic_artifact(
+            artifacts,
+            failure_diagnostic=failure_diagnostic,
+            episode_dir=episode_dir,
+            relative_root=relative_root,
+            artifact_id=f"work_design:{episode_id}:failure_diagnostic",
         )
     artifacts.append(
         DesignEpisodeArtifact(
@@ -603,6 +622,7 @@ def _blocked_work_design_outcome(
             for item in RUNTIME_SKILL_REGISTRY.knowledge_for_skill("work_design")
         ),
         artifacts=tuple(artifacts),
+        failure_diagnostic=failure_diagnostic,
     )
 
 
@@ -683,6 +703,13 @@ def _episode_outcome(
                 source_artifact_ids=(exchange_id,) if exchange_id else (),
             )
         )
+    _append_failure_diagnostic_artifact(
+        artifacts,
+        failure_diagnostic=result.failure_diagnostic,
+        episode_dir=episode_dir,
+        relative_root=relative_root,
+        artifact_id=f"episode:{result.episode_id}:failure_diagnostic",
+    )
     candidate_id = None
     if result.final_contract is not None and result.contract_submission_count:
         candidate_id = f"episode:{result.episode_id}:contract"
@@ -796,6 +823,19 @@ def _episode_outcome(
             artifacts.extend(
                 (published.result_artifact, published.step_artifact)
             )
+    failure_diagnostic = result.failure_diagnostic
+    if publication_error is not None:
+        failure_diagnostic = {
+            "schema_version": 1,
+            "rejection_stage": "reviewable_publication",
+            "rejected_action": "publish_reviewable_result",
+            "reason_code": publication_error,
+            "requested_capability_or_context": None,
+            "human_safe_detail": (
+                "CadFlow could not publish the locally evaluated candidate as a reviewable result."
+            ),
+            "side_effect_started": True,
+        }
     product_completed = result.status == "completed" and publication_error is None
     if result.stop_reason.value == "user_input_required":
         question_id = f"episode:{result.episode_id}:user_input_request"
@@ -898,6 +938,7 @@ def _episode_outcome(
             if published
             else None
         ),
+        failure_diagnostic=failure_diagnostic,
     )
 
 
@@ -907,6 +948,7 @@ def _blocked_design_outcome(
     relative_root: str,
     stop_reason: str,
     episode_dir: Path | None = None,
+    failure_diagnostic: dict[str, Any] | None = None,
 ) -> DesignPartEpisodeOutcome:
     episode_id = uuid4().hex
     artifacts: list[DesignEpisodeArtifact] = []
@@ -919,6 +961,14 @@ def _blocked_design_outcome(
                 trust_role="diagnostic",
                 validation_status="blocked",
             )
+        )
+    if episode_dir is not None:
+        _append_failure_diagnostic_artifact(
+            artifacts,
+            failure_diagnostic=failure_diagnostic,
+            episode_dir=episode_dir,
+            relative_root=relative_root,
+            artifact_id=f"episode:{episode_id}:failure_diagnostic",
         )
     artifacts.append(
         DesignEpisodeArtifact(
@@ -937,6 +987,29 @@ def _blocked_design_outcome(
         capability_mode="provider_selected_design_with_attested_model_program",
         validated=False,
         artifacts=tuple(artifacts),
+        failure_diagnostic=failure_diagnostic,
+    )
+
+
+def _append_failure_diagnostic_artifact(
+    artifacts: list[DesignEpisodeArtifact],
+    *,
+    failure_diagnostic: dict[str, Any] | None,
+    episode_dir: Path,
+    relative_root: str,
+    artifact_id: str,
+) -> None:
+    if failure_diagnostic is None:
+        return
+    _write_json(episode_dir / "failure_diagnostic.json", failure_diagnostic)
+    artifacts.append(
+        DesignEpisodeArtifact(
+            artifact_id=artifact_id,
+            relative_path=f"{relative_root}/failure_diagnostic.json",
+            checkpoint="failure_diagnostic",
+            trust_role="diagnostic",
+            validation_status="recorded",
+        )
     )
 
 

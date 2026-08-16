@@ -1026,6 +1026,13 @@ class WorkflowConsoleBackend:
             work_id,
             artifact_id,
         )
+        return self._read_work_json_artifact(reference, artifact_path)
+
+    @staticmethod
+    def _read_work_json_artifact(
+        reference: dict[str, Any],
+        artifact_path: Path,
+    ) -> dict[str, Any]:
         suffix = artifact_path.suffix.lower()
         if suffix not in {".json", ".jsonl"}:
             raise ValueError("workflow console Work artifact is not JSON evidence")
@@ -1042,6 +1049,48 @@ class WorkflowConsoleBackend:
             "reference": dict(reference),
             "content": _sanitize_public_artifact_content(value),
         }
+
+    def read_work_artifact_references(
+        self,
+        work_id: str,
+        artifact_ids: list[str],
+        *,
+        limit: int = 24,
+    ) -> list[dict[str, Any]]:
+        """Read a bounded evidence group with one manifest lookup."""
+
+        self._require_safe_run_id(work_id)
+        if not isinstance(artifact_ids, list) or not 0 <= len(artifact_ids) <= limit:
+            raise ValueError("workflow console artifact group exceeds its bounded limit")
+        if any(not isinstance(item, str) or not item for item in artifact_ids):
+            raise ValueError("workflow console artifact ids are required")
+        if len(set(artifact_ids)) != len(artifact_ids):
+            raise ValueError("workflow console artifact ids must be unique")
+        work = self._read_work_manifest(work_id)
+        references = {
+            str(item.get("artifact_id")): item
+            for item in work.get("artifact_references", [])
+            if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)
+        }
+        loaded: list[dict[str, Any]] = []
+        for artifact_id in artifact_ids:
+            reference = references.get(artifact_id)
+            if reference is None:
+                raise FileNotFoundError(
+                    f"workflow console Work artifact does not exist: {artifact_id}"
+                )
+            run_id = reference.get("run_id")
+            relative_path = reference.get("relative_path")
+            if not isinstance(run_id, str) or not isinstance(relative_path, str):
+                raise ValueError("workflow console Work artifact reference is invalid")
+            run_path = self.resolve_run(run_id, root=self._work_runs_root(work_id))
+            artifact_path = self._require_child_path(run_path, relative_path)
+            if not artifact_path.is_file() or artifact_path.is_symlink():
+                raise FileNotFoundError(
+                    f"workflow console Work artifact file is missing: {artifact_id}"
+                )
+            loaded.append(self._read_work_json_artifact(reference, artifact_path))
+        return loaded
 
     def get_work_summary(self, work_id: str) -> dict[str, Any]:
         """Return one inferred Work summary."""

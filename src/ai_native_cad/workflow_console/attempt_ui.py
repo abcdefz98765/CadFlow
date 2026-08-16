@@ -26,7 +26,25 @@ def render_stopped_attempt(ui: Any, recovery: dict[str, Any], language: str) -> 
                 "workflow-eyebrow mt-2"
             )
             ui.label(str(why)).classes("text-sm text-gray-700")
+        owner = str(recovery.get("resolution_owner") or "cadflow")
+        owner_labels = {
+            "agent": "Agent",
+            "user": "你" if language == "zh" else "You",
+            "cadflow": "CadFlow",
+            "environment": "本地环境" if language == "zh" else "Local environment",
+            "unknown_historical": "无法从历史证据确定" if language == "zh" else "Not known from historical evidence",
+        }
+        ui.label("谁需要处理" if language == "zh" else "Who needs to act").classes(
+            "workflow-eyebrow mt-2"
+        )
+        ui.label(owner_labels.get(owner, owner.replace("_", " ").title())).classes(
+            "text-sm font-medium"
+        )
         facts = (
+            (
+                "已执行 CAD 代码" if language == "zh" else "CAD code executed",
+                recovery.get("code_executed") is True,
+            ),
             (
                 "已生成几何" if language == "zh" else "Geometry generated",
                 recovery.get("geometry_generated") is True,

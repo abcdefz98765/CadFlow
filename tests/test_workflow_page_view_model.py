@@ -199,6 +199,17 @@ def test_retry_is_exposed_only_for_retryable_current_stop(tmp_path):
         ]
     }
     assert {historical_artifact, retry_artifact} <= evidence_ids
+    part_node = next(
+        node for node in retry_page["nodes"]
+        if node["id"] == f"part:{job['part_job_id']}"
+    )
+    attempt_node = next(
+        node for node in retry_page["nodes"]
+        if node["id"] == f"attempt:{job['part_job_id']}:{run_id}"
+    )
+    assert part_node["status"] == "incomplete"
+    assert part_node["user_state"] == "attention"
+    assert attempt_node["status"] == "blocked"
 
     other = backend.create_product_design("Design an unsupported mechanism.", title="Unsupported")
     other_id = other["work_id"]

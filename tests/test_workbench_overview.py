@@ -319,6 +319,23 @@ def test_registered_step_reuses_existing_stl_viewer_with_ephemeral_mesh(tmp_path
         preview_path.unlink(missing_ok=True)
 
 
+def test_bounded_evidence_group_preserves_exact_registered_identity(tmp_path):
+    backend, _ = _backend(tmp_path)
+    manifest = backend._read_work_manifest("workbench_work")
+    json_ids = [
+        item["artifact_id"]
+        for item in manifest["artifact_references"]
+        if str(item.get("relative_path") or "").endswith((".json", ".jsonl"))
+    ][:2]
+
+    loaded = backend.read_work_artifact_references(
+        "workbench_work", json_ids, limit=24
+    )
+
+    assert [item["reference"]["artifact_id"] for item in loaded] == json_ids
+    assert all(isinstance(item["content"], dict) for item in loaded)
+
+
 def test_deterministic_work_is_honestly_labeled_and_reuses_stl_preview(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     backend.create_work(

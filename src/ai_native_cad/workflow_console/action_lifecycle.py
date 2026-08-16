@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
 from ai_native_cad.workflow_console.i18n import action_label
+from ai_native_cad.workflow_console.ui_performance import ui_trace_event, ui_trace_start
 
 
 def _dict_get(value: Any, key: str) -> Any:
@@ -164,12 +165,27 @@ async def _execute_action_lifecycle(
     pending.command_acknowledged = True
     pending.runtime_outcome = "running"
     _set_action_execution(state, pending, action)
-    refresh()
+    # NiceGUI supplies a cached content-only pending refresh. Other callers keep
+    # the original callable contract and receive the full refresh fallback.
+    pending_refresh = getattr(refresh, "pending", None)
+    pending_started = ui_trace_start()
+    (pending_refresh if callable(pending_refresh) else refresh)()
+    ui_trace_event(
+        "action_pending_render",
+        pending_started,
+        action_key=str(action.get("key") or ""),
+    )
     # Yield after the render so browser users observe pending state before a
     # synchronous local backend operation starts.
     await asyncio.sleep(0.05)
     try:
+        backend_started = ui_trace_start()
         result = await asyncio.to_thread(execute)
+        ui_trace_event(
+            "action_backend",
+            backend_started,
+            action_key=str(action.get("key") or ""),
+        )
         verified, detail = await asyncio.to_thread(verify, result) if verify else (True, None)
         if not verified:
             raise RuntimeError(detail or "backend result did not satisfy its postcondition")
@@ -205,7 +221,13 @@ async def _execute_action_lifecycle(
         state["surface_action_result"] = {"ok": False, "error": str(exc)}
         return None
     finally:
+        terminal_started = ui_trace_start()
         refresh()
+        ui_trace_event(
+            "action_terminal_refresh",
+            terminal_started,
+            action_key=str(action.get("key") or ""),
+        )
 
 async def _start_work_intent_async(
     backend: WorkflowConsoleBackend | None,

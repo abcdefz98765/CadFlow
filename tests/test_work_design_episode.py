@@ -339,6 +339,18 @@ def test_provider_execution_field_is_product_routed_to_policy_block(tmp_path) ->
 
     assert result["episode"]["stop_reason"] == "policy_blocked"
     assert result["episode"]["validated"] is False
+    diagnostic = result["episode"]["failure_diagnostic"]
+    assert diagnostic == {
+        "schema_version": 1,
+        "rejection_stage": "action_contract_validation",
+        "rejected_action": "create_contract",
+        "reason_code": "structured_contract_execution_field",
+        "requested_capability_or_context": "python_code",
+        "human_safe_detail": (
+            "The Agent placed an executable-source field inside a structured geometry action."
+        ),
+        "side_effect_started": False,
+    }
     assert result["artifact_references"][0]["trust_role"] == "diagnostic"
     episode_dir = (
         backend._work_runs_root("clamp_work")
@@ -353,6 +365,7 @@ def test_provider_execution_field_is_product_routed_to_policy_block(tmp_path) ->
         if path.is_file()
     )
     assert forbidden_source not in persisted
+    assert (episode_dir / "failure_diagnostic.json").is_file()
     assert not any(episode_dir.rglob("model.py"))
 
 

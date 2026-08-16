@@ -1,10 +1,110 @@
 # Workflow-native UI recovery verification
 
-Status date: 2026-08-13
+Status date: 2026-08-16
 
-Branch: `codex/v1-workflow-native-ui`
+Branch: `codex/v1-nicegui-runtime-cleanup`
 
-Parent: `origin/codex/v1-canonical-consolidation` at `c0a59c54d6b4cd4153516572166bb4a009c3dc0a`
+Parent: `codex/v1-workflow-native-ui` at
+`8e4dd9acc49016e7ab8be233d851c0d2c0dfb146`
+
+## Failure causality and runtime-boundary correction
+
+The 2026-08-16 correction preserves the same Work, Part Job, Run, result, and
+lineage authority while making a new rejection record exact at the boundary
+where CadFlow rejects an Agent action. A bounded `failure_diagnostic` now
+records the rejection stage, rejected action, stable reason code, requested
+capability or context, human-safe detail, and whether a side effect started.
+The record is carried through the existing Episode outcome and registered
+artifact route; provider source, exception prose, credentials, and hidden
+reasoning are not copied into it.
+
+The normal blocked-attempt inspector now answers what happened, why it stopped,
+who owns recovery, whether CAD code ran, whether geometry or a result exists,
+and what can happen next. The modern developer fixture proves the exact
+`create_contract` / `python_code` contract rejection before execution. The
+older owner fixture remains unchanged and is presented honestly: its evidence
+did not preserve the rejected action or more specific local cause, so the UI
+does not infer one from the Agent response. A failed attempt remains a blocked
+Attempt; its parent Part is incomplete and needs attention rather than being
+presented as a failed Part.
+
+### Current rendering and evidence boundaries
+
+```mermaid
+flowchart LR
+    N["Work/page navigation"] --> R["Canonical full projection"]
+    R --> C["Composition shell"]
+    C --> G["Stable Workflow graph"]
+    C --> I["Selected inspector"]
+    S["Node selection"] --> P["Cached selection projection"]
+    P --> I
+    P --> X["Selected CSS state"]
+    A["State-changing action"] --> L["Action lifecycle"]
+    L --> Q["Cached pending overlay"]
+    L --> B["Existing backend command"]
+    B --> R
+    E["Technical Evidence open"] --> M["One bounded manifest lookup"]
+    M --> J["Exact scoped JSON/JSONL references"]
+```
+
+`selected_node_inspector_ui.py` now owns the independently replaceable
+inspector, while `nicegui_app.py` remains the composition root and supplies
+existing preview, action, activity, and evidence renderers. `ui_performance.py`
+is opt-in diagnostic timing only. A refresh-local reference map deduplicates
+projection reads and is discarded after the refresh; it is not a new cache or
+source of product truth. Activity uses browser-native disclosure and incurs no
+server callback. Technical Evidence stays collapsed and performs one bounded,
+scoped batch read only when opened. Pending action feedback reuses the current
+projection; the terminal refresh reprojects canonical durable state.
+
+### Correction measurements
+
+Measurements used the real local NiceGUI service and the same isolated Work.
+Browser wall time includes the in-app browser control/event transport. The
+native disclosure no-op floor was 264-310 ms, so that wall clock cannot
+demonstrate a 150 ms interaction even when the server does no work.
+
+| Interaction | Before | After | Interpretation |
+| --- | ---: | ---: | --- |
+| Workflow node selection, 10 samples | 298 ms median / 321 ms p95 | 282 ms median / 299 ms p95 | browser-control wall time; below the requested 150/200 target is not measurable through this transport |
+| Selection server work | not instrumented | 2.6-5.8 ms total; 1.9-4.9 ms inspector | cached page selection; no backend read, reprojection, sidebar, graph, or viewer rebuild |
+| Activity disclosure | about 300 ms wall | no server event; 264-299 ms control floor | native local disclosure |
+| First Technical Evidence disclosure | 451-459 ms wall | 288 ms wall / 220.43 ms server | one bounded batch read for three exact references |
+| Full Workflow refresh | not phase-timed | 191.84 ms projection / 234.43 ms total | retained for navigation and terminal durable-state refresh |
+
+Exact real-Chrome layout checks produced no console/runtime errors and no
+page-level horizontal overflow:
+
+| Viewport | Shell / inspector | Graph overflow | Off-screen controls |
+| --- | --- | --- | ---: |
+| 1440 x 900 | row / sticky | none | 0 |
+| 1024 x 900 | row / static | none | 0 |
+| 414 x 896 | column / static | graph-local horizontal scroll only | 0 |
+
+Chinese was the primary verification language for modern exact causality,
+historical non-inference, zero-Part, and reviewable Accept/Revise surfaces; the
+modern causality surface was also checked in English. Normal inspector content
+does not expose raw Run IDs; the exact identifiers remain available in
+Advanced/Technical Evidence.
+
+### Correction code concentration
+
+Physical-line counts are repository measurements, not a claim that net line
+count alone is a quality metric.
+
+| Metric | Before correction | After correction | Change |
+| --- | ---: | ---: | ---: |
+| `nicegui_app.py` | 5,974 | 5,829 | -145 |
+| Workflow-console Python modules / lines | 29 / 24,090 | 31 / 24,760 | +2 / +670 |
+| All source Python modules / lines | 91 / 48,053 | 93 / 49,251 | +2 / +1,198 |
+
+The source increase is primarily the explicit rejection contract and its
+product projection, plus the focused inspector and timing boundary. It does not
+introduce workflow persistence, another state machine, or a rendering
+framework.
+
+Focused affected-suite verification passed with `90 passed`. The clean complete
+repository suite passed with `702 passed, 9 skipped` in 439.36 seconds.
 
 ## Scope and invariants
 

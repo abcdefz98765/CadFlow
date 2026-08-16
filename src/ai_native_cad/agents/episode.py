@@ -46,11 +46,43 @@ class StopReason(str, Enum):
     POLICY_BLOCKED = "policy_blocked"
 
 
-class UnknownAgentActionError(ValueError):
+class AgentActionRejection(ValueError):
+    """Typed, product-safe fact captured at an Agent rejection boundary."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        rejection_stage: str = "action_contract_validation",
+        reason_code: str = "invalid_action_contract",
+        rejected_action: str | None = None,
+        requested_capability_or_context: str | None = None,
+        human_safe_detail: str = "The Agent response did not match the allowed action contract.",
+        side_effect_started: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.failure_diagnostic = {
+            "schema_version": 1,
+            "rejection_stage": _safe_diagnostic_identifier(
+                rejection_stage, "action_contract_validation"
+            ),
+            "rejected_action": _safe_diagnostic_identifier(rejected_action),
+            "reason_code": _safe_diagnostic_identifier(
+                reason_code, "invalid_action_contract"
+            ),
+            "requested_capability_or_context": _safe_diagnostic_identifier(
+                requested_capability_or_context
+            ),
+            "human_safe_detail": _short_text(human_safe_detail),
+            "side_effect_started": side_effect_started is True,
+        }
+
+
+class UnknownAgentActionError(AgentActionRejection):
     """Raised before an action outside the public allowlist can be processed."""
 
 
-class EpisodeContractError(ValueError):
+class EpisodeContractError(AgentActionRejection):
     """Raised when an action attempts to cross the structured contract boundary."""
 
 
@@ -215,10 +247,25 @@ class AgentAction:
         if isinstance(value, cls):
             return value
         if not isinstance(value, dict):
-            raise UnknownAgentActionError("agent action must be an object")
+            raise UnknownAgentActionError(
+                "agent action must be an object",
+                reason_code="agent_action_not_object",
+                human_safe_detail="The Agent returned a value instead of one typed action object.",
+            )
         action = value.get("action")
         if not isinstance(action, str) or action not in ALLOWLISTED_ACTIONS:
-            raise UnknownAgentActionError(f"unknown agent action: {action!r}")
+            raise UnknownAgentActionError(
+                f"unknown agent action: {action!r}",
+                rejection_stage="skill_action_authorization",
+                reason_code="action_not_registered",
+                rejected_action=action if isinstance(action, str) else None,
+                requested_capability_or_context=(
+                    action if isinstance(action, str) else None
+                ),
+                human_safe_detail=(
+                    "The Agent requested an action that is not registered for bounded Episodes."
+                ),
+            )
         allowed_fields = {
             "request_context": {"action", "context_key", "reason"},
             "create_contract": {"action", "contract_type", "contract", "assumptions", "summary"},
@@ -237,22 +284,46 @@ class AgentAction:
         }[action]
         if set(value) != (set(value) & allowed_fields) or "action" not in value:
             raise EpisodeContractError(
-                f"{action} contains fields outside its strict action contract"
+                f"{action} contains fields outside its strict action contract",
+                reason_code="action_contract_extra_fields",
+                rejected_action=action,
+                requested_capability_or_context=_first_safe_identifier(
+                    set(value) - allowed_fields
+                ),
+                human_safe_detail=(
+                    f"The Agent returned fields that the {action} action does not allow."
+                ),
             )
         raw_reason = value.get("stop_reason")
         try:
             stop_reason = StopReason(raw_reason) if raw_reason is not None else None
         except ValueError as exc:
-            raise EpisodeContractError("stop action has an unknown typed stop reason") from exc
+            raise EpisodeContractError(
+                "stop action has an unknown typed stop reason",
+                reason_code="unknown_stop_reason",
+                rejected_action=action,
+                requested_capability_or_context=(
+                    raw_reason if isinstance(raw_reason, str) else None
+                ),
+                human_safe_detail="The Agent returned a stop reason that the active Episode does not recognize.",
+            ) from exc
         assumptions = value.get("assumptions") or []
         questions = value.get("questions") or []
         contract = value.get("contract")
         model_program = value.get("model_program")
         work_design = value.get("work_design")
         if not isinstance(assumptions, list) or not all(isinstance(item, str) for item in assumptions):
-            raise EpisodeContractError("action assumptions must be a list of strings")
+            raise EpisodeContractError(
+                "action assumptions must be a list of strings",
+                reason_code="invalid_action_payload",
+                rejected_action=action,
+            )
         if not isinstance(questions, list) or not all(isinstance(item, dict) for item in questions):
-            raise EpisodeContractError("ask_user questions must be a list of objects")
+            raise EpisodeContractError(
+                "ask_user questions must be a list of objects",
+                reason_code="invalid_action_payload",
+                rejected_action=action,
+            )
         if action == "ask_user" and (
             not questions
             or any(
@@ -264,19 +335,42 @@ class AgentAction:
             )
         ):
             raise EpisodeContractError(
-                "ask_user requires focused field and question values"
+                "ask_user requires focused field and question values",
+                reason_code="invalid_question_contract",
+                rejected_action=action,
             )
         if contract is not None and not isinstance(contract, dict):
-            raise EpisodeContractError("contract must be an object")
+            raise EpisodeContractError(
+                "contract must be an object",
+                reason_code="invalid_action_payload",
+                rejected_action=action,
+            )
         if action in {"create_model_program", "patch_model_program"}:
-            _validate_model_program_action(model_program)
+            _validate_model_program_action(
+                model_program,
+                rejected_action=action,
+            )
         elif model_program is not None:
-            raise EpisodeContractError("model_program is not allowed for this action")
+            raise EpisodeContractError(
+                "model_program is not allowed for this action",
+                reason_code="action_contract_extra_fields",
+                rejected_action=action,
+                requested_capability_or_context="model_program",
+            )
         if action == "propose_work_design":
             if not isinstance(work_design, dict):
-                raise EpisodeContractError("propose_work_design requires work_design")
+                raise EpisodeContractError(
+                    "propose_work_design requires work_design",
+                    reason_code="invalid_work_design_contract",
+                    rejected_action=action,
+                )
         elif work_design is not None:
-            raise EpisodeContractError("work_design is not allowed for this action")
+            raise EpisodeContractError(
+                "work_design is not allowed for this action",
+                reason_code="action_contract_extra_fields",
+                rejected_action=action,
+                requested_capability_or_context="work_design",
+            )
         return cls(
             action=action,
             context_key=value.get("context_key") if isinstance(value.get("context_key"), str) else None,
@@ -338,19 +432,53 @@ class ContextBroker:
         expected_work_id: str | None = None,
     ) -> ContextItem:
         if context_key not in CONTEXT_KEYS:
-            raise EpisodeContractError("context requests must use an allowlisted semantic context key")
+            raise EpisodeContractError(
+                "context requests must use an allowlisted semantic context key",
+                rejection_stage="context_authorization",
+                reason_code="context_key_not_registered",
+                rejected_action="request_context",
+                requested_capability_or_context=context_key,
+                human_safe_detail=(
+                    "The Agent requested a semantic context key that CadFlow does not register."
+                ),
+            )
         if allowed_keys is not None and context_key not in allowed_keys:
-            raise EpisodeContractError("active skill does not allow this semantic context key")
+            raise EpisodeContractError(
+                "active skill does not allow this semantic context key",
+                rejection_stage="context_authorization",
+                reason_code="context_not_allowed_for_skill",
+                rejected_action="request_context",
+                requested_capability_or_context=context_key,
+                human_safe_detail=(
+                    "The Agent requested context that is not granted to the active Skill."
+                ),
+            )
         item = self._items.get(context_key)
         if item is None:
-            raise EpisodeContractError(f"active lineage does not provide context: {context_key}")
+            raise EpisodeContractError(
+                f"active lineage does not provide context: {context_key}",
+                rejection_stage="context_resolution",
+                reason_code="context_not_available",
+                rejected_action="request_context",
+                requested_capability_or_context=context_key,
+                human_safe_detail=(
+                    "The requested context is allowed, but this Work scope does not provide it."
+                ),
+            )
         if (
             expected_work_id is not None
             and item.work_id is not None
             and item.work_id != expected_work_id
         ):
             raise EpisodeContractError(
-                "semantic context belongs to an unrelated Work"
+                "semantic context belongs to an unrelated Work",
+                rejection_stage="context_scope_validation",
+                reason_code="context_belongs_to_other_work",
+                rejected_action="request_context",
+                requested_capability_or_context=context_key,
+                human_safe_detail=(
+                    "CadFlow rejected context that belongs to a different Work."
+                ),
             )
         return item
 
@@ -380,6 +508,7 @@ class AgentEpisodeResult:
     final_observation_id: str | None
     execution_succeeded: bool
     output_validated: bool
+    failure_diagnostic: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -406,6 +535,7 @@ class AgentEpisodeResult:
             "final_observation_id": self.final_observation_id,
             "execution_succeeded": self.execution_succeeded,
             "output_validated": self.output_validated,
+            "failure_diagnostic": deepcopy(self.failure_diagnostic),
         }
 
 
@@ -422,6 +552,7 @@ class WorkDesignEpisodeResult:
     proposal_count: int
     work_design: dict[str, Any] | None
     part_job_creation_requested: bool
+    failure_diagnostic: dict[str, Any] | None = None
     skill_id: str = "work_design"
     skill_version: str = "0.1.0"
     capability_mode: str = "provider_selected_work_design"
@@ -441,6 +572,7 @@ class WorkDesignEpisodeResult:
             "proposal_count": self.proposal_count,
             "work_design_available": self.work_design is not None,
             "part_job_creation_requested": self.part_job_creation_requested,
+            "failure_diagnostic": deepcopy(self.failure_diagnostic),
         }
 
 
@@ -686,6 +818,7 @@ class EpisodeOrchestrator:
         latest_observation: dict[str, Any] | None = None
         latest_observation_id: str | None = None
         latest_observation_inspected = False
+        latest_failure_diagnostic: dict[str, Any] | None = None
         state = "created"
         supplied_context: list[dict[str, Any]] = []
 
@@ -695,6 +828,7 @@ class EpisodeOrchestrator:
             validated: bool = False,
             result_kind: str | None = None,
             output_validated: bool = False,
+            failure_diagnostic: dict[str, Any] | None = None,
         ) -> AgentEpisodeResult:
             actual_result_kind = result_kind or (
                 "model_program" if current_program is not None else "structured_contract"
@@ -730,6 +864,9 @@ class EpisodeOrchestrator:
                 ),
                 output_validated=(
                     output_validated or observed_output_validated
+                ),
+                failure_diagnostic=deepcopy(
+                    failure_diagnostic or latest_failure_diagnostic
                 ),
             )
             self.writer.finish(result)
@@ -785,7 +922,16 @@ class EpisodeOrchestrator:
             self.writer.provider_response(steps + 1, supplied_action)
             action = AgentAction.from_value(supplied_action)
             if action.action not in self.capabilities.allowed_actions:
-                raise UnknownAgentActionError(f"action is not enabled for this episode: {action.action}")
+                raise UnknownAgentActionError(
+                    f"action is not enabled for this episode: {action.action}",
+                    rejection_stage="skill_action_authorization",
+                    reason_code="action_not_allowed_for_skill",
+                    rejected_action=action.action,
+                    requested_capability_or_context=action.action,
+                    human_safe_detail=(
+                        "The Agent requested an action that the active Skill does not allow."
+                    ),
+                )
             steps += 1
 
             if action.action == "request_context":
@@ -793,7 +939,11 @@ class EpisodeOrchestrator:
                     self.writer.event({"step": steps, "action": action.action, "context_key": action.context_key, "reason": action.reason, "observation": "context_budget_exhausted"})
                     return finish(StopReason.BUDGET_EXHAUSTED)
                 if not action.context_key:
-                    raise EpisodeContractError("request_context requires context_key")
+                    raise EpisodeContractError(
+                        "request_context requires context_key",
+                        reason_code="missing_context_key",
+                        rejected_action=action.action,
+                    )
                 item = self.context_broker.resolve(
                     action.context_key,
                     allowed_keys=self.capabilities.allowed_context_keys,
@@ -840,9 +990,19 @@ class EpisodeOrchestrator:
                     or not isinstance(action.contract, dict)
                 ):
                     raise EpisodeContractError(
-                        "submitted contract type is not enabled for this episode"
+                        "submitted contract type is not enabled for this episode",
+                        rejection_stage="skill_action_authorization",
+                        reason_code="contract_type_not_allowed",
+                        rejected_action=action.action,
+                        requested_capability_or_context=action.contract_type,
+                        human_safe_detail=(
+                            "The Agent submitted a contract type that the active Skill does not allow."
+                        ),
                     )
-                _reject_execution_fields(action.contract)
+                _reject_execution_fields(
+                    action.contract,
+                    rejected_action=action.action,
+                )
                 submissions += 1
                 draft = action.contract
                 self.writer.submission(submissions, draft)
@@ -874,16 +1034,25 @@ class EpisodeOrchestrator:
                 is_repair = action.action == "patch_model_program"
                 if action.action == "create_model_program" and current_program is not None:
                     raise EpisodeContractError(
-                        "create_model_program requires no current candidate"
+                        "create_model_program requires no current candidate",
+                        rejection_stage="episode_action_ordering",
+                        reason_code="model_program_candidate_already_exists",
+                        rejected_action=action.action,
                     )
                 if is_repair:
                     if current_program is None:
                         raise EpisodeContractError(
-                            "patch_model_program requires a current candidate"
+                            "patch_model_program requires a current candidate",
+                            rejection_stage="episode_action_ordering",
+                            reason_code="model_program_candidate_missing",
+                            rejected_action=action.action,
                         )
                     if latest_observation is None or not latest_observation_inspected:
                         raise EpisodeContractError(
-                            "patch_model_program requires inspection of the latest execution observation"
+                            "patch_model_program requires inspection of the latest execution observation",
+                            rejection_stage="episode_action_ordering",
+                            reason_code="observation_inspection_required",
+                            rejected_action=action.action,
                         )
                     if repairs >= self.budget.max_repair_attempts:
                         self.writer.event(
@@ -934,11 +1103,17 @@ class EpisodeOrchestrator:
             if action.action == "request_execution":
                 if current_program is None or current_candidate_id is None:
                     raise EpisodeContractError(
-                        "request_execution requires a current model-program candidate"
+                        "request_execution requires a current model-program candidate",
+                        rejection_stage="episode_action_ordering",
+                        reason_code="model_program_candidate_missing",
+                        rejected_action=action.action,
                     )
                 if latest_observation is not None:
                     raise EpisodeContractError(
-                        "request_execution requires a new or patched candidate"
+                        "request_execution requires a new or patched candidate",
+                        rejection_stage="episode_action_ordering",
+                        reason_code="candidate_already_executed",
+                        rejected_action=action.action,
                     )
                 if executions >= self.budget.max_executions:
                     self.writer.event(
@@ -968,7 +1143,11 @@ class EpisodeOrchestrator:
                     )
                 except ValueError as exc:
                     raise EpisodeContractError(
-                        "model-program execution requires path-safe CadFlow lineage identity"
+                        "model-program execution requires path-safe CadFlow lineage identity",
+                        rejection_stage="tool_input_validation",
+                        reason_code="invalid_execution_lineage",
+                        rejected_action=action.action,
+                        human_safe_detail="CadFlow could not bind the execution request to safe Work and Run identity.",
                     ) from exc
                 observation = self.tool_broker.invoke(
                     MODEL_PROGRAM_TOOL,
@@ -986,6 +1165,14 @@ class EpisodeOrchestrator:
                 latest_observation_id = f"observation_{executions:03d}"
                 latest_observation = observation.as_dict()
                 latest_observation_inspected = False
+                latest_failure_diagnostic = (
+                    _tool_rejection_diagnostic(
+                        latest_observation,
+                        rejected_action=action.action,
+                    )
+                    if observation.success is not True
+                    else None
+                )
                 self.writer.execution_observation(
                     executions,
                     observation_id=latest_observation_id,
@@ -1013,11 +1200,17 @@ class EpisodeOrchestrator:
             if action.action == "inspect_observation":
                 if latest_observation is None or latest_observation_id is None:
                     raise EpisodeContractError(
-                        "inspect_observation requires an execution observation"
+                        "inspect_observation requires an execution observation",
+                        rejection_stage="episode_action_ordering",
+                        reason_code="execution_observation_missing",
+                        rejected_action=action.action,
                     )
                 if latest_observation_inspected:
                     raise EpisodeContractError(
-                        "the latest execution observation was already inspected"
+                        "the latest execution observation was already inspected",
+                        rejection_stage="episode_action_ordering",
+                        reason_code="execution_observation_already_inspected",
+                        rejected_action=action.action,
                     )
                 if inspections >= self.budget.max_observation_inspections:
                     self.writer.event(
@@ -1053,7 +1246,12 @@ class EpisodeOrchestrator:
 
             if action.action == "request_validation":
                 if draft is None:
-                    raise EpisodeContractError("request_validation requires a submitted contract")
+                    raise EpisodeContractError(
+                        "request_validation requires a submitted contract",
+                        rejection_stage="episode_action_ordering",
+                        reason_code="structured_contract_missing",
+                        rejected_action=action.action,
+                    )
                 observation = self.tool_broker.invoke(
                     STRUCTURED_CONTRACT_TOOL,
                     skill_id=self.capabilities.skill_id,
@@ -1065,7 +1263,11 @@ class EpisodeOrchestrator:
                 feedback = observation.output
                 if not isinstance(feedback, dict) or not isinstance(feedback.get("valid"), bool):
                     raise EpisodeContractError(
-                        "Tool Broker must return structured validation feedback"
+                        "Tool Broker must return structured validation feedback",
+                        rejection_stage="tool_output_validation",
+                        reason_code="invalid_tool_observation",
+                        rejected_action=action.action,
+                        human_safe_detail="CadFlow's local validator returned an invalid typed observation.",
                     )
                 self.writer.feedback(submissions, feedback)
                 self.writer.event({
@@ -1108,7 +1310,11 @@ class EpisodeOrchestrator:
                         and _execution_output_has_valid_reimport(execution_output)
                     ):
                         raise EpisodeContractError(
-                            "completed requires a successful, inspected, STEP-reimport-validated execution observation"
+                            "completed requires a successful, inspected, STEP-reimport-validated execution observation",
+                            rejection_stage="reviewable_completion_validation",
+                            reason_code="completion_evidence_incomplete",
+                            rejected_action=action.action,
+                            human_safe_detail="The Agent tried to complete before the required execution and inspection evidence existed.",
                         )
                     self.writer.event(
                         {
@@ -1126,12 +1332,29 @@ class EpisodeOrchestrator:
                     )
                 if reason.value not in self.capabilities.allowed_stop_reasons:
                     raise EpisodeContractError(
-                        "stop reason is not enabled for the active skill"
+                        "stop reason is not enabled for the active skill",
+                        rejection_stage="skill_action_authorization",
+                        reason_code="stop_reason_not_allowed_for_skill",
+                        rejected_action=action.action,
+                        requested_capability_or_context=reason.value,
                     )
                 self.writer.event({"step": steps, "action": action.action, "stop_reason": reason.value, "reason": action.reason})
-                return finish(reason)
+                return finish(
+                    reason,
+                    failure_diagnostic=(
+                        _agent_reported_policy_block_diagnostic(action.action)
+                        if reason == StopReason.POLICY_BLOCKED
+                        and latest_failure_diagnostic is None
+                        else None
+                    ),
+                )
 
-            raise UnknownAgentActionError(f"unknown agent action: {action.action!r}")
+            raise UnknownAgentActionError(
+                f"unknown agent action: {action.action!r}",
+                reason_code="action_not_registered",
+                rejected_action=action.action,
+                requested_capability_or_context=action.action,
+            )
 
 
 class DeterministicCreatePartIRProposer:
@@ -1525,7 +1748,12 @@ def run_work_design_episode(
         with (artifact_dir / "agent_exchange.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(entry, sort_keys=True) + "\n")
 
-    def finish(reason: StopReason, *, creation_requested: bool = False) -> WorkDesignEpisodeResult:
+    def finish(
+        reason: StopReason,
+        *,
+        creation_requested: bool = False,
+        failure_diagnostic: dict[str, Any] | None = None,
+    ) -> WorkDesignEpisodeResult:
         completed = reason == StopReason.COMPLETED and draft is not None and creation_requested
         result = WorkDesignEpisodeResult(
             episode_id=episode_id,
@@ -1537,6 +1765,7 @@ def run_work_design_episode(
             proposal_count=proposals,
             work_design=deepcopy(draft),
             part_job_creation_requested=creation_requested,
+            failure_diagnostic=deepcopy(failure_diagnostic),
             skill_id=skill.skill_id,
             skill_version=skill.version,
         )
@@ -1608,14 +1837,25 @@ def run_work_design_episode(
         action = AgentAction.from_value(supplied_action)
         if action.action not in skill.allowed_actions:
             raise UnknownAgentActionError(
-                f"action is not enabled for this episode: {action.action}"
+                f"action is not enabled for this episode: {action.action}",
+                rejection_stage="skill_action_authorization",
+                reason_code="action_not_allowed_for_skill",
+                rejected_action=action.action,
+                requested_capability_or_context=action.action,
+                human_safe_detail=(
+                    "The Agent requested an action that the Work Design Skill does not allow."
+                ),
             )
         steps += 1
         if action.action == "request_context":
             if context_requests >= episode_budget.max_context_requests:
                 return finish(StopReason.BUDGET_EXHAUSTED)
             if not action.context_key:
-                raise EpisodeContractError("request_context requires context_key")
+                raise EpisodeContractError(
+                    "request_context requires context_key",
+                    reason_code="missing_context_key",
+                    rejected_action=action.action,
+                )
             item = broker.resolve(
                 action.context_key,
                 allowed_keys=skill.allowed_context_keys,
@@ -1666,9 +1906,19 @@ def run_work_design_episode(
             continue
         if action.action == "create_part_jobs":
             if draft is None:
-                raise EpisodeContractError("create_part_jobs requires a valid Work Design proposal")
+                raise EpisodeContractError(
+                    "create_part_jobs requires a valid Work Design proposal",
+                    rejection_stage="episode_action_ordering",
+                    reason_code="work_design_proposal_missing",
+                    rejected_action=action.action,
+                )
             if draft["unresolved_questions"]:
-                raise EpisodeContractError("create_part_jobs requires no unresolved material questions")
+                raise EpisodeContractError(
+                    "create_part_jobs requires no unresolved material questions",
+                    rejection_stage="episode_action_ordering",
+                    reason_code="work_design_questions_unresolved",
+                    rejected_action=action.action,
+                )
             events.append(
                 {
                     "event_type": "agent_action",
@@ -1706,9 +1956,20 @@ def run_work_design_episode(
         if action.action == "stop":
             reason = action.stop_reason or StopReason.INSUFFICIENT_CONTEXT
             if reason == StopReason.COMPLETED:
-                raise EpisodeContractError("work_design completes only through create_part_jobs")
+                raise EpisodeContractError(
+                    "work_design completes only through create_part_jobs",
+                    rejection_stage="episode_action_ordering",
+                    reason_code="work_design_completion_action_required",
+                    rejected_action=action.action,
+                )
             if reason.value not in skill.stop_reasons:
-                raise EpisodeContractError("stop reason is not enabled for the active skill")
+                raise EpisodeContractError(
+                    "stop reason is not enabled for the active skill",
+                    rejection_stage="skill_action_authorization",
+                    reason_code="stop_reason_not_allowed_for_skill",
+                    rejected_action=action.action,
+                    requested_capability_or_context=reason.value,
+                )
             events.append(
                 {
                     "event_type": "agent_action",
@@ -1718,15 +1979,31 @@ def run_work_design_episode(
                     "reason": action.reason,
                 }
             )
-            return finish(reason)
-        raise UnknownAgentActionError(f"unknown work_design action: {action.action!r}")
+            return finish(
+                reason,
+                failure_diagnostic=(
+                    _agent_reported_policy_block_diagnostic(action.action)
+                    if reason == StopReason.POLICY_BLOCKED
+                    else None
+                ),
+            )
+        raise UnknownAgentActionError(
+            f"unknown work_design action: {action.action!r}",
+            reason_code="action_not_registered",
+            rejected_action=action.action,
+            requested_capability_or_context=action.action,
+        )
 
 
 def validate_work_design_proposal(value: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalize the small provider-authored Work Design contract."""
 
     if not isinstance(value, dict):
-        raise EpisodeContractError("work_design must be an object")
+        raise EpisodeContractError(
+            "work_design must be an object",
+            reason_code="invalid_work_design_contract",
+            rejected_action="propose_work_design",
+        )
     allowed = {
         "objective",
         "concept_summary",
@@ -1740,24 +2017,48 @@ def validate_work_design_proposal(value: dict[str, Any]) -> dict[str, Any]:
         "recommendation",
     }
     if set(value) != allowed:
-        raise EpisodeContractError("work_design fields do not match the canonical contract")
+        raise EpisodeContractError(
+            "work_design fields do not match the canonical contract",
+            reason_code="invalid_work_design_contract",
+            rejected_action="propose_work_design",
+            requested_capability_or_context=_first_safe_identifier(
+                set(value) ^ allowed
+            ),
+            human_safe_detail="The Agent's Work Design fields did not match the typed Work Design contract.",
+        )
     for forbidden in ("part_job_id", "run_id", "work_id", "manifest", "path", "command"):
         if _contains_key(value, forbidden):
-            raise EpisodeContractError("provider Work Design cannot supply product identities or side effects")
+            raise EpisodeContractError(
+                "provider Work Design cannot supply product identities or side effects",
+                rejection_stage="work_design_authority",
+                reason_code="work_design_authority_violation",
+                rejected_action="propose_work_design",
+                requested_capability_or_context=forbidden,
+                human_safe_detail="The Agent tried to supply a product identity or side effect that CadFlow owns.",
+            )
     objective = _required_bounded_text(value["objective"], "objective", 2_000)
     concept = _required_bounded_text(value["concept_summary"], "concept_summary", 4_000)
     recommendation = _required_bounded_text(value["recommendation"], "recommendation", 1_000)
     raw_parts = value["generated_parts"]
     if not isinstance(raw_parts, list) or not 1 <= len(raw_parts) <= 12:
-        raise EpisodeContractError("work_design requires one to twelve generated Parts")
+        raise _work_design_contract_error(
+            "work_design requires one to twelve generated Parts",
+            "generated_parts",
+        )
     generated_parts: list[dict[str, Any]] = []
     keys: set[str] = set()
     for raw in raw_parts:
         if not isinstance(raw, dict) or set(raw) != {"key", "name", "role", "interfaces", "dependencies"}:
-            raise EpisodeContractError("generated Part fields do not match the canonical contract")
+            raise _work_design_contract_error(
+                "generated Part fields do not match the canonical contract",
+                "generated_parts",
+            )
         key = _required_bounded_text(raw["key"], "generated Part key", 120)
         if key in keys:
-            raise EpisodeContractError("generated Part keys must be unique")
+            raise _work_design_contract_error(
+                "generated Part keys must be unique",
+                "generated_parts.key",
+            )
         keys.add(key)
         generated_parts.append(
             {
@@ -1770,11 +2071,17 @@ def validate_work_design_proposal(value: dict[str, Any]) -> dict[str, Any]:
         )
     raw_references = value["reference_components"]
     if not isinstance(raw_references, list) or len(raw_references) > 24:
-        raise EpisodeContractError("reference_components must be a bounded list")
+        raise _work_design_contract_error(
+            "reference_components must be a bounded list",
+            "reference_components",
+        )
     reference_components: list[dict[str, Any]] = []
     for raw in raw_references:
         if not isinstance(raw, dict) or set(raw) != {"name", "role", "interfaces"}:
-            raise EpisodeContractError("reference component fields do not match the canonical contract")
+            raise _work_design_contract_error(
+                "reference component fields do not match the canonical contract",
+                "reference_components",
+            )
         reference_components.append(
             {
                 "name": _required_bounded_text(raw["name"], "reference component name", 200),
@@ -1785,7 +2092,10 @@ def validate_work_design_proposal(value: dict[str, Any]) -> dict[str, Any]:
     interfaces = _bounded_relation_list(value["interfaces"], "interfaces", 48)
     dependencies = _bounded_relation_list(value["dependencies"], "dependencies", 24)
     if not isinstance(value["assembly_expected"], bool):
-        raise EpisodeContractError("assembly_expected must be boolean")
+        raise _work_design_contract_error(
+            "assembly_expected must be boolean",
+            "assembly_expected",
+        )
     return {
         "schema_version": 1,
         "objective": objective,
@@ -1803,11 +2113,14 @@ def validate_work_design_proposal(value: dict[str, Any]) -> dict[str, Any]:
 
 def _bounded_relation_list(value: Any, label: str, maximum: int) -> list[dict[str, str]]:
     if not isinstance(value, list) or len(value) > maximum:
-        raise EpisodeContractError(f"{label} must be a bounded list")
+        raise _work_design_contract_error(f"{label} must be a bounded list", label)
     result = []
     for item in value:
         if not isinstance(item, dict) or set(item) != {"from", "to", "description"}:
-            raise EpisodeContractError(f"{label} entries require from, to, and description")
+            raise _work_design_contract_error(
+                f"{label} entries require from, to, and description",
+                label,
+            )
         result.append(
             {
                 "from": _required_bounded_text(item["from"], f"{label} from", 200),
@@ -1820,14 +2133,29 @@ def _bounded_relation_list(value: Any, label: str, maximum: int) -> list[dict[st
 
 def _bounded_text_list(value: Any, label: str, maximum: int, item_limit: int) -> list[str]:
     if not isinstance(value, list) or len(value) > maximum:
-        raise EpisodeContractError(f"{label} must be a bounded list")
+        raise _work_design_contract_error(f"{label} must be a bounded list", label)
     return [_required_bounded_text(item, label, item_limit) for item in value]
 
 
 def _required_bounded_text(value: Any, label: str, limit: int) -> str:
     if not isinstance(value, str) or not value.strip() or len(value.strip()) > limit:
-        raise EpisodeContractError(f"{label} must be non-empty bounded text")
+        raise _work_design_contract_error(
+            f"{label} must be non-empty bounded text",
+            label,
+        )
     return value.strip()
+
+
+def _work_design_contract_error(message: str, field: str) -> EpisodeContractError:
+    return EpisodeContractError(
+        message,
+        reason_code="invalid_work_design_contract",
+        rejected_action="propose_work_design",
+        requested_capability_or_context=field,
+        human_safe_detail=(
+            "The Agent's Work Design did not match the bounded Work Design contract."
+        ),
+    )
 
 
 def _contains_key(value: Any, key: str) -> bool:
@@ -1924,16 +2252,38 @@ def _safe_agent_response(value: Any) -> dict[str, Any]:
     return result
 
 
-def _reject_execution_fields(value: Any, path: str = "") -> None:
+def _reject_execution_fields(
+    value: Any,
+    path: str = "",
+    *,
+    rejected_action: str | None = None,
+) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             child_path = f"{path}.{key}" if path else str(key)
             if str(key).lower() in _FORBIDDEN_EXECUTION_FIELDS:
-                raise EpisodeContractError(f"submitted contract contains forbidden execution field: {child_path}")
-            _reject_execution_fields(child, child_path)
+                raise EpisodeContractError(
+                    f"submitted contract contains forbidden execution field: {child_path}",
+                    rejection_stage="action_contract_validation",
+                    reason_code="structured_contract_execution_field",
+                    rejected_action=rejected_action,
+                    requested_capability_or_context=child_path,
+                    human_safe_detail=(
+                        "The Agent placed an executable-source field inside a structured geometry action."
+                    ),
+                )
+            _reject_execution_fields(
+                child,
+                child_path,
+                rejected_action=rejected_action,
+            )
     elif isinstance(value, list):
         for index, child in enumerate(value):
-            _reject_execution_fields(child, f"{path}[{index}]")
+            _reject_execution_fields(
+                child,
+                f"{path}[{index}]",
+                rejected_action=rejected_action,
+            )
 
 
 def _contract_summary(contract: dict[str, Any]) -> str:
@@ -1945,7 +2295,11 @@ def _feedback_summary(feedback: dict[str, Any]) -> dict[str, Any]:
     return {"valid": feedback.get("valid"), "codes": [item.get("code") for item in errors if isinstance(item, dict) and isinstance(item.get("code"), str)]}
 
 
-def _validate_model_program_action(value: Any) -> None:
+def _validate_model_program_action(
+    value: Any,
+    *,
+    rejected_action: str | None = None,
+) -> None:
     if not isinstance(value, dict) or set(value) != {
         "api_id",
         "source",
@@ -1953,21 +2307,53 @@ def _validate_model_program_action(value: Any) -> None:
         "requested_outputs",
     }:
         raise EpisodeContractError(
-            "model-program submission requires exactly api_id, source, parameters, and requested_outputs"
+            "model-program submission requires exactly api_id, source, parameters, and requested_outputs",
+            reason_code="invalid_model_program_contract",
+            rejected_action=rejected_action,
+            human_safe_detail=(
+                "The Agent's model-program action did not match the typed model-program contract."
+            ),
         )
     if value.get("api_id") != "cadquery_v1":
-        raise EpisodeContractError("model-program api_id must be cadquery_v1")
+        raise EpisodeContractError(
+            "model-program api_id must be cadquery_v1",
+            rejection_stage="skill_action_authorization",
+            reason_code="model_program_api_not_allowed",
+            rejected_action=rejected_action,
+            requested_capability_or_context=value.get("api_id"),
+            human_safe_detail="The Agent requested a model-program API that this Skill does not allow.",
+        )
     if not isinstance(value.get("source"), str) or not value["source"]:
-        raise EpisodeContractError("model-program source must be a non-empty string")
+        raise EpisodeContractError(
+            "model-program source must be a non-empty string",
+            reason_code="invalid_model_program_contract",
+            rejected_action=rejected_action,
+        )
     if not isinstance(value.get("parameters"), dict):
-        raise EpisodeContractError("model-program parameters must be an object")
+        raise EpisodeContractError(
+            "model-program parameters must be an object",
+            reason_code="invalid_model_program_contract",
+            rejected_action=rejected_action,
+        )
     try:
         validate_model_program_parameters(value["parameters"])
     except ValueError as exc:
-        raise EpisodeContractError(str(exc)) from exc
+        raise EpisodeContractError(
+            str(exc),
+            reason_code="invalid_model_program_parameters",
+            rejected_action=rejected_action,
+            human_safe_detail="The Agent returned model parameters outside the typed JSON contract.",
+        ) from exc
     if value.get("requested_outputs") != ["step"]:
         raise EpisodeContractError(
-            "model-program requested_outputs must be exactly ['step']"
+            "model-program requested_outputs must be exactly ['step']",
+            rejection_stage="skill_action_authorization",
+            reason_code="model_program_output_not_allowed",
+            rejected_action=rejected_action,
+            requested_capability_or_context=_first_safe_identifier(
+                value.get("requested_outputs")
+            ),
+            human_safe_detail="The Agent requested a model-program output that this Skill does not allow.",
         )
 
 
@@ -2047,6 +2433,93 @@ def _sha256_json(value: Any) -> str:
 
 def _short_text(value: Any) -> str:
     return str(value or "").strip()[:240]
+
+
+def _safe_diagnostic_identifier(
+    value: Any,
+    fallback: str | None = None,
+) -> str | None:
+    """Keep diagnostic identity bounded and free of source/prose payloads."""
+
+    if not isinstance(value, str):
+        return fallback
+    text = value.strip()
+    if not text or len(text) > 120:
+        return fallback
+    if not all(character.isalnum() or character in "_.:-[]" for character in text):
+        return fallback
+    return text
+
+
+def _first_safe_identifier(values: Any) -> str | None:
+    if not isinstance(values, (set, frozenset, list, tuple)):
+        return None
+    return next(
+        (
+            safe
+            for safe in (
+                _safe_diagnostic_identifier(value)
+                for value in sorted(str(item) for item in values)
+            )
+            if safe is not None
+        ),
+        None,
+    )
+
+
+def _agent_reported_policy_block_diagnostic(
+    rejected_action: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "rejection_stage": "agent_typed_stop",
+        "rejected_action": _safe_diagnostic_identifier(rejected_action),
+        "reason_code": "agent_reported_policy_block",
+        "requested_capability_or_context": None,
+        "human_safe_detail": (
+            "The Agent reported a policy block; CadFlow recorded no local rejection fact."
+        ),
+        "side_effect_started": False,
+    }
+
+
+def _tool_rejection_diagnostic(
+    observation: dict[str, Any],
+    *,
+    rejected_action: str,
+) -> dict[str, Any]:
+    observation_type = _safe_diagnostic_identifier(
+        observation.get("observation_type"), "tool_observation_failed"
+    )
+    codes = observation.get("codes")
+    reason_code = _first_safe_identifier(codes) or observation_type
+    stage = {
+        "policy_blocked": "tool_authorization",
+        "sandbox_policy_rejected": "generated_code_policy",
+        "tool_input_rejected": "tool_input_validation",
+        "sandbox_unavailable": "local_execution_environment",
+        "model_program_execution_failed": "local_execution_runtime",
+        "sandbox_protocol_error": "local_execution_runtime",
+    }.get(observation_type, "tool_execution")
+    details = {
+        "tool_authorization": "CadFlow rejected a tool request outside the active Skill authority.",
+        "generated_code_policy": "The generated CAD program did not pass the local source policy.",
+        "tool_input_validation": "The requested tool call did not match CadFlow's typed tool contract.",
+        "local_execution_environment": "The isolated local CAD execution environment was unavailable.",
+        "local_execution_runtime": "The isolated local CAD runtime could not complete the candidate.",
+        "tool_execution": "A CadFlow tool returned a typed failed observation.",
+    }
+    return {
+        "schema_version": 1,
+        "rejection_stage": stage,
+        "rejected_action": _safe_diagnostic_identifier(rejected_action),
+        "reason_code": reason_code,
+        "requested_capability_or_context": _safe_diagnostic_identifier(
+            observation.get("tool_id")
+        ),
+        "human_safe_detail": details[stage],
+        "side_effect_started": observation.get("side_effect_started") is True,
+    }
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:

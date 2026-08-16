@@ -5,6 +5,7 @@ import pytest
 from ai_native_cad.workflow_console.agent_activity import bounded_evidence, significant_activity
 from ai_native_cad.workflow_console.work_outcome import project_stopped_attempt
 from ai_native_cad.workflow_console.product_usability import _workflow_node_interaction
+from ai_native_cad.workflow_console.product_usability import build_agent_output_projection
 from ai_native_cad.workflow_console.workflow_page_view_model import select_projected_workflow_node
 
 
@@ -19,15 +20,145 @@ def test_specific_policy_block_explains_pre_execution_rejection_and_safe_retry()
         }],
         scope_label="Camera Cradle",
         language="en",
+        failure_diagnostic={
+            "schema_version": 1,
+            "rejection_stage": "action_contract_validation",
+            "rejected_action": "create_contract",
+            "reason_code": "structured_contract_execution_field",
+            "requested_capability_or_context": "python_code",
+            "human_safe_detail": "Executable source is not allowed in this action.",
+            "side_effect_started": False,
+        },
     )
 
-    assert outcome["technical_reason"] == "structured_contract_contains_execution_field"
+    assert outcome["technical_reason"] == "structured_contract_execution_field"
     assert outcome["geometry_generated"] is False
     assert outcome["result_published"] is False
     assert outcome["user_input_required"] is False
     assert outcome["retryable"] is True
-    assert "outside the create_contract Skill action" in outcome["why"]
-    assert outcome["next_action"] == "Retry Camera Cradle"
+    assert "python_code" in outcome["why"]
+    assert outcome["cause_category"] == "agent_action_problem"
+    assert outcome["resolution_owner"] == "agent"
+    assert outcome["next_action"] == "Start a new Camera Cradle attempt"
+
+
+def test_historical_policy_block_is_honest_and_does_not_infer_from_agent_payload():
+    outcome = project_stopped_attempt(
+        stop_reason="policy_blocked",
+        episode={"execution_succeeded": False},
+        agent_items=[{
+            "kind": "agent_response",
+            "action": "create_contract",
+            "contract_fields": ["source", "password"],
+        }],
+        scope_label="Camera Cradle",
+        language="en",
+    )
+
+    assert outcome["cause_category"] == "historical_policy_block"
+    assert outcome["historical_diagnostic_missing"] is True
+    assert outcome["retryable"] is False
+    assert outcome["recovery_action_key"] == "start_new_attempt"
+    assert "source" not in outcome["why"]
+    assert outcome["next_action"] == "Start a new Camera Cradle attempt"
+
+
+@pytest.mark.parametrize(
+    ("stage", "reason_code", "category", "owner", "action_key"),
+    [
+        (
+            "context_authorization",
+            "context_not_allowed_for_skill",
+            "context_permission_problem",
+            "agent",
+            "start_new_attempt",
+        ),
+        (
+            "generated_code_policy",
+            "sandbox_source_policy",
+            "generated_code_policy_problem",
+            "agent",
+            "start_new_attempt",
+        ),
+        (
+            "local_execution_environment",
+            "sandbox_unavailable",
+            "environment_problem",
+            "environment",
+            "check_environment",
+        ),
+        (
+            "reviewable_publication",
+            "step_hash_mismatch",
+            "publication_integrity_problem",
+            "cadflow",
+            "no_user_action",
+        ),
+        (
+            "agent_typed_stop",
+            "agent_reported_policy_block",
+            "agent_reported_policy_block",
+            "agent",
+            "start_new_attempt",
+        ),
+    ],
+)
+def test_policy_diagnostics_map_to_stable_product_categories(
+    stage, reason_code, category, owner, action_key
+):
+    outcome = project_stopped_attempt(
+        stop_reason="policy_blocked",
+        episode={"execution_succeeded": False},
+        agent_items=[],
+        scope_label="Part",
+        language="en",
+        failure_diagnostic={
+            "schema_version": 1,
+            "rejection_stage": stage,
+            "rejected_action": "request_execution",
+            "reason_code": reason_code,
+            "requested_capability_or_context": "cadquery_v1",
+            "human_safe_detail": "Typed local rejection.",
+            "side_effect_started": False,
+        },
+    )
+
+    assert outcome["cause_category"] == category
+    assert outcome["resolution_owner"] == owner
+    assert outcome["recovery_action_key"] == action_key
+
+
+def test_page_local_reference_cache_reads_relevant_artifact_once():
+    class Backend:
+        def __init__(self):
+            self.reads = 0
+
+        def read_work_artifact_reference(self, work_id, artifact_id):
+            assert (work_id, artifact_id) == ("work", "agent-output")
+            self.reads += 1
+            return {"content": {"records": [{"action": "stop"}]}}
+
+    backend = Backend()
+    references = [{
+        "artifact_id": "agent-output",
+        "checkpoint": "agent_output",
+        "trust_role": "observation",
+    }, {
+        "artifact_id": "step-binary",
+        "checkpoint": "reviewable_step",
+        "trust_role": "reviewable_result",
+    }]
+    cache = {}
+
+    build_agent_output_projection(
+        backend, "work", references, language="en", reference_cache=cache
+    )
+    build_agent_output_projection(
+        backend, "work", references, language="en", reference_cache=cache
+    )
+
+    assert backend.reads == 1
+    assert "step-binary" not in cache
 
 
 def test_activity_collapses_protocol_repetition_without_becoming_evidence():
