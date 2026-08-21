@@ -27,7 +27,39 @@ A provider is not the architecture. A capable provider may perform several
 logical roles, but every episode still declares the active skill, context,
 tools, budgets, and output contract.
 
-## Logical Agent roles
+## V1 runtime boundary
+
+The V1 runtime authority is exactly `work_design`, `design_part`, and
+`model_program`. The logical role and skill vocabulary below is long-term
+future capability vocabulary, not a current implementation backlog or a set of
+runtime roles. Do not proactively create additional runtime roles or Skills
+from that vocabulary.
+
+The explicit relationship is:
+
+- **Knowledge** = reusable guidance;
+- **Skill** = allowed capability;
+- **Context** = current Work/Part/Run facts;
+- **Agent** = creative decisions, strategy, self-review, and repair;
+- **Tool/Validator** = execution and measured facts;
+- **Rules/Policy** = hard boundary;
+- **WorkOrchestrator** = durable mutation authority.
+
+Agent self-review, repair, and redesign are normal autonomous `design_part`
+convergence, not another Workflow stage. Intermediate turns are Activity and
+Technical Evidence; Workflow exposes durable meaningful states only.
+
+Revision uses lineage, the source result, and the revision request/context
+through the existing `design_part` Skill. It does not imply a Revision Agent or
+Revision Skill. Assembly remains an explicit future capability and is frozen in
+V1. Evaluation begins as Agent judgment over validator observations and
+measured facts: validators own the facts, and this does not imply a standalone
+Evaluation Agent.
+
+## Long-term logical Agent role vocabulary
+
+The following role names are future capability vocabulary only; they are not
+V1 runtime roles.
 
 ### Intent Agent
 
@@ -126,18 +158,21 @@ Each skill declares:
 Skills describe capability, not a fixed end-to-end workflow. They do not
 duplicate the entire product architecture.
 
-## Required initial skills
+## Long-term target skill vocabulary (future capability)
 
-Target skills:
+Beyond the V1 runtime authority, target skills are:
 
 - `intent`;
 - `design`;
 - `geometry_contract`;
-- `model_program`;
 - `part_evaluation`;
 - `assembly`;
 - `revision`;
 - `deliverables`.
+
+V1 already includes `model_program` as a constrained Skill delegated by
+`design_part`; broader future model-program capability or role vocabulary must
+not be mistaken for a new runtime Skill.
 
 Current legacy skills map as follows:
 
@@ -216,8 +251,9 @@ The local Tool Broker and validators decide publication.
 The first selected API contract is `cadquery_v1` with entrypoint
 `build_model(parameters)`. Its current implementation is static policy
 validation only: AST parsing checks allowlisted imports/calls and prohibited
-authority without retaining or executing source. This does not register the
-runtime skill or satisfy the isolated-execution requirement.
+authority without retaining or executing source. This policy check is part of
+the registered `model_program` Skill but does not by itself satisfy the
+isolated-execution requirement.
 
 ## Knowledge layers
 

@@ -3,6 +3,7 @@ from copy import deepcopy
 import pytest
 
 from ai_native_cad.workflow_console.agent_activity import bounded_evidence, significant_activity
+from ai_native_cad.workflow_console.canonical_interaction import project_canonical_interaction
 from ai_native_cad.workflow_console.work_outcome import project_stopped_attempt
 from ai_native_cad.workflow_console.product_usability import _workflow_node_interaction
 from ai_native_cad.workflow_console.product_usability import build_agent_output_projection
@@ -230,6 +231,45 @@ def test_local_workflow_selection_rejects_snapshot_and_unknown_nodes():
             "nodes": [],
             "workflow_graph": {"nodes": [], "edges": []},
         }, "x")
+
+
+def test_canonical_part_recovery_maps_start_new_attempt_to_existing_retry_command():
+    recovery = {
+        "part_job_id": "camera_cradle",
+        "run_id": "camera_attempt_1",
+        "recommended_action": {
+            "key": "start_new_attempt",
+            "label": "Start a new Camera Cradle attempt",
+        },
+    }
+    durable_recovery = deepcopy(recovery)
+
+    interaction = project_canonical_interaction(
+        work_id="owner_fixture",
+        work_design={"status": "completed"},
+        parts=[{
+            "part_job_id": "camera_cradle",
+            "name": "Camera Cradle",
+            "state": "design",
+            "latest_attempt_run_id": "camera_attempt_1",
+        }],
+        current_result=None,
+        recovery=recovery,
+        language="en",
+    )
+    primary = interaction["work"]["primary_action"]
+
+    assert primary == {
+        "key": "retry_agent",
+        "label": "Start a new Camera Cradle attempt",
+        "enabled": True,
+        "target_work_id": "owner_fixture",
+        "part_job_id": "camera_cradle",
+        "target_run_id": "camera_attempt_1",
+        "recovery_mode": "new_attempt",
+    }
+    assert interaction["parts"]["camera_cradle"]["primary_action"] == primary
+    assert recovery == durable_recovery
 
 
 def test_scoped_recovery_command_is_not_replaced_by_sibling_or_generic_part_authority():

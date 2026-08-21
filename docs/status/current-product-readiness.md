@@ -1,6 +1,6 @@
 # Current Product Readiness
 
-Status date: 2026-08-16.
+Status date: 2026-08-21.
 
 This document distinguishes the Agent-first target architecture from the
 implemented deterministic product, accepted M1 runtime foundation, bounded M2
@@ -36,6 +36,15 @@ are not.
   owner, output status, and a real next action. Historical policy blocks that
   lack the new diagnostic explicitly say that their exact cause is unknown;
   the UI does not reconstruct causality from an Agent payload.
+- The selected Work Design node now renders that persisted recovery directly.
+  A local CadFlow rejection, an Agent-reported policy stop with no local
+  rejection, and historical unspecified evidence remain three distinct honest
+  presentations; Technical Evidence is not required to understand them.
+- Transient Action Lifecycle feedback says only that the scope stopped. Work
+  Design retry appends a bounded Episode to the same Work Design Run and is
+  labelled accordingly. Part recovery creates one child attempt Run with the
+  stopped attempt as `parent_run_id`; accepted pointers and old Run evidence
+  remain unchanged.
 - A blocked Run attempt remains a blocked Attempt. Its Part remains incomplete
   and needs attention. Reviewable and accepted result semantics, accepted
   pointers, revision lineage, and historical Run immutability are unchanged.
@@ -56,6 +65,10 @@ are not.
   and exact 1440/1024/414 layouts. There was no page-level horizontal overflow,
   no off-screen interactive control, and no console/runtime error. The mobile
   graph alone retains intentional local horizontal scrolling.
+- Static examples, Golden regression data, and the new browser fixtures are
+  developer-only creation/seed outputs under `.internal/dev-works`. The normal
+  catalog hides them. No existing Work manifest was deleted, moved, or
+  rewritten as a migration.
 
 The browser-control wall-clock floor was 264-310 ms. Consequently, the
 requested 150 ms median / 200 ms p95 selection target cannot be demonstrated
@@ -64,8 +77,9 @@ the traced server work was 2.6-5.8 ms with no I/O or full refresh. First lazy
 Technical Evidence expansion improved from 451-459 ms to 288 ms wall time and
 met its 300 ms target.
 
-Focused affected-suite verification passed with `90 passed`; the clean complete
-repository suite passed with `702 passed, 9 skipped` in 439.36 seconds.
+The broad affected suite passed with `412 passed, 1 skipped`; the final
+lifecycle subset passed with `88 passed`. The clean complete repository suite
+passed with `711 passed, 9 skipped` in 435.85 seconds.
 
 ## V1 canonical consolidation — implemented and automated verified
 
@@ -124,7 +138,7 @@ repository suite passed with `702 passed, 9 skipped` in 439.36 seconds.
 - Real browser verification covered Home, New Work, Work Design, multi-Part,
   ready, running, blocked, clarification, reviewable, selected attempt,
   Activity, Technical Evidence, history, English/Chinese, 1440/1024/414, and a
-  real command lifecycle. All 17 distinct captures and timing/method details
+  real command lifecycle. All 23 distinct captures and timing/method details
   are recorded in `../ux/workflow-native-ui-verification.md`.
 - Focused Workflow-native projection/UI verification passed with `87 passed`.
   The complete final suite result is recorded in the Verification state below.
@@ -246,6 +260,11 @@ repository suite passed with `702 passed, 9 skipped` in 439.36 seconds.
   sources declared by the active Skill. Legacy stage prompt builders and the
   fake planner remain explicitly labeled compatibility/test support rather than
   parallel authorities.
+- Current V1 runtime authority remains exactly `work_design`, `design_part`,
+  and `model_program`. Revision is lineage plus a revision request through the
+  existing Part Design capability; self-review/repair stays inside the bounded
+  `design_part` loop. Assembly is an explicit future capability and remains
+  frozen for V1. Long-term role vocabulary is not an implementation backlog.
 - A deterministic two-Part example uses the same product backend, Episode,
   Orchestrator, manifest, and projection path. It treats the camera and 2020
   extrusion as references and does not claim Assembly execution.
@@ -594,6 +613,15 @@ These are migration tasks, not accepted target behavior.
 
 ## Verification state
 
+- PR #4 Work Design Inspector closure passed on 2026-08-21 with `711 passed,
+  9 skipped` in the complete clean suite, `88 passed` in the final focused
+  lifecycle set, and successful Python compilation. Real NiceGUI verification
+  covered local rejection, Agent-reported stop, historical unknown, existing
+  Part failure, successful Work Design, developer-fixture filtering, scoped
+  confirmation, English/Chinese, and 1440/1024/414 layouts. All viewports had
+  no page-level horizontal overflow and browser error/warning logs were empty.
+  Six new screenshots and hashes are recorded in
+  `../ux/workflow-native-ui-verification.md`.
 - V1 workflow-native UI recovery passed on 2026-08-13 with `693 passed, 9
   skipped` in 404.88 seconds in the complete repository suite, plus `87 passed`
   in the focused projection/UI set. Real in-app browser verification covered
@@ -840,12 +868,14 @@ M0 and M1 are complete. The M2 backend vertical slice is implemented through
 reviewable publication and explicit accept/revise routes. The M2.5 Workbench,
 M2.6 Product Golden, M2.7 onboarding/recovery, and M2.8 Dynamic Work Graph
 product gates are complete. The external-provider M2 benchmark is now the
-current milestone; M2 itself remains unaccepted until that benchmark and an
-explicit user acceptance pass.
+remaining formal acceptance gate, but the current product stage is CadFlow V1
+Owner Use / Real Design Trials. M2 itself remains unaccepted until the
+external-provider benchmark and an explicit user acceptance pass.
 
 Delivery order:
 
-1. run the M2 external-provider benchmark and explicit user acceptance;
+1. run V1 Owner Use / Real Design Trials, including the M2 external-provider
+   benchmark and explicit user acceptance;
 2. preserve the completed M2.5–M2.9 and V1 consolidation product gates while fixing any
    benchmark-driven usability defects;
 3. M3 feature-graph/model-program geometry paths;

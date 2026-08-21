@@ -29,6 +29,15 @@ def _dict_get(value: Any, key: str) -> Any:
     return value.get(key) if isinstance(value, dict) else None
 
 
+def _work_design_recovery(detail_type: str, detail: dict[str, Any]) -> dict[str, Any]:
+    """Return persisted recovery only for the active Work Design node."""
+
+    if detail_type != "work_design":
+        return {}
+    recovery = detail.get("recovery")
+    return recovery if isinstance(recovery, dict) and recovery else {}
+
+
 def render_selected_node_inspector(
     ui: Any,
     page: dict[str, Any],
@@ -137,6 +146,10 @@ def render_selected_node_inspector(
                 for constraint in constraints:
                     ui.label(f"• {constraint}").classes("text-sm")
         elif detail_type in {"work_design", "decomposition"}:
+            if detail_type == "work_design":
+                work_design_recovery = _work_design_recovery(detail_type, detail)
+                if work_design_recovery:
+                    render_stopped_attempt(ui, work_design_recovery, language)
             work_design = detail.get("work_design") if isinstance(detail.get("work_design"), dict) else {}
             _key_values(ui, {
                 "Scope": "Work Design",

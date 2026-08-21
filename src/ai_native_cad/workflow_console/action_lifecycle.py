@@ -463,7 +463,7 @@ def _agent_terminal_outcome(
         ),
         "policy_blocked": (
             "failed",
-            f"{scope}：设计被策略或动作契约阻止。" if language == "zh" else f"{scope}: design was blocked by policy or the action contract.",
+            f"{scope} 已停止。" if language == "zh" else f"{scope} stopped.",
             "policy_block",
         ),
         "budget_exhausted": (
@@ -502,8 +502,51 @@ async def _continue_agent_async(
     before = backend._read_work_manifest(work_id)
     accepted_before = deepcopy(before.get("accepted_part_results"))
     reference_count = len(before.get("artifact_references", []))
+    job_before = next(
+        (
+            item
+            for item in before.get("part_jobs", [])
+            if isinstance(item, dict) and item.get("part_job_id") == part_id
+        ),
+        {},
+    )
+    attempt_count = len(job_before.get("attempts", []))
+    parent_run_id = action.get("target_run_id")
+    if not isinstance(parent_run_id, str):
+        parent_run_id = job_before.get("active_attempt_run_id")
+    recovery_new_attempt = action.get("recovery_mode") == "new_attempt"
+    created_run_id: str | None = None
 
     def execute() -> dict[str, Any]:
+        nonlocal created_run_id
+        if recovery_new_attempt:
+            if not isinstance(parent_run_id, str):
+                raise ValueError("A recovery attempt requires its parent Run.")
+            created = backend.create_work_part_attempt(
+                work_id,
+                part_id,
+                role=(
+                    str(job_before["role"])
+                    if isinstance(job_before.get("role"), str)
+                    else None
+                ),
+                parent_run_id=parent_run_id,
+            )
+            created_job = (
+                created.get("part_job")
+                if isinstance(created.get("part_job"), dict)
+                else {}
+            )
+            created_run_id = created_job.get("active_attempt_run_id")
+            if not isinstance(created_run_id, str) or created_run_id == parent_run_id:
+                raise RuntimeError("Recovery did not create a distinct Part attempt Run.")
+            episode = backend.run_work_part_design_episode(
+                work_id,
+                part_id,
+                request_id=f"workbench_{uuid4().hex}",
+                attempt_run_id=created_run_id,
+            )
+            return {"attempt": created, **episode}
         return backend.run_work_part_design_episode(
             work_id,
             part_id,
@@ -517,6 +560,37 @@ async def _continue_agent_async(
 
     def verify(_result: dict[str, Any]) -> tuple[bool, str | None]:
         after = backend._read_work_manifest(work_id)
+        job_after = next(
+            (
+                item
+                for item in after.get("part_jobs", [])
+                if isinstance(item, dict) and item.get("part_job_id") == part_id
+            ),
+            {},
+        )
+        if recovery_new_attempt:
+            created_attempt = next(
+                (
+                    item
+                    for item in job_after.get("attempts", [])
+                    if isinstance(item, dict) and item.get("run_id") == created_run_id
+                ),
+                {},
+            )
+            ok = (
+                after.get("accepted_part_results") == accepted_before
+                and len(after.get("artifact_references", [])) > reference_count
+                and len(job_after.get("attempts", [])) == attempt_count + 1
+                and isinstance(created_run_id, str)
+                and created_run_id != parent_run_id
+                and created_attempt.get("parent_run_id") == parent_run_id
+            )
+            return (
+                ok,
+                None
+                if ok
+                else "Recovery did not append one child attempt with preserved acceptance and new evidence.",
+            )
         ok = (
             after.get("accepted_part_results") == accepted_before
             and len(after.get("artifact_references", [])) > reference_count

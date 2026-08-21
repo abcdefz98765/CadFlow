@@ -1685,12 +1685,12 @@ def _render_recovery_card(
                 )
                 active = next((item for item in overview.get("part_jobs", []) if isinstance(item, dict) and item.get("part_job_id") == active_part_job_id), None)
                 if active:
-                    retry_action = {"key": "retry_agent", "label": action.get("label") or "Start a new attempt", "target_work_id": _dict_get(overview.get("advanced"), "work_id"), "part_job_id": active.get("part_job_id"), "target_run_id": recovery.get("run_id") or active.get("active_attempt_run_id")}
+                    retry_action = {"key": "retry_agent", "label": action.get("label") or "Start a new attempt", "target_work_id": _dict_get(overview.get("advanced"), "work_id"), "part_job_id": active.get("part_job_id"), "target_run_id": recovery.get("run_id") or active.get("active_attempt_run_id"), **({"recovery_mode": "new_attempt"} if key == "start_new_attempt" else {})}
                     ui.button(action.get("label") or "Start a new attempt", icon="refresh", on_click=lambda: _show_continue_agent_confirmation(ui, backend, overview, state, refresh, language, scoped_action=retry_action)).props("color=primary")
                 else:
-                    work_action = {"key": "continue_work_design", "label": action.get("label") or "Start a new Work Design attempt", "target_work_id": _dict_get(overview.get("advanced"), "work_id")}
+                    work_action = {"key": "continue_work_design", "label": action.get("label") or "Retry Work Design", "target_work_id": _dict_get(overview.get("advanced"), "work_id"), "target_run_id": recovery.get("run_id")}
                     ui.button(
-                        action.get("label") or "Start a new Work Design attempt",
+                        action.get("label") or "Retry Work Design",
                         icon="refresh",
                         on_click=lambda: _show_continue_work_design_confirmation(ui, backend, overview, state, refresh, language, scoped_action=work_action),
                     ).props("color=primary")
@@ -1716,8 +1716,14 @@ def _render_recovery_card(
                 ).props("outline")
         if recovery.get("retryable"):
             ui.label(
-                "重试只会创建新的有界尝试；历史证据和已接受结果保持不变。" if language == "zh"
-                else "A retry creates a new bounded attempt; historical evidence and accepted results remain unchanged."
+                str(
+                    recovery.get("retry_reason")
+                    or (
+                        "可以重试；历史证据和已接受结果保持不变。"
+                        if language == "zh"
+                        else "Retry is available; historical evidence and accepted results remain unchanged."
+                    )
+                )
             ).classes("text-xs text-gray-500 mt-2")
 
 
@@ -2094,9 +2100,13 @@ def _show_continue_work_design_confirmation(
             "target_work_id": work_id,
         }
     )
+    action_label_text = str(
+        action.get("label")
+        or ("继续 Work 设计" if language == "zh" else "Continue Work Design")
+    )
     dialog = ui.dialog()
     with dialog, ui.card().classes("w-[560px] max-w-full"):
-        ui.label("继续 Work 设计" if language == "zh" else "Continue Work Design").classes("text-xl font-semibold")
+        ui.label(action_label_text).classes("text-xl font-semibold")
         ui.label(
             "Agent 将分析整个目标、现有上下文和接口，并提出零件边界。只有完成且有效的提案才会创建 Part Jobs。"
             if language == "zh"
@@ -2105,7 +2115,7 @@ def _show_continue_work_design_confirmation(
         with ui.row().classes("w-full justify-end gap-2"):
             ui.button(i18n_copy(language, "cancel"), on_click=dialog.close).props("outline")
             ui.button(
-                "继续" if language == "zh" else "Continue",
+                action_label_text,
                 icon="account_tree",
                 on_click=lambda: (
                     dialog.close(),

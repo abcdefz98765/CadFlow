@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -9,9 +10,14 @@ from ai_native_cad.agents import JsonContractAgentAdapter
 from ai_native_cad.agents.episode import EpisodeContractError, validate_work_design_proposal
 from ai_native_cad.agents.registry import RUNTIME_SKILL_REGISTRY
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
+from ai_native_cad.workflow_console.action_lifecycle import _continue_work_design_async
 from ai_native_cad.workflow_console.product_usability import build_agent_first_workflow_projection
 from ai_native_cad.workflow_console.routes import dispatch_route
-from ai_native_cad.workflow_console.workflow_page_view_model import build_workbench_overview_view_model
+from ai_native_cad.workflow_console.selected_node_inspector_ui import _work_design_recovery
+from ai_native_cad.workflow_console.workflow_page_view_model import (
+    build_workbench_overview_view_model,
+    build_workflow_page_view_model,
+)
 
 
 class SequencedWorkDesignClient:
@@ -173,6 +179,92 @@ def test_honest_stop_preserves_empty_part_scope(tmp_path: Path, reason: str) -> 
     result = backend.run_work_design_episode(work_id, request_id=f"stop_{reason}")
     assert result["episode"]["status"] == "safely_blocked"
     assert backend._read_work_manifest(work_id)["part_jobs"] == []
+
+
+def test_local_work_design_rejection_reaches_selected_design_recovery_without_cad(
+    tmp_path: Path,
+) -> None:
+    backend, _ = _backend(
+        tmp_path,
+        [
+            {"action": "create_contract"},
+            {"action": "stop", "stop_reason": "insufficient_context", "reason": "Need a dimension."},
+        ],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+
+    result = backend.run_work_design_episode(work_id, request_id="local_rejection")
+    assert result["episode"]["stop_reason"] == "policy_blocked"
+    assert result["episode"]["failure_diagnostic"]["rejected_action"] == "create_contract"
+    assert backend._read_work_manifest(work_id)["part_jobs"] == []
+
+    page = build_workflow_page_view_model(
+        backend, work_id, selected_stage_id="work:design", language="en"
+    )
+    selected = page["selected_node"]
+    assert selected["id"] == "work:design"
+    recovery = selected["detail"]["recovery"]
+    assert recovery["rejected_action"] == "create_contract"
+    assert recovery["technical_reason"] == "action_not_allowed_for_skill"
+    assert recovery["resolution_owner"] == "agent"
+    assert recovery["code_executed"] is False
+    assert recovery["geometry_generated"] is False
+    assert recovery["result_published"] is False
+    assert recovery["retryable"] is True
+    assert recovery["next_action"] == "Retry Work Design"
+    assert recovery["recommended_action"]["label"] == "Retry Work Design"
+    assert recovery["recommended_action"]["key"] == "start_new_attempt"
+    assert "same Work Design Run" in recovery["retry_reason"]
+    primary = selected["interaction"]["primary_action"]
+    assert primary["key"] == "continue_work_design"
+    assert primary["label"] == recovery["recommended_action"]["label"]
+    assert primary["target_work_id"] == work_id
+    assert primary["target_run_id"] == recovery["run_id"]
+    before_retry = backend._read_work_manifest(work_id)
+    retry_result = asyncio.run(
+        _continue_work_design_async(backend, primary, {}, lambda: None, "en")
+    )
+    after_retry = backend._read_work_manifest(work_id)
+    assert retry_result["episode"]["stop_reason"] == "insufficient_context"
+    assert after_retry["work_design"]["run_id"] == before_retry["work_design"]["run_id"]
+    assert after_retry["run_ids"] == before_retry["run_ids"]
+    assert after_retry["part_jobs"] == before_retry["part_jobs"] == []
+    assert len(after_retry["artifact_references"]) > len(before_retry["artifact_references"])
+    assert _work_design_recovery(selected["detail"]["type"], selected["detail"]) == recovery
+    assert _work_design_recovery("decomposition", {"recovery": recovery}) == {}
+    assert _work_design_recovery("attempt", {"recovery": recovery}) == {}
+
+
+def test_agent_reported_work_design_policy_stop_is_distinct_from_local_rejection(
+    tmp_path: Path,
+) -> None:
+    backend, _ = _backend(
+        tmp_path,
+        [{"action": "stop", "stop_reason": "policy_blocked", "reason": "Agent stopped."}],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+
+    backend.run_work_design_episode(work_id, request_id="agent_policy_stop")
+    page = build_workflow_page_view_model(
+        backend, work_id, selected_stage_id="work:design", language="en"
+    )
+    recovery = page["selected_node"]["detail"]["recovery"]
+
+    assert recovery["rejected_action"] == "stop"
+    assert recovery["technical_reason"] == "agent_reported_policy_block"
+    assert recovery["cause_category"] == "agent_reported_policy_block"
+    assert recovery["resolution_owner"] == "agent"
+    assert recovery["code_executed"] is False
+    assert recovery["geometry_generated"] is False
+    assert recovery["result_published"] is False
+    assert recovery["retryable"] is False
+    assert recovery["next_action"] == "Retry Work Design"
+    assert recovery["recommended_action"]["label"] == "Retry Work Design"
+    primary = page["selected_node"]["interaction"]["primary_action"]
+    assert primary["key"] == "continue_work_design"
+    assert primary["label"] == recovery["recommended_action"]["label"]
+    assert primary["target_work_id"] == work_id
+    assert primary["target_run_id"] == recovery["run_id"]
 
 
 def test_work_design_skill_loads_only_declared_bounded_markdown_knowledge() -> None:

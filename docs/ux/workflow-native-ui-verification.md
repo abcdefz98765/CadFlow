@@ -1,6 +1,6 @@
 # Workflow-native UI recovery verification
 
-Status date: 2026-08-16
+Status date: 2026-08-21
 
 Branch: `codex/v1-nicegui-runtime-cleanup`
 
@@ -27,6 +27,37 @@ did not preserve the rejected action or more specific local cause, so the UI
 does not infer one from the Agent response. A failed attempt remains a blocked
 Attempt; its parent Part is incomplete and needs attention rather than being
 presented as a failed Part.
+
+### PR #4 Work Design Inspector closure
+
+The selected Work Design node now renders the same persisted stopped-attempt
+projection as a blocked Part attempt. The transient Action Lifecycle reports
+only that Work Design stopped; the selected Inspector owns the durable what,
+why, owner, impact, retryability, and recovery explanation. No new durable
+state or workflow projection was introduced.
+
+Recovery semantics remain aligned with the existing domain model. Work Design
+retry appends a new bounded Agent Episode to the same Work Design Run, and the
+UI says so. A blocked Part recovery creates exactly one child attempt Run with
+`parent_run_id` pointing to the stopped attempt, then runs the next Episode on
+that child. Accepted pointers and historical Run evidence remain unchanged.
+
+| Acceptance case | Result |
+| --- | --- |
+| A — local Work Design rejection | exact `create_contract` rejection, Agent owner, no CAD/geometry/result, useful retry |
+| B — Agent-reported policy stop | says the Agent reported the stop and CadFlow recorded no local rejected action |
+| C — historical unspecified stop | says the rejected action and specific local cause were not saved; no inference |
+| D — blocked Part attempt | existing Part-scoped causality retained; recovery creates a child attempt Run |
+| E — successful Work Design | Agent Design plus generated Part Jobs remains unchanged |
+| F — Workflow selection | cached Inspector-only selection boundary retained; automated no-I/O/no-reprojection checks pass |
+| G — fixture classification | verification/regression seeds are developer-only under `.internal/dev-works`; normal catalog hides them |
+| H — layouts/language | English 1440; Chinese 1024 and 414; no page-level horizontal overflow or browser errors |
+
+The real browser measured `scrollWidth == clientWidth` at all three widths:
+1425/1425, 1009/1009, and 399/399 respectively. Technical Evidence remained
+collapsed, the Work retry confirmation used the scoped label, and the dialog
+was cancelled without mutating the fixture. Browser error/warning logs were
+empty.
 
 ### Current rendering and evidence boundaries
 
@@ -103,8 +134,8 @@ product projection, plus the focused inspector and timing boundary. It does not
 introduce workflow persistence, another state machine, or a rendering
 framework.
 
-Focused affected-suite verification passed with `90 passed`. The clean complete
-repository suite passed with `702 passed, 9 skipped` in 439.36 seconds.
+The final affected lifecycle subset passed with `88 passed`. The clean complete
+repository suite passed with `711 passed, 9 skipped` in 435.85 seconds.
 
 ## Scope and invariants
 
@@ -246,7 +277,7 @@ to intentional local server restarts during the verification pass.
 
 ## Screenshot evidence
 
-All hashes are SHA-256 and all 17 files are distinct.
+All hashes are SHA-256 and all 23 files are distinct.
 
 | Screenshot | SHA-256 |
 | --- | --- |
@@ -267,6 +298,12 @@ All hashes are SHA-256 and all 17 files are distinct.
 | `15-history.png` | `508b1d3689fca6198d88b1f3f07a1901ac6575387643b6a300e76a1ce8610b47` |
 | `16-work-1024.png` | `b2d608e79a40eb7412beec8b409030f058fefd92f0303aa40a543f3093f05528` |
 | `17-work-mobile.png` | `aae68962ecf7ccad30e2c14f7ffdebdaa9b7fa0a5c53ef6a180b60cad1e1d2a5` |
+| `18-work-design-local-rejection-selected-en.png` | `5f8ef449028224d370311dec8db3e0adefd5e23534ad60c8da72bbf6e4718145` |
+| `19-work-design-agent-reported-stop-en.png` | `e42e94d3ff75c22a27630843b0a488fdd2b031c546f1d76ff9793ebb399c8d76` |
+| `20-work-design-historical-unknown-en.png` | `febc94608190bb7cce44fd953de9444a873ec32e0368228b61d1335856cee59f` |
+| `21-part-attempt-recovery-unchanged-en.png` | `815206f3229408c5bdd419641d3247558ec3217c4ea2c263191f71bdc0b6cb35` |
+| `22-work-design-local-rejection-1024-zh.png` | `e375c2c89948e211c12c8eeb550488481ca6b98d86319bb0ff95b1924c3961e9` |
+| `23-work-design-local-rejection-mobile-zh.png` | `6c0a62aff0d835a14b234e3096910b56cef7980e1fe9eb70889ee5071f8097b4` |
 
 Baseline captures are retained separately under `baseline/` for the original
 repeated blocked nodes, duplicate request, eager protocol output, and dominant
@@ -277,5 +314,9 @@ global failure surface: `01-blocked-overview.png` is
 
 ## Automated verification
 
-- Focused Workflow-native projection/UI suite: `87 passed`.
-- Complete repository suite: `693 passed, 9 skipped` in 404.88 seconds.
+- Broad affected Work Design, lifecycle, fixture, path-privacy, and projection
+  suite: `412 passed, 1 skipped`.
+- Final lifecycle subset after the real-backend child-attempt test and scoped
+  retry-copy correction: `88 passed`.
+- Python compilation: passed for `src` and `tests`.
+- Complete clean repository suite: `711 passed, 9 skipped` in 435.85 seconds.

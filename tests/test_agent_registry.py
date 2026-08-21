@@ -73,6 +73,17 @@ def _adapter(responses):
     )
 
 
+def test_v1_runtime_authority_is_exactly_the_three_registered_operations():
+    expected = {"work_design", "design_part", "model_program"}
+
+    assert set(RUNTIME_SKILL_REGISTRY._by_operation) == expected
+    assert set(RUNTIME_SKILL_REGISTRY._by_id) == expected
+    assert {
+        RUNTIME_SKILL_REGISTRY.for_operation(operation).skill_id
+        for operation in expected
+    } == expected
+
+
 def test_design_part_registry_delegates_only_to_cadflow_model_program_skill():
     skill = RUNTIME_SKILL_REGISTRY.for_operation("design_part")
 

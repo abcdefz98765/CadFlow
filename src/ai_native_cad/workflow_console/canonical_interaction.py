@@ -37,18 +37,31 @@ def project_canonical_interaction(
         recommended = recovery.get("recommended_action") if isinstance(recovery.get("recommended_action"), dict) else {}
         key = str(recommended.get("key") or "")
         if key:
+            recovery_part_id = recovery.get("part_job_id")
+            part_job_id = (
+                recovery_part_id
+                if isinstance(recovery_part_id, str) and recovery_part_id
+                else None
+            )
+            command_key = key
+            if key == "start_new_attempt":
+                command_key = "retry_agent" if part_job_id else "continue_work_design"
             recovery_command = _command(
-                key,
+                command_key,
                 str(recommended.get("label") or key.replace("_", " ").title()),
                 work_id,
-                part_job_id=recovery.get("part_job_id"),
+                part_job_id=part_job_id,
                 target_run_id=recovery.get("run_id"),
+                **(
+                    {"recovery_mode": "new_attempt"}
+                    if key == "start_new_attempt" and part_job_id
+                    else {}
+                ),
             )
             primary = recovery_command
-            recovery_part_id = recovery.get("part_job_id")
-            if isinstance(recovery_part_id, str) and recovery_part_id in part_commands:
-                part_commands[recovery_part_id] = {
-                    **part_commands[recovery_part_id],
+            if part_job_id and part_job_id in part_commands:
+                part_commands[part_job_id] = {
+                    **part_commands[part_job_id],
                     "primary_action": recovery_command,
                 }
         attention = "needs_you" if key == "answer_question" else "blocked"

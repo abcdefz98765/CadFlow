@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from ai_native_cad.workflow_console.backend import WORKSPACE_SCHEMA_VERSION, _write_json
+from ai_native_cad.workflow_console.work_index import (
+    NORMAL_WORK_CLASSIFICATIONS,
+    _works_root,
+)
 
 EXAMPLE_TEMPLATE = Path("examples") / "workflow_console" / "example_works.json"
 
@@ -18,18 +22,27 @@ def seed_example_works(backend: Any) -> dict[str, Any]:
     if not examples:
         raise ValueError("workflow console example template has no examples")
 
-    works_root = backend._resolve_workspace_path("works")
     planned = [_validate_example(example) for example in examples]
+    storage_roots = (_works_root(backend), _works_root(backend, developer=True))
     conflicts = [
         work["work_id"]
         for work, _runs in planned
-        if backend._require_child_path(works_root, work["work_id"]).exists()
+        if any(
+            backend._require_child_path(storage_root, work["work_id"]).exists()
+            for storage_root in storage_roots
+        )
     ]
     if conflicts:
         raise FileExistsError(f"workflow console example Work already exists: {', '.join(conflicts)}")
 
     seeded = []
     for manifest, runs in planned:
+        metadata = manifest.get("metadata") if isinstance(manifest.get("metadata"), dict) else {}
+        work_classification = metadata.get("work_classification", "user")
+        works_root = _works_root(
+            backend,
+            developer=work_classification not in NORMAL_WORK_CLASSIFICATIONS,
+        )
         work_dir = backend._require_child_path(works_root, manifest["work_id"])
         work_dir.mkdir(parents=True, exist_ok=False)
         _write_json(backend._require_child_path(work_dir, "work_manifest.json"), manifest)

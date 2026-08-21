@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from ai_native_cad.agents.base import AgentAdapter
@@ -2680,12 +2680,12 @@ def run_part_result_review_pipeline(
     return {
         "status": review["status"],
         "success": review["status"] == "accepted_for_preview",
-        "output_dir": str(output_path),
+        "output_dir": _repo_relative_string(output_path),
         "part_result_review": review,
         "agent_trace": trace,
         "files": files,
-        "report_json": str(output_path / "report.json"),
-        "report_md": str(output_path / "report.md"),
+        "report_json": _repo_relative_string(output_path / "report.json"),
+        "report_md": _repo_relative_string(output_path / "report.md"),
     }
 
 
@@ -4501,7 +4501,10 @@ def _merge_provider_normalized_design_create_metadata(output_dir: Path, metadata
         report = json.loads(report_path.read_text(encoding="utf-8"))
         report["provider_normalized_design_create"] = metadata
         report["files"] = _collect_files(output_dir, repo_relative=True)
-        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        report_path.write_text(
+            json.dumps(_normalize_persisted_report_paths(report), indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     report_md_path = output_dir / "report.md"
     if report_md_path.exists():
@@ -4522,6 +4525,25 @@ def _merge_provider_normalized_design_create_metadata(output_dir: Path, metadata
     runtime = _read_json_if_present(runtime_path)
     runtime["provider_normalized_design_create"] = metadata
     _write_json(runtime_path, runtime)
+
+
+def _normalize_persisted_report_paths(value: Any) -> Any:
+    """Keep persisted normalized-design reports portable and free of local paths."""
+
+    if isinstance(value, dict):
+        return {key: _normalize_persisted_report_paths(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_persisted_report_paths(item) for item in value]
+    if not isinstance(value, str):
+        return value
+
+    path = Path(value)
+    if path.is_absolute():
+        normalized = _repo_relative_string(path)
+        return normalized if not Path(normalized).is_absolute() else "[redacted-local-path]"
+    if PureWindowsPath(value).is_absolute() or PurePosixPath(value).is_absolute():
+        return "[redacted-local-path]"
+    return value
 
 
 def _rewrite_report_md_files_section(output_dir: Path) -> None:

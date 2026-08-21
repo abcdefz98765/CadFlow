@@ -805,18 +805,22 @@ class WorkflowConsoleBackend:
         prompt: str | None = None,
         role: str | None = None,
         run_id: str | None = None,
+        parent_run_id: str | None = None,
     ) -> dict[str, Any]:
         """Append another explicit attempt to one Part Job."""
         self._require_safe_run_id(work_id)
         self._require_safe_run_id(part_job_id)
         if run_id is not None:
             self._require_safe_run_id(run_id)
+        if parent_run_id is not None:
+            self._require_safe_run_id(parent_run_id)
         return self._work_orchestrator().create_part_attempt(
             work_id,
             part_job_id,
             prompt=prompt,
             role=role,
             run_id=run_id,
+            parent_run_id=parent_run_id,
         )
 
     def run_work_part_design_episode(

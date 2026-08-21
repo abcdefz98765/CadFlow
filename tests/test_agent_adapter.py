@@ -37,6 +37,17 @@ import ai_native_cad.pipeline.runner as pipeline_runner
 from ai_native_cad.workflow_console.stage_runner import StageRunner
 
 
+def _assert_no_absolute_path_values(value):
+    if isinstance(value, dict):
+        for item in value.values():
+            _assert_no_absolute_path_values(item)
+    elif isinstance(value, list):
+        for item in value:
+            _assert_no_absolute_path_values(item)
+    elif isinstance(value, str):
+        assert not Path(value).is_absolute()
+
+
 class InvalidRequirementAdapter(DeterministicAgentAdapter):
     def parse_requirement(self, prompt, context=None):
         return {"part_type": "", "dimensions": []}
@@ -2556,7 +2567,10 @@ def test_provider_normalized_design_create_pipeline_writes_local_design_artifact
     report_md = (output_dir / "report.md").read_text(encoding="utf-8")
     trace = json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8"))
     assert report["provider_normalized_design_create"]["selected_candidate"] == "A"
-    assert str(output_dir) not in json.dumps(report, sort_keys=True)
+    _assert_no_absolute_path_values(report)
+    assert report["execution"]["model_path"] == "outputs/provider_normalized_design_create/model.py"
+    assert report["validation"]["checks"][1]["file"] == "outputs/provider_normalized_design_create/model.step"
+    assert report["inspection"]["stl_file"]["path"] == "outputs/provider_normalized_design_create/model.stl"
     assert str(output_dir) not in report_md
     assert trace["provider_normalized_design_create"]["provider_role"] == "extract_design_signals_only"
 
@@ -3959,6 +3973,10 @@ def test_part_result_review_outputs_do_not_leak_paths_secrets_or_provider_messag
         "report": json.loads((output_dir / "report.json").read_text(encoding="utf-8")),
         "trace": json.loads((output_dir / "agent_trace.json").read_text(encoding="utf-8")),
     }, sort_keys=True)
+    assert result["output_dir"] == "outputs/part_result_privacy"
+    assert result["report_json"] == "outputs/part_result_privacy/report.json"
+    assert result["report_md"] == "outputs/part_result_privacy/report.md"
+    assert all(not Path(path).is_absolute() for path in result["files"].values())
     assert str(tmp_path) not in serialized_outputs
     assert "D:\\" not in serialized_outputs
     assert "api_key" not in serialized_outputs

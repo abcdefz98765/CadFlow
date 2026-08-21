@@ -428,6 +428,16 @@ def build_recovery_projection(
         )
         retryable = outcome.get("retryable") is True
         action_key = str(outcome.get("recovery_action_key") or "view_details")
+        action_label = str(outcome["next_action"])
+        outcome_extra = dict(outcome)
+        if action_key == "start_new_attempt" and not part_job_id:
+            action_label = "重试 Work 设计" if language == "zh" else "Retry Work Design"
+            outcome_extra["next_action"] = action_label
+            outcome_extra["retry_reason"] = (
+                "重试会在同一 Work 设计 Run 内追加新的有界 Agent Episode；历史 Episode 和证据会保留。"
+                if language == "zh"
+                else "Retrying appends a new bounded Agent Episode to the same Work Design Run; historical Episodes and evidence are preserved."
+            )
         return _recovery(
             category=str(outcome.get("cause_category") or "policy_blocked"),
             owner=str(outcome.get("resolution_owner") or "cadflow"),
@@ -435,7 +445,7 @@ def build_recovery_projection(
             summary=str(outcome["what_happened"]),
             why=str(outcome["why"]),
             action_key=action_key,
-            action_label=str(outcome["next_action"]),
+            action_label=action_label,
             destination=(
                 "config#local-execution"
                 if action_key == "check_environment"
@@ -449,7 +459,7 @@ def build_recovery_projection(
             language=language,
             extra={
                 **route_scope,
-                **outcome,
+                **outcome_extra,
                 "last_agent_action": (agent_output or {}).get("last_action"),
                 "last_observation": (agent_output or {}).get("last_observation"),
                 "history": (agent_output or {}).get("items", []),
@@ -1131,12 +1141,19 @@ def _workflow_node_interaction(
         )
     elif recovery_key == "start_new_attempt":
         part_label = str(part.get("name") or part_job_id.replace("_", " ").title())
-        primary = action(
-            "retry_agent",
-            f"Start a new {part_label} attempt" if part_job_id else "Start a new Work Design attempt",
-            f"开始新的 {part_label} 尝试" if part_job_id else "开始新的 Work 设计尝试",
-            recovery_mode="new_attempt",
-        )
+        if part_job_id:
+            primary = action(
+                "retry_agent",
+                f"Start a new {part_label} attempt",
+                f"开始新的 {part_label} 尝试",
+                recovery_mode="new_attempt",
+            )
+        else:
+            primary = action(
+                "continue_work_design",
+                str(recommended.get("label") or "Retry Work Design"),
+                str(recommended.get("label") or "重试 Work 设计"),
+            )
     elif recovery_key in {"open_settings", "check_environment"}:
         primary = action("open_settings", "Open Settings", "打开设置", category="navigation")
     elif recovery_key == "modify_request":
