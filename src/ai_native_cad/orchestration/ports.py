@@ -41,7 +41,7 @@ def _require_relative_path(value: str) -> str:
     return normalized
 
 
-_FAILURE_DIAGNOSTIC_FIELDS = {
+_FAILURE_DIAGNOSTIC_REQUIRED_FIELDS = {
     "schema_version",
     "rejection_stage",
     "rejected_action",
@@ -50,6 +50,10 @@ _FAILURE_DIAGNOSTIC_FIELDS = {
     "human_safe_detail",
     "side_effect_started",
 }
+_FAILURE_DIAGNOSTIC_OPTIONAL_FIELDS = {
+    "contract_repair_exhausted",
+    "contract_repair_turn_count",
+}
 
 
 def _require_failure_diagnostic(value: dict[str, Any] | None) -> None:
@@ -57,7 +61,17 @@ def _require_failure_diagnostic(value: dict[str, Any] | None) -> None:
 
     if value is None:
         return
-    if not isinstance(value, dict) or set(value) != _FAILURE_DIAGNOSTIC_FIELDS:
+    fields = set(value) if isinstance(value, dict) else set()
+    if (
+        not isinstance(value, dict)
+        or not _FAILURE_DIAGNOSTIC_REQUIRED_FIELDS <= fields
+        or not fields <= (
+            _FAILURE_DIAGNOSTIC_REQUIRED_FIELDS
+            | _FAILURE_DIAGNOSTIC_OPTIONAL_FIELDS
+        )
+        or bool(fields & _FAILURE_DIAGNOSTIC_OPTIONAL_FIELDS)
+        != (_FAILURE_DIAGNOSTIC_OPTIONAL_FIELDS <= fields)
+    ):
         raise ValueError("failure_diagnostic has an invalid shape")
     if value.get("schema_version") != 1:
         raise ValueError("failure_diagnostic has an unsupported schema version")
@@ -74,6 +88,12 @@ def _require_failure_diagnostic(value: dict[str, Any] | None) -> None:
         raise ValueError("failure_diagnostic human_safe_detail is invalid")
     if not isinstance(value.get("side_effect_started"), bool):
         raise ValueError("failure_diagnostic side_effect_started is invalid")
+    if _FAILURE_DIAGNOSTIC_OPTIONAL_FIELDS <= fields:
+        if value.get("contract_repair_exhausted") is not True:
+            raise ValueError("failure_diagnostic contract repair exhaustion is invalid")
+        turn_count = value.get("contract_repair_turn_count")
+        if not isinstance(turn_count, int) or isinstance(turn_count, bool) or turn_count < 0:
+            raise ValueError("failure_diagnostic contract repair count is invalid")
 
 
 @dataclass(frozen=True)

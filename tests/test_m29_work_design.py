@@ -117,6 +117,24 @@ def test_normal_entry_runs_real_work_design_before_cad_parts(tmp_path: Path, par
     assert client.requests[0]["skill"]["skill_id"] == "work_design"
 
 
+def test_contract_repair_exhaustion_routes_through_work_orchestrator(tmp_path: Path) -> None:
+    invalid = {"action": "request_context", "parameters": {}}
+    backend, client = _backend(tmp_path, [invalid, invalid, invalid])
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+
+    result = backend.run_work_design_episode(work_id, request_id="repair_exhausted")
+
+    diagnostic = result["episode"]["failure_diagnostic"]
+    assert result["episode"]["status"] == "safely_blocked"
+    assert diagnostic["contract_repair_exhausted"] is True
+    assert diagnostic["contract_repair_turn_count"] == 2
+    assert diagnostic["requested_capability_or_context"] == "parameters"
+    assert len(client.requests) == 3
+    manifest = backend._read_work_manifest(work_id)
+    assert manifest["part_jobs"] == []
+    assert manifest["work_design"]["status"] == "blocked"
+
+
 def test_reference_components_are_not_generated_part_jobs(tmp_path: Path) -> None:
     backend, _ = _backend(
         tmp_path,

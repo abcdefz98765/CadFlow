@@ -41,6 +41,21 @@ def workflow_graph_with_runtime(
     return projected
 
 
+def current_attention_is_redundant(graph: dict[str, Any]) -> bool:
+    """Whether a single attention item merely repeats the selected graph node."""
+
+    items = [item for item in graph.get("current_attention", []) if isinstance(item, dict)]
+    if len(items) != 1:
+        return False
+    node_id = items[0].get("node_id")
+    return any(
+        isinstance(node, dict)
+        and node.get("id") == node_id
+        and node.get("selected") is True
+        for node in graph.get("nodes", [])
+    )
+
+
 def render_current_attention(
     ui: Any,
     graph: dict[str, Any],
@@ -66,6 +81,8 @@ def render_current_attention(
             return "running", "运行中" if language == "zh" else "Running"
         return str(item.get("state") or "ready"), str(item.get("state_label") or "")
     if not items:
+        return
+    if current_attention_is_redundant(graph):
         return
     if len(items) == 1:
         item = items[0]
@@ -320,4 +337,9 @@ def _dot_status(status: Any) -> str:
     return "blocked" if "blocked" in value else "unknown"
 
 
-__all__ = ["workflow_graph_with_runtime", "render_current_attention", "render_dynamic_work_graph"]
+__all__ = [
+    "workflow_graph_with_runtime",
+    "current_attention_is_redundant",
+    "render_current_attention",
+    "render_dynamic_work_graph",
+]

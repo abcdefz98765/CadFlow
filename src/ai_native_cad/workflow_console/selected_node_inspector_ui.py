@@ -38,6 +38,48 @@ def _work_design_recovery(detail_type: str, detail: dict[str, Any]) -> dict[str,
     return recovery if isinstance(recovery, dict) and recovery else {}
 
 
+def selected_node_action_state_copy(
+    node: dict[str, Any], interaction: dict[str, Any], detail: dict[str, Any], language: str
+) -> tuple[str, str]:
+    """Describe ownership of the selected node's next action without generic readiness."""
+
+    recovery = detail.get("recovery") if isinstance(detail.get("recovery"), dict) else {}
+    stopped = str(node.get("status") or "") in {"blocked", "failed"}
+    owner = str(recovery.get("resolution_owner") or "")
+    needs_input = recovery.get("user_input_required") is True or owner == "user"
+    if stopped and needs_input:
+        return (
+            "需要你的输入" if language == "zh" else "Your input is needed",
+            "text-amber-800",
+        )
+    if stopped and owner == "environment":
+        return (
+            "本地环境需要处理" if language == "zh" else "Local environment needs attention",
+            "text-amber-800",
+        )
+    if stopped and recovery.get("retryable") is True:
+        return (
+            "可以开始新的设计尝试" if language == "zh" else "A new design attempt can be started",
+            "text-blue-700",
+        )
+    if stopped:
+        return (
+            "当前无需你处理" if language == "zh" else "No action is needed from you",
+            "text-gray-600",
+        )
+    if interaction.get("requires_user_action") is True:
+        return (
+            "需要你的操作" if language == "zh" else "Your action is required",
+            "text-amber-800",
+        )
+    if interaction.get("primary_action"):
+        return (
+            "可以继续" if language == "zh" else "Continue when ready",
+            "text-gray-600",
+        )
+    return ("当前无需操作" if language == "zh" else "No action required", "text-gray-600")
+
+
 def render_selected_node_inspector(
     ui: Any,
     page: dict[str, Any],
@@ -71,8 +113,30 @@ def render_selected_node_inspector(
     if node.get("part_job_id"):
         node_work["active_part"] = node.get("part_job_id")
     node_overview["work"] = node_work
+    recovery_before_action = (
+        _work_design_recovery(detail_type, detail)
+        if detail_type == "work_design"
+        else detail.get("recovery")
+        if detail_type == "attempt" and isinstance(detail.get("recovery"), dict)
+        else {}
+    )
+    primary_action = (
+        interaction.get("primary_action")
+        if isinstance(interaction.get("primary_action"), dict)
+        else {}
+    )
+    action_running = bool(primary_action and _pending_action_matches(state, primary_action))
+    visible_recovery = {} if action_running else recovery_before_action
     with ui.element("section").classes("dynamic-node-detail w-full"):
-        _render_action_feedback_panel(ui, state, language)
+        # This inspector owns durable node evidence.  It only mirrors compact
+        # in-process activity so a terminal response cannot duplicate it.
+        _render_action_feedback_panel(
+            ui,
+            state,
+            language,
+            transient_only=True,
+            has_durable_recovery=bool(recovery_before_action),
+        )
         with ui.row().classes("w-full items-start justify-between gap-3 flex-wrap"):
             with ui.column().classes("gap-1"):
                 ui.label("所选节点" if language == "zh" else "SELECTED NODE").classes("workflow-eyebrow")
@@ -95,35 +159,38 @@ def render_selected_node_inspector(
                     ).classes("text-sm font-medium text-blue-700")
                 # A request inspector owns the one visible copy of the request;
                 # repeating the node summary above it made the same text appear twice.
-                if detail_type != "request":
+                if detail_type != "request" and not recovery_before_action:
                     ui.label(str(node.get("summary") or "")).classes("text-sm text-gray-600")
-            primary_action = (
-                interaction.get("primary_action")
-                if isinstance(interaction.get("primary_action"), dict)
-                else {}
-            )
-            action_running = bool(primary_action and _pending_action_matches(state, primary_action))
             user_state = "running" if action_running else str(node.get("user_state") or "ready")
             user_state_label = (
                 ("运行中" if language == "zh" else "Running")
                 if action_running
                 else str(node.get("user_state_label") or _display_status(node.get("status"), language))
             )
-            ui.label(user_state_label).classes(
-                f"workflow-state-pill {user_state}"
-            )
-        with ui.row().classes("items-center gap-2 mt-3"):
-            needs_action = interaction.get("requires_user_action") is True
-            if needs_action:
-                action_state_label = "需要你的操作" if language == "zh" else "Your action is required"
-            elif interaction.get("primary_action"):
-                action_state_label = "准备好后即可继续" if language == "zh" else "Ready when you are"
-            else:
-                action_state_label = "当前无需操作" if language == "zh" else "No action required"
-            ui.label(action_state_label).classes(
-                "text-sm font-semibold " + ("text-amber-800" if needs_action else "text-gray-600")
-            )
+            # The graph and diagnosis already make a stopped state explicit.
+            # Keep a pill only when an action is actively replacing that state.
+            if not visible_recovery:
+                ui.label(user_state_label).classes(
+                    f"workflow-state-pill {user_state}"
+                )
 
+        # A durable diagnosis belongs directly ahead of the one recovery CTA;
+        # later detail only adds supporting design evidence.
+        if visible_recovery:
+            render_stopped_attempt(ui, visible_recovery, language)
+        with ui.row().classes("items-center gap-2 mt-3"):
+            if action_running:
+                action_state_label = (
+                    "Agent 正在进行新的设计尝试"
+                    if language == "zh"
+                    else "A new Agent design attempt is running"
+                )
+                action_state_class = "text-blue-700"
+            else:
+                action_state_label, action_state_class = selected_node_action_state_copy(
+                    node, interaction, detail, language
+                )
+            ui.label(action_state_label).classes("text-sm font-semibold " + action_state_class)
         _render_dynamic_node_actions(
             ui,
             node,
@@ -146,17 +213,17 @@ def render_selected_node_inspector(
                 for constraint in constraints:
                     ui.label(f"• {constraint}").classes("text-sm")
         elif detail_type in {"work_design", "decomposition"}:
+            work_design_recovery: dict[str, Any] = {}
             if detail_type == "work_design":
                 work_design_recovery = _work_design_recovery(detail_type, detail)
-                if work_design_recovery:
-                    render_stopped_attempt(ui, work_design_recovery, language)
             work_design = detail.get("work_design") if isinstance(detail.get("work_design"), dict) else {}
-            _key_values(ui, {
-                "Scope": "Work Design",
-                "State": work_design.get("status") or node.get("status"),
-                "Generated Parts": work_design.get("part_job_count", len(work_design.get("generated_parts", []))),
-                "Reference components": work_design.get("reference_component_count", len(work_design.get("reference_components", []))),
-            })
+            if not work_design_recovery and not action_running:
+                _key_values(ui, {
+                    "Scope": "Work Design",
+                    "State": work_design.get("status") or node.get("status"),
+                    "Generated Parts": work_design.get("part_job_count", len(work_design.get("generated_parts", []))),
+                    "Reference components": work_design.get("reference_component_count", len(work_design.get("reference_components", []))),
+                })
             render_work_design(ui, work_design, language)
             render_agent_activity(ui, _dict_get(detail, "agent_output") or {}, language, backend=actions.backend)
         elif detail_type == "part_job":
@@ -178,8 +245,6 @@ def render_selected_node_inspector(
             render_agent_activity(ui, _dict_get(detail, "agent_output") or {}, language, backend=actions.backend)
         elif detail_type == "attempt":
             attempt_recovery = detail.get("recovery") if isinstance(detail.get("recovery"), dict) else {}
-            if attempt_recovery:
-                render_stopped_attempt(ui, attempt_recovery, language)
             ui.label(
                 (
                     "从较早结果开始的新设计版本。"

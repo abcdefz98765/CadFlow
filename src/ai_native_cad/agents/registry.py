@@ -24,6 +24,7 @@ class BudgetDefinition:
     max_executions: int
     max_observation_inspections: int
     timeout_seconds: float
+    max_contract_repair_turns: int = 2
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,7 @@ WORK_DESIGN_SKILL = SkillDefinition(
         max_executions=0,
         max_observation_inspections=0,
         timeout_seconds=120.0,
+        max_contract_repair_turns=2,
     ),
     system_rules=(
         "Return exactly one JSON Agent action and no markdown or private reasoning.",
@@ -239,6 +241,7 @@ DESIGN_PART_SKILL = SkillDefinition(
         max_executions=3,
         max_observation_inspections=3,
         timeout_seconds=180.0,
+        max_contract_repair_turns=2,
     ),
     system_rules=(
         "Return exactly one JSON Agent action and no markdown or private reasoning.",
@@ -302,6 +305,7 @@ MODEL_PROGRAM_SKILL = SkillDefinition(
         max_executions=3,
         max_observation_inspections=3,
         timeout_seconds=180.0,
+        max_contract_repair_turns=2,
     ),
     system_rules=(
         "Use only cadquery_v1 source accepted by the CadFlow static policy.",
