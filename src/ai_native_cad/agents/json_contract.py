@@ -12,8 +12,13 @@ from ai_native_cad.agents.provider_context import (
     contract_guide_for,
     provider_messages_for,
     provider_request_trace_summary,
+)
+from ai_native_cad.agents.provider_sanitization import (
     sanitize_provider_payload,
     sanitize_provider_string,
+)
+from ai_native_cad.agents.registered_skill_adapter import (
+    compile_registered_skill_action_request,
 )
 from ai_native_cad.agents.validation import (
     validate_adapter_result,
@@ -218,11 +223,12 @@ class JsonContractAgentAdapter(AgentAdapter):
         skill allowlist, budgets, context policy, contract checks, and local
         validation after the provider returns.
         """
-        request = _design_part_action_request(state, skill_manifest)
+        request = _runtime_action_request(state, skill_manifest)
+        skill_id = str(skill_manifest.get("skill_id") or "")
         request["provider_options"] = self._config.request_options()
         self._last_provider_request_trace = {
-            "operation": "design_part_action",
-            "stage": "design",
+            "operation": f"{skill_id}_action",
+            "stage": "intent_design" if skill_id == "work_design" else "design",
             "skill": {
                 "id": skill_manifest.get("skill_id"),
                 "version": skill_manifest.get("version"),
@@ -244,7 +250,7 @@ class JsonContractAgentAdapter(AgentAdapter):
         raw_response = _call_json_client(
             self.client,
             request,
-            "design_part_action",
+            f"{skill_id}_action",
         )
         return _extract_json_object(raw_response)
 
@@ -365,83 +371,22 @@ def _part_ir_contract_request(reviewed_part_handoff: dict[str, Any], context: di
     }
 
 
+def _runtime_action_request(
+    state: dict[str, Any],
+    skill_manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Compatibility import name for the canonical registered-Skill compiler."""
+
+    return compile_registered_skill_action_request(state, skill_manifest)
+
+
 def _design_part_action_request(
     state: dict[str, Any],
     skill_manifest: dict[str, Any],
 ) -> dict[str, Any]:
-    """Compile the M2 action request from the typed runtime registry."""
-    from ai_native_cad.agents.registry import RUNTIME_SKILL_REGISTRY
+    """Compatibility name for tests and callers compiled through the registry."""
 
-    skill = RUNTIME_SKILL_REGISTRY.for_operation("design_part")
-    if (
-        skill_manifest.get("skill_id") != skill.skill_id
-        or skill_manifest.get("version") != skill.version
-    ):
-        raise ValueError("design action request does not match the registry skill")
-    safe_state = sanitize_provider_payload(state)
-    safe_manifest = {
-        "skill_id": skill.skill_id,
-        "version": skill.version,
-        "allowed_actions": sorted(skill.allowed_actions),
-        "allowed_context_keys": sorted(skill.allowed_context_keys),
-        "allowed_tools": sorted(skill.allowed_tools),
-        "output_contract_types": sorted(skill.output_contract_types),
-        "stop_reasons": sorted(skill.stop_reasons),
-        "delegated_skills": [
-            {
-                "skill_id": delegated.skill_id,
-                "version": delegated.version,
-                "allowed_actions": sorted(delegated.allowed_actions),
-                "allowed_tools": sorted(delegated.allowed_tools),
-                "output_contract_types": sorted(
-                    delegated.output_contract_types
-                ),
-                "prohibited_side_effects": list(
-                    delegated.prohibited_side_effects
-                ),
-            }
-            for delegated in (
-                RUNTIME_SKILL_REGISTRY.skill(delegated_id)
-                for delegated_id in skill.delegated_skill_ids
-            )
-        ],
-        "knowledge": [
-            {
-                "id": item.knowledge_id,
-                "scope": item.scope,
-                "summary": item.summary,
-            }
-            for item in RUNTIME_SKILL_REGISTRY.knowledge_for_skill(
-                skill.skill_id
-            )
-        ],
-    }
-    return {
-        "operation": "design_part_action",
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": skill.compile_system_prompt()},
-            {"role": "system", "content": skill.compile_action_contract()},
-            {
-                "role": "system",
-                "content": "Registered capability: "
-                + json.dumps(safe_manifest, sort_keys=True),
-            },
-            {
-                "role": "user",
-                "content": json.dumps(safe_state, sort_keys=True),
-            },
-        ],
-        "skill": safe_manifest,
-        "state": safe_state,
-        "payload_shape": {
-            "kind": "agent_episode_state",
-            "top_level_keys": sorted(
-                str(key) for key in safe_state
-                if isinstance(key, str)
-            ),
-        },
-    }
+    return _runtime_action_request(state, skill_manifest)
 
 
 def _repair_contract_request(failure: dict[str, Any], ir: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:

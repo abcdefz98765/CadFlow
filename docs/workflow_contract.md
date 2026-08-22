@@ -360,6 +360,17 @@ manifest entries record Work, Run, Part Job, checkpoint, trust role, and compact
 summary. Action, context, source, execution, inspection, and repair budgets are
 enforced.
 
+M2.9 also implements the preceding Work-scoped `work_design` v0.1 Episode.
+Normal New Design and Live Product Example entry create only a Work. The
+Episode may request allowlisted Work context, propose a whole-Work design,
+classify generated versus reference components, ask a focused question, request
+Part Job creation, or stop with a typed reason. Its evidence is append-only
+under `runs/<run_id>/episodes/work_design/<request_id>/`. Only
+`WorkOrchestrator` may validate the proposal, assign Part Job/Run identities,
+and update the Work manifest. A clarification or blocked outcome creates no
+Part Job; a completed valid decomposition creates the exact generated Part Jobs
+and their initial attempt Runs. Assembly and acceptance remain unchanged.
+
 Before execution, a model-program submission artifact records source and
 parameter hashes only. Full source and parameters are retained in the canonical
 Broker candidate directory only after static policy and live attestation gates

@@ -41,6 +41,41 @@ def _require_relative_path(value: str) -> str:
     return normalized
 
 
+_FAILURE_DIAGNOSTIC_FIELDS = {
+    "schema_version",
+    "rejection_stage",
+    "rejected_action",
+    "reason_code",
+    "requested_capability_or_context",
+    "human_safe_detail",
+    "side_effect_started",
+}
+
+
+def _require_failure_diagnostic(value: dict[str, Any] | None) -> None:
+    """Validate the small, source-free rejection fact carried by route evidence."""
+
+    if value is None:
+        return
+    if not isinstance(value, dict) or set(value) != _FAILURE_DIAGNOSTIC_FIELDS:
+        raise ValueError("failure_diagnostic has an invalid shape")
+    if value.get("schema_version") != 1:
+        raise ValueError("failure_diagnostic has an unsupported schema version")
+    for field in ("rejection_stage", "reason_code"):
+        item = value.get(field)
+        if not isinstance(item, str) or not item or len(item) > 120:
+            raise ValueError(f"failure_diagnostic {field} is invalid")
+    for field in ("rejected_action", "requested_capability_or_context"):
+        item = value.get(field)
+        if item is not None and (not isinstance(item, str) or len(item) > 120):
+            raise ValueError(f"failure_diagnostic {field} is invalid")
+    detail = value.get("human_safe_detail")
+    if not isinstance(detail, str) or not detail or len(detail) > 240:
+        raise ValueError("failure_diagnostic human_safe_detail is invalid")
+    if not isinstance(value.get("side_effect_started"), bool):
+        raise ValueError("failure_diagnostic side_effect_started is invalid")
+
+
 @dataclass(frozen=True)
 class DesignPartEpisodeRequest:
     """Work-owned request for one validation-only Part Job Design Episode."""
@@ -78,6 +113,45 @@ class DesignPartEpisodeRequest:
             "role": self.role,
             "interface_context": self.interface_context,
             "accepted_result_id": self.accepted_result_id,
+        }
+
+
+@dataclass(frozen=True)
+class WorkDesignEpisodeRequest:
+    """Work-owned request for one canonical Work Design Episode."""
+
+    request_id: str
+    work_id: str
+    run_id: str
+    title: str
+    objective: str
+    previous_work_design: dict[str, Any]
+    clarification_answers: tuple[dict[str, Any], ...]
+    existing_part_jobs: tuple[dict[str, Any], ...]
+    accepted_part_results: dict[str, Any]
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        _require_safe_id(self.request_id, "request_id")
+        _require_safe_id(self.work_id, "work_id")
+        _require_safe_id(self.run_id, "run_id")
+        if not isinstance(self.title, str) or not self.title.strip():
+            raise ValueError("Work Design title must be non-empty")
+        if not isinstance(self.objective, str) or not self.objective.strip():
+            raise ValueError("Work Design objective must be non-empty")
+
+    def manifest(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "request_id": self.request_id,
+            "work_id": self.work_id,
+            "run_id": self.run_id,
+            "title": self.title,
+            "objective": self.objective,
+            "previous_work_design": self.previous_work_design,
+            "clarification_answers": list(self.clarification_answers),
+            "existing_part_jobs": list(self.existing_part_jobs),
+            "accepted_part_results": self.accepted_part_results,
         }
 
 
@@ -151,6 +225,7 @@ class DesignPartEpisodeOutcome:
     reviewable_result_id: str | None = None
     reviewable_step_artifact_id: str | None = None
     reviewable_summary: dict[str, Any] | None = None
+    failure_diagnostic: dict[str, Any] | None = None
     idempotent_replay: bool = False
     schema_version: int = 1
 
@@ -203,6 +278,7 @@ class DesignPartEpisodeOutcome:
                 raise ValueError("reviewable_summary must be an object")
         if not self.artifacts:
             raise ValueError("Design Episode outcome requires durable evidence")
+        _require_failure_diagnostic(self.failure_diagnostic)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -221,6 +297,9 @@ class DesignPartEpisodeOutcome:
             "reviewable_result_id": self.reviewable_result_id,
             "reviewable_step_artifact_id": self.reviewable_step_artifact_id,
             "reviewable_summary": self.reviewable_summary,
+            "failure_diagnostic": (
+                dict(self.failure_diagnostic) if self.failure_diagnostic else None
+            ),
             "idempotent_replay": self.idempotent_replay,
             "artifacts": [artifact.as_dict() for artifact in self.artifacts],
         }
@@ -257,12 +336,84 @@ class DesignPartEpisodeOutcome:
                 if isinstance(value.get("reviewable_summary"), dict)
                 else None
             ),
+            failure_diagnostic=(
+                dict(value["failure_diagnostic"])
+                if isinstance(value.get("failure_diagnostic"), dict)
+                else None
+            ),
             idempotent_replay=idempotent_replay,
             schema_version=value.get("schema_version", 1),
         )
 
     def as_idempotent_replay(self) -> "DesignPartEpisodeOutcome":
         return replace(self, idempotent_replay=True)
+
+
+@dataclass(frozen=True)
+class WorkDesignEpisodeOutcome:
+    """Path-free Work Design proposal returned to CadFlow for mutation."""
+
+    request_id: str
+    episode_id: str
+    status: str
+    stop_reason: str
+    work_design: dict[str, Any] | None
+    part_job_creation_requested: bool
+    knowledge_ids: tuple[str, ...]
+    artifacts: tuple[DesignEpisodeArtifact, ...]
+    failure_diagnostic: dict[str, Any] | None = None
+    idempotent_replay: bool = False
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        _require_safe_id(self.request_id, "request_id")
+        _require_safe_id(self.episode_id, "episode_id")
+        if self.status not in {"completed", "safely_blocked"}:
+            raise ValueError("Work Design outcome has an invalid status")
+        if self.status == "completed" and not (
+            isinstance(self.work_design, dict) and self.part_job_creation_requested
+        ):
+            raise ValueError("completed Work Design requires a decomposition request")
+        if not self.artifacts:
+            raise ValueError("Work Design outcome requires durable evidence")
+        _require_failure_diagnostic(self.failure_diagnostic)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "request_id": self.request_id,
+            "episode_id": self.episode_id,
+            "status": self.status,
+            "stop_reason": self.stop_reason,
+            "work_design": self.work_design,
+            "part_job_creation_requested": self.part_job_creation_requested,
+            "knowledge_ids": list(self.knowledge_ids),
+            "failure_diagnostic": (
+                dict(self.failure_diagnostic) if self.failure_diagnostic else None
+            ),
+            "idempotent_replay": self.idempotent_replay,
+            "artifacts": [item.as_dict() for item in self.artifacts],
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any], *, idempotent_replay: bool = False) -> "WorkDesignEpisodeOutcome":
+        return cls(
+            request_id=value["request_id"],
+            episode_id=value["episode_id"],
+            status=value["status"],
+            stop_reason=value["stop_reason"],
+            work_design=dict(value["work_design"]) if isinstance(value.get("work_design"), dict) else None,
+            part_job_creation_requested=value.get("part_job_creation_requested") is True,
+            knowledge_ids=tuple(value.get("knowledge_ids") or ()),
+            artifacts=tuple(DesignEpisodeArtifact.from_dict(item) for item in value.get("artifacts") or []),
+            failure_diagnostic=(
+                dict(value["failure_diagnostic"])
+                if isinstance(value.get("failure_diagnostic"), dict)
+                else None
+            ),
+            idempotent_replay=idempotent_replay,
+            schema_version=value.get("schema_version", 1),
+        )
 
 
 class WorkStorePort(Protocol):
@@ -333,6 +484,23 @@ class AgentDesignPort(Protocol):
         self,
         request: DesignPartEpisodeRequest,
     ) -> DesignPartEpisodeOutcome: ...
+
+    def run_work_design_episode(
+        self,
+        request: WorkDesignEpisodeRequest,
+    ) -> WorkDesignEpisodeOutcome: ...
+
+    def record_work_design_answer(
+        self,
+        *,
+        work_id: str,
+        run_id: str,
+        answer_id: str,
+        question_artifact_id: str,
+        field: str,
+        question: str,
+        answer: str,
+    ) -> DesignEpisodeArtifact: ...
 
     def record_part_design_answer(
         self,

@@ -10,12 +10,14 @@ Read first:
 - `../docs/architecture/bounded-agent-loop-context-broker-and-checkpoints.md`
 - `../docs/workflow_contract.md`
 
-## Target skill map
+## Runtime authority map
 
 ```text
-Intent
-  -> Design
-  -> Geometry
+Work request
+  -> work_design (whole-Work concept, references, interfaces, decomposition)
+  -> Part Jobs assigned by CadFlow
+  -> design_part (one owned Part attempt)
+  -> model_program or structured compatibility geometry
   -> Evaluation
   -> Revision
 
@@ -27,7 +29,16 @@ accepted Part / Assembly results
   -> Deliverables
 ```
 
-Current directories are retained during migration:
+Canonical runtime Skills:
+
+- `work_design/` — version 0.1 Work-scoped provider-selected design,
+  clarification, reference-component classification, interface reasoning, and
+  Part decomposition. It cannot assign product identities or mutate a Work;
+  CadFlow validates the proposal and creates Part Jobs.
+- `design_part/` — version 0.2 design of one already-owned Part Job attempt.
+- `model_program/` — version 0.1 controlled CAD source delegate.
+
+Compatibility documentation retained during migration:
 
 - `requirement/` — compatibility name for Intent interpretation and focused
   clarification.
@@ -40,11 +51,11 @@ Current directories are retained during migration:
 - `review/` — compatibility name for Evaluation and evidence explanation.
 - `revision/` — child-Run change intent and candidate revision.
 - `assembly/` — Assembly Job planning, placement, constraints, and checks.
-- `design_part/` — M2 provider-selected contract/model-program episode;
-  version 0.2 is product-routed through `WorkOrchestrator` for Broker-owned
-  validation, attested execution, and gated reviewable publication.
-- `model_program/` — registered version 0.1 delegate using the pinned,
-  attested WSL2 CadQuery worker.
+
+Test/example support such as `DesignPlannerFakeAgentAdapter` is not a runtime
+Skill authority. `agents.provider_context` remains a compatibility compiler for
+legacy stage calls; canonical Episodes compile their Skill and knowledge from
+the typed runtime registry.
 
 Target additions still required by the roadmap:
 
@@ -79,6 +90,9 @@ and accepted-result pointers change only through explicit user action.
 - Skill-private knowledge lives under `skills/<skill>/knowledge/`.
 - Accepted Work artifacts are runtime context, not static knowledge.
 - Validator and execution feedback are episode observations, not knowledge.
+- The runtime loader reads only knowledge ids declared by the active Skill,
+  resolves only repository-contained Markdown sources, and applies fixed text
+  bounds. Python summaries are not an independent knowledge source.
 
 Do not load every skill or the whole repository into a provider context.
 Runtime context is minimal, semantic, allowlisted, and auditable.

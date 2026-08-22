@@ -47,10 +47,10 @@ The graph is a projection of current domain state, not a second workflow engine.
 
 ### First: implementation audit
 
-- [ ] Inventory the existing target Agent-first Workflow projection and legacy Workflow graph renderer.
-- [ ] Document which existing graph/layout/selection/detail components can be reused as-is.
-- [ ] Identify the exact reason the current Agent-first projection collapses to four phase nodes.
-- [ ] Confirm the current sources of truth for:
+- [x] Inventory the existing target Agent-first Workflow projection and legacy Workflow graph renderer.
+- [x] Document which existing graph/layout/selection/detail components can be reused as-is.
+- [x] Identify the exact reason the current Agent-first projection collapses to four phase nodes.
+- [x] Confirm the current sources of truth for:
   - Work intent;
   - Part Jobs;
   - attempts/Run lineage;
@@ -59,104 +59,112 @@ The graph is a projection of current domain state, not a second workflow engine.
   - validation/recovery;
   - reviewable results;
   - accepted pointers.
-- [ ] Identify any required graph fact that genuinely cannot be derived from existing durable evidence before adding new persistence.
+- [x] Identify any required graph fact that genuinely cannot be derived from existing durable evidence before adding new persistence.
 
 ### Projection
 
-- [ ] Replace the four-node Agent-first Workflow projection with a dynamic Work graph projection.
-- [ ] Keep Intent / Design / Build & Evaluate / Accept & Deliver as graph grouping/orientation, not the whole graph.
-- [ ] Use a deliberately small semantic node vocabulary for current behavior.
-- [ ] Use a deliberately small edge/transition vocabulary derived from real state.
-- [ ] Do not render provider turns/tool calls/log events as Workflow nodes.
-- [ ] Preserve existing compatibility Workflow projection for legacy Runs where appropriate.
+- [x] Replace the four-node Agent-first Workflow projection with a dynamic Work graph projection.
+- [x] Keep Intent / Design / Build & Evaluate / Accept & Deliver as graph grouping/orientation, not the whole graph.
+- [x] Use a deliberately small semantic node vocabulary for current behavior.
+- [x] Use a deliberately small edge/transition vocabulary derived from real state.
+- [x] Do not render provider turns/tool calls/log events as Workflow nodes.
+- [x] Preserve existing compatibility Workflow projection for legacy Runs where appropriate.
 
 ### Single-Part user flows
 
-- [ ] New/ready-to-design Work shows a clear beginning state.
-- [ ] Agent design evidence appears without fabricating future checkpoints.
-- [ ] Clarification appears as a meaningful branch/state and the submitted answer remains visible.
-- [ ] Resume after clarification updates the same Work graph.
-- [ ] Build/validation failure or typed stop shows where/why execution stopped.
-- [ ] Repair/retry appears only when it actually occurred.
-- [ ] Reviewable result is visually distinct from accepted result.
-- [ ] Accept updates graph state only after persisted accepted pointer verification.
-- [ ] Revision creates a new branch/attempt while preserving the previous branch/result.
+- [x] New/ready-to-design Work shows a clear beginning state.
+- [x] Agent design evidence appears without fabricating future checkpoints.
+- [x] Clarification appears as a meaningful branch/state and the submitted answer remains visible.
+- [x] Resume after clarification updates the same Work graph.
+- [x] Build/validation failure or typed stop shows where/why execution stopped.
+- [x] Repair/retry appears only when it actually occurred.
+- [x] Reviewable result is visually distinct from accepted result.
+- [x] Accept updates graph state only after persisted accepted pointer verification.
+- [x] Revision creates a new branch/attempt while preserving the previous branch/result.
 
 ### Part Jobs / branching
 
-- [ ] Existing multiple Part Jobs render as real branches rather than a flat list when Work state contains them.
-- [ ] Part branches show current attempt/result/attention state without inventing unsupported steps.
-- [ ] Selecting a Part/result node reuses existing Workbench/Parts/geometry/result detail.
-- [ ] Accepted Part state remains independent of active attempt state.
+- [x] Existing multiple Part Jobs render as real branches rather than a flat list when Work state contains them.
+- [x] Part branches show current attempt/result/attention state without inventing unsupported steps.
+- [x] Selecting a Part/result node reuses existing Workbench/Parts/geometry/result detail.
+- [x] Accepted Part state remains independent of active attempt state.
 
 Do not implement new Agent multi-Part decomposition merely to make this graph look more impressive. The graph should be ready to display real decomposition when the runtime creates it later.
 
 ### Node interaction and revision
 
-- [ ] Clicking a node selects detail without mutating business state.
-- [ ] Historical attempt/result nodes can navigate to existing read-only Run Snapshot/evidence.
-- [ ] Where valid, provide `Start Revision from here` using existing child-Run/attempt semantics.
-- [ ] Never delete or rewrite downstream historical evidence to simulate rollback.
+- [x] Clicking a node selects detail without mutating business state.
+- [x] Historical attempt/result nodes can navigate to existing read-only Run Snapshot/evidence.
+- [x] Where valid, provide `Start Revision from here` using existing child-Run/attempt semantics.
+- [x] Never delete or rewrite downstream historical evidence to simulate rollback.
 
 ### Overview consistency
 
-- [ ] Overview and Workflow derive from the same current Work state.
-- [ ] Current phase/status/recovery/result shown in Overview agrees with graph state.
-- [ ] No state such as `Ready for review` may coexist with a contradictory `Design not started` graph unless the user is explicitly viewing a historical Run.
+- [x] Overview and Workflow derive from the same current Work state.
+- [x] Current phase/status/recovery/result shown in Overview agrees with graph state.
+- [x] No state such as `Ready for review` may coexist with a contradictory `Design not started` graph unless the user is explicitly viewing a historical Run.
 
 ### UX / visual design
 
-- [ ] Reuse the current dot graph visual vocabulary rather than building a new graph framework.
-- [ ] Make active/blocked/reviewable/accepted/revision branches understandable at a glance.
-- [ ] Use progressive disclosure so simple Works stay visually simple.
-- [ ] Make selected node detail useful without duplicating the entire Overview.
-- [ ] Keep Agent Output / technical evidence inspectable but out of the primary graph.
-- [ ] Preserve Chinese/English support.
-- [ ] Verify desktop, 1024px, and mobile behavior.
+- [x] Reuse the current dot graph visual vocabulary rather than building a new graph framework.
+- [x] Make active/blocked/reviewable/accepted/revision branches understandable at a glance.
+- [x] Use progressive disclosure so simple Works stay visually simple.
+- [x] Make selected node detail useful without duplicating the entire Overview.
+- [x] Keep Agent Output / technical evidence inspectable but out of the primary graph.
+- [x] Preserve Chinese/English support.
+- [x] Verify desktop, 1024px, and mobile behavior.
 
 ### Browser acceptance
 
 Manually verify at least:
 
-- [ ] beginning-state Real Agent Example;
-- [ ] clarification -> answer -> resumed Work;
-- [ ] typed failure/block with real reason;
-- [ ] reviewable Product Golden state;
-- [ ] accepted result;
-- [ ] revision branch preserving prior accepted state;
-- [ ] a Work containing more than one Part Job if existing fixture/evidence provides one;
-- [ ] node -> detail navigation;
-- [ ] node -> Run Snapshot -> Current Work navigation;
-- [ ] Chinese critical path;
-- [ ] 1440px / 1024px / 390–430px.
+- [x] beginning-state Real Agent Example;
+- [x] clarification -> answer -> resumed Work;
+- [x] typed failure/block with real reason;
+- [x] reviewable Product Golden state;
+- [x] accepted result;
+- [x] revision branch preserving prior accepted state;
+- [x] a Work containing more than one Part Job if existing fixture/evidence provides one;
+- [x] node -> detail navigation;
+- [x] node -> Run Snapshot -> Current Work navigation;
+- [x] Chinese critical path;
+- [x] 1440px / 1024px / 390–430px.
 
 ### Tests
 
-- [ ] Graph state comes from domain/evidence rather than browser-owned business state.
-- [ ] Four phases are grouping metadata, not the complete graph node list.
-- [ ] Clarification/answer history projects correctly.
-- [ ] Reviewable/accepted are distinct.
-- [ ] Revision produces a branch and preserves history.
-- [ ] Multi-Part branch projection works on existing real fixture/domain state.
-- [ ] Overview/Workflow consistency contracts.
-- [ ] Run Snapshot remains read-only.
-- [ ] No graph database/workflow engine/parallel persistence introduced.
-- [ ] Full relevant regression remains green.
+- [x] Graph state comes from domain/evidence rather than browser-owned business state.
+- [x] Four phases are grouping metadata, not the complete graph node list.
+- [x] Clarification/answer history projects correctly.
+- [x] Reviewable/accepted are distinct.
+- [x] Revision produces a branch and preserves history.
+- [x] Multi-Part branch projection works on existing real fixture/domain state.
+- [x] Overview/Workflow consistency contracts.
+- [x] Run Snapshot remains read-only.
+- [x] No graph database/workflow engine/parallel persistence introduced.
+- [x] Full relevant regression remains green.
 
 ### M2.8 explicit non-goals
 
 Do not add during this milestone unless a demonstrated bug makes it unavoidable:
 
-- [ ] no new sandbox/security/attestation architecture;
-- [ ] no new Provider abstraction layer;
-- [ ] no graph DB;
-- [ ] no BPMN/workflow DSL;
-- [ ] no graph-specific durable state model;
-- [ ] no Feature Graph CAD implementation;
-- [ ] no new CAD families for the sake of the demo;
-- [ ] no new Assembly execution;
-- [ ] no Deliverable/BOM/drawing implementation;
-- [ ] no formal five-case external-provider benchmark.
+- [x] no new sandbox/security/attestation architecture;
+- [x] no new Provider abstraction layer;
+- [x] no graph DB;
+- [x] no BPMN/workflow DSL;
+- [x] no graph-specific durable state model;
+- [x] no Feature Graph CAD implementation;
+- [x] no new CAD families for the sake of the demo;
+- [x] no new Assembly execution;
+- [x] no Deliverable/BOM/drawing implementation;
+- [x] no formal five-case external-provider benchmark.
+
+Status: complete on 2026-08-09. The graph is a read-only presentation
+projection. The only domain extension is optional Part-attempt revision
+provenance (`parent_run_id` and `source_result_id`), added because revision
+causality cannot be inferred safely from prompts, ordering, or timestamps.
+The current product entry remains Part-first after Work creation; Work-level
+Agent decomposition is still an explicit runtime/product debt for later
+evidence-driven work, not hidden behind legacy planning.
 
 ## After M2.8 — M2 real-provider product trial
 

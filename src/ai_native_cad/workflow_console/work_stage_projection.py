@@ -36,9 +36,14 @@ _KNOWN_NAMES = {name for spec in STAGE_SPECS for group in (spec["inputs"], spec[
 _KNOWN_NAMES.update({"golden_example.json", "report.json", "report.md", "stage_review.json"})
 
 
-def build_work_stage_projection(backend: Any, work_id: str) -> dict[str, Any]:
+def build_work_stage_projection(
+    backend: Any,
+    work_id: str,
+    *,
+    include_debug: bool = False,
+) -> dict[str, Any]:
     """Return a path-referencing stage view of all artifact-backed Work lineage."""
-    index = build_work_index(backend)
+    index = build_work_index(backend, include_debug=include_debug)
     work = next((item for item in index["works"] if item["summary"].get("work_id") == work_id), None)
     if work is None:
         raise FileNotFoundError(f"workflow console work not found: {work_id}")

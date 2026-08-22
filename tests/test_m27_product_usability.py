@@ -198,19 +198,21 @@ def test_live_product_example_starts_at_real_beginning_and_uses_agent_projection
     assert started["accepted"] is False
     assert manifest["artifact_references"] == []
     assert manifest["accepted_part_results"] == {}
-    assert len(manifest["part_jobs"]) == 1
+    assert manifest["part_jobs"] == []
     overview = build_workbench_overview_view_model(backend, started["work_id"], language="en")
     workflow = build_workflow_page_view_model(backend, started["work_id"], language="en")
     assert overview["user_input"]["original_request"].startswith("Create a compact single-piece")
     assert overview["agent_design"]["evidence_status"] == "insufficient"
     assert overview["current_result"] is None
     assert workflow["projection_mode"] == "agent_first"
-    assert [stage["stage_id"] for stage in workflow["stages"]] == [
+    assert [phase["id"] for phase in workflow["phase_groups"]] == [
         "intent", "design", "build_evaluate", "accept_deliver"
     ]
-    assert workflow["stages"][0]["status"] == "completed"
-    assert workflow["stages"][1]["status"] == "blocked"
-    assert workflow["stages"][3]["status"] == "not_started"
+    assert [node["kind"] for node in workflow["nodes"]] == ["request", "work_design"]
+    assert workflow["workflow_graph"]["topology"] == "dynamic_work_graph"
+    assert workflow["workflow_graph"]["compatibility_mode"] is False
+    assert workflow["nodes"][0]["status"] == "completed"
+    assert workflow["nodes"][1]["status"] == "not_started"
 
 
 def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
@@ -218,11 +220,9 @@ def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
     started = backend.start_live_product_example()
     adapter = AskThenStopAdapter()
     backend.stage_runner.agent_adapter = adapter
-    first = backend.run_work_part_design_episode(
+    first = backend.run_work_design_episode(
         started["work_id"],
-        started["part_job_id"],
         request_id="ask_fixture",
-        attempt_run_id=started["attempt_run_id"],
     )
     assert first["episode"]["stop_reason"] == "user_input_required"
     overview = build_workbench_overview_view_model(backend, started["work_id"], language="en")
@@ -230,21 +230,31 @@ def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
     assert recovery["resolution_owner"] == "user"
     assert recovery["recommended_action"]["key"] == "answer_question"
     question = recovery["questions"][0]
-    backend.answer_work_part_design_question(
+    waiting_workflow = build_workflow_page_view_model(
+        backend, started["work_id"], language="en"
+    )
+    waiting_question = next(
+        node
+        for node in waiting_workflow["nodes"]
+        if node["detail"]["type"] == "clarification"
+    )
+    assert waiting_question["interaction"]["primary_action"]["key"] == "answer_question"
+    assert waiting_question["interaction"]["requires_user_action"] is True
+    assert waiting_question["user_state"] == "needs_you"
+    assert waiting_workflow["current_attention"][0]["node_id"] == waiting_question["id"]
+    assert waiting_workflow["current_attention"][0]["state"] == "needs_you"
+    backend.answer_work_design_question(
         started["work_id"],
-        started["part_job_id"],
-        run_id=started["attempt_run_id"],
+        run_id=first["work_design"]["run_id"],
         answer_id="spacing_answer",
         question_artifact_id=recovery["question_artifact_id"],
         field=question["field"],
         question=question["question"],
         answer="27.5 mm",
     )
-    resumed = backend.run_work_part_design_episode(
+    resumed = backend.run_work_design_episode(
         started["work_id"],
-        started["part_job_id"],
         request_id="resume_fixture",
-        attempt_run_id=started["attempt_run_id"],
         objective="Continue with servo_hole_spacing_mm = 27.5 mm",
     )
     assert resumed["episode"]["stop_reason"] == "insufficient_context"
@@ -261,6 +271,21 @@ def test_clarification_is_persisted_and_same_work_can_resume(tmp_path):
     assert overview["recovery"]["last_agent_action"] == "stop"
     assert overview["recovery"]["recommended_action"]["key"] == "modify_request"
     assert overview["recovery"]["summary"] == "Controlled resume fixture stop."
+    workflow = build_workflow_page_view_model(
+        backend, started["work_id"], language="en"
+    )
+    nodes = {item["id"]: item for item in workflow["nodes"]}
+    edges = workflow["edges"]
+    question_id = next(node_id for node_id, node in nodes.items() if node["kind"] == "decision" and node["detail"]["type"] == "clarification")
+    answer_id = next(node_id for node_id, node in nodes.items() if node["kind"] == "decision" and node["detail"]["type"] == "answer")
+    work_design_node = nodes["work:design"]
+    assert nodes[question_id]["group"] == nodes[answer_id]["group"]
+    assert nodes[question_id]["detail"]["answered"] is True
+    assert nodes[question_id]["interaction"]["primary_action"] is None
+    assert "historical" in nodes[question_id]["interaction"]["unavailable_reason"].lower()
+    assert any(edge["source"] == question_id and edge["target"] == answer_id and edge["type"] == "answered" for edge in edges)
+    assert work_design_node["detail"]["recovery"]["technical_reason"] == "insufficient_context"
+    assert not any(node["kind"] == "recovery" for node in nodes.values())
 
 
 def test_home_product_examples_are_explicitly_distinct(tmp_path):

@@ -11,6 +11,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Literal
 
+from ai_native_cad.workflow_console.canonical_interaction import (
+    project_canonical_interaction,
+)
 from ai_native_cad.workflow_console.review_surface import build_workflow_review_surface
 from ai_native_cad.workflow_console.product_usability import (
     build_agent_output_projection,
@@ -50,6 +53,8 @@ def build_workbench_overview_view_model(
     work_id: str,
     *,
     language: str = "en",
+    work_detail: dict[str, Any] | None = None,
+    reference_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Project the existing Current Work surface into the Agent-first Overview.
 
@@ -59,7 +64,8 @@ def build_workbench_overview_view_model(
     """
 
     language = "zh" if language == "zh" else "en"
-    work = backend.get_work_detail(work_id)
+    work = work_detail if isinstance(work_detail, dict) else backend.get_work_detail(work_id)
+    reference_cache = reference_cache if reference_cache is not None else {}
     summary = _dict_value(work.get("summary"))
     entity = _dict_value(work.get("entity_state"))
     references = [
@@ -68,6 +74,7 @@ def build_workbench_overview_view_model(
         if isinstance(item, dict)
     ]
     accepted = _dict_value(entity.get("accepted_part_results"))
+    work_design = _workbench_work_design(entity, language)
     result_records = _reviewable_records(
         backend,
         work_id,
@@ -78,7 +85,15 @@ def build_workbench_overview_view_model(
         accepted,
         references,
         result_records,
-        [item for item in work.get("parts", []) if isinstance(item, dict)],
+        (
+            []
+            if entity.get("state_authority") == "canonical"
+            else [
+                item
+                for item in work.get("parts", [])
+                if isinstance(item, dict)
+            ]
+        ),
         language,
     )
     active_job = _active_workbench_part(jobs)
@@ -108,11 +123,23 @@ def build_workbench_overview_view_model(
         active_record,
         language,
     )
+    if agent_design.get("evidence_status") == "insufficient" and work_design.get("present"):
+        agent_design = {
+            **agent_design,
+            "evidence_status": "persisted_work_design",
+            "summary": work_design.get("concept_summary"),
+            "concept": work_design.get("concept_summary"),
+            "interfaces": list(work_design.get("interfaces") or []),
+            "assumptions": list(work_design.get("assumptions") or []),
+            "source_capability_mode": "work_design",
+        }
     phase_key = _workbench_phase(entity, jobs, active_job)
     metadata = _dict_value(entity.get("metadata"))
     if metadata.get("example_classification") == "product_golden":
         capability_key = "reproducible_product_golden"
     elif metadata.get("example_classification") == "live_agent_example":
+        capability_key = "agentic_experimental"
+    elif work_design.get("present"):
         capability_key = "agentic_experimental"
     elif (
         isinstance(active_record, dict)
@@ -128,6 +155,7 @@ def build_workbench_overview_view_model(
         work_id,
         references,
         language=language,
+        reference_cache=reference_cache,
     )
     recovery = build_recovery_projection(
         backend,
@@ -136,6 +164,7 @@ def build_workbench_overview_view_model(
         references,
         language=language,
         agent_output=agent_output,
+        reference_cache=reference_cache,
     )
     activity = _workbench_agent_activity(
         active_job,
@@ -156,6 +185,23 @@ def build_workbench_overview_view_model(
         language,
         design_evidence=design_evidence,
     )
+    command_authority = project_canonical_interaction(
+        work_id=work_id,
+        work_design=work_design,
+        parts=jobs,
+        current_result=current_result,
+        recovery=recovery,
+        language=language,
+    )
+    primary_command = _dict_value(
+        _dict_value(command_authority.get("work")).get("primary_action")
+    )
+    if primary_command:
+        recommendation = {
+            **primary_command,
+            "summary": recommendation.get("summary")
+            or primary_command.get("label"),
+        }
     transformation = _workbench_transformation(
         user_input,
         agent_design,
@@ -201,9 +247,11 @@ def build_workbench_overview_view_model(
             "summary": objective,
         },
         "user_input": user_input,
+        "work_design": work_design,
         "agent_design": agent_design,
         "transformation": transformation,
         "recommendation": recommendation,
+        "command_authority": command_authority,
         "recovery": recovery,
         "agent_output": agent_output,
         "capability": {
@@ -236,6 +284,7 @@ def build_workbench_overview_view_model(
             "work_id": work_id,
             "run_ids": list(entity.get("run_ids", [])),
             "artifact_references": references,
+            "work_design_knowledge_ids": list(work_design.get("knowledge_ids") or []),
                 "reviewable_evidence": _advanced_reviewable_evidence(active_record),
                 "input_evidence": {
                     "durable": user_input.get("durable") is True,
@@ -354,9 +403,9 @@ def _workbench_user_input(
     attempts = [item for item in raw_job.get("attempts", []) if isinstance(item, dict)]
     first_run_id = attempts[0].get("run_id") if attempts else entity.get("root_run_id")
     active_run_id = job.get("latest_attempt_run_id") if isinstance(job, dict) else first_run_id
-    original = _read_work_prompt(backend, work_id, first_run_id)
+    original = str(entity.get("description") or "").strip() or None
     if not original:
-        original = str(entity.get("description") or "").strip() or None
+        original = _read_work_prompt(backend, work_id, first_run_id)
     active_prompt = _read_work_prompt(backend, work_id, active_run_id)
     active_attempt = attempts[-1] if attempts else {}
     is_revision = bool(
@@ -437,6 +486,31 @@ def _first_design_constraints(
         if isinstance(evidence.get("user_constraints"), list):
             return evidence["user_constraints"]
     return []
+
+
+def _workbench_work_design(entity: dict[str, Any], language: str) -> dict[str, Any]:
+    record = _dict_value(entity.get("work_design"))
+    proposal = _dict_value(record.get("current_design"))
+    parts = [dict(item) for item in proposal.get("generated_parts", []) if isinstance(item, dict)]
+    references = [dict(item) for item in proposal.get("reference_components", []) if isinstance(item, dict)]
+    return {
+        "present": bool(proposal),
+        "status": record.get("status") or "not_started",
+        "run_id": record.get("run_id"),
+        "concept_summary": proposal.get("concept_summary"),
+        "generated_parts": parts,
+        "reference_components": references,
+        "interfaces": [dict(item) for item in proposal.get("interfaces", []) if isinstance(item, dict)],
+        "dependencies": [dict(item) for item in proposal.get("dependencies", []) if isinstance(item, dict)],
+        "assumptions": list(proposal.get("assumptions") or []),
+        "unresolved_questions": list(proposal.get("unresolved_questions") or []),
+        "assembly_expected": proposal.get("assembly_expected") is True,
+        "recommendation": proposal.get("recommendation"),
+        "knowledge_ids": list(record.get("knowledge_ids") or []),
+        "scope_label": "Work 设计" if language == "zh" else "Work Design",
+        "part_job_count": len(parts),
+        "reference_component_count": len(references),
+    }
 
 
 def _workbench_agent_design(
@@ -600,6 +674,22 @@ def _workbench_part_jobs(
             state = "design"
         else:
             state = "not_started"
+        has_agent_progress = any(
+            item.get("run_id") == latest_run_id
+            and item.get("checkpoint")
+            in {
+                "agent_activity",
+                "agent_output",
+                "cad_ir_draft",
+                "design_brief",
+                "execution_observation",
+                "geometry_candidate",
+                "model_program_candidate",
+                "product_design_routing",
+                "reviewable_result",
+            }
+            for item in references
+        )
         jobs.append(
             {
                 "part_job_id": part_id,
@@ -608,6 +698,7 @@ def _workbench_part_jobs(
                 "attempt_count": len(attempts),
                 "latest_attempt_run_id": latest_run_id,
                 "latest_attempt_source": attempts[-1].get("source") if attempts else None,
+                "has_agent_progress": has_agent_progress,
                 "state": state,
                 "state_label": status_label(language, state),
                 "reviewable_result_id": latest_result_id,
@@ -670,7 +761,8 @@ def _workbench_phase(
     jobs: list[dict[str, Any]],
     active_job: dict[str, Any] | None,
 ) -> str:
-    if not entity.get("root_run_id") and not jobs:
+    work_design = _dict_value(entity.get("work_design"))
+    if work_design.get("status") == "not_started" and not jobs:
         return "intent"
     state = active_job.get("state") if active_job else None
     if state in {"reviewable", "accepted"}:
@@ -726,6 +818,46 @@ def _workbench_preview(
                 ),
                 "download_url": f"/api/work-artifacts/{work_id}/{artifact_id}/download",
                 "geometry": _dict_value(record.get("geometry")),
+            }
+    if job:
+        registered = [
+            item
+            for item in references
+            if isinstance(item, dict)
+            and item.get("part_job_id") == job.get("part_job_id")
+            and item.get("checkpoint") == "reviewable_result"
+            and item.get("trust_role") == "reviewable_result"
+            and item.get("validation_status") == "passed"
+        ]
+        stl = next(
+            (
+                item
+                for item in registered
+                if str(item.get("relative_path") or "").lower().endswith(".stl")
+            ),
+            None,
+        )
+        step = next(
+            (
+                item
+                for item in registered
+                if str(item.get("relative_path") or "").lower().endswith(".step")
+            ),
+            None,
+        )
+        if stl:
+            artifact_id = stl.get("artifact_id")
+            return {
+                "status": job.get("state"),
+                "label": i18n_copy(language, "model_ready"),
+                "kind": "registered_stl",
+                "viewer_url": f"/web-viewer/index.html?file=%2Fapi%2Fwork-artifacts%2F{work_id}%2F{artifact_id}%2Fdownload",
+                "download_url": (
+                    f"/api/work-artifacts/{work_id}/{step.get('artifact_id')}/download"
+                    if step
+                    else None
+                ),
+                "geometry": {},
             }
     if job and job.get("legacy_has_stl") and job.get("legacy_download_run_id"):
         run_id = job["legacy_download_run_id"]
@@ -793,7 +925,11 @@ def _workbench_agent_activity(
         for item in references
     ):
         key = "inspecting_step"
-    elif any(item.get("trust_role") == "candidate" for item in references):
+    elif any(
+        item.get("trust_role") == "candidate"
+        and item.get("checkpoint") != "work_design"
+        for item in references
+    ):
         key = "building_geometry"
     elif any(
         item.get("checkpoint") == "contract_validation"
@@ -832,14 +968,15 @@ def _workbench_recommendation(
     record: dict[str, Any] | None,
     language: str,
 ) -> dict[str, Any]:
-    if not entity.get("root_run_id") and not job:
+    work_design = _dict_value(entity.get("work_design"))
+    if not job and work_design.get("status") != "completed":
         return {
-            "key": "start_design",
-            "label": i18n_copy(language, "start_design"),
+            "key": "continue_work_design",
+            "label": "继续 Work 设计" if language == "zh" else "Continue Work Design",
             "summary": (
-                "描述目标并开始第一个设计尝试。"
+                "让 Agent 先理解整个目标，并决定真实需要生成的零件。"
                 if language == "zh"
-                else "Describe the objective and start the first design attempt."
+                else "Let the Agent understand the whole objective and decide which Parts really need to be generated."
             ),
         }
     if job and record and job.get("state") == "reviewable":
@@ -1107,22 +1244,54 @@ def build_workflow_page_view_model(
     selected_run_id: str | None = None,
     selected_stage_id: str | None = None,
     language: str = "en",
+    overview: dict[str, Any] | None = None,
+    work_detail: dict[str, Any] | None = None,
+    reference_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build one coherent Workflow page for a Work or immutable Run snapshot."""
     if view_mode not in {"current_work", "run_snapshot"}:
         raise ValueError("workflow view mode must be current_work or run_snapshot")
-    work = backend.get_work_detail(work_id)
+    work = work_detail if isinstance(work_detail, dict) else backend.get_work_detail(work_id)
+    reference_cache = reference_cache if reference_cache is not None else {}
     summary = work.get("summary") if isinstance(work.get("summary"), dict) else {}
     entity = work.get("entity_state") if isinstance(work.get("entity_state"), dict) else {}
-    metadata = entity.get("metadata") if isinstance(entity.get("metadata"), dict) else {}
     lineage = summary.get("active_lineage") if isinstance(summary.get("active_lineage"), dict) else {}
     active_root = lineage.get("active_root_run_id") or summary.get("root_run_id")
-    if view_mode == "current_work" and (
-        metadata.get("example_classification") == "live_agent_example"
-        or metadata.get("product_entry") == "new_design"
-    ):
-        overview = build_workbench_overview_view_model(backend, work_id, language=language)
-        agent_page = build_agent_first_workflow_projection(overview, language=language)
+    if view_mode == "current_work":
+        overview = (
+            overview
+            if isinstance(overview, dict) and overview
+            else build_workbench_overview_view_model(
+                backend,
+                work_id,
+                language=language,
+                work_detail=work,
+                reference_cache=reference_cache,
+            )
+        )
+        agent_page = build_agent_first_workflow_projection(
+            backend,
+            work_id,
+            work,
+            overview,
+            selected_node_id=selected_stage_id,
+            language=language,
+            reference_cache=reference_cache,
+        )
+        selected_node = _dict_value(agent_page.get("selected_node"))
+        interaction = _dict_value(selected_node.get("interaction"))
+        primary_action = interaction.get("primary_action") if isinstance(interaction.get("primary_action"), dict) else None
+        secondary_actions = [
+            dict(item)
+            for item in interaction.get("secondary_actions", [])
+            if isinstance(item, dict)
+        ]
+        available_actions = {
+            "primary_action": primary_action,
+            "secondary_actions": secondary_actions,
+            "disabled_actions": [],
+            "advanced_actions": [],
+        }
         agent_page.update({
             "view_mode": "current_work",
             "read_only": False,
@@ -1137,9 +1306,9 @@ def build_workflow_page_view_model(
             "lineage_inferred": bool(lineage.get("lineage_inferred")),
             "viewed_run_id": None,
             "run_strip": _run_strip(work.get("run_history"), lineage, view_mode, None),
-            "recommended_next_action": None,
-            "available_actions": {"primary_action": None, "secondary_actions": [], "disabled_actions": []},
-            "action_inventory": [],
+            "recommended_next_action": primary_action,
+            "available_actions": available_actions,
+            "action_inventory": _action_inventory(available_actions, agent_page.get("workflow_graph") or {}),
             "empty_state": None,
             "error_state": None,
             "source": {"projection": "agent_first", "overview": overview},
@@ -1202,12 +1371,140 @@ def build_workflow_page_view_model(
         "selected_stage": selected,
         "available_actions": actions,
         "action_inventory": _action_inventory(actions, graph),
+        "historical_run_summary": _historical_run_summary(
+            backend,
+            work_id,
+            run,
+            surface,
+            selected_run_id,
+            language,
+        ) if view_mode == "run_snapshot" else None,
         "empty_state": None if stages else {"title": "No workflow has started yet.", "summary": "Add a requirement to begin."},
         "error_state": None,
         # Compatibility/debug consumers can inspect the provenance without using
         # it to assemble another UI surface.
         "source": {"projection": projection, "surface": surface},
     }
+
+
+def _historical_run_summary(
+    backend: Any,
+    work_id: str,
+    run: dict[str, Any],
+    surface: dict[str, Any],
+    run_id: str | None,
+    language: str,
+) -> dict[str, Any]:
+    """Project a task-oriented read-only summary ahead of legacy stage evidence."""
+
+    stages = [item for item in surface.get("stages", []) if isinstance(item, dict)]
+    meaningful = [
+        item
+        for item in stages
+        if item.get("status") not in {None, "not_started", "unavailable"}
+    ]
+    latest = meaningful[-1] if meaningful else (stages[0] if stages else {})
+    blocked = next(
+        (item for item in reversed(meaningful) if item.get("status") in {"blocked", "failed"}),
+        None,
+    )
+    agent_stage = next(
+        (item for item in reversed(meaningful) if _dict_value(item.get("agent_output"))),
+        None,
+    )
+    context = _dict_value(surface.get("workflow_context"))
+    prompt = _dict_value(context.get("prompt"))
+    preview = _dict_value(prompt.get("preview"))
+    prompt_text = preview.get("content") or prompt.get("content") or _read_work_prompt(backend, work_id, run_id)
+    if isinstance(prompt_text, dict):
+        prompt_text = prompt_text.get("text") or prompt_text.get("prompt")
+    raw_status = run.get("status")
+    status_value = (
+        raw_status.get("status")
+        if isinstance(raw_status, dict)
+        else raw_status
+    )
+    artifacts = [
+        item
+        for item in _dict_value(surface.get("artifact_viewer")).get("artifacts", [])
+        if isinstance(item, dict) and item.get("present")
+    ]
+    model_artifacts = [
+        item for item in artifacts
+        if item.get("name") in {"model.step", "model.stl", "preview.png", "input_ir.json"}
+    ]
+    banner = _dict_value((blocked or latest).get("status_banner"))
+    return {
+        "run_id": run_id,
+        "status": status_value or latest.get("status") or "unknown",
+        "request": prompt_text,
+        "summary": latest.get("human_summary") or latest.get("short_summary") or run.get("summary"),
+        "latest_evidence": latest.get("stage_name") or latest.get("label"),
+        "agent_output": _dict_value((agent_stage or latest).get("agent_output")),
+        "validation": {
+            "title": banner.get("title"),
+            "summary": banner.get("summary") or latest.get("human_summary"),
+            "consequence": banner.get("consequence"),
+            "blocked": blocked is not None,
+        },
+        "model_artifacts": model_artifacts,
+        "geometry_viewer_url": (
+            f"/web-viewer/index.html?file=%2Fapi%2Fdownloads%2F{run_id}%2Fmodel.stl"
+            if run_id and any(item.get("name") == "model.stl" for item in model_artifacts)
+            else None
+        ),
+        "compatibility_evidence_available": bool(stages),
+        "read_only": True,
+        "legacy_workflow_is_primary": False,
+        "title": "历史 Run 摘要" if language == "zh" else "Historical Run summary",
+    }
+
+
+def select_projected_workflow_node(
+    page: dict[str, Any], node_id: str
+) -> dict[str, Any]:
+    """Apply presentation-only selection to an already projected Current Work.
+
+    No backend read, canonical reprojection, command execution, or technical
+    evidence load occurs here. The node already carries its scoped interaction
+    projection from the durable Work state used to build ``page``.
+    """
+
+    if page.get("projection_mode") != "agent_first" or page.get("read_only"):
+        raise ValueError("local node selection requires an actionable Agent-first page")
+    nodes = [item for item in page.get("nodes", []) if isinstance(item, dict)]
+    selected = next((item for item in nodes if item.get("id") == node_id), None)
+    if selected is None:
+        raise ValueError(f"unknown projected workflow node: {node_id}")
+    for node in nodes:
+        node["selected"] = node is selected
+    graph = _dict_value(page.get("workflow_graph"))
+    for node in graph.get("nodes", []):
+        if isinstance(node, dict):
+            node["selected"] = node.get("id") == node_id
+    interaction = _dict_value(selected.get("interaction"))
+    primary = (
+        interaction.get("primary_action")
+        if isinstance(interaction.get("primary_action"), dict)
+        else None
+    )
+    actions = {
+        "primary_action": primary,
+        "secondary_actions": [
+            dict(item)
+            for item in interaction.get("secondary_actions", [])
+            if isinstance(item, dict)
+        ],
+        "disabled_actions": [],
+        "advanced_actions": [],
+    }
+    page["selected_node"] = selected
+    page["selected_stage"] = selected
+    page["selected_stage_id"] = node_id
+    page["recommended_next_action"] = primary
+    page["available_actions"] = actions
+    page["action_inventory"] = _action_inventory(actions, graph)
+    return page
 
 
 def _with_guidance(stage: dict[str, Any], language: str, view_mode: ViewMode) -> dict[str, Any]:

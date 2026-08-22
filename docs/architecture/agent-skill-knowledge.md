@@ -27,7 +27,39 @@ A provider is not the architecture. A capable provider may perform several
 logical roles, but every episode still declares the active skill, context,
 tools, budgets, and output contract.
 
-## Logical Agent roles
+## V1 runtime boundary
+
+The V1 runtime authority is exactly `work_design`, `design_part`, and
+`model_program`. The logical role and skill vocabulary below is long-term
+future capability vocabulary, not a current implementation backlog or a set of
+runtime roles. Do not proactively create additional runtime roles or Skills
+from that vocabulary.
+
+The explicit relationship is:
+
+- **Knowledge** = reusable guidance;
+- **Skill** = allowed capability;
+- **Context** = current Work/Part/Run facts;
+- **Agent** = creative decisions, strategy, self-review, and repair;
+- **Tool/Validator** = execution and measured facts;
+- **Rules/Policy** = hard boundary;
+- **WorkOrchestrator** = durable mutation authority.
+
+Agent self-review, repair, and redesign are normal autonomous `design_part`
+convergence, not another Workflow stage. Intermediate turns are Activity and
+Technical Evidence; Workflow exposes durable meaningful states only.
+
+Revision uses lineage, the source result, and the revision request/context
+through the existing `design_part` Skill. It does not imply a Revision Agent or
+Revision Skill. Assembly remains an explicit future capability and is frozen in
+V1. Evaluation begins as Agent judgment over validator observations and
+measured facts: validators own the facts, and this does not imply a standalone
+Evaluation Agent.
+
+## Long-term logical Agent role vocabulary
+
+The following role names are future capability vocabulary only; they are not
+V1 runtime roles.
 
 ### Intent Agent
 
@@ -126,18 +158,21 @@ Each skill declares:
 Skills describe capability, not a fixed end-to-end workflow. They do not
 duplicate the entire product architecture.
 
-## Required initial skills
+## Long-term target skill vocabulary (future capability)
 
-Target skills:
+Beyond the V1 runtime authority, target skills are:
 
 - `intent`;
 - `design`;
 - `geometry_contract`;
-- `model_program`;
 - `part_evaluation`;
 - `assembly`;
 - `revision`;
 - `deliverables`.
+
+V1 already includes `model_program` as a constrained Skill delegated by
+`design_part`; broader future model-program capability or role vocabulary must
+not be mistaken for a new runtime Skill.
 
 Current legacy skills map as follows:
 
@@ -151,6 +186,15 @@ Current legacy skills map as follows:
 
 Migration should preserve legacy skill ids only as versioned compatibility
 aliases.
+
+The implemented M2.9 canonical entry uses `work_design` v0.1 before any Part
+Job exists. It receives Work-specific semantic context, loads only its declared
+static Markdown knowledge, and may propose generated Parts, reference
+components, interfaces, dependencies, assumptions, or a focused clarification.
+It cannot assign Work, Part Job, or Run identities and has no mutation or
+Assembly execution authority. After strict validation, `WorkOrchestrator`
+assigns identities and materializes the Part Jobs; `design_part` then operates
+on one owned Part attempt.
 
 ## Tool authority
 
@@ -207,8 +251,9 @@ The local Tool Broker and validators decide publication.
 The first selected API contract is `cadquery_v1` with entrypoint
 `build_model(parameters)`. Its current implementation is static policy
 validation only: AST parsing checks allowlisted imports/calls and prohibited
-authority without retaining or executing source. This does not register the
-runtime skill or satisfy the isolated-execution requirement.
+authority without retaining or executing source. This policy check is part of
+the registered `model_program` Skill but does not by itself satisfy the
+isolated-execution requirement.
 
 ## Knowledge layers
 
@@ -324,6 +369,13 @@ Runtime prompt text should be compiled from this registry and source skill
 documents. Inline duplicated skill guides in provider adapters are migration
 debt, not an acceptable second authority.
 
+Current implementation follows that boundary: the registered-Skill adapter
+compiles runtime requests from registry entries and declared Markdown
+knowledge; provider sanitization is transport-neutral; provider adapters submit
+the compiled request and parse typed responses. Compatibility adapter methods
+may delegate to this compiler, but they must not own a second copy of Skill
+semantics or select undeclared knowledge.
+
 The registry is an enabling slice of the Agentic vertical milestone. It must not
 become a long standalone governance project that delays the first real Design
 Episode.
@@ -371,11 +423,14 @@ Current code provides:
 
 - one broad `AgentAdapter`;
 - deterministic and JSON-contract adapters;
-- static inline skill/knowledge summaries;
+- a bounded declared-Markdown knowledge loader for registered runtime Skills;
 - a bounded episode state machine;
 - a deterministic one-shot proposer around `create_part_ir`;
 - deterministic template-backed CAD execution.
 - a typed `design_part` v0.2 runtime skill definition;
+- a typed `work_design` v0.1 runtime Skill and Work-scoped Episode before Part
+  Jobs, with clarification, proposal validation, CadFlow-owned decomposition,
+  and append-only evidence;
 - a provider-selected design episode in which the
   provider may request semantic context, create or patch a candidate, react to
   validator observations, ask the user, or stop;

@@ -26,8 +26,12 @@ A selected Work has:
 
 - **Overview / Design** — what matters now;
 - **Workflow** — how the Work got here, its branches/states, and available transitions;
-- **Parts** — Part Jobs, attempts, results, interfaces, and acceptance;
-- **History** — immutable Runs and Run Snapshots.
+
+These are the two persistent primary destinations. **Parts** is shown as a
+contextual destination when a Work has meaningful decomposition (normally more
+than one Part Job). **History** is a subordinate immutable-evidence destination
+when Runs exist, not an equal-priority step in the normal design journey. Their
+routes and mature inspection components remain available.
 
 Overview is the default landing page. Workflow is not merely Diagnostics; it is the first-class map of the Work.
 
@@ -64,6 +68,25 @@ Both views derive from the same Work/Run/Part Job state and must never contradic
 Workflow is a live state graph, not a script.
 
 The Agent is not required to execute nodes in a fixed UI-defined sequence. The graph is produced after/because durable product state changes.
+
+Workflow is both the orientation surface and the primary command surface for
+the Current Work. Selecting a meaningful node should expose a concise
+interaction projection: current state, why it matters, whether attention is
+required, one dominant valid action, secondary valid actions, relevant
+result/Agent/validation evidence, and any honest unavailable reason. These
+actions call existing backend/orchestrator commands; the graph is not the
+command engine or state owner.
+
+**Current Attention** is a derived presentation concept, not a global current
+node. A single-Part Work may have one attention node; parallel Part Jobs may
+simultaneously expose several waiting, reviewable, blocked, or active nodes.
+Selection, attention, actions, and layout are not persisted.
+
+Current Attention is rendered as an index, not a second graph or action
+console. A single-Part Work uses one compact current-task row; a multi-Part
+Work uses a compact per-Part list whose items select the corresponding graph
+node. The selected-node inspector remains the precise Workflow command
+surface.
 
 The graph should be built from existing:
 
@@ -227,6 +250,11 @@ The graph should make the new branch understandable.
 
 Existing accepted results remain until explicitly replaced by acceptance of another result.
 
+Use wording such as **Start new version from this result**. Do not promise
+arbitrary-node replay: only reviewable/accepted results and other states backed
+by an existing safe domain command may branch. Unsupported historical nodes
+remain inspection-only with a clear explanation.
+
 ## 12. Overview / Design composition
 
 The existing Work Overview remains the default landing surface.
@@ -246,7 +274,12 @@ Recommended information order:
 
 Do not make internal artifact names the information architecture.
 
-## 13. Agent Design, Activity, and Output
+Overview normally has one dominant Work-level action. Agent Activity explains
+progress and Part cards navigate to their current graph state; neither repeats
+that dominant command. Empty Agent Design, geometry, and Agent Output states
+stay compact until durable evidence exists.
+
+## 13. Agent Design, Activity, and Technical Evidence
 
 Keep these distinct.
 
@@ -258,13 +291,15 @@ What the Agent currently proposes to build, based only on persisted concise desi
 
 What is currently happening in product language.
 
-### Agent Output
+### Technical Evidence
 
-What the external Agent explicitly returned to CadFlow, sanitized and readable for debugging/recovery.
+What the external Agent explicitly returned to CadFlow plus exact scoped
+runtime evidence, sanitized and readable for debugging/recovery. It is loaded
+only on explicit disclosure and browser rendering is bounded.
 
 Do not expose private chain-of-thought or credentials.
 
-Agent Output/technical evidence may be expandable and should not dominate the normal page.
+Technical Evidence is expandable and must not dominate the normal page.
 
 ## 14. Geometry preview
 
@@ -409,7 +444,10 @@ Success is a real state change, not merely a returned function value.
 
 Reuse the existing responsive system.
 
-At desktop, graph and detail may sit side-by-side when useful.
+At desktop, the normal Current Work Workflow uses a graph-and-inspector
+master-detail layout so node selection updates nearby detail without a long
+scroll. Phase labels remain compact orientation above the topology and do not
+reserve four equal empty lanes.
 
 At 1024px and mobile, prioritize:
 
@@ -418,7 +456,9 @@ At 1024px and mobile, prioritize:
 - geometry;
 - primary action.
 
-The graph may scroll/zoom rather than compressing every label beyond readability.
+At narrower widths graph and inspector stack. The topology may scroll within
+its own surface rather than forcing page-level horizontal overflow or
+compressing every label beyond readability.
 
 ## 25. Avoid over-designing Workflow
 

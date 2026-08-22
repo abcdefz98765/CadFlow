@@ -5,6 +5,8 @@ from ai_native_cad.orchestration.ports import (
     DesignEpisodeArtifact,
     DesignPartEpisodeOutcome,
     DesignPartEpisodeRequest,
+    WorkDesignEpisodeOutcome,
+    WorkDesignEpisodeRequest,
 )
 from ai_native_cad.orchestration.work_orchestrator import WorkOrchestrator
 
@@ -13,5 +15,7 @@ __all__ = [
     "DesignEpisodeArtifact",
     "DesignPartEpisodeOutcome",
     "DesignPartEpisodeRequest",
+    "WorkDesignEpisodeOutcome",
+    "WorkDesignEpisodeRequest",
     "WorkOrchestrator",
 ]

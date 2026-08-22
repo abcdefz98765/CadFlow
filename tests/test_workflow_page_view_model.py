@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from ai_native_cad.domain.records import create_artifact_reference, register_artifact_references
 from ai_native_cad.workflow_console import WorkflowConsoleBackend
 from ai_native_cad.workflow_console.workflow_page_view_model import build_workflow_page_view_model
 
@@ -33,6 +34,43 @@ def _work_with_failed_latest_attempt(tmp_path):
     return backend
 
 
+def _register_route_stop(
+    backend: WorkflowConsoleBackend,
+    work_id: str,
+    part_job_id: str,
+    run_id: str,
+    stop_reason: str,
+) -> str:
+    artifact_id = f"route_{stop_reason}"
+    relative_path = f"episodes/design_part/{artifact_id}/product_route_result.json"
+    target = backend._work_runs_root(work_id) / run_id / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps({
+        "episode": {
+            "status": "safely_blocked",
+            "stop_reason": stop_reason,
+        }
+    }) + "\n", encoding="utf-8")
+    reference = create_artifact_reference(
+        artifact_id=artifact_id,
+        work_id=work_id,
+        run_id=run_id,
+        part_job_id=part_job_id,
+        relative_path=relative_path,
+        phase="design",
+        checkpoint="product_design_routing",
+        trust_role="diagnostic",
+        validation_status="blocked",
+    )
+    manifest = register_artifact_references(
+        backend._read_work_manifest(work_id),
+        [reference],
+    )
+    backend._write_work_manifest(work_id, manifest)
+    backend.invalidate_work_index()
+    return artifact_id
+
+
 def test_current_work_uses_explicit_active_lineage_not_latest_attempt(tmp_path):
     backend = _work_with_failed_latest_attempt(tmp_path)
 
@@ -41,7 +79,8 @@ def test_current_work_uses_explicit_active_lineage_not_latest_attempt(tmp_path):
     assert page["view_mode"] == "current_work"
     assert page["active_lineage"]["active_root_run_id"] == "accepted_root"
     assert page["active_lineage"]["latest_attempt_run_id"] == "failed_attempt"
-    assert page["source"]["projection"]["root_run_id"] == "accepted_root"
+    assert page["source"]["projection"] == "agent_first"
+    assert page["workflow_graph"]["state_source"] == "work_manifest_runs_part_jobs_artifact_references"
     assert {item["run_id"]: item["lineage_state"] for item in page["run_strip"]}["failed_attempt"] == "failed_branch"
 
 
@@ -57,6 +96,7 @@ def test_run_snapshot_is_read_only_and_uses_only_selected_run(tmp_path):
 
     assert page["read_only"] is True
     assert page["viewed_run_id"] == "failed_attempt"
+    assert page["historical_run_summary"]["request"] == "Create a failed alternative."
     assert page["selected_stage"]["user_input"]["source_run_id"] == "failed_attempt"
     assert all(action["target_run_id"] == "failed_attempt" for action in page["available_actions"]["disabled_actions"])
     assert all("read-only" in str(action.get("disabled_reason", "")).lower() for action in page["available_actions"]["disabled_actions"] if action.get("backend_action") != "run_rework")
@@ -65,33 +105,130 @@ def test_run_snapshot_is_read_only_and_uses_only_selected_run(tmp_path):
 def test_graph_nodes_have_required_contract_and_selected_is_not_status(tmp_path):
     backend = _work_with_failed_latest_attempt(tmp_path)
     page = build_workflow_page_view_model(backend, "lineage_work", view_mode="current_work")
-    nodes = [*page["workflow_graph"]["stage_spine"], *page["workflow_graph"]["selected_part_pipeline"], *page["workflow_graph"]["review_tail"]]
+    nodes = page["workflow_graph"]["nodes"]
 
     assert nodes
     for node in nodes:
-        assert node["stage_id"]
+        assert node["id"]
         assert node["label"]
         assert node["status"]
-        assert node["short_summary"]
-        assert node["kind"] in {"stage", "review", "rework"}
+        assert node["kind"]
+        assert node["group"] in {"intent", "design", "build_evaluate", "accept_deliver"}
         assert isinstance(node["selected"], bool)
         assert node["status"] != "selected"
+    assert [item["id"] for item in page["phase_groups"]] == [
+        "intent", "design", "build_evaluate", "accept_deliver"
+    ]
+    assert {item["id"] for item in nodes} != {item["id"] for item in page["phase_groups"]}
 
 
-def test_current_work_actions_have_one_primary_and_an_explicit_target(tmp_path):
+def test_selecting_current_work_graph_node_is_presentation_only(tmp_path):
     backend = _work_with_failed_latest_attempt(tmp_path)
+    before = backend._read_work_manifest("lineage_work")
+    page = build_workflow_page_view_model(
+        backend, "lineage_work", view_mode="current_work", selected_stage_id="work:request"
+    )
 
-    page = build_workflow_page_view_model(backend, "lineage_work", view_mode="current_work")
-    primary = page["available_actions"]["primary_action"]
+    assert page["selected_node"]["id"] == "work:request"
+    assert page["workflow_graph"]["selection_is_presentation_only"] is True
+    assert backend._read_work_manifest("lineage_work") == before
 
-    assert primary is not None
-    assert primary["scope"] == "current_work"
-    assert primary["target_work_id"] == "lineage_work"
-    assert primary["target_run_id"] == "accepted_root"
-    assert primary["next_stage_on_success"] == "workflow_review"
-    assert primary["label"] == "Refresh agent workflow review"
-    assert primary["backend_action"] == "create_workflow_review"
-    assert page["selected_stage"]["primary_action"] == primary
+
+def test_beginning_work_and_current_attempt_expose_existing_agent_command(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    work_id = "panel_bracket"
+    backend.create_work("Panel bracket", "Design a compact panel bracket.", work_id=work_id)
+    backend.create_work_part_attempt(
+        work_id, "primary_part", role="Primary design part", run_id="panel_bracket_attempt"
+    )
+    manifest = backend._read_work_manifest(work_id)
+    job = manifest["part_jobs"][0]
+    run_id = job["active_attempt_run_id"]
+
+    request_page = build_workflow_page_view_model(
+        backend, work_id, selected_stage_id="work:request", language="en"
+    )
+    attempt_page = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id=f"attempt:{job['part_job_id']}:{run_id}",
+        language="en",
+    )
+
+    assert request_page["recommended_next_action"]["key"] == "continue_agent"
+    assert request_page["recommended_next_action"]["label"] == "Start Primary Part design"
+    assert attempt_page["available_actions"]["primary_action"]["key"] == "continue_agent"
+    assert attempt_page["selected_node"]["user_state"] == "ready"
+    assert attempt_page["selected_node"]["interaction"]["requires_user_action"] is False
+    assert attempt_page["current_attention"][0]["state"] == "ready"
+    assert attempt_page["action_inventory"]
+    assert all(node["interaction"]["business_state_owner"] == "domain" for node in attempt_page["nodes"])
+    assert "global_current_node" not in json.dumps(attempt_page)
+
+
+def test_retry_is_exposed_only_for_retryable_current_stop(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    created = backend.create_product_design("Design a small clamp.", title="Clamp")
+    work_id = created["work_id"]
+    backend.create_work_part_attempt(work_id, "clamp", role="Explicit compatibility Part")
+    manifest = backend._read_work_manifest(work_id)
+    job = manifest["part_jobs"][0]
+    run_id = job["active_attempt_run_id"]
+    historical_artifact = _register_route_stop(
+        backend, work_id, job["part_job_id"], run_id, "user_input_required"
+    )
+    retry_artifact = _register_route_stop(
+        backend, work_id, job["part_job_id"], run_id, "provider_failure"
+    )
+
+    retry_page = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id=f"attempt:{job['part_job_id']}:{run_id}",
+        language="en",
+    )
+    assert retry_page["recommended_next_action"]["key"] == "retry_agent"
+    assert retry_page["current_attention"][0]["node_id"] == f"attempt:{job['part_job_id']}:{run_id}"
+    assert retry_page["selected_node"]["user_state"] == "blocked"
+    assert retry_page["current_attention"][0]["state"] == "blocked"
+    assert not any(node["kind"] == "recovery" for node in retry_page["nodes"])
+    evidence_ids = {
+        item["artifact_id"]
+        for item in retry_page["selected_node"]["detail"]["agent_output"][
+            "technical_evidence_references"
+        ]
+    }
+    assert {historical_artifact, retry_artifact} <= evidence_ids
+    part_node = next(
+        node for node in retry_page["nodes"]
+        if node["id"] == f"part:{job['part_job_id']}"
+    )
+    attempt_node = next(
+        node for node in retry_page["nodes"]
+        if node["id"] == f"attempt:{job['part_job_id']}:{run_id}"
+    )
+    assert part_node["status"] == "incomplete"
+    assert part_node["user_state"] == "attention"
+    assert attempt_node["status"] == "blocked"
+
+    other = backend.create_product_design("Design an unsupported mechanism.", title="Unsupported")
+    other_id = other["work_id"]
+    backend.create_work_part_attempt(other_id, "mechanism", role="Explicit compatibility Part")
+    other_manifest = backend._read_work_manifest(other_id)
+    other_job = other_manifest["part_jobs"][0]
+    other_run = other_job["active_attempt_run_id"]
+    unsupported_artifact = _register_route_stop(
+        backend, other_id, other_job["part_job_id"], other_run, "unsupported_capability"
+    )
+    unsupported_page = build_workflow_page_view_model(
+        backend,
+        other_id,
+        selected_stage_id=f"attempt:{other_job['part_job_id']}:{other_run}",
+        language="en",
+    )
+    assert unsupported_page["recommended_next_action"]["key"] == "modify_request"
+    assert unsupported_page["selected_node"]["user_state"] == "blocked"
+    assert all(action["key"] != "retry_agent" for action in unsupported_page["action_inventory"])
 
 
 def test_workflow_review_uses_human_stage_output_and_source_aware_artifact_contract(tmp_path):
@@ -110,7 +247,13 @@ def test_workflow_review_uses_human_stage_output_and_source_aware_artifact_contr
     (run_dir / "workflow_review.md").write_text("# Workflow Review\n", encoding="utf-8")
     backend.invalidate_work_index()
 
-    page = build_workflow_page_view_model(backend, "lineage_work", view_mode="current_work", selected_stage_id="workflow_review")
+    page = build_workflow_page_view_model(
+        backend,
+        "lineage_work",
+        view_mode="run_snapshot",
+        selected_run_id="accepted_root",
+        selected_stage_id="workflow_review",
+    )
     stage = page["selected_stage"]
 
     assert stage["agent_output"]["summary"].startswith("Workflow review created successfully")
@@ -120,83 +263,502 @@ def test_workflow_review_uses_human_stage_output_and_source_aware_artifact_contr
     assert output["workflow_review.json"]["open_action"] == {"type": "artifact_dialog"}
     assert output["workflow_review.json"]["source_run_id"] == "accepted_root"
     reports = next(item for item in stage["evidence"] if item["name"] == "report.json")
-    assert reports["related_count"] == 1
-    assert reports["related"][0]["source_run_id"] == "single_part_upper_link"
     assert "token" not in reports["content"]
     assert "raw_provider_response" not in reports["content"]
-    assert "Target:" not in page["available_actions"]["primary_action"]["tooltip"]
-    assert len(page["available_actions"]["primary_action"]["tooltip"].splitlines()) <= 3
+    assert page["read_only"] is True
 
 
-def test_enabled_actions_expose_localized_labels_and_tooltips(tmp_path):
+def test_dynamic_graph_phase_groups_and_node_labels_are_bilingual(tmp_path):
     backend = _work_with_failed_latest_attempt(tmp_path)
 
     chinese = build_workflow_page_view_model(backend, "lineage_work", view_mode="current_work", language="zh")
     english = build_workflow_page_view_model(backend, "lineage_work", view_mode="current_work", language="en")
 
-    for page, language in ((chinese, "zh"), (english, "en")):
-        for action in page["action_inventory"]:
-            assert action["category"]
-            assert action["tooltip"]
-            assert action["label_i18n"][language] == action["label"]
-            assert "backend_action" not in action["tooltip"]
-    assert "Available" not in chinese["available_actions"]["primary_action"]["tooltip"]
-    assert "Target:" not in chinese["available_actions"]["primary_action"]["tooltip"]
+    assert [item["label"] for item in chinese["phase_groups"]] == ["意图", "设计", "构建与评估", "接受与交付"]
+    assert [item["label"] for item in english["phase_groups"]] == ["Intent", "Design", "Build & Evaluate", "Accept & Deliver"]
+    assert chinese["nodes"][0]["label"] == "用户目标"
+    assert english["nodes"][0]["label"] == "User Goal"
 
 
-def test_every_visible_stage_has_a_complete_bilingual_guidance_contract(tmp_path):
-    backend = _work_with_failed_latest_attempt(tmp_path)
-    english = build_workflow_page_view_model(backend, "lineage_work", language="en")
-    chinese = build_workflow_page_view_model(backend, "lineage_work", language="zh")
-    fields = {
-        "stage_purpose", "current_conclusion", "why_this_matters", "user_decision_required",
-        "user_decision_summary", "recommended_next_action", "expected_result", "normal_next_stage",
-        "blocked_reason", "recovery_action", "limitations",
+def test_multi_part_current_work_has_one_branch_per_durable_part_job(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work(
+        "Two-part fixture",
+        "Design a base and a cover as separate parts.",
+        work_id="two_part_work",
+    )
+    backend.create_work_part_attempt(
+        "two_part_work", "base", role="base plate", run_id="base_attempt_1"
+    )
+    backend.create_work_part_attempt(
+        "two_part_work", "cover", role="protective cover", run_id="cover_attempt_1"
+    )
+
+    page = build_workflow_page_view_model(backend, "two_part_work", language="en")
+
+    assert [item["part_job_id"] for item in page["workflow_graph"]["branches"]] == [
+        "base", "cover"
+    ]
+    assert {
+        node["part_job_id"] for node in page["nodes"] if node["kind"] == "part"
+    } == {"base", "cover"}
+    assert next(node for node in page["nodes"] if node["id"] == "work:request")["label"] == "User Goal"
+    assert not any(node["kind"] == "decomposition" for node in page["nodes"])
+    assert not any(node["kind"] == "assembly" for node in page["nodes"])
+    assert page["workflow_graph"]["compatibility_mode"] is False
+    assert len(page["current_attention"]) == 2
+    assert {item["part_job_id"] for item in page["current_attention"]} == {"base", "cover"}
+    assert {item["state"] for item in page["current_attention"]} == {"ready"}
+    assert all(item["part_label"] for item in page["current_attention"])
+
+
+def test_semantic_graph_folds_internal_attempt_evidence_but_keeps_results_and_revision(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    work_id = "semantic_projection_work"
+    part_job_id = "clamp"
+    first_run_id = "clamp_attempt_1"
+    revision_run_id = "clamp_attempt_2"
+    result_id = "clamp_reviewable_1"
+    backend.create_work("Clamp", "Design a compact clamp.", work_id=work_id)
+    backend.create_work_part_attempt(
+        work_id, part_job_id, role="Fixture clamp", run_id=first_run_id
+    )
+    backend.create_work_part_attempt(
+        work_id,
+        part_job_id,
+        role="Fixture clamp",
+        run_id=revision_run_id,
+        parent_run_id=first_run_id,
+    )
+
+    def register_evidence(
+        artifact_id: str,
+        checkpoint: str,
+        trust_role: str,
+        content: dict,
+        *,
+        source_artifact_ids: list[str] | None = None,
+        validation_status: str = "recorded",
+    ) -> None:
+        relative_path = f"evidence/{artifact_id}.json"
+        target = backend._work_runs_root(work_id) / revision_run_id / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(content) + "\n", encoding="utf-8")
+        reference = create_artifact_reference(
+            artifact_id=artifact_id,
+            work_id=work_id,
+            run_id=revision_run_id,
+            part_job_id=part_job_id,
+            relative_path=relative_path,
+            phase="design",
+            checkpoint=checkpoint,
+            trust_role=trust_role,
+            source_artifact_ids=source_artifact_ids,
+            validation_status=validation_status,
+        )
+        manifest = register_artifact_references(
+            backend._read_work_manifest(work_id), [reference]
+        )
+        backend._write_work_manifest(work_id, manifest)
+
+    for checkpoint in (
+        "design_brief",
+        "model_program_candidate",
+        "geometry_candidate",
+        "cad_ir_draft",
+        "execution_observation",
+    ):
+        register_evidence(
+            f"internal_{checkpoint}",
+            checkpoint,
+            "candidate" if checkpoint != "execution_observation" else "observation",
+            {"checkpoint": checkpoint, "codes": []},
+        )
+    register_evidence(
+        "clamp_question",
+        "clarification_decision",
+        "diagnostic",
+        {"questions": [{"question": "Which fastener size is required?"}]},
+        validation_status="user_input_required",
+    )
+    register_evidence(
+        "clamp_answer",
+        "clarification_decision",
+        "accepted_input",
+        {"question": "Which fastener size is required?", "answer": "M5"},
+        source_artifact_ids=["clamp_question"],
+        validation_status="passed",
+    )
+
+    reviewable_path = "results/reviewable_result.json"
+    reviewable_target = (
+        backend._work_runs_root(work_id) / first_run_id / reviewable_path
+    )
+    reviewable_target.parent.mkdir(parents=True, exist_ok=True)
+    reviewable_target.write_text(
+        json.dumps({"geometry": {"valid": True}, "validation": {}}) + "\n",
+        encoding="utf-8",
+    )
+    reviewable_reference = create_artifact_reference(
+        artifact_id=result_id,
+        work_id=work_id,
+        run_id=first_run_id,
+        part_job_id=part_job_id,
+        relative_path=reviewable_path,
+        phase="accept_deliver",
+        checkpoint="reviewable_result",
+        trust_role="reviewable_result",
+        validation_status="passed",
+    )
+    manifest = register_artifact_references(
+        backend._read_work_manifest(work_id), [reviewable_reference]
+    )
+    manifest["accepted_part_results"] = {
+        part_job_id: {
+            "status": "approved",
+            "result_id": result_id,
+            "part_job_id": part_job_id,
+            "attempt_run_id": first_run_id,
+            "run_id": first_run_id,
+            "review_id": "review_1",
+            "artifact_ids": [result_id],
+        }
     }
-    assert {stage["stage_id"] for stage in english["stages"]} == {stage["stage_id"] for stage in chinese["stages"]}
-    for english_stage, chinese_stage in zip(english["stages"], chinese["stages"]):
-        assert fields <= set(english_stage["guidance"])
-        assert fields <= set(chinese_stage["guidance"])
-        assert english_stage["guidance"]["stage_purpose"]
-        assert chinese_stage["guidance"]["stage_purpose"]
-        assert all(ord(char) < 128 or "\u4e00" <= char <= "\u9fff" or char in "，。；：、（）" for char in chinese_stage["guidance"]["current_conclusion"])
-        assert isinstance(english_stage["guidance"]["user_decision_required"], bool)
+    manifest["work_design"].update({
+        "status": "completed",
+        "current_design": {"generated_parts": [{"part_job_id": part_job_id}]},
+    })
+    manifest["part_jobs"][0]["attempts"][1]["source_result_id"] = result_id
+    backend._write_work_manifest(work_id, manifest)
+    _register_route_stop(
+        backend, work_id, part_job_id, revision_run_id, "provider_failure"
+    )
+
+    page = build_workflow_page_view_model(backend, work_id, language="en")
+    nodes = page["nodes"]
+    node_ids = {node["id"] for node in nodes}
+    node_kinds = {node["kind"] for node in nodes}
+
+    assert "work:decomposition" not in node_ids
+    assert not node_kinds & {"design", "candidate", "build", "decomposition"}
+    assert not any(
+        checkpoint in node["id"]
+        for checkpoint in {
+            "design_brief",
+            "model_program_candidate",
+            "geometry_candidate",
+            "cad_ir_draft",
+            "execution_observation",
+        }
+        for node in nodes
+    )
+    revision_attempt = next(
+        node
+        for node in nodes
+        if node["id"] == f"attempt:{part_job_id}:{revision_run_id}"
+    )
+    assert {
+        f"internal_{checkpoint}"
+        for checkpoint in {
+            "design_brief",
+            "model_program_candidate",
+            "geometry_candidate",
+            "cad_ir_draft",
+            "execution_observation",
+        }
+    } <= {
+        reference["artifact_id"]
+        for reference in revision_attempt["detail"]["agent_output"][
+            "technical_evidence_references"
+        ]
+    }
+    assert {"decision", "reviewable", "accepted", "attempt", "part"} <= node_kinds
+    assert not any(node["kind"] == "assembly" for node in nodes)
+    assert any(
+        edge["source"] == "work:design" and edge["target"] == f"part:{part_job_id}"
+        for edge in page["edges"]
+    )
+    assert any(
+        edge["type"] == "revised"
+        and edge["source"] == f"result:{result_id}"
+        and edge["target"] == f"attempt:{part_job_id}:{revision_run_id}"
+        for edge in page["edges"]
+    )
+    assert revision_attempt["status"] == "blocked"
 
 
-def test_artifact_roles_do_not_conflate_unverified_inputs_or_failed_outputs(tmp_path):
-    backend = _work_with_failed_latest_attempt(tmp_path)
-    page = build_workflow_page_view_model(backend, "lineage_work", language="en")
+def test_failed_execution_observation_marks_folded_attempt_failed(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    work_id = "failed_observation_work"
+    part_job_id = "bracket"
+    run_id = "bracket_attempt_1"
+    backend.create_work("Bracket", "Design a bracket.", work_id=work_id)
+    backend.create_work_part_attempt(
+        work_id, part_job_id, role="Mounting bracket", run_id=run_id
+    )
+    relative_path = "episodes/failed_observation.json"
+    target = backend._work_runs_root(work_id) / run_id / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps({"codes": ["cad_execution_failed"]}) + "\n",
+        encoding="utf-8",
+    )
+    reference = create_artifact_reference(
+        artifact_id="failed_execution_observation",
+        work_id=work_id,
+        run_id=run_id,
+        part_job_id=part_job_id,
+        relative_path=relative_path,
+        phase="build_evaluate",
+        checkpoint="execution_observation",
+        trust_role="diagnostic",
+        validation_status="failed",
+    )
+    manifest = register_artifact_references(
+        backend._read_work_manifest(work_id), [reference]
+    )
+    backend._write_work_manifest(work_id, manifest)
 
-    for stage in page["stages"]:
-        detail = build_workflow_page_view_model(
-            backend,
-            "lineage_work",
-            language="en",
-            selected_stage_id=stage["stage_id"],
-        )["selected_stage"]
-        for artifact in detail["user_input"]["artifacts"]:
-            if artifact["trust_status"] == "accepted_upstream":
-                assert artifact["artifact_role"] == "accepted_input"
-            else:
-                assert artifact["artifact_role"] in {"unverified_input", "stale_input"}
-        for artifact in detail["agent_output"]["artifacts"]:
-            if artifact["name"] not in {"model.py", "model.step", "model.stl", "preview.png"}:
-                continue
-            if artifact["trust_status"] == "accepted":
-                assert artifact["artifact_role"] == "final_output"
-            elif artifact["trust_status"] == "reviewable":
-                assert artifact["artifact_role"] == "attempt_output"
-            else:
-                assert artifact["artifact_role"] == "diagnostic_evidence"
-                assert artifact["downloadable"] is False
+    page = build_workflow_page_view_model(backend, work_id, language="en")
+    attempt = next(
+        node
+        for node in page["nodes"]
+        if node["id"] == f"attempt:{part_job_id}:{run_id}"
+    )
+
+    assert attempt["status"] == "failed"
+    assert not any(
+        node["kind"] == "build" or "execution_observation" in node["id"]
+        for node in page["nodes"]
+    )
+    assert "failed_execution_observation" in {
+        item["artifact_id"]
+        for item in attempt["detail"]["agent_output"][
+            "technical_evidence_references"
+        ]
+    }
+
+
+def test_two_part_selected_node_scope_isolated_from_work_and_sibling_output(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    created = backend.create_product_design(
+        "Design a camera cradle and a separate extrusion adapter.",
+        title="Scoped two-Part fixture",
+    )
+    work_id = created["work_id"]
+    backend.create_work_requirement_run(
+        work_id,
+        "Design a camera cradle and a separate extrusion adapter.",
+        run_id="work_design_run",
+    )
+    work_run_id = "work_design_run"
+    backend.create_work_part_attempt(
+        work_id,
+        "camera_cradle",
+        prompt="Part Job: Camera Cradle\nRole: Hold the camera",
+        role="Hold the camera",
+        run_id="camera_attempt_1",
+    )
+    backend.create_work_part_attempt(
+        work_id,
+        "extrusion_adapter",
+        prompt="Part Job: Extrusion Adapter\nRole: Attach the cradle to the rail",
+        role="Attach the cradle to the rail",
+        run_id="adapter_attempt_1",
+    )
+    manifest = backend._read_work_manifest(work_id)
+    manifest["work_design"].update({
+        "status": "completed",
+        "run_id": work_run_id,
+        "current_design": {
+            "concept_summary": "Keep the camera support separate from the rail adapter.",
+            "generated_parts": [
+                {"part_job_id": "camera_cradle", "name": "Camera Cradle", "role": "Hold the camera"},
+                {"part_job_id": "extrusion_adapter", "name": "Extrusion Adapter", "role": "Attach the cradle to the rail"},
+            ],
+            "reference_components": [],
+            "interfaces": [],
+            "dependencies": [],
+            "assumptions": [],
+            "unresolved_questions": [],
+            "assembly_expected": False,
+            "recommendation": "Design each Part independently.",
+        },
+    })
+    backend._write_work_manifest(work_id, manifest)
+
+    def register_output(
+        *,
+        artifact_id: str,
+        run_id: str,
+        part_job_id: str | None,
+        action: str,
+    ) -> None:
+        relative_path = f"episodes/{artifact_id}/agent_exchange.jsonl"
+        target = backend._work_runs_root(work_id) / run_id / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({
+            "event_type": "agent_response",
+            "schema_version": 1,
+            "sequence": 1,
+            "action": action,
+            "provider_identity": {"provider": "scripted", "model": artifact_id},
+        }) + "\n", encoding="utf-8")
+        reference = create_artifact_reference(
+            artifact_id=artifact_id,
+            work_id=work_id,
+            run_id=run_id,
+            part_job_id=part_job_id,
+            relative_path=relative_path,
+            phase="design",
+            checkpoint="agent_output",
+            trust_role="observation",
+            validation_status="recorded",
+        )
+        updated = register_artifact_references(
+            backend._read_work_manifest(work_id),
+            [reference],
+        )
+        backend._write_work_manifest(work_id, updated)
+        backend.invalidate_work_index()
+
+    register_output(
+        artifact_id="work_design_output",
+        run_id=work_run_id,
+        part_job_id=None,
+        action="propose_work_design",
+    )
+    register_output(
+        artifact_id="camera_output",
+        run_id="camera_attempt_1",
+        part_job_id="camera_cradle",
+        action="create_contract",
+    )
+
+    work_page = build_workflow_page_view_model(
+        backend, work_id, selected_stage_id="work:design", language="en"
+    )
+    camera_page = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id="attempt:camera_cradle:camera_attempt_1",
+        language="en",
+    )
+    adapter_page = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id="attempt:extrusion_adapter:adapter_attempt_1",
+        language="en",
+    )
+
+    def output_actions(page):
+        return [
+            item.get("action")
+            for item in page["selected_node"]["detail"]["agent_output"]["items"]
+            if item.get("kind") == "agent_response"
+        ]
+
+    assert output_actions(work_page) == ["propose_work_design"]
+    assert output_actions(camera_page) == ["create_contract"]
+    assert output_actions(adapter_page) == []
+    assert adapter_page["selected_node"]["detail"]["agent_output"]["empty_message"] == (
+        "No Part Agent output yet."
+    )
+    assert "Camera Cradle" in camera_page["selected_node"]["detail"]["prompt"]
+    assert "Extrusion Adapter" not in camera_page["selected_node"]["detail"]["prompt"]
+    assert camera_page["selected_node"]["detail"]["part"]["role"] == "Hold the camera"
+    assert adapter_page["selected_node"]["detail"]["part"]["role"] == (
+        "Attach the cradle to the rail"
+    )
+    camera_action = camera_page["available_actions"]["primary_action"]
+    adapter_action = adapter_page["available_actions"]["primary_action"]
+    assert camera_action["part_job_id"] == "camera_cradle"
+    assert camera_action["target_run_id"] == "camera_attempt_1"
+    assert camera_action["target_stage_id"] == "attempt:camera_cradle:camera_attempt_1"
+    assert adapter_action["part_job_id"] == "extrusion_adapter"
+    assert adapter_action["target_run_id"] == "adapter_attempt_1"
+    assert adapter_action["label"] == "Start Extrusion Adapter design"
+    assert {item["part_job_id"] for item in adapter_page["current_attention"]} == {
+        "camera_cradle",
+        "extrusion_adapter",
+    }
+
+    register_output(
+        artifact_id="adapter_output",
+        run_id="adapter_attempt_1",
+        part_job_id="extrusion_adapter",
+        action="create_model_program",
+    )
+    camera_after = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id="attempt:camera_cradle:camera_attempt_1",
+        language="en",
+    )
+    adapter_after = build_workflow_page_view_model(
+        backend,
+        work_id,
+        selected_stage_id="attempt:extrusion_adapter:adapter_attempt_1",
+        language="en",
+    )
+    assert output_actions(camera_after) == ["create_contract"]
+    assert output_actions(adapter_after) == ["create_model_program"]
+    assert adapter_after["available_actions"]["primary_action"]["label"] == (
+        "Continue Extrusion Adapter"
+    )
+
+
+def test_legacy_part_job_is_badged_as_compatibility_projection(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work("Legacy fixture", "Imported fixture.", work_id="legacy_work")
+    backend.create_work_part_attempt(
+        "legacy_work", "legacy_part", role="legacy part", run_id="legacy_attempt"
+    )
+    manifest = backend._read_work_manifest("legacy_work")
+    manifest["part_jobs"][0]["source"] = "assembly_plan"
+    backend._write_work_manifest("legacy_work", manifest)
+    backend.invalidate_work_index()
+
+    page = build_workflow_page_view_model(backend, "legacy_work", language="en")
+
+    assert page["workflow_graph"]["compatibility_mode"] is True
+    assert any(edge["type"] == "imported" for edge in page["edges"])
+
+
+def test_revision_edges_are_not_inferred_from_prompt_or_attempt_order(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work("Fixture", "Design a clamp.", work_id="no_inference_work")
+    backend.create_work_part_attempt(
+        "no_inference_work", "clamp", prompt="Design the clamp.", run_id="attempt_1"
+    )
+    backend.create_work_part_attempt(
+        "no_inference_work",
+        "clamp",
+        prompt="Revise the earlier clamp and make it wider.",
+        run_id="attempt_2",
+    )
+
+    page = build_workflow_page_view_model(backend, "no_inference_work", language="en")
+    second_id = "attempt:clamp:attempt_2"
+
+    assert page["nodes"][-1]["detail"]["source_result_id"] is None
+    assert any(
+        edge["target"] == second_id and edge["type"] == "attempted"
+        for edge in page["edges"]
+    )
+    assert not any(
+        edge["target"] == second_id and edge["type"] == "revised"
+        for edge in page["edges"]
+    )
 
 
 def test_contract_guidance_and_snapshot_guidance_preserve_user_workflow_semantics(tmp_path):
     backend = _work_with_failed_latest_attempt(tmp_path)
-    current = build_workflow_page_view_model(backend, "lineage_work", selected_stage_id="part_modeling")
     snapshot = build_workflow_page_view_model(
         backend, "lineage_work", view_mode="run_snapshot", selected_run_id="accepted_root", selected_stage_id="part_modeling",
     )
-    assert current["selected_stage"]["guidance"]["normal_next_stage"] == "Part Result Review"
     assert snapshot["selected_stage"]["guidance"]["user_decision_summary"].startswith("This historical Run is read-only")
     assert snapshot["selected_stage"]["guidance"]["recovery_action"].startswith("Return to Current Work")
+    assert snapshot["historical_run_summary"]["read_only"] is True
+    assert snapshot["historical_run_summary"]["legacy_workflow_is_primary"] is False
+    assert snapshot["historical_run_summary"]["compatibility_evidence_available"] is True

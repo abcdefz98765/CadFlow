@@ -26,8 +26,8 @@ M2 backend Agentic vertical slice          implemented, formal acceptance pendin
 M2.5 Workbench MVP                         complete
 M2.6 Product Golden / design story         complete
 M2.7 onboarding / Settings / recovery      complete
-M2.8 Dynamic Work Graph                    NEXT
-M2 external-provider product trial         after M2.8
+M2.8 Dynamic Work Graph                    complete
+M2 external-provider product trial         NEXT
 M3 capability-expansion decision           evidence-driven
 M4 multi-Part / Assembly                   later
 M5 Deliverables                            later
@@ -196,6 +196,17 @@ Start with the minimum node/edge vocabulary required by the scenarios above.
 Do not design the final graph schema for all future Assembly/Deliverable capabilities.
 
 If the existing domain state cannot express one required graph fact, identify that exact gap before adding any durable field.
+
+Status: complete on 2026-08-09. Current Work now projects a dynamic graph from
+the Work manifest, Part Jobs, attempts, artifact references, reviewable
+results, and accepted pointers. Optional revision provenance on Part attempts
+is the only new durable fact; it prevents prompt/order inference. Historical
+Run Snapshots retain the read-only compatibility graph. Automated and real
+NiceGUI browser verification covered beginning, clarification/resume, typed
+block, reviewable, accepted, revision, multi-Part, node detail, Run Snapshot,
+Chinese, 1440px, 1024px, and 390px scenarios. No graph persistence, workflow
+engine, Assembly execution, Deliverables, or new security/provider framework
+was added.
 
 ## M2 external-provider product trial and acceptance
 

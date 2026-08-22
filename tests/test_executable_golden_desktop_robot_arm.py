@@ -23,15 +23,17 @@ def _run_contract(tmp_path, monkeypatch):
     module = _module()
     workspace = tmp_path / "workspace"
     result = module.run_golden_workflow(workspace, mode="contract", project_root=tmp_path)
-    run = workspace / "works" / module.WORK_ID / "runs" / module.RUN_ID
+    run = workspace / ".internal" / "dev-works" / module.WORK_ID / "runs" / module.RUN_ID
     return module, workspace, run, result
 
 
 def test_executable_golden_contract_creates_real_work_and_required_artifacts(tmp_path, monkeypatch):
     module, workspace, run, result = _run_contract(tmp_path, monkeypatch)
 
-    manifest = json.loads((workspace / "works" / module.WORK_ID / "work_manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((workspace / ".internal" / "dev-works" / module.WORK_ID / "work_manifest.json").read_text(encoding="utf-8"))
     assert manifest["title"] == "Golden Desktop Robot Arm"
+    assert manifest["metadata"]["work_classification"] == "compatibility_regression"
+    assert not (workspace / "works" / module.WORK_ID).exists()
     assert manifest["root_run_id"] == module.RUN_ID
     assert manifest["active_lineage"]["active_root_run_id"] == module.RUN_ID
     assert manifest["active_lineage"]["accepted_run_ids"] == [module.RUN_ID]
@@ -71,12 +73,27 @@ def test_executable_golden_contract_uses_generic_ir_without_assembly_claim(tmp_p
     assert not (run / "05_single_create/single_part_upper_link/model.stl").exists()
 
 
+def test_executable_golden_reuses_no_existing_work_data(tmp_path, monkeypatch):
+    module, workspace, _, _ = _run_contract(tmp_path, monkeypatch)
+    original_manifest = workspace / ".internal" / "dev-works" / module.WORK_ID / "work_manifest.json"
+    before = original_manifest.read_text(encoding="utf-8")
+
+    second = module.run_golden_workflow(workspace, mode="contract", project_root=tmp_path)
+
+    assert second["work_id"] == f"{module.WORK_ID}_attempt_2"
+    assert original_manifest.read_text(encoding="utf-8") == before
+    assert (workspace / ".internal" / "dev-works" / second["work_id"] / "work_manifest.json").is_file()
+    assert not (workspace / "works" / second["work_id"]).exists()
+
+
 def test_executable_golden_work_is_discoverable_by_web_backend(tmp_path, monkeypatch):
     module, workspace, _, _ = _run_contract(tmp_path, monkeypatch)
     backend = WorkflowConsoleBackend(project_root=tmp_path, workspace_root=workspace)
 
+    normal_works = backend.list_works()["works"]
     works = backend.list_works(filters={"show_developer": True})["works"]
     work = backend.get_work_detail(module.WORK_ID)
+    assert module.WORK_ID not in {item["work_id"] for item in normal_works}
     assert module.WORK_ID in {item["work_id"] for item in works}
     assert work["summary"]["title"] == "Golden Desktop Robot Arm"
 
@@ -100,7 +117,7 @@ def test_executable_golden_full_mode_generates_step_and_stl(tmp_path, monkeypatc
     workspace = tmp_path / "workspace"
 
     result = module.run_golden_workflow(workspace, mode="full", project_root=tmp_path)
-    run = workspace / "works" / module.WORK_ID / "runs" / module.RUN_ID
+    run = workspace / ".internal" / "dev-works" / module.WORK_ID / "runs" / module.RUN_ID
     child = run / "05_single_create" / "single_part_upper_link"
     assert result["comparison"]["passed"] is True
     assert (child / "model.step").exists()

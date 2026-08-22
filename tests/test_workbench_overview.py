@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 from copy import deepcopy
 
@@ -23,6 +24,7 @@ from ai_native_cad.workflow_console.nicegui_app import (
 )
 from ai_native_cad.workflow_console.workflow_page_view_model import (
     build_workbench_overview_view_model,
+    build_workflow_page_view_model,
 )
 
 
@@ -179,6 +181,25 @@ def test_reviewable_overview_uses_canonical_phase_and_hides_evidence_by_default(
 
 def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_path):
     backend, result_id = _backend(tmp_path)
+    review_page = build_workflow_page_view_model(
+        backend,
+        "workbench_work",
+        selected_stage_id=f"result:{result_id}",
+        language="en",
+    )
+    assert review_page["recommended_next_action"]["key"] == "accept_reviewable_result"
+    authority = review_page["source"]["overview"]["command_authority"]["parts"]["mounting_bracket"]
+    assert review_page["recommended_next_action"]["key"] == authority["primary_action"]["key"]
+    assert review_page["recommended_next_action"]["target_run_id"] == authority["primary_action"]["target_run_id"]
+    assert review_page["selected_node"]["user_state"] == "review"
+    assert review_page["recommended_next_action"]["reviewable_result_id"] == result_id
+    assert [item["key"] for item in review_page["available_actions"]["secondary_actions"]] == [
+        "revise_reviewable_result"
+    ]
+    assert [item["key"] for item in authority["secondary_actions"]] == [
+        "revise_reviewable_result"
+    ]
+    assert review_page["current_attention"][0]["node_id"] == f"result:{result_id}"
     state = {}
     refresh_count = 0
 
@@ -207,6 +228,15 @@ def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_pa
     assert pointer["result_id"] == result_id
     assert state["action_execution"]["status"] == "succeeded"
     assert state["action_execution"]["postcondition_verified"] is True
+    accepted_page = build_workflow_page_view_model(
+        backend,
+        "workbench_work",
+        selected_stage_id=f"accepted:mounting_bracket:{result_id}",
+        language="en",
+    )
+    assert accepted_page["selected_node"]["status"] == "accepted"
+    assert accepted_page["recommended_next_action"]["key"] == "revise_reviewable_result"
+    assert accepted_page["available_actions"]["secondary_actions"] == []
 
     revise_action = {
         "key": "revise_reviewable_result",
@@ -229,6 +259,18 @@ def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_pa
     assert revised["orchestration"]["command"] == "revise_reviewable_part_result"
     assert final["accepted_part_results"]["mounting_bracket"] == pointer
     assert len(final["part_jobs"][0]["attempts"]) == 2
+    revision_attempt = final["part_jobs"][0]["attempts"][1]
+    assert revision_attempt["parent_run_id"] == "mounting_bracket_attempt_1"
+    assert revision_attempt["source_result_id"] == result_id
+    revised_page = build_workflow_page_view_model(
+        backend,
+        "workbench_work",
+        language="en",
+    )
+    assert any(node["status"] == "accepted" and node.get("result_id") == result_id for node in revised_page["nodes"])
+    assert any(edge["type"] == "revised" for edge in revised_page["edges"])
+    assert revised_page["current_attention"][0]["node_id"].startswith("attempt:mounting_bracket:")
+    assert revised_page["current_attention"][0]["primary_action"]["key"] == "continue_agent"
     overview = build_workbench_overview_view_model(
         backend,
         "workbench_work",
@@ -241,6 +283,17 @@ def test_accept_and_revise_use_existing_lifecycle_and_preserve_acceptance(tmp_pa
     assert overview["current_result"]["revision_in_progress"] is True
     assert overview["part_jobs"][0]["has_accepted_result"] is True
     assert overview["part_jobs"][0]["attempt_count"] == 2
+    workflow = build_workflow_page_view_model(backend, "workbench_work", language="zh")
+    graph_nodes = {item["id"]: item for item in workflow["nodes"]}
+    revision_node_id = f"attempt:mounting_bracket:{revision_attempt['run_id']}"
+    accepted_node_id = f"accepted:mounting_bracket:{result_id}"
+    assert graph_nodes[revision_node_id]["detail"]["source_result_id"] == result_id
+    assert graph_nodes[accepted_node_id]["status"] == "accepted"
+    assert workflow["selected_node"]["id"] == revision_node_id
+    assert any(
+        edge["target"] == revision_node_id and edge["type"] == "revised"
+        for edge in workflow["edges"]
+    )
     assert refresh_count >= 4
 
 
@@ -264,6 +317,23 @@ def test_registered_step_reuses_existing_stl_viewer_with_ephemeral_mesh(tmp_path
         assert preview_path.stat().st_size > 0
     finally:
         preview_path.unlink(missing_ok=True)
+
+
+def test_bounded_evidence_group_preserves_exact_registered_identity(tmp_path):
+    backend, _ = _backend(tmp_path)
+    manifest = backend._read_work_manifest("workbench_work")
+    json_ids = [
+        item["artifact_id"]
+        for item in manifest["artifact_references"]
+        if str(item.get("relative_path") or "").endswith((".json", ".jsonl"))
+    ][:2]
+
+    loaded = backend.read_work_artifact_references(
+        "workbench_work", json_ids, limit=24
+    )
+
+    assert [item["reference"]["artifact_id"] for item in loaded] == json_ids
+    assert all(isinstance(item["content"], dict) for item in loaded)
 
 
 def test_deterministic_work_is_honestly_labeled_and_reuses_stl_preview(tmp_path):
@@ -321,8 +391,8 @@ def test_deterministic_work_is_honestly_labeled_and_reuses_stl_preview(tmp_path)
 
     assert overview["capability"]["key"] == "deterministic_compatibility"
     assert overview["capability"]["label"] == "确定性兼容模式"
-    assert overview["preview"]["kind"] == "legacy_stl"
-    assert "model.stl" in overview["preview"]["viewer_url"]
+    assert overview["preview"]["kind"] == "registered_stl"
+    assert "deterministic_stl" in overview["preview"]["viewer_url"]
     assert overview["part_jobs"][0]["state"] == "accepted"
 
 
@@ -350,6 +420,26 @@ def test_workbench_keeps_existing_shell_lifecycle_viewer_and_secondary_surfaces(
     assert "workbench-primary-grid" in WORKFLOW_UI_CSS
     assert "@media(max-width:1100px)" in WORKFLOW_UI_CSS
     assert "@media(max-width:760px)" in WORKFLOW_UI_CSS
+
+
+def test_overview_has_one_dominant_action_owner_and_compact_empty_states():
+    from ai_native_cad.workflow_console import nicegui_app
+    from ai_native_cad.workflow_console import agent_activity_ui
+
+    overview_source = inspect.getsource(nicegui_app._render_work_overview)
+    task_source = inspect.getsource(nicegui_app._render_overview_current_task)
+    activity_source = inspect.getsource(agent_activity_ui.render_agent_activity)
+    parts_source = inspect.getsource(nicegui_app._render_workbench_parts_summary)
+
+    assert "_show_continue_agent_confirmation" not in overview_source
+    assert task_source.count("_show_continue_agent_confirmation") == 1
+    assert "if has_preview" in overview_source
+    assert "if has_activity" in overview_source
+    assert "technical_evidence_references" in activity_source
+    assert "on_value_change=open_evidence" in activity_source
+    assert "workbench-agent-output-compact" not in activity_source
+    assert "recommended_action" not in parts_source
+    assert "View current step in Workflow" in parts_source
 
 
 def test_chinese_and_english_product_copy_exist():

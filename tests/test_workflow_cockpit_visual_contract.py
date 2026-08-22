@@ -12,6 +12,7 @@ from ai_native_cad.examples import golden_desktop_robot_arm as golden_service
 from ai_native_cad.pipeline import runner as pipeline_runner
 from ai_native_cad.workflow_console import WorkflowConsoleBackend
 from ai_native_cad.workflow_console.nicegui_app import WORKFLOW_UI_CSS, WORK_USER_PAGES
+from ai_native_cad.workflow_console import workflow_graph_ui
 from ai_native_cad.workflow_console.workflow_page_view_model import build_workflow_page_view_model
 
 
@@ -20,42 +21,158 @@ def _contract_page(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     result = golden_service.run_golden_workflow(workspace, mode="contract", project_root=tmp_path)
     backend = WorkflowConsoleBackend(project_root=tmp_path, workspace_root=workspace)
-    return build_workflow_page_view_model(backend, result["work_id"], selected_stage_id="part_modeling")
+    return build_workflow_page_view_model(backend, result["work_id"])
 
 
 def test_visual_tokens_keep_status_selection_attention_and_horizontal_graph_separate(tmp_path, monkeypatch):
     page = _contract_page(tmp_path, monkeypatch)
-    nodes = [
-        *page["workflow_graph"]["stage_spine"],
-        *page["workflow_graph"]["selected_part_pipeline"],
-        *page["workflow_graph"]["review_tail"],
-    ]
+    nodes = page["workflow_graph"]["nodes"]
 
-    assert all(node["label"] and node["short_summary"] for node in nodes)
+    assert all(node["label"] and node["summary"] for node in nodes)
     assert all(node["status"] != "selected" and isinstance(node["selected"], bool) for node in nodes)
-    assert all(node["attention"] in {"none", "required", "in_progress"} for node in nodes)
     assert "overflow-x:auto" in WORKFLOW_UI_CSS
-    assert ".workflow-graph-canvas{min-width:" in WORKFLOW_UI_CSS
-    assert ".workflow-step-selected" in WORKFLOW_UI_CSS
-    assert ".workflow-attention" in WORKFLOW_UI_CSS
+    assert ".dynamic-workflow-canvas{min-width:" in WORKFLOW_UI_CSS
+    assert ".dynamic-phase-grid{display:flex" in WORKFLOW_UI_CSS
+    assert ".workflow-master-detail{display:grid" in WORKFLOW_UI_CSS
+    assert ".dynamic-edge-line" in WORKFLOW_UI_CSS
+    assert ".dynamic-node.selected" in WORKFLOW_UI_CSS
     assert ".workflow-dot.status-unavailable" in WORKFLOW_UI_CSS
     assert ".workflow-dot.status-execution_skipped" in WORKFLOW_UI_CSS
+    assert ".workflow-dot.status-reviewable" in WORKFLOW_UI_CSS
+    assert ".workflow-dot.status-accepted" in WORKFLOW_UI_CSS
 
 
-def test_candidate_reference_and_contract_rendering_contracts_are_explicit(tmp_path, monkeypatch):
+def test_dynamic_renderer_keeps_compact_semantic_topology_and_local_scroll_contract():
+    source = inspect.getsource(workflow_graph_ui)
+
+    # Rendering consumes the existing projection (spine, branches, attempts and
+    # edges) rather than introducing graph-owned layout or state.
+    assert "dynamic-spine-row" in source
+    assert "dynamic-branch-list" in source
+    assert 'variant="part"' in source
+    assert "dynamic-attempt-label" in source
+    assert "Revision from result" in source
+    assert "Recovery child" in source
+    assert 'ui.element("button")' in source
+    assert 'data-node-id="{node_id}"' in source
+    assert 'aria-label="{aria_label}"' in source
+    assert 'type="button"' in source
+    assert "summary" not in inspect.getsource(workflow_graph_ui._render_dynamic_graph_node)
+
+    # Compact controls remain comfortably clickable, preserve selection as an
+    # outer ring, and make state readable through both glyph and label.
+    assert ".dynamic-node{box-sizing:border-box" in WORKFLOW_UI_CSS
+    assert "min-height:44px" in WORKFLOW_UI_CSS
+    assert ".dynamic-node.selected{border-color:#2563eb;outline:3px" in WORKFLOW_UI_CSS
+    assert "box-shadow:inset 0 0 0 2px" in WORKFLOW_UI_CSS
+    assert ".workflow-dot.status-running:after{content:'↻'" in WORKFLOW_UI_CSS
+    assert ".workflow-dot.status-reviewable:after{content:'◉'" in WORKFLOW_UI_CSS
+    assert ".workflow-dot.status-accepted:after{content:'✓'" in WORKFLOW_UI_CSS
+    assert ".workflow-dot.status-blocked:after,.workflow-dot.status-failed:after{content:'×'" in WORKFLOW_UI_CSS
+
+    # The shared fan-out trunk and the dashed child revision connector remain
+    # graph-local, including on narrow screens where only this surface scrolls.
+    assert ".dynamic-branch-list:before" in WORKFLOW_UI_CSS
+    assert ".dynamic-branch-list.from-work-path" in WORKFLOW_UI_CSS
+    assert ".dynamic-branch:before" in WORKFLOW_UI_CSS
+    assert ".dynamic-attempt-row.revision:before" in WORKFLOW_UI_CSS
+    assert ".dynamic-attempt-row.revision.from-result" in WORKFLOW_UI_CSS
+    assert "border-left:2px dashed" in WORKFLOW_UI_CSS
+    assert "overscroll-behavior-x:contain" in WORKFLOW_UI_CSS
+    assert "@media(max-width:760px){.dynamic-workflow-shell" in WORKFLOW_UI_CSS
+
+
+def test_dynamic_node_renders_as_escaped_button_and_targets_projected_selection():
+    class Element:
+        def __init__(self, tag, text=None):
+            self.tag = tag
+            self.text = text
+            self.class_names = ""
+            self.properties = ""
+            self.handlers = {}
+
+        def classes(self, value):
+            self.class_names = value
+            return self
+
+        def props(self, value):
+            self.properties = value
+            return self
+
+        def on(self, event, callback):
+            self.handlers[event] = callback
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class UI:
+        def __init__(self):
+            self.elements = []
+
+        def element(self, tag):
+            item = Element(tag)
+            self.elements.append(item)
+            return item
+
+        def row(self):
+            item = Element("row")
+            self.elements.append(item)
+            return item
+
+        def label(self, value):
+            item = Element("label", value)
+            self.elements.append(item)
+            return item
+
+    ui = UI()
+    selected = []
+    node_id = 'part:<camera>"'
+    workflow_graph_ui._render_dynamic_graph_node(
+        ui,
+        {
+            "id": node_id,
+            "label": 'Camera <Cradle> "long label"',
+            "kind": "part",
+            "status": "blocked",
+            "selected": True,
+        },
+        {"design": "Design"},
+        selected.append,
+        "en",
+        variant="part",
+    )
+
+    button = ui.elements[0]
+    assert button.tag == "button"
+    assert {"dynamic-node-part", "blocked", "selected"} <= set(
+        button.class_names.split()
+    )
+    assert 'type="button"' in button.properties
+    assert "&lt;camera&gt;&quot;" in button.properties
+    assert "Camera &lt;Cradle&gt; &quot;long label&quot;. Blocked." in button.properties
+    button.handlers["click"](None)
+    assert selected == [node_id]
+
+
+def test_current_work_does_not_fabricate_part_branches_or_legacy_graph_nodes(tmp_path, monkeypatch):
     page = _contract_page(tmp_path, monkeypatch)
     graph = page["workflow_graph"]
 
-    assert graph["part_candidates"] and graph["reference_lane"]
-    assert {item["kind"] for item in graph["part_candidates"]} == {"candidate_part"}
-    assert {item["kind"] for item in graph["reference_lane"]} == {"reference_component"}
-    assert page["selected_stage"]["status"] == "execution_skipped"
-    assert page["selected_stage"]["agent_output"]["step_stl_expectation"] == "not_expected"
-    guidance = page["selected_stage"]["guidance"]
-    assert guidance["current_conclusion"].startswith("CAD IR is validated")
-    assert guidance["normal_next_stage"] == "Part Result Review"
-    assert any("STEP/STL are not expected" in item for item in guidance["limitations"])
-    assert "reference-component" in WORKFLOW_UI_CSS
+    assert graph["compatibility_mode"] is False
+    assert graph["branches"] == []
+    assert {item["kind"] for item in graph["nodes"]} <= {
+        "request", "part", "attempt", "decision", "design", "candidate",
+        "build", "recovery", "reviewable", "accepted", "work_design",
+    }
+    assert "part_candidates" not in graph
+    assert "reference_lane" not in graph
+    assert {(item["source"], item["target"]) for item in graph["edges"]} == {
+        ("work:request", "work:design")
+    }
 
 
 def test_current_and_snapshot_page_structure_are_distinguishable(tmp_path, monkeypatch):
@@ -68,11 +185,14 @@ def test_current_and_snapshot_page_structure_are_distinguishable(tmp_path, monke
     )
 
     assert page["view_mode"] == "current_work"
-    assert page["current_conclusion"]["title"] == "CAD IR contract validated"
+    assert page["projection_mode"] == "agent_first"
+    assert page["workflow_graph"]["topology"] == "dynamic_work_graph"
     assert snapshot["read_only"] is True
     assert "read-only" in snapshot["read_only_reason"].lower()
-    assert [page for page, _icon, _label in WORK_USER_PAGES] == ["overview", "workflow", "parts", "history"]
-    assert "grid-template-columns:repeat(3" in WORKFLOW_UI_CSS
+    assert "stage_spine" in snapshot["workflow_graph"]
+    assert [page for page, _icon, _label in WORK_USER_PAGES] == ["overview", "workflow"]
+    assert "grid-template-columns:repeat(4" in WORKFLOW_UI_CSS
+    assert ".workflow-inspector-pane{min-width:0;position:sticky" in WORKFLOW_UI_CSS
     assert "@media(max-width:760px)" in WORKFLOW_UI_CSS
 
 

@@ -1,10 +1,14 @@
 import importlib.util
 import asyncio
 import json
+import threading
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
+from ai_native_cad.agents import JsonContractAgentAdapter
+from ai_native_cad.domain.records import create_artifact_reference
 from ai_native_cad.workflow_console import WorkflowConsoleBackend
 from ai_native_cad.workflow_console.nicegui_app import (
     ARTIFACT_PAGE_ARTIFACTS,
@@ -24,6 +28,7 @@ from ai_native_cad.workflow_console.nicegui_app import (
     WORK_USER_PAGES,
     PAGE_IDS,
     _page_selection_callback,
+    _run_selection_callback,
     _select_console_page,
     _select_console_run,
     _select_console_work,
@@ -31,6 +36,10 @@ from ai_native_cad.workflow_console.nicegui_app import (
     _part_viewer_url,
     _run_workflow_page_action,
     _execute_action_lifecycle,
+    _agent_terminal_outcome,
+    _continue_agent_async,
+    _pending_action_matches,
+    _workflow_graph_with_runtime,
     _save_artifact_override_ui,
 )
 from ai_native_cad.workflow_console.routes import dispatch_route
@@ -52,6 +61,35 @@ def _does_not_contain_absolute_paths(value, root: Path):
     if isinstance(value, str):
         return str(root.resolve()) not in value and not Path(value).is_absolute()
     return True
+
+
+def test_current_work_page_assembly_does_not_build_legacy_surfaces(tmp_path, monkeypatch):
+    backend = WorkflowConsoleBackend(
+        project_root=tmp_path, workspace_root=tmp_path / "workspace"
+    )
+    backend.create_workspace()
+    backend.create_work("Canonical", "Design one bracket.", work_id="canonical")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("current canonical page assembled a compatibility surface")
+
+    monkeypatch.setattr(
+        "ai_native_cad.workflow_console.nicegui_app.build_work_stage_projection",
+        forbidden,
+    )
+    monkeypatch.setattr(
+        "ai_native_cad.workflow_console.nicegui_app.build_workflow_review_surface",
+        forbidden,
+    )
+    data = build_console_page_data(
+        backend,
+        selected_work_id="canonical",
+        active_page="workflow",
+    )
+
+    assert data["workflow_page"]["projection_mode"] == "agent_first"
+    assert data["workflow_review_surface"]["stages"] == []
+    assert data["selected_run"] is None
 
 
 def test_console_page_navigation_contract_preserves_work_and_reaches_workflow_view_model(tmp_path):
@@ -91,6 +129,10 @@ def test_console_navigation_callbacks_consume_events_and_snapshot_boundaries():
     callback(object())
     assert selected_pages == ["workflow"]
     assert all(page in PAGE_IDS for page in selected_pages)
+    selected_runs = []
+    run_callback = _run_selection_callback(selected_runs.append, "run-1")
+    run_callback(object())
+    assert selected_runs == ["run-1"]
 
     state = {"selected_work_id": "work-1", "selected_node_id": "node-1", "selected_stage_id": "part_modeling"}
     refreshes = []
@@ -167,6 +209,382 @@ def test_action_lifecycle_reports_failed_postcondition_and_rejects_duplicate_cli
     assert state["action_execution"]["status"] == "failed"
     assert state["action_execution"]["postcondition_verified"] is False
     assert "postcondition mismatch" in state["action_execution"]["error_detail"]
+
+
+def test_action_lifecycle_uses_cached_pending_refresh_then_full_terminal_refresh():
+    state = {}
+    refreshes = []
+
+    def refresh():
+        refreshes.append("terminal")
+
+    def refresh_pending():
+        refreshes.append("pending_cached")
+
+    refresh.pending = refresh_pending
+    result = asyncio.run(
+        _execute_action_lifecycle(
+            {"key": "continue_agent", "target_work_id": "work"},
+            state,
+            refresh,
+            lambda: {"ok": True},
+            language="en",
+        )
+    )
+
+    assert result == {"ok": True}
+    assert refreshes == ["pending_cached", "terminal"]
+
+
+def test_agent_action_is_pending_disabled_and_running_before_terminal_success():
+    state = {}
+    refresh_states = []
+    started = threading.Event()
+    release = threading.Event()
+    action = {
+        "key": "continue_agent",
+        "label": "Start Camera Cradle design",
+        "scope_label": "Camera Cradle",
+        "target_work_id": "scope_work",
+        "part_job_id": "camera_cradle",
+        "target_run_id": "camera_attempt_1",
+        "target_stage_id": "attempt:camera_cradle:camera_attempt_1",
+    }
+
+    def refresh():
+        refresh_states.append(dict(state.get("action_execution") or {}))
+
+    def execute():
+        started.set()
+        assert release.wait(timeout=5)
+        return {
+            "episode": {
+                "status": "completed",
+                "stop_reason": "completed_with_reviewable_result",
+                "reviewable_result_id": "camera_result_1",
+            }
+        }
+
+    async def exercise():
+        task = asyncio.create_task(
+            _execute_action_lifecycle(
+                action,
+                state,
+                refresh,
+                execute,
+                language="en",
+                terminal=lambda value: _agent_terminal_outcome(action, value, "en"),
+            )
+        )
+        while not started.is_set():
+            await asyncio.sleep(0.01)
+        assert state["action_execution"]["status"] == "pending"
+        assert state["action_execution"]["command_acknowledged"] is True
+        assert state["action_execution"]["runtime_outcome"] == "running"
+        assert _pending_action_matches(state, action) is True
+        graph = _workflow_graph_with_runtime(
+            {
+                "nodes": [{"id": action["target_stage_id"], "status": "not_started"}],
+                "current_attention": [{"node_id": action["target_stage_id"], "state": "ready"}],
+            },
+            state,
+            "en",
+        )
+        assert graph["nodes"][0]["status"] == "running"
+        assert graph["current_attention"][0]["state"] == "running"
+        duplicate = await _execute_action_lifecycle(
+            action,
+            state,
+            refresh,
+            lambda: pytest.fail("duplicate invocation reached the backend"),
+            language="en",
+        )
+        assert duplicate is None
+        release.set()
+        return await task
+
+    result = asyncio.run(exercise())
+    assert result["episode"]["reviewable_result_id"] == "camera_result_1"
+    assert refresh_states[0]["status"] == "pending"
+    assert refresh_states[0]["message"] == "Starting Camera Cradle design…"
+    assert state["action_execution"]["status"] == "succeeded"
+    assert state["action_execution"]["runtime_outcome"] == "reviewable_result_ready"
+    assert "ready for review" in state["action_execution"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("stop_reason", "expected_status", "expected_outcome", "message_fragment"),
+    [
+        ("user_input_required", "warning", "user_input_required", "input is needed"),
+        ("provider_failure", "failed", "provider_failure", "provider request failed"),
+        ("validation_exhausted", "failed", "validation_exhausted", "validation was exhausted"),
+        ("unsupported_capability", "warning", "unsupported_capability", "not currently supported"),
+        ("sandbox_unavailable", "failed", "environment_runtime_failure", "runtime is unavailable"),
+        ("policy_blocked", "failed", "policy_block", "Extrusion Adapter stopped."),
+        ("budget_exhausted", "warning", "budget_exhausted", "exhausted its budget"),
+    ],
+)
+def test_agent_terminal_feedback_uses_typed_episode_outcome(
+    stop_reason, expected_status, expected_outcome, message_fragment
+):
+    status, message, outcome = _agent_terminal_outcome(
+        {"scope_label": "Extrusion Adapter"},
+        {"episode": {"status": "safely_blocked", "stop_reason": stop_reason}},
+        "en",
+    )
+
+    assert status == expected_status
+    assert outcome == expected_outcome
+    assert message_fragment in message
+
+
+def test_policy_blocked_lifecycle_feedback_does_not_repeat_recovery_diagnosis():
+    status, message, outcome = _agent_terminal_outcome(
+        {"scope_label": "Work Design"},
+        {"episode": {"status": "safely_blocked", "stop_reason": "policy_blocked"}},
+        "zh",
+    )
+
+    assert (status, message, outcome) == ("failed", "Work Design 已停止。", "policy_block")
+
+
+def test_continue_agent_executes_exact_selected_part_and_run():
+    class Backend:
+        def __init__(self):
+            self.manifest = {"accepted_part_results": {}, "artifact_references": []}
+            self.calls = []
+
+        def _read_work_manifest(self, work_id):
+            assert work_id == "two_part_work"
+            return {
+                "accepted_part_results": dict(self.manifest["accepted_part_results"]),
+                "artifact_references": list(self.manifest["artifact_references"]),
+            }
+
+        def run_work_part_design_episode(
+            self, work_id, part_job_id, *, request_id, attempt_run_id
+        ):
+            self.calls.append((work_id, part_job_id, attempt_run_id, request_id))
+            self.manifest["artifact_references"].append({"artifact_id": "adapter_route"})
+            return {
+                "episode": {
+                    "status": "safely_blocked",
+                    "stop_reason": "provider_failure",
+                }
+            }
+
+    backend = Backend()
+    state = {}
+    action = {
+        "key": "continue_agent",
+        "label": "Start Extrusion Adapter design",
+        "scope_label": "Extrusion Adapter",
+        "target_work_id": "two_part_work",
+        "part_job_id": "extrusion_adapter",
+        "target_run_id": "adapter_attempt_1",
+        "target_stage_id": "attempt:extrusion_adapter:adapter_attempt_1",
+    }
+
+    result = asyncio.run(
+        _continue_agent_async(backend, action, state, lambda: None, "en")
+    )
+
+    assert result["episode"]["stop_reason"] == "provider_failure"
+    assert backend.calls[0][:3] == (
+        "two_part_work",
+        "extrusion_adapter",
+        "adapter_attempt_1",
+    )
+    assert state["action_execution"]["status"] == "failed"
+    assert state["action_execution"]["runtime_outcome"] == "provider_failure"
+
+
+def test_recovery_retry_appends_one_child_part_attempt_before_running_agent():
+    class Backend:
+        def __init__(self):
+            self.manifest = {
+                "accepted_part_results": {"camera_cradle": {"result_id": "accepted_1"}},
+                "artifact_references": [{"artifact_id": "parent_route"}],
+                "part_jobs": [{
+                    "part_job_id": "camera_cradle",
+                    "role": "Hold the camera",
+                    "active_attempt_run_id": "camera_attempt_1",
+                    "attempts": [{
+                        "run_id": "camera_attempt_1",
+                        "parent_run_id": None,
+                    }],
+                }],
+            }
+            self.create_calls = []
+            self.episode_calls = []
+
+        def _read_work_manifest(self, work_id):
+            assert work_id == "owner_fixture"
+            return json.loads(json.dumps(self.manifest))
+
+        def create_work_part_attempt(
+            self, work_id, part_job_id, *, role, parent_run_id
+        ):
+            self.create_calls.append((work_id, part_job_id, role, parent_run_id))
+            job = self.manifest["part_jobs"][0]
+            job["attempts"].append({
+                "run_id": "camera_attempt_2",
+                "parent_run_id": parent_run_id,
+            })
+            job["active_attempt_run_id"] = "camera_attempt_2"
+            return {"part_job": json.loads(json.dumps(job)), "run": {"run_id": "camera_attempt_2"}}
+
+        def run_work_part_design_episode(
+            self, work_id, part_job_id, *, request_id, attempt_run_id
+        ):
+            self.episode_calls.append((work_id, part_job_id, attempt_run_id, request_id))
+            self.manifest["artifact_references"].append({"artifact_id": "child_route"})
+            return {"episode": {"status": "safely_blocked", "stop_reason": "provider_failure"}}
+
+    backend = Backend()
+    accepted_before = json.loads(json.dumps(backend.manifest["accepted_part_results"]))
+    action = {
+        "key": "retry_agent",
+        "label": "Start a new Camera Cradle attempt",
+        "target_work_id": "owner_fixture",
+        "part_job_id": "camera_cradle",
+        "target_run_id": "camera_attempt_1",
+        "recovery_mode": "new_attempt",
+    }
+    state = {}
+
+    result = asyncio.run(_continue_agent_async(backend, action, state, lambda: None, "en"))
+
+    assert result["episode"]["stop_reason"] == "provider_failure"
+    assert backend.create_calls == [
+        ("owner_fixture", "camera_cradle", "Hold the camera", "camera_attempt_1")
+    ]
+    assert backend.episode_calls[0][:3] == (
+        "owner_fixture", "camera_cradle", "camera_attempt_2"
+    )
+    job = backend.manifest["part_jobs"][0]
+    assert len(job["attempts"]) == 2
+    assert job["active_attempt_run_id"] == "camera_attempt_2"
+    assert job["attempts"][-1]["parent_run_id"] == "camera_attempt_1"
+    assert backend.manifest["accepted_part_results"] == accepted_before
+    assert len(backend.manifest["artifact_references"]) == 2
+    assert state["action_execution"]["status"] == "failed"
+    assert state["action_execution"]["runtime_outcome"] == "provider_failure"
+
+
+def test_recovery_retry_persists_child_attempt_and_binds_episode_to_new_run(tmp_path):
+    class Client:
+        def __init__(self):
+            self.responses = [
+                {"action": "request_context", "context_key": "part_job"},
+                {
+                    "action": "create_contract",
+                    "contract_type": "cad_ir_draft",
+                    "contract": {
+                        "part_type": "simple_bracket",
+                        "part_name": "clamp",
+                        "unit": "mm",
+                        "dimensions": {
+                            "base_length": 50,
+                            "base_width": 30,
+                            "height": 35,
+                            "thickness": 5,
+                        },
+                        "features": {},
+                        "outputs": ["step", "stl"],
+                        "check_level": "L0",
+                    },
+                },
+                {"action": "request_validation"},
+            ]
+
+        @property
+        def provider_identity(self):
+            return {"provider": "scripted", "model": "recovery-fixture"}
+
+        def generate_json_contract(self, request):
+            return self.responses.pop(0)
+
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work("Clamp", work_id="clamp_work")
+    backend.create_work_part_attempt(
+        "clamp_work", "clamp", role="moving jaw", run_id="clamp_attempt_1"
+    )
+    backend._work_orchestrator().accept_part_result(
+        "clamp_work",
+        part_job_id="clamp",
+        result_id="part_result:clamp:accepted",
+        attempt_run_id="clamp_attempt_1",
+        result_run_id="clamp_attempt_1",
+        review_id="review_001",
+        artifact_references=[
+            create_artifact_reference(
+                artifact_id="artifact:clamp:accepted",
+                work_id="clamp_work",
+                run_id="clamp_attempt_1",
+                part_job_id="clamp",
+                relative_path="model.step",
+                phase="build_evaluate",
+                checkpoint="reviewable_result",
+                trust_role="reviewable_result",
+                validation_status="passed",
+                created_at="2026-08-21T00:00:00+00:00",
+            )
+        ],
+    )
+    backend.stage_runner.agent_adapter = JsonContractAgentAdapter(
+        Client(), provider="scripted", model="recovery-fixture"
+    )
+    before = backend._read_work_manifest("clamp_work")
+    before_job = deepcopy(before["part_jobs"][0])
+    before_accepted = deepcopy(before["accepted_part_results"])
+    before_old_references = deepcopy(
+        [item for item in before["artifact_references"] if item["run_id"] == "clamp_attempt_1"]
+    )
+    old_run_dir = backend._work_runs_root("clamp_work") / "clamp_attempt_1"
+    old_run_snapshot = {
+        item.relative_to(old_run_dir).as_posix(): item.read_bytes()
+        for item in old_run_dir.rglob("*")
+        if item.is_file()
+    }
+
+    result = asyncio.run(
+        _continue_agent_async(
+            backend,
+            {
+                "key": "retry_agent",
+                "target_work_id": "clamp_work",
+                "part_job_id": "clamp",
+                "target_run_id": "clamp_attempt_1",
+                "recovery_mode": "new_attempt",
+            },
+            {},
+            lambda: None,
+            "en",
+        )
+    )
+
+    after = backend._read_work_manifest("clamp_work")
+    job = after["part_jobs"][0]
+    child_run_id = job["active_attempt_run_id"]
+    assert result["episode"]["validated"] is True
+    assert len(job["attempts"]) == len(before_job["attempts"]) + 1
+    assert child_run_id != "clamp_attempt_1"
+    assert job["attempts"][-1]["run_id"] == child_run_id
+    assert job["attempts"][-1]["parent_run_id"] == "clamp_attempt_1"
+    assert after["accepted_part_results"] == before_accepted
+    assert job["attempts"][0] == before_job["attempts"][0]
+    assert [item for item in after["artifact_references"] if item["run_id"] == "clamp_attempt_1"] == before_old_references
+    assert {
+        item.relative_to(old_run_dir).as_posix(): item.read_bytes()
+        for item in old_run_dir.rglob("*")
+        if item.is_file()
+    } == old_run_snapshot
+    child_references = [
+        item for item in after["artifact_references"] if item["run_id"] == child_run_id
+    ]
+    assert child_references
+    assert all(item["run_id"] == child_run_id for item in result["artifact_references"])
 
 
 def _does_not_contain_text(value, blocked):
@@ -527,6 +945,25 @@ def test_nicegui_work_dashboard_does_not_mix_debug_group_into_work_list(tmp_path
     assert "__debug_runs__" not in {work["work_id"] for work in shown["works"]}
 
 
+def test_nicegui_developer_toggle_loads_isolated_developer_work(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    backend.create_work(
+        "Browser review fixture",
+        work_id="browser_review_fixture",
+        metadata={"work_classification": "developer_fixture"},
+    )
+
+    hidden = build_console_page_data(backend, active_page="works")
+    shown = build_console_page_data(
+        backend,
+        active_page="works",
+        show_debug_works=True,
+    )
+
+    assert "browser_review_fixture" not in {work["work_id"] for work in hidden["works"]}
+    assert "browser_review_fixture" in {work["work_id"] for work in shown["works"]}
+
+
 def test_nicegui_real_work_entity_can_be_created_without_runs_or_cad(tmp_path):
     backend = WorkflowConsoleBackend(project_root=tmp_path)
 
@@ -585,15 +1022,17 @@ def test_nicegui_workspace_examples_are_visible_as_workspace_works(tmp_path):
         backend,
         selected_work_id="multi_part_enclosure_planning",
         active_page="parts",
+        show_debug_works=True,
     )
     reviewed_data = build_console_page_data(
         backend,
         selected_work_id="reviewed_one_part_enclosure_base",
         active_page="products",
+        show_debug_works=True,
     )
 
     assert response["ok"] is True
-    assert workspace_data["workspace"]["work_count"] == 3
+    assert workspace_data["workspace"]["work_count"] == 0
     assert workspace_data["works"] == []
     assert {work["work_id"] for work in developer_data["works"]} == {
         "single_part_mounting_plate",
@@ -666,7 +1105,7 @@ def test_nicegui_user_pages_hide_review_and_products_from_work_nav_contract():
 
     assert "review" not in user_pages
     assert "products" not in user_pages
-    assert user_pages == ["overview", "workflow", "parts", "history"]
+    assert user_pages == ["overview", "workflow"]
 
 
 def test_nicegui_legacy_work_manifest_under_outputs_is_not_indexed(tmp_path):

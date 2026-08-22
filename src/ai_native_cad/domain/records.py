@@ -61,6 +61,7 @@ def create_work_record(
         "run_ids": [],
         "active_lineage": _empty_active_lineage(),
         "part_jobs": [],
+        "work_design": _empty_work_design(),
         "accepted_part_results": {},
         "assembly_job": None,
         "deliverable_packages": [],
@@ -179,10 +180,16 @@ def append_part_attempt(
     source: str = "manifest",
     status: str = "incomplete",
     created_at: str | None = None,
+    parent_run_id: str | None = None,
+    source_result_id: str | None = None,
 ) -> dict[str, Any]:
     """Return a new Work record with one ordered Part Job attempt appended."""
     _require_id(part_job_id, "part_job_id")
     _require_id(run_id, "run_id")
+    if parent_run_id is not None:
+        _require_id(parent_run_id, "parent_run_id")
+    if source_result_id is not None:
+        _require_id(source_result_id, "source_result_id", allow_colon=True)
     projected = project_work_record(work)
     jobs = projected["part_jobs"]
     job = next((item for item in jobs if item["part_job_id"] == part_job_id), None)
@@ -203,6 +210,8 @@ def append_part_attempt(
             "status": status,
             "artifact_ids": [],
             "created_at": timestamp,
+            "parent_run_id": parent_run_id,
+            "source_result_id": source_result_id,
         }
     )
     job["active_attempt_run_id"] = run_id
@@ -211,6 +220,158 @@ def append_part_attempt(
         job["role"] = role
     projected["run_ids"] = list(dict.fromkeys([*projected["run_ids"], run_id]))
     projected["updated_at"] = timestamp
+    validate_work_record(projected)
+    return projected
+
+
+def begin_work_design(
+    work: dict[str, Any],
+    *,
+    run_id: str,
+    updated_at: str | None = None,
+) -> dict[str, Any]:
+    """Bind the canonical Work Design Run before any Part Job is required."""
+
+    _require_id(run_id, "work_design run_id")
+    projected = project_work_record(work)
+    design = projected["work_design"]
+    if design.get("status") == "completed":
+        raise ValueError("completed Work Design cannot be rewritten")
+    active_run_id = design.get("run_id")
+    if active_run_id not in {None, run_id}:
+        raise ValueError("Work Design is already bound to another Run")
+    timestamp = updated_at or _now()
+    design["run_id"] = run_id
+    design["status"] = "in_progress"
+    design["updated_at"] = timestamp
+    projected["run_ids"] = list(dict.fromkeys([*projected["run_ids"], run_id]))
+    if projected.get("root_run_id") is None:
+        projected["root_run_id"] = run_id
+        projected["current_run_id"] = run_id
+        projected["active_lineage"] = {
+            "active_root_run_id": run_id,
+            "active_leaf_run_id": run_id,
+            "accepted_run_ids": [],
+            "superseded_run_ids": [],
+            "latest_attempt_run_id": run_id,
+        }
+    projected["status"] = "active"
+    projected["updated_at"] = timestamp
+    validate_work_record(projected)
+    return projected
+
+
+def record_work_design_outcome(
+    work: dict[str, Any],
+    *,
+    run_id: str,
+    request_id: str,
+    episode_id: str,
+    status: str,
+    stop_reason: str,
+    artifact_ids: list[str],
+    knowledge_ids: list[str],
+    assigned_design: dict[str, Any] | None = None,
+    updated_at: str | None = None,
+) -> dict[str, Any]:
+    """Record one Work Design Episode and optionally materialize its Part Jobs."""
+
+    for value, label in ((run_id, "run_id"), (request_id, "request_id"), (episode_id, "episode_id")):
+        _require_id(value, label)
+    if status not in {"completed", "user_input_required", "blocked"}:
+        raise ValueError("unsupported Work Design status")
+    projected = project_work_record(work)
+    design = projected["work_design"]
+    if design.get("run_id") != run_id:
+        raise ValueError("Work Design outcome must target its bound Run")
+    if any(item.get("request_id") == request_id for item in design["episodes"]):
+        raise ValueError("Work Design request already exists")
+    timestamp = updated_at or _now()
+    design["episodes"].append(
+        {
+            "request_id": request_id,
+            "episode_id": episode_id,
+            "status": status,
+            "stop_reason": _require_text(stop_reason, "stop_reason"),
+            "artifact_ids": _unique_ids(artifact_ids, "artifact_ids", allow_colon=True),
+            "created_at": timestamp,
+        }
+    )
+    design["status"] = status
+    design["knowledge_ids"] = _unique_ids(knowledge_ids, "knowledge_ids")
+    design["updated_at"] = timestamp
+    if assigned_design is not None:
+        if status != "completed":
+            raise ValueError("only a completed Work Design may be assigned")
+        if projected["part_jobs"]:
+            raise ValueError("Work Design decomposition cannot replace existing Part Jobs")
+        normalized_design = deepcopy(assigned_design)
+        parts = normalized_design.get("generated_parts")
+        if not isinstance(parts, list) or not parts:
+            raise ValueError("completed Work Design requires generated Parts")
+        for part in parts:
+            if not isinstance(part, dict):
+                raise ValueError("generated Part must be an object")
+            part_job_id = part.get("part_job_id")
+            _require_id(part_job_id, "part_job_id")
+            job = _new_part_job(
+                part_job_id,
+                role=_require_text(part.get("role"), "generated Part role"),
+                source="work_design",
+            )
+            job["interface_context"] = {
+                "work_design_role": part["role"],
+                "interfaces": deepcopy(part.get("interfaces") or []),
+                "dependencies": deepcopy(part.get("dependencies") or []),
+                "work_interfaces": [
+                    deepcopy(item)
+                    for item in normalized_design.get("interfaces", [])
+                    if isinstance(item, dict)
+                    and part.get("key") in {item.get("from"), item.get("to")}
+                ],
+                "reference_components": deepcopy(
+                    normalized_design.get("reference_components") or []
+                ),
+            }
+            projected["part_jobs"].append(job)
+        design["current_design"] = normalized_design
+        design["question_artifact_id"] = None
+    projected["updated_at"] = timestamp
+    validate_work_record(projected)
+    return projected
+
+
+def record_work_design_answer(
+    work: dict[str, Any],
+    *,
+    artifact_id: str,
+    question_artifact_id: str,
+    field: str,
+    question: str,
+    answer: str,
+    updated_at: str | None = None,
+) -> dict[str, Any]:
+    """Append one accepted Work-scope clarification to mutable Work context."""
+
+    projected = project_work_record(work)
+    design = projected["work_design"]
+    _require_id(artifact_id, "artifact_id", allow_colon=True)
+    _require_id(question_artifact_id, "question_artifact_id", allow_colon=True)
+    if any(item.get("artifact_id") == artifact_id for item in design["clarification_answers"]):
+        raise ValueError("Work Design answer already exists")
+    design["clarification_answers"].append(
+        {
+            "artifact_id": artifact_id,
+            "question_artifact_id": question_artifact_id,
+            "field": _require_text(field, "field"),
+            "question": _require_text(question, "question"),
+            "answer": _require_text(answer, "answer"),
+        }
+    )
+    design["status"] = "in_progress"
+    design["question_artifact_id"] = None
+    design["updated_at"] = updated_at or _now()
+    projected["updated_at"] = design["updated_at"]
     validate_work_record(projected)
     return projected
 
@@ -439,6 +600,7 @@ def project_work_record(value: dict[str, Any]) -> dict[str, Any]:
         value.get("artifact_references"), work_id
     )
     projected["part_jobs"] = _project_part_jobs(value.get("part_jobs"))
+    projected["work_design"] = _project_work_design(value.get("work_design"))
     projected["accepted_part_results"] = _project_accepted_part_results(
         value.get("accepted_part_results")
     )
@@ -550,6 +712,33 @@ def validate_work_record(work: dict[str, Any]) -> None:
         for attempt in job["attempts"]:
             if attempt["run_id"] not in run_ids:
                 raise ValueError("Part Job attempt Run must be present in Work run_ids")
+    work_design = work.get("work_design")
+    if not isinstance(work_design, dict):
+        raise ValueError("work_design must be an object")
+    if work_design.get("status") not in {
+        "not_started",
+        "in_progress",
+        "user_input_required",
+        "blocked",
+        "completed",
+    }:
+        raise ValueError("work_design has an invalid status")
+    work_design_run_id = work_design.get("run_id")
+    if work_design_run_id is not None:
+        _require_id(work_design_run_id, "work_design.run_id")
+        if work_design_run_id not in run_ids:
+            raise ValueError("Work Design Run must be present in Work run_ids")
+    if work_design.get("status") == "completed":
+        current_design = work_design.get("current_design")
+        if not isinstance(current_design, dict):
+            raise ValueError("completed Work Design requires current_design")
+        designed_jobs = {
+            item.get("part_job_id")
+            for item in current_design.get("generated_parts", [])
+            if isinstance(item, dict)
+        }
+        if not designed_jobs or not designed_jobs.issubset(set(job_ids)):
+            raise ValueError("completed Work Design generated Parts must reference real Part Jobs")
     accepted = work.get("accepted_part_results")
     if not isinstance(accepted, dict):
         raise ValueError("accepted_part_results must be an object")
@@ -627,6 +816,57 @@ def _new_part_job(part_job_id: str, *, role: str | None, source: str) -> dict[st
     }
 
 
+def _empty_work_design() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "status": "not_started",
+        "run_id": None,
+        "current_design": None,
+        "episodes": [],
+        "clarification_answers": [],
+        "question_artifact_id": None,
+        "knowledge_ids": [],
+        "updated_at": None,
+    }
+
+
+def _project_work_design(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return _empty_work_design()
+    projected = _empty_work_design()
+    status = value.get("status")
+    if status in {"not_started", "in_progress", "user_input_required", "blocked", "completed"}:
+        projected["status"] = status
+    projected["run_id"] = value.get("run_id") if isinstance(value.get("run_id"), str) else None
+    projected["current_design"] = deepcopy(
+        value.get("current_design") if isinstance(value.get("current_design"), dict) else None
+    )
+    projected["episodes"] = [
+        deepcopy(item)
+        for item in value.get("episodes", [])
+        if isinstance(item, dict)
+        and isinstance(item.get("request_id"), str)
+        and isinstance(item.get("episode_id"), str)
+    ]
+    projected["clarification_answers"] = [
+        deepcopy(item)
+        for item in value.get("clarification_answers", [])
+        if isinstance(item, dict)
+        and isinstance(item.get("artifact_id"), str)
+        and isinstance(item.get("answer"), str)
+    ]
+    projected["question_artifact_id"] = (
+        value.get("question_artifact_id")
+        if isinstance(value.get("question_artifact_id"), str)
+        else None
+    )
+    projected["knowledge_ids"] = _unique_ids(
+        value.get("knowledge_ids") or [], "work_design knowledge_ids"
+    )
+    projected["updated_at"] = value.get("updated_at") if isinstance(value.get("updated_at"), str) else None
+    return projected
+
+
 def _project_part_jobs(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
@@ -687,6 +927,16 @@ def _project_part_jobs(value: Any) -> list[dict[str, Any]]:
                     "created_at": (
                         attempt.get("created_at")
                         if isinstance(attempt.get("created_at"), str)
+                        else None
+                    ),
+                    "parent_run_id": (
+                        attempt.get("parent_run_id")
+                        if isinstance(attempt.get("parent_run_id"), str)
+                        else None
+                    ),
+                    "source_result_id": (
+                        attempt.get("source_result_id")
+                        if isinstance(attempt.get("source_result_id"), str)
                         else None
                     ),
                 }
@@ -849,13 +1099,25 @@ def _validate_part_job(job: dict[str, Any]) -> None:
     if not isinstance(attempts, list):
         raise ValueError("Part Job attempts must be a list")
     run_ids = []
+    known_prior_runs: set[str] = set()
     for index, attempt in enumerate(attempts, start=1):
         if attempt.get("record_type") != "part_job_attempt":
             raise ValueError("attempt record_type must be 'part_job_attempt'")
         if attempt.get("sequence") != index:
             raise ValueError("Part Job attempt sequence must be ordered and contiguous")
         _require_id(attempt.get("run_id"), "attempt run_id")
+        parent_run_id = attempt.get("parent_run_id")
+        if parent_run_id is not None:
+            _require_id(parent_run_id, "attempt parent_run_id")
+            if parent_run_id not in known_prior_runs:
+                raise ValueError("Part Job attempt parent must reference an earlier attempt")
+        source_result_id = attempt.get("source_result_id")
+        if source_result_id is not None:
+            _require_id(source_result_id, "attempt source_result_id", allow_colon=True)
+            if parent_run_id is None:
+                raise ValueError("attempt source_result_id requires parent_run_id")
         run_ids.append(attempt["run_id"])
+        known_prior_runs.add(attempt["run_id"])
     if len(run_ids) != len(set(run_ids)):
         raise ValueError("Part Job attempt Run ids must be unique")
     active = job.get("active_attempt_run_id")

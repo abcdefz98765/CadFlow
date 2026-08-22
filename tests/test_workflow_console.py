@@ -29,6 +29,7 @@ from ai_native_cad.workflow_console.artifact_display import (
     filter_artifacts_for_display,
 )
 from ai_native_cad.workflow_console.review_surface import build_workflow_review_surface
+from ai_native_cad.workflow_console.work_index import build_work_index
 
 
 def _does_not_contain_keys(value, keys):
@@ -37,6 +38,70 @@ def _does_not_contain_keys(value, keys):
     if isinstance(value, list):
         return all(_does_not_contain_keys(item, keys) for item in value)
     return True
+
+
+def test_canonical_work_never_invokes_legacy_product_inference(tmp_path, monkeypatch):
+    backend = WorkflowConsoleBackend(
+        project_root=tmp_path, workspace_root=tmp_path / "workspace"
+    )
+    backend.create_workspace()
+    backend.create_work("Canonical", "Design one bracket.", work_id="canonical")
+    backend.create_work_requirement_run(
+        "canonical", "Design one bracket.", run_id="canonical_root"
+    )
+    run_dir = backend._work_runs_root("canonical") / "canonical_root"
+    (run_dir / "assembly_plan.json").write_text(
+        json.dumps({"parts": [{"part_id": "inferred_part"}]}) + "\n",
+        encoding="utf-8",
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("canonical read invoked compatibility inference")
+
+    monkeypatch.setattr(
+        "ai_native_cad.workflow_console.work_index.project_legacy_product_references",
+        forbidden,
+    )
+    backend.invalidate_work_index()
+    detail = backend.get_work_detail("canonical")
+
+    assert detail["entity_state"]["state_authority"] == "canonical"
+    assert detail["parts"] == []
+    assert detail["available_actions"] == []
+    assert detail["summary"]["active_lineage"]["lineage_inferred"] is False
+    assert {node["id"] for node in detail["nodes"]} == {"request", "work:design"}
+
+
+def test_developer_works_use_isolated_storage_and_explicit_catalog_visibility(tmp_path):
+    backend = WorkflowConsoleBackend(
+        project_root=tmp_path, workspace_root=tmp_path / "workspace"
+    )
+    backend.create_workspace()
+    backend.create_work(
+        "Browser fixture",
+        work_id="browser_fixture",
+        metadata={"work_classification": "developer_fixture"},
+    )
+    backend.create_work(
+        "Product example",
+        work_id="product_example",
+        metadata={"work_classification": "product_example"},
+    )
+
+    isolated = tmp_path / "workspace" / ".internal" / "dev-works" / "browser_fixture"
+    assert (isolated / "work_manifest.json").is_file()
+    assert not (tmp_path / "workspace" / "works" / "browser_fixture").exists()
+    assert (tmp_path / "workspace" / "works" / "product_example" / "work_manifest.json").is_file()
+    assert not (tmp_path / "workspace" / ".internal" / "dev-works" / "product_example").exists()
+    assert backend.get_work_detail("browser_fixture")["summary"]["work_id"] == "browser_fixture"
+    assert [item["summary"]["work_id"] for item in build_work_index(backend)["works"]] == [
+        "product_example"
+    ]
+    debug_index = build_work_index(backend, include_debug=True)
+    assert {item["summary"]["work_id"] for item in debug_index["works"]} == {
+        "browser_fixture",
+        "product_example",
+    }
 
 
 def _does_not_contain_absolute_paths(value):
@@ -161,6 +226,8 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
         "create_work_requirement_run",
         "create_work_part_runs",
         "create_work_part_attempt",
+        "run_work_design_episode",
+        "answer_work_design_question",
         "run_work_part_design_episode",
         "answer_work_part_design_question",
         "accept_work_reviewable_result",
@@ -212,6 +279,8 @@ def test_workflow_console_route_specs_use_safe_by_id_backend_operations():
             "create_work_requirement_run",
             "create_work_part_runs",
             "create_work_part_attempt",
+            "run_work_design_episode",
+            "answer_work_design_question",
             "run_work_part_design_episode",
             "answer_work_part_design_question",
             "accept_work_reviewable_result",
@@ -311,12 +380,14 @@ def test_workspace_can_seed_static_example_works_under_external_root(tmp_path, m
         "multi_part_enclosure_planning",
         "reviewed_one_part_enclosure_base",
     ]
-    assert created["data"]["workspace"]["work_count"] == 3
+    assert created["data"]["workspace"]["work_count"] == 0
     assert normal_works["data"]["works"] == []
-    assert (external / "works" / "single_part_mounting_plate" / "work_manifest.json").exists()
-    assert (external / "works" / "multi_part_enclosure_planning" / "runs" / "multi_part_enclosure_planning_root" / "01_design" / "assembly_plan.json").exists()
-    assert (external / "works" / "reviewed_one_part_enclosure_base" / "runs" / "single_part_enclosure_base_result" / "model.step").exists()
-    assert "facet normal" in (external / "works" / "reviewed_one_part_enclosure_base" / "runs" / "single_part_enclosure_base_result" / "model.stl").read_text(encoding="utf-8")
+    developer_works = external / ".internal" / "dev-works"
+    assert (developer_works / "single_part_mounting_plate" / "work_manifest.json").exists()
+    assert (developer_works / "multi_part_enclosure_planning" / "runs" / "multi_part_enclosure_planning_root" / "01_design" / "assembly_plan.json").exists()
+    assert (developer_works / "reviewed_one_part_enclosure_base" / "runs" / "single_part_enclosure_base_result" / "model.step").exists()
+    assert "facet normal" in (developer_works / "reviewed_one_part_enclosure_base" / "runs" / "single_part_enclosure_base_result" / "model.stl").read_text(encoding="utf-8")
+    assert not (external / "works" / "single_part_mounting_plate").exists()
     assert {work["work_id"] for work in works["data"]["works"]} == {
         "single_part_mounting_plate",
         "multi_part_enclosure_planning",
@@ -331,7 +402,7 @@ def test_workspace_example_seed_rejects_existing_work_without_overwrite(tmp_path
     backend = WorkflowConsoleBackend(project_root=tmp_path / "repo")
     external = tmp_path / "example_workspace"
     first = dispatch_route(backend, "create_workspace", body={"path": str(external), "include_examples": True})
-    marker = external / "works" / "single_part_mounting_plate" / "work_manifest.json"
+    marker = external / ".internal" / "dev-works" / "single_part_mounting_plate" / "work_manifest.json"
     before = marker.read_text(encoding="utf-8")
 
     second = dispatch_route(backend, "create_workspace", body={"path": str(external), "include_examples": True})
@@ -340,6 +411,26 @@ def test_workspace_example_seed_rejects_existing_work_without_overwrite(tmp_path
     assert second["ok"] is False
     assert second["status_code"] == 409
     assert marker.read_text(encoding="utf-8") == before
+
+
+def test_workspace_example_seed_rejects_same_id_in_normal_storage_without_overwrite(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path / "repo")
+    external = tmp_path / "example_workspace"
+    dispatch_route(backend, "create_workspace", body={"path": str(external)})
+    backend.create_work(
+        "Existing product example",
+        work_id="single_part_mounting_plate",
+        metadata={"work_classification": "product_example"},
+    )
+    marker = external / "works" / "single_part_mounting_plate" / "work_manifest.json"
+    before = marker.read_text(encoding="utf-8")
+
+    seeded = dispatch_route(backend, "create_workspace", body={"path": str(external), "include_examples": True})
+
+    assert seeded["ok"] is False
+    assert seeded["status_code"] == 409
+    assert marker.read_text(encoding="utf-8") == before
+    assert not (external / ".internal" / "dev-works" / "single_part_mounting_plate").exists()
 
 
 def test_external_workspace_work_and_runs_are_written_outside_repo(tmp_path):

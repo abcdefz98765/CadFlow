@@ -160,6 +160,20 @@ Do not introduce graph-specific business state merely to render the graph.
 
 Do not build a second workflow engine, graph database, BPMN system, or generic workflow DSL unless a concrete future requirement cannot be met by the existing domain model.
 
+Workflow is also the primary command surface for valid user-driven progress and
+revision. The interaction dependency is strictly one-way:
+
+```text
+Domain State -> Workflow Projection -> Node Interaction Projection
+             -> existing domain/orchestrator command -> re-projected Domain State
+```
+
+The graph projects which existing commands are valid; it does not own or
+execute business transitions itself. Selected nodes, available buttons, graph
+layout, and **Current Attention** are presentation state and are never persisted
+as Work state. Current Attention may contain several nodes when parallel Part
+Jobs simultaneously need input, review, or continued work.
+
 ### Four phases are graph grouping, not four nodes
 
 The user-facing phases remain:
@@ -245,9 +259,15 @@ Selecting a node should inspect the existing associated state/evidence:
 - recovery details;
 - historical Run Snapshot.
 
-A graph node selection is interaction state, not business state.
+A graph node selection is interaction state, not business state. Its normal
+detail surface explains the state, why it matters, whether the user must act,
+one dominant valid action when applicable, relevant result/evidence, and why an
+expected action is unavailable.
 
-Starting from an earlier node is a branch/revision operation that creates new immutable lineage. It is not destructive rollback.
+Starting from an earlier node is offered only where an existing domain command
+has durable provenance. It is a branch/revision operation that creates new
+immutable lineage, preserves prior evidence and accepted pointers, and is not
+destructive rollback. Other historical nodes remain inspection-only.
 
 ## Overview and Workflow
 
@@ -296,6 +316,13 @@ The Agent may:
 - stop with a meaningful reason.
 
 The system must not force the Agent through a fixed template catalogue or fixed stage sequence.
+
+The implemented normal entry expresses this as a Work-scoped Design Episode
+before Part Jobs. The provider proposes the concept, generated/reference
+component distinction, interfaces, and decomposition; CadFlow validates the
+proposal and owns identity assignment and manifest mutation. Only then do
+Part-scoped Design Episodes operate on the resulting Part Jobs. This is one
+live Work state graph, not a second planning workflow.
 
 ### Build & Evaluate
 
@@ -389,6 +416,16 @@ Future capability is allowed. Premature capability is not a requirement.
 Legacy fixed Workflow evidence and deterministic paths remain readable for compatibility.
 
 They do not define the target product.
+
+Every loaded Work must expose its state authority. Schema-v2 Works created by
+the current product are `canonical`; explicitly imported, migrated, or
+deterministic compatibility Works are `compatibility`. Normal Current Work may
+derive presentation only from the canonical Work manifest, Part Jobs, accepted
+pointers, and registered artifact references. It must not call a compatibility
+projector as a fallback, infer active lineage from directory order or
+timestamps, or infer product state from filenames. Compatibility projection is
+allowed only after the Work has been classified as compatibility data and must
+not mutate historical evidence.
 
 The target Workflow is the dynamic Work graph described above. Existing graph/rendering/navigation components should be reused where possible rather than discarded.
 

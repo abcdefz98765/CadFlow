@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from ai_native_cad.agents import run_design_part_episode
+from ai_native_cad.agents import (
+    run_design_part_episode,
+    run_work_design_episode as run_runtime_work_design_episode,
+)
+from ai_native_cad.agents.registry import RUNTIME_SKILL_REGISTRY
 from ai_native_cad.agents.episode import (
     EpisodeContractError,
     UnknownAgentActionError,
@@ -18,6 +22,8 @@ from ai_native_cad.orchestration.ports import (
     DesignEpisodeArtifact,
     DesignPartEpisodeOutcome,
     DesignPartEpisodeRequest,
+    WorkDesignEpisodeOutcome,
+    WorkDesignEpisodeRequest,
 )
 from ai_native_cad.orchestration.reviewable_publication import (
     ReviewablePublicationError,
@@ -193,6 +199,140 @@ class WorkflowConsoleAgentDesign:
     def __init__(self, backend: WorkflowConsoleBackend) -> None:
         self.backend = backend
 
+    def run_work_design_episode(
+        self,
+        request: WorkDesignEpisodeRequest,
+    ) -> WorkDesignEpisodeOutcome:
+        run_path = self.backend.resolve_run(
+            request.run_id,
+            root=self.backend._work_runs_root(request.work_id),
+        )
+        relative_root = f"episodes/work_design/{request.request_id}"
+        episode_dir = self.backend._require_child_path(run_path, relative_root)
+        route_result_path = self.backend._require_child_path(
+            episode_dir, "product_route_result.json"
+        )
+        request_fingerprint = _work_design_request_fingerprint(request)
+        if episode_dir.exists():
+            return _read_idempotent_work_design_outcome(
+                route_result_path,
+                request_fingerprint=request_fingerprint,
+            )
+        episode_dir.mkdir(parents=True, exist_ok=False)
+        adapter = self.backend.stage_runner.agent_adapter
+        if not callable(getattr(adapter, "choose_design_action", None)):
+            outcome = _blocked_work_design_outcome(
+                request,
+                relative_root=relative_root,
+                stop_reason="unsupported_capability",
+            )
+        else:
+            try:
+                result = run_runtime_work_design_episode(
+                    adapter=adapter,
+                    work_context={
+                        "work_id": request.work_id,
+                        "title": request.title,
+                        "description": request.objective,
+                        "previous_work_design": request.previous_work_design,
+                        "clarification_answers": list(request.clarification_answers),
+                        "existing_part_jobs": list(request.existing_part_jobs),
+                        "existing_part_job_count": len(request.existing_part_jobs),
+                        "accepted_part_results": request.accepted_part_results,
+                        "accepted_part_count": len(request.accepted_part_results),
+                    },
+                    artifact_dir=episode_dir,
+                    run_id=request.run_id,
+                )
+            except (EpisodeContractError, UnknownAgentActionError) as exc:
+                outcome = _blocked_work_design_outcome(
+                    request,
+                    relative_root=relative_root,
+                    stop_reason="policy_blocked",
+                    episode_dir=episode_dir,
+                    failure_diagnostic=exc.failure_diagnostic,
+                )
+            except Exception:
+                outcome = _blocked_work_design_outcome(
+                    request,
+                    relative_root=relative_root,
+                    stop_reason="provider_failure",
+                    episode_dir=episode_dir,
+                )
+            else:
+                outcome = _work_design_outcome(
+                    request,
+                    result,
+                    relative_root=relative_root,
+                    episode_dir=episode_dir,
+                )
+        _write_json(
+            route_result_path,
+            {
+                "schema_version": 1,
+                "request_fingerprint": request_fingerprint,
+                "request_identity": {
+                    "request_id": request.request_id,
+                    "work_id": request.work_id,
+                    "run_id": request.run_id,
+                    "scope": "work",
+                },
+                "episode": outcome.as_dict(),
+                "authority": {
+                    "orchestrator": "work_orchestrator",
+                    "provider_manifest_mutation_enabled": False,
+                    "part_job_identity_owner": "cadflow",
+                    "assembly_execution_enabled": False,
+                },
+            },
+        )
+        return outcome
+
+    def record_work_design_answer(
+        self,
+        *,
+        work_id: str,
+        run_id: str,
+        answer_id: str,
+        question_artifact_id: str,
+        field: str,
+        question: str,
+        answer: str,
+    ) -> DesignEpisodeArtifact:
+        run_path = self.backend.resolve_run(
+            run_id,
+            root=self.backend._work_runs_root(work_id),
+        )
+        relative_path = f"work_design/clarifications/{answer_id}.json"
+        destination = self.backend._require_child_path(run_path, relative_path)
+        if destination.exists():
+            raise FileExistsError("Work Design clarification answer already exists")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(
+            destination,
+            {
+                "schema_version": 1,
+                "checkpoint": "clarification_decision",
+                "scope": "work",
+                "work_id": work_id,
+                "run_id": run_id,
+                "question_artifact_id": question_artifact_id,
+                "field": field,
+                "question": question,
+                "answer": answer,
+                "source": "user",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        return DesignEpisodeArtifact(
+            artifact_id=f"work_clarification:{answer_id}",
+            relative_path=relative_path,
+            checkpoint="clarification_decision",
+            trust_role="accepted_input",
+            validation_status="provided",
+            source_artifact_ids=(question_artifact_id,),
+        )
+
     def run_part_design_episode(
         self,
         request: DesignPartEpisodeRequest,
@@ -231,12 +371,13 @@ class WorkflowConsoleAgentDesign:
                     run_id=request.run_id,
                     objective_summary=request.objective,
                 )
-            except (EpisodeContractError, UnknownAgentActionError):
+            except (EpisodeContractError, UnknownAgentActionError) as exc:
                 outcome = _blocked_design_outcome(
                     request,
                     relative_root=relative_root,
                     stop_reason="policy_blocked",
                     episode_dir=episode_dir,
+                    failure_diagnostic=exc.failure_diagnostic,
                 )
             except Exception:
                 outcome = _blocked_design_outcome(
@@ -324,6 +465,192 @@ class WorkflowConsoleAgentDesign:
         )
 
 
+def _work_design_outcome(
+    request: WorkDesignEpisodeRequest,
+    result: Any,
+    *,
+    relative_root: str,
+    episode_dir: Path,
+) -> WorkDesignEpisodeOutcome:
+    artifacts: list[DesignEpisodeArtifact] = []
+    exchange_id = None
+    if (episode_dir / "agent_exchange.jsonl").is_file():
+        exchange_id = f"work_design:{result.episode_id}:agent_output"
+        artifacts.append(
+            DesignEpisodeArtifact(
+                artifact_id=exchange_id,
+                relative_path=f"{relative_root}/agent_exchange.jsonl",
+                checkpoint="agent_output",
+                trust_role="observation",
+                validation_status="recorded",
+            )
+        )
+    if (episode_dir / "agent_events.jsonl").is_file():
+        artifacts.append(
+            DesignEpisodeArtifact(
+                artifact_id=f"work_design:{result.episode_id}:agent_activity",
+                relative_path=f"{relative_root}/agent_events.jsonl",
+                checkpoint="agent_activity",
+                trust_role="observation",
+                validation_status="recorded",
+                source_artifact_ids=(exchange_id,) if exchange_id else (),
+            )
+        )
+    _append_failure_diagnostic_artifact(
+        artifacts,
+        failure_diagnostic=result.failure_diagnostic,
+        episode_dir=episode_dir,
+        relative_root=relative_root,
+        artifact_id=f"work_design:{result.episode_id}:failure_diagnostic",
+    )
+    design_id = None
+    if result.work_design is not None and result.proposal_count:
+        design_id = f"work_design:{result.episode_id}:proposal"
+        artifacts.append(
+            DesignEpisodeArtifact(
+                artifact_id=design_id,
+                relative_path=(
+                    f"{relative_root}/work_design_submissions/"
+                    f"submission_{result.proposal_count:03d}.json"
+                ),
+                checkpoint="work_design",
+                trust_role="candidate",
+                validation_status="passed" if result.status == "completed" else "not_validated",
+            )
+        )
+    if result.stop_reason.value == "user_input_required":
+        artifacts.append(
+            DesignEpisodeArtifact(
+                artifact_id=f"work_design:{result.episode_id}:user_input_request",
+                relative_path=f"{relative_root}/user_input_request.json",
+                checkpoint="clarification_decision",
+                trust_role="diagnostic",
+                validation_status="user_input_required",
+            )
+        )
+    result_id = f"work_design:{result.episode_id}:result"
+    artifacts.append(
+        DesignEpisodeArtifact(
+            artifact_id=result_id,
+            relative_path=f"{relative_root}/agent_result.json",
+            checkpoint="work_design",
+            trust_role="observation" if result.status == "completed" else "diagnostic",
+            validation_status="passed" if result.status == "completed" else "blocked",
+            source_artifact_ids=(design_id,) if design_id else (),
+        )
+    )
+    artifacts.append(
+        DesignEpisodeArtifact(
+            artifact_id=f"work_design:{result.episode_id}:product_route",
+            relative_path=f"{relative_root}/product_route_result.json",
+            checkpoint="work_design_routing",
+            trust_role="observation" if result.status == "completed" else "diagnostic",
+            validation_status="passed" if result.status == "completed" else "blocked",
+            source_artifact_ids=(
+                result_id,
+                *tuple(
+                    str(item.get("artifact_id"))
+                    for item in request.clarification_answers
+                    if isinstance(item, dict) and item.get("artifact_id")
+                )[-1:],
+            ),
+        )
+    )
+    knowledge_ids = tuple(
+        item.knowledge_id
+        for item in RUNTIME_SKILL_REGISTRY.knowledge_for_skill("work_design")
+    )
+    return WorkDesignEpisodeOutcome(
+        request_id=request.request_id,
+        episode_id=result.episode_id,
+        status=result.status,
+        stop_reason=result.stop_reason.value,
+        work_design=dict(result.work_design) if isinstance(result.work_design, dict) else None,
+        part_job_creation_requested=result.part_job_creation_requested,
+        knowledge_ids=knowledge_ids,
+        artifacts=tuple(artifacts),
+        failure_diagnostic=result.failure_diagnostic,
+    )
+
+
+def _blocked_work_design_outcome(
+    request: WorkDesignEpisodeRequest,
+    *,
+    relative_root: str,
+    stop_reason: str,
+    episode_dir: Path | None = None,
+    failure_diagnostic: dict[str, Any] | None = None,
+) -> WorkDesignEpisodeOutcome:
+    episode_id = uuid4().hex
+    artifacts: list[DesignEpisodeArtifact] = []
+    if episode_dir is not None and (episode_dir / "agent_exchange.jsonl").is_file():
+        artifacts.append(
+            DesignEpisodeArtifact(
+                artifact_id=f"work_design:{episode_id}:agent_output",
+                relative_path=f"{relative_root}/agent_exchange.jsonl",
+                checkpoint="agent_output",
+                trust_role="diagnostic",
+                validation_status="blocked",
+            )
+        )
+    if episode_dir is not None:
+        _append_failure_diagnostic_artifact(
+            artifacts,
+            failure_diagnostic=failure_diagnostic,
+            episode_dir=episode_dir,
+            relative_root=relative_root,
+            artifact_id=f"work_design:{episode_id}:failure_diagnostic",
+        )
+    artifacts.append(
+        DesignEpisodeArtifact(
+            artifact_id=f"work_design:{episode_id}:product_route",
+            relative_path=f"{relative_root}/product_route_result.json",
+            checkpoint="work_design_routing",
+            trust_role="diagnostic",
+            validation_status="blocked",
+        )
+    )
+    return WorkDesignEpisodeOutcome(
+        request_id=request.request_id,
+        episode_id=episode_id,
+        status="safely_blocked",
+        stop_reason=stop_reason,
+        work_design=None,
+        part_job_creation_requested=False,
+        knowledge_ids=tuple(
+            item.knowledge_id
+            for item in RUNTIME_SKILL_REGISTRY.knowledge_for_skill("work_design")
+        ),
+        artifacts=tuple(artifacts),
+        failure_diagnostic=failure_diagnostic,
+    )
+
+
+def _work_design_request_fingerprint(request: WorkDesignEpisodeRequest) -> str:
+    return hashlib.sha256(
+        json.dumps(request.manifest(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _read_idempotent_work_design_outcome(
+    route_result_path: Path,
+    *,
+    request_fingerprint: str,
+) -> WorkDesignEpisodeOutcome:
+    if not route_result_path.is_file():
+        raise RuntimeError("Work Design request has incomplete evidence; use a new request id")
+    try:
+        payload = json.loads(route_result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Work Design request evidence is unreadable") from exc
+    if payload.get("request_fingerprint") != request_fingerprint:
+        raise ValueError("request_id is already bound to a different Work Design request")
+    episode = payload.get("episode")
+    if not isinstance(episode, dict):
+        raise RuntimeError("Work Design request evidence is incomplete")
+    return WorkDesignEpisodeOutcome.from_dict(episode, idempotent_replay=True)
+
+
 def _design_handoff(request: DesignPartEpisodeRequest) -> dict[str, Any]:
     interfaces = request.interface_context.get("interfaces")
     if not isinstance(interfaces, list):
@@ -376,6 +703,13 @@ def _episode_outcome(
                 source_artifact_ids=(exchange_id,) if exchange_id else (),
             )
         )
+    _append_failure_diagnostic_artifact(
+        artifacts,
+        failure_diagnostic=result.failure_diagnostic,
+        episode_dir=episode_dir,
+        relative_root=relative_root,
+        artifact_id=f"episode:{result.episode_id}:failure_diagnostic",
+    )
     candidate_id = None
     if result.final_contract is not None and result.contract_submission_count:
         candidate_id = f"episode:{result.episode_id}:contract"
@@ -489,6 +823,19 @@ def _episode_outcome(
             artifacts.extend(
                 (published.result_artifact, published.step_artifact)
             )
+    failure_diagnostic = result.failure_diagnostic
+    if publication_error is not None:
+        failure_diagnostic = {
+            "schema_version": 1,
+            "rejection_stage": "reviewable_publication",
+            "rejected_action": "publish_reviewable_result",
+            "reason_code": publication_error,
+            "requested_capability_or_context": None,
+            "human_safe_detail": (
+                "CadFlow could not publish the locally evaluated candidate as a reviewable result."
+            ),
+            "side_effect_started": True,
+        }
     product_completed = result.status == "completed" and publication_error is None
     if result.stop_reason.value == "user_input_required":
         question_id = f"episode:{result.episode_id}:user_input_request"
@@ -591,6 +938,7 @@ def _episode_outcome(
             if published
             else None
         ),
+        failure_diagnostic=failure_diagnostic,
     )
 
 
@@ -600,6 +948,7 @@ def _blocked_design_outcome(
     relative_root: str,
     stop_reason: str,
     episode_dir: Path | None = None,
+    failure_diagnostic: dict[str, Any] | None = None,
 ) -> DesignPartEpisodeOutcome:
     episode_id = uuid4().hex
     artifacts: list[DesignEpisodeArtifact] = []
@@ -612,6 +961,14 @@ def _blocked_design_outcome(
                 trust_role="diagnostic",
                 validation_status="blocked",
             )
+        )
+    if episode_dir is not None:
+        _append_failure_diagnostic_artifact(
+            artifacts,
+            failure_diagnostic=failure_diagnostic,
+            episode_dir=episode_dir,
+            relative_root=relative_root,
+            artifact_id=f"episode:{episode_id}:failure_diagnostic",
         )
     artifacts.append(
         DesignEpisodeArtifact(
@@ -630,6 +987,29 @@ def _blocked_design_outcome(
         capability_mode="provider_selected_design_with_attested_model_program",
         validated=False,
         artifacts=tuple(artifacts),
+        failure_diagnostic=failure_diagnostic,
+    )
+
+
+def _append_failure_diagnostic_artifact(
+    artifacts: list[DesignEpisodeArtifact],
+    *,
+    failure_diagnostic: dict[str, Any] | None,
+    episode_dir: Path,
+    relative_root: str,
+    artifact_id: str,
+) -> None:
+    if failure_diagnostic is None:
+        return
+    _write_json(episode_dir / "failure_diagnostic.json", failure_diagnostic)
+    artifacts.append(
+        DesignEpisodeArtifact(
+            artifact_id=artifact_id,
+            relative_path=f"{relative_root}/failure_diagnostic.json",
+            checkpoint="failure_diagnostic",
+            trust_role="diagnostic",
+            validation_status="recorded",
+        )
     )
 
 

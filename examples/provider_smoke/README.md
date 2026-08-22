@@ -62,6 +62,24 @@ python examples/provider_smoke/work_design_episode_eval.py
   lineage, accepted pointers, and deliverable state remain unchanged; no
   `model.py`, STEP, STL, or preview is created.
 
+This older script is the retained `design_part` compatibility acceptance; its
+filename predates the canonical Work Design capability.
+
+## Canonical Work Design Decomposition Acceptance
+
+```bash
+python examples/provider_smoke/work_design_decomposition_eval.py
+```
+
+- Verifies: the normal product entry creates a Work with no preselected Part;
+  the registered `work_design` Skill loads declared knowledge, a scripted
+  provider proposes two generated Parts plus two reference components, and
+  CadFlow assigns identities and creates the real Part Jobs.
+- Does not verify: a real external provider, CAD execution, Assembly Job
+  execution, fit, strength, tolerances, publication, or acceptance.
+- Durable outputs: none; it uses a temporary Workspace and the same backend,
+  Episode, Orchestrator, manifest, and projection path as the product.
+
 ## CadQuery v1 Static Model-Program Policy Acceptance
 
 ```bash

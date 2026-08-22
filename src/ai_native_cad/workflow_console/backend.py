@@ -617,7 +617,7 @@ class WorkflowConsoleBackend:
         from ai_native_cad.workflow_console.work_index import list_works
 
         filters = filters or {}
-        show_debug = bool(filters.get("show_debug"))
+        show_debug = bool(filters.get("show_debug") or filters.get("show_developer"))
         return list_works(self, limit=limit, offset=offset, filters=filters, index=self._get_work_index(show_debug=show_debug))
 
     def create_work(
@@ -706,22 +706,15 @@ class WorkflowConsoleBackend:
             break
         else:
             raise FileExistsError("live Product Example id space is exhausted")
-        attempt = self._work_orchestrator().create_part_attempt(
-            work_id,
-            "servo_mounting_bracket",
-            prompt=objective,
-            role="Single-piece micro-servo mounting bracket",
-            source="live_product_example",
-        )
         self.invalidate_work_index()
         manifest = self._read_work_manifest(work_id)
         if manifest.get("artifact_references") or manifest.get("accepted_part_results"):
             raise RuntimeError("live Product Example must start without generated or accepted evidence")
         return {
             "work_id": work_id,
-            "part_job_id": "servo_mounting_bracket",
-            "attempt_run_id": attempt["part_job"]["active_attempt_run_id"],
-            "state": "ready_to_design",
+            "part_job_id": None,
+            "attempt_run_id": None,
+            "state": "ready_for_work_design",
             "provider_requirement": self.read_provider_readiness(),
             "preloaded_design": False,
             "preloaded_geometry": False,
@@ -735,7 +728,7 @@ class WorkflowConsoleBackend:
         *,
         title: str | None = None,
     ) -> dict[str, Any]:
-        """Create one normal single-Part Job Work from the user's request."""
+        """Create one canonical Work before the Agent decides its Parts."""
         prompt = _safe_prompt_text(request)
         normalized_title = _safe_summary_text(title) or _generated_work_title(prompt)
         created = self.create_work(
@@ -744,19 +737,12 @@ class WorkflowConsoleBackend:
             metadata={"product_entry": "new_design", "work_classification": "user"},
         )
         work_id = created["work"]["work_id"]
-        attempt = self._work_orchestrator().create_part_attempt(
-            work_id,
-            "primary_part",
-            prompt=prompt,
-            role="Primary design part",
-            source="new_design",
-        )
         self.invalidate_work_index()
         return {
             "work_id": work_id,
-            "part_job_id": "primary_part",
-            "attempt_run_id": attempt["part_job"]["active_attempt_run_id"],
-            "state": "ready_to_design",
+            "part_job_id": None,
+            "attempt_run_id": None,
+            "state": "ready_for_work_design",
         }
 
     def get_golden_example_summary(self, work_id: str) -> dict[str, Any] | None:
@@ -819,18 +805,22 @@ class WorkflowConsoleBackend:
         prompt: str | None = None,
         role: str | None = None,
         run_id: str | None = None,
+        parent_run_id: str | None = None,
     ) -> dict[str, Any]:
         """Append another explicit attempt to one Part Job."""
         self._require_safe_run_id(work_id)
         self._require_safe_run_id(part_job_id)
         if run_id is not None:
             self._require_safe_run_id(run_id)
+        if parent_run_id is not None:
+            self._require_safe_run_id(parent_run_id)
         return self._work_orchestrator().create_part_attempt(
             work_id,
             part_job_id,
             prompt=prompt,
             role=role,
             run_id=run_id,
+            parent_run_id=parent_run_id,
         )
 
     def run_work_part_design_episode(
@@ -854,6 +844,62 @@ class WorkflowConsoleBackend:
             request_id=request_id,
             attempt_run_id=attempt_run_id,
             objective=_safe_prompt_text(objective) if objective is not None else None,
+        )
+
+    def run_work_design_episode(
+        self,
+        work_id: str,
+        *,
+        request_id: str,
+        objective: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one canonical Work-scoped design/decomposition Episode."""
+
+        for value in (work_id, request_id):
+            self._require_safe_run_id(value)
+        return self._work_orchestrator().run_work_design_episode(
+            work_id,
+            request_id=request_id,
+            objective=_safe_prompt_text(objective) if objective is not None else None,
+        )
+
+    def answer_work_design_question(
+        self,
+        work_id: str,
+        *,
+        run_id: str,
+        answer_id: str,
+        question_artifact_id: str,
+        field: str,
+        question: str,
+        answer: str,
+    ) -> dict[str, Any]:
+        """Persist one Work-level clarification through the Work orchestrator."""
+
+        for value in (work_id, run_id, answer_id):
+            self._require_safe_run_id(value)
+        safe_field = _safe_workspace_text(field, "clarification field", limit=120)
+        safe_question = _safe_workspace_text(question, "clarification question", limit=1000)
+        safe_answer = _safe_workspace_text(answer, "clarification answer", limit=4000)
+        _reject_secret_fields({"field": safe_field, "question": safe_question, "answer": safe_answer})
+        payload = self.read_work_artifact_reference(work_id, question_artifact_id)
+        content = payload.get("content") if isinstance(payload, dict) else {}
+        questions = content.get("questions") if isinstance(content, dict) else []
+        if not any(
+            isinstance(item, dict)
+            and item.get("field") == safe_field
+            and item.get("question") == safe_question
+            for item in questions
+        ):
+            raise ValueError("clarification answer does not match the persisted Work question")
+        return self._work_orchestrator().answer_work_design_question(
+            work_id,
+            run_id=run_id,
+            answer_id=answer_id,
+            question_artifact_id=question_artifact_id,
+            field=safe_field,
+            question=safe_question,
+            answer=safe_answer,
         )
 
     def answer_work_part_design_question(
@@ -984,6 +1030,13 @@ class WorkflowConsoleBackend:
             work_id,
             artifact_id,
         )
+        return self._read_work_json_artifact(reference, artifact_path)
+
+    @staticmethod
+    def _read_work_json_artifact(
+        reference: dict[str, Any],
+        artifact_path: Path,
+    ) -> dict[str, Any]:
         suffix = artifact_path.suffix.lower()
         if suffix not in {".json", ".jsonl"}:
             raise ValueError("workflow console Work artifact is not JSON evidence")
@@ -1001,19 +1054,63 @@ class WorkflowConsoleBackend:
             "content": _sanitize_public_artifact_content(value),
         }
 
+    def read_work_artifact_references(
+        self,
+        work_id: str,
+        artifact_ids: list[str],
+        *,
+        limit: int = 24,
+    ) -> list[dict[str, Any]]:
+        """Read a bounded evidence group with one manifest lookup."""
+
+        self._require_safe_run_id(work_id)
+        if not isinstance(artifact_ids, list) or not 0 <= len(artifact_ids) <= limit:
+            raise ValueError("workflow console artifact group exceeds its bounded limit")
+        if any(not isinstance(item, str) or not item for item in artifact_ids):
+            raise ValueError("workflow console artifact ids are required")
+        if len(set(artifact_ids)) != len(artifact_ids):
+            raise ValueError("workflow console artifact ids must be unique")
+        work = self._read_work_manifest(work_id)
+        references = {
+            str(item.get("artifact_id")): item
+            for item in work.get("artifact_references", [])
+            if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)
+        }
+        loaded: list[dict[str, Any]] = []
+        for artifact_id in artifact_ids:
+            reference = references.get(artifact_id)
+            if reference is None:
+                raise FileNotFoundError(
+                    f"workflow console Work artifact does not exist: {artifact_id}"
+                )
+            run_id = reference.get("run_id")
+            relative_path = reference.get("relative_path")
+            if not isinstance(run_id, str) or not isinstance(relative_path, str):
+                raise ValueError("workflow console Work artifact reference is invalid")
+            run_path = self.resolve_run(run_id, root=self._work_runs_root(work_id))
+            artifact_path = self._require_child_path(run_path, relative_path)
+            if not artifact_path.is_file() or artifact_path.is_symlink():
+                raise FileNotFoundError(
+                    f"workflow console Work artifact file is missing: {artifact_id}"
+                )
+            loaded.append(self._read_work_json_artifact(reference, artifact_path))
+        return loaded
+
     def get_work_summary(self, work_id: str) -> dict[str, Any]:
         """Return one inferred Work summary."""
         from ai_native_cad.workflow_console.work_index import get_work_summary_from_index
 
         self._require_safe_run_id(work_id)
-        return get_work_summary_from_index(self._get_work_index(show_debug=work_id == "__debug_runs__"), work_id)
+        show_debug = work_id == "__debug_runs__" or self._is_developer_work(work_id)
+        return get_work_summary_from_index(self._get_work_index(show_debug=show_debug), work_id)
 
     def get_work_detail(self, work_id: str) -> dict[str, Any]:
         """Return one inferred Work detail with current state and history separated."""
         from ai_native_cad.workflow_console.work_index import get_work_detail
 
         self._require_safe_run_id(work_id)
-        detail = get_work_detail(self, work_id, index=self._get_work_index(show_debug=work_id == "__debug_runs__"))
+        show_debug = work_id == "__debug_runs__" or self._is_developer_work(work_id)
+        detail = get_work_detail(self, work_id, index=self._get_work_index(show_debug=show_debug))
         if work_id != "__debug_runs__":
             detail["golden_example"] = self.get_golden_example_summary(work_id)
         return detail
@@ -1070,13 +1167,37 @@ class WorkflowConsoleBackend:
         )
 
     def _work_manifest_path(self, work_id: str) -> Path:
-        work_dir = self._require_child_path(self._resolve_workspace_path("works"), work_id)
+        work_dir = self._work_storage_dir(work_id)
         return self._require_child_path(work_dir, "work_manifest.json")
 
     def _work_runs_root(self, work_id: str) -> Path:
         self._require_safe_run_id(work_id)
-        work_dir = self._require_child_path(self._resolve_workspace_path("works"), work_id)
+        work_dir = self._work_storage_dir(work_id)
         return self._require_child_path(work_dir, "runs")
+
+    def _work_storage_dir(self, work_id: str) -> Path:
+        """Resolve user or isolated developer Work storage without inference."""
+
+        self._require_safe_run_id(work_id)
+        normal = self._require_child_path(
+            self._resolve_workspace_path("works"), work_id
+        )
+        developer = self._require_child_path(
+            self._resolve_workspace_path(".internal/dev-works"), work_id
+        )
+        if (normal / "work_manifest.json").is_file():
+            return normal
+        if (developer / "work_manifest.json").is_file():
+            return developer
+        return normal
+
+    def _is_developer_work(self, work_id: str) -> bool:
+        self._require_safe_run_id(work_id)
+        manifest = self._require_child_path(
+            self._resolve_workspace_path(".internal/dev-works"),
+            f"{work_id}/work_manifest.json",
+        )
+        return manifest.is_file()
 
     def read_work_run_prompt(self, work_id: str, run_id: str) -> str | None:
         """Read immutable prompt evidence for an exact manifest-owned Run."""
@@ -1990,10 +2111,19 @@ class WorkflowConsoleBackend:
         self.invalidate_work_index()
 
     def _workspace_work_ids(self) -> list[str]:
-        works_root = self._resolve_workspace_path("works")
-        if not works_root.exists():
-            return []
-        return [path.name for path in sorted(works_root.iterdir(), key=lambda item: item.name) if path.is_dir() and (path / "work_manifest.json").exists()]
+        roots = (
+            self._resolve_workspace_path("works"),
+            self._resolve_workspace_path(".internal/dev-works"),
+        )
+        return list(
+            dict.fromkeys(
+                path.name
+                for root in roots
+                if root.exists()
+                for path in sorted(root.iterdir(), key=lambda item: item.name)
+                if path.is_dir() and (path / "work_manifest.json").exists()
+            )
+        )
 
     def _resolve_developer_run_root(self) -> Path:
         """Keep low-level developer runs outside user-visible Work storage."""

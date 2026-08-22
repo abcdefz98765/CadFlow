@@ -72,7 +72,11 @@ def run_golden_desktop_robot_arm(
         "Golden Desktop Robot Arm",
         description="Executable golden workflow for one reviewed generic link-like concept part.",
         work_id=work_id,
-        metadata={"example": "golden_desktop_robot_arm", "mode": mode},
+        metadata={
+            "example": "golden_desktop_robot_arm",
+            "mode": mode,
+            "work_classification": "compatibility_regression",
+        },
     )
     prompt = (EXAMPLE_ROOT / "prompt.txt").read_text(encoding="utf-8").strip()
     backend.create_work_requirement_run(work_id, prompt, run_id=run_id)

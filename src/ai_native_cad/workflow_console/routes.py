@@ -104,7 +104,7 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         method="POST",
         path="/api/designs",
         backend_operation="create_product_design",
-        description="Create a normal single-Part Job design Work from a user request.",
+        description="Create a normal Work before the Agent decides its Part Jobs.",
     ),
     RouteSpec(
         name="create_golden_example",
@@ -140,6 +140,20 @@ ROUTE_SPECS: tuple[RouteSpec, ...] = (
         path="/api/works/{work_id}/parts/{part_job_id}/attempts",
         backend_operation="create_work_part_attempt",
         description="Append another explicit Run attempt to one Part Job.",
+    ),
+    RouteSpec(
+        name="run_work_design_episode",
+        method="POST",
+        path="/api/works/{work_id}/work-design/episodes",
+        backend_operation="run_work_design_episode",
+        description="Append one Work-scoped design and decomposition Episode.",
+    ),
+    RouteSpec(
+        name="answer_work_design_question",
+        method="POST",
+        path="/api/works/{work_id}/work-design/answers",
+        backend_operation="answer_work_design_question",
+        description="Append one Work-scoped clarification answer without creating a Part Job.",
     ),
     RouteSpec(
         name="run_work_part_design_episode",
@@ -650,6 +664,46 @@ def _run_work_part_design_episode(
     )
 
 
+def _run_work_design_episode(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    unknown = set(body) - {"request_id", "objective"}
+    if unknown:
+        raise ValueError("Work Design Episode body contains unknown fields")
+    return backend.run_work_design_episode(
+        _require_value(path_params, "work_id"),
+        request_id=_require_value(body, "request_id"),
+        objective=body.get("objective"),
+    )
+
+
+def _answer_work_design_question(
+    backend: WorkflowConsoleBackend,
+    path_params: dict[str, Any],
+    body: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    _reject_secret_fields(body)
+    unknown = set(body) - {
+        "run_id", "answer_id", "question_artifact_id", "field", "question", "answer"
+    }
+    if unknown:
+        raise ValueError("Work Design answer body contains unknown fields")
+    return backend.answer_work_design_question(
+        _require_value(path_params, "work_id"),
+        run_id=_require_value(body, "run_id"),
+        answer_id=_require_value(body, "answer_id"),
+        question_artifact_id=_require_value(body, "question_artifact_id"),
+        field=_require_value(body, "field"),
+        question=_require_value(body, "question"),
+        answer=_require_value(body, "answer"),
+    )
+
+
 def _answer_work_part_design_question(
     backend: WorkflowConsoleBackend,
     path_params: dict[str, Any],
@@ -1022,6 +1076,8 @@ _ROUTE_HANDLERS: dict[str, RouteHandler] = {
     "create_work_requirement_run": _create_work_requirement_run,
     "create_work_part_runs": _create_work_part_runs,
     "create_work_part_attempt": _create_work_part_attempt,
+    "run_work_design_episode": _run_work_design_episode,
+    "answer_work_design_question": _answer_work_design_question,
     "run_work_part_design_episode": _run_work_part_design_episode,
     "answer_work_part_design_question": _answer_work_part_design_question,
     "accept_work_reviewable_result": _accept_work_reviewable_result,
@@ -1066,6 +1122,8 @@ def _success_status_code(route_name: str) -> int:
         "create_work_requirement_run",
         "create_work_part_runs",
         "create_work_part_attempt",
+        "run_work_design_episode",
+        "answer_work_design_question",
         "run_work_part_design_episode",
         "answer_work_part_design_question",
         "accept_work_reviewable_result",

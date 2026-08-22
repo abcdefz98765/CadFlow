@@ -1,6 +1,6 @@
 # Current Product Readiness
 
-Status date: 2026-08-09.
+Status date: 2026-08-21.
 
 This document distinguishes the Agent-first target architecture from the
 implemented deterministic product, accepted M1 runtime foundation, bounded M2
@@ -25,6 +25,144 @@ external-provider M2
 acceptance and later-milestone modeling, Assembly, and Deliverable capabilities
 are not.
 
+## Semantic Workflow Map visual correction — implemented and browser verified
+
+- Current Work now renders as a compact semantic DAG with a quiet four-phase
+  orientation strip and a selected-node Inspector. Real Work Design fans out
+  to independent Part Job lanes; Attempt, Reviewable, Accepted, blocked, and
+  revision lineage remain visible without exposing internal Agent/tool turns.
+- The redundant presentation-only Part Decomposition node was removed. This
+  does not change Work, Part Job, Run, accepted-result, recovery, revision, or
+  compatibility authority semantics.
+- Part identity uses a compact branch label; result-sourced revisions use a
+  dashed child lane. Assembly remains absent unless a real Assembly Job exists.
+- Selection still consumes the cached projection and refreshes only the
+  Inspector. Real browser tracing measured 1.43-5.78 ms server-side and
+  273 ms median / 283 ms p95 through the browser-control transport.
+- English 1440 px and Chinese 1024/414 px checks passed. Mobile keeps graph-local
+  horizontal scrolling with no page-level overflow; browser runtime logs were
+  clean.
+- Verification passed 112 focused Workflow/NiceGUI tests, Python compilation,
+  and the complete clean suite (`715 passed, 9 skipped`).
+
+## V1 failure causality and NiceGUI boundaries — implemented and automated verified
+
+- New bounded Episode rejections persist a small `failure_diagnostic` at the
+  real Agent-action, context, tool, execution-environment, or publication
+  boundary. The diagnostic records exact typed facts needed for recovery and
+  excludes provider source, credentials, exception prose, and hidden
+  reasoning. Existing historical evidence is not rewritten.
+- Current Work projects modern policy blocks into product categories with an
+  owner, output status, and a real next action. Historical policy blocks that
+  lack the new diagnostic explicitly say that their exact cause is unknown;
+  the UI does not reconstruct causality from an Agent payload.
+- The selected Work Design node now renders that persisted recovery directly.
+  A local CadFlow rejection, an Agent-reported policy stop with no local
+  rejection, and historical unspecified evidence remain three distinct honest
+  presentations; Technical Evidence is not required to understand them.
+- Transient Action Lifecycle feedback says only that the scope stopped. Work
+  Design retry appends a bounded Episode to the same Work Design Run and is
+  labelled accordingly. Part recovery creates one child attempt Run with the
+  stopped attempt as `parent_run_id`; accepted pointers and old Run evidence
+  remain unchanged.
+- A blocked Run attempt remains a blocked Attempt. Its Part remains incomplete
+  and needs attention. Reviewable and accepted result semantics, accepted
+  pointers, revision lineage, and historical Run immutability are unchanged.
+- Workflow node selection uses the already projected page and replaces only
+  the selected inspector. It does not read the backend, reproject the Work,
+  rebuild the graph/sidebar/viewer, or create graph persistence. Server-side
+  selection measured 2.6-5.8 ms in real NiceGUI tracing.
+- Activity disclosure is browser-local. Technical Evidence remains secondary
+  and reads only exact scoped JSON/JSONL references through one bounded lookup
+  when opened. A refresh-local evidence map deduplicates projection reads and
+  is discarded after the refresh.
+- State-changing actions retain confirmation, immediate pending feedback,
+  duplicate protection, backend execution, and terminal canonical refresh.
+  Pending feedback reuses the current projection; it does not fabricate a
+  durable Run state.
+- Real-browser verification covered modern and historical blocked states,
+  zero-Part, reviewable Accept/Revise, Chinese primary copy, one English pass,
+  and exact 1440/1024/414 layouts. There was no page-level horizontal overflow,
+  no off-screen interactive control, and no console/runtime error. The mobile
+  graph alone retains intentional local horizontal scrolling.
+- Static examples, Golden regression data, and the new browser fixtures are
+  developer-only creation/seed outputs under `.internal/dev-works`. The normal
+  catalog hides them. No existing Work manifest was deleted, moved, or
+  rewritten as a migration.
+
+The browser-control wall-clock floor was 264-310 ms. Consequently, the
+requested 150 ms median / 200 ms p95 selection target cannot be demonstrated
+through that transport: final wall time was 282 ms median / 299 ms p95 while
+the traced server work was 2.6-5.8 ms with no I/O or full refresh. First lazy
+Technical Evidence expansion improved from 451-459 ms to 288 ms wall time and
+met its 300 ms target.
+
+The broad affected suite passed with `412 passed, 1 skipped`; the final
+lifecycle subset passed with `88 passed`. The clean complete repository suite
+passed with `711 passed, 9 skipped` in 435.85 seconds.
+
+## V1 canonical consolidation — implemented and automated verified
+
+- Normal Current Work reads schema-v2 Work manifests, Part Jobs, accepted
+  pointers, and registered artifact references directly. It does not invoke the
+  legacy product projector, infer lineage from directories/timestamps, scan
+  filenames for product state, or build the fixed-stage Run review surface.
+- The manifest exposes `state_authority` as `canonical` or `compatibility`.
+  Legacy/imported Works remain readable, but their projector and fixed-stage
+  review model are confined to the compatibility boundary and Run Snapshot.
+- A small canonical interaction projection owns current state facts and
+  state-changing command keys/targets. Overview, Workflow selected nodes, and
+  Part scope consume that inventory; selected historical evidence remains
+  inspectable and cannot invent a mutation.
+- Normal selected-Work navigation is Overview and Workflow. Parts appears as a
+  contextual destination when decomposition is meaningful; History remains a
+  subordinate immutable-evidence destination. Current Work no longer eagerly
+  loads a selected Run merely because a legacy run id is present.
+- Explicit developer/test Works are written under
+  `workspace/.internal/dev-works` and enter the index only when developer
+  content is requested. Existing user workspace material was not deleted or
+  moved by this migration.
+- The registered Work Design Skill now owns concise missing-information,
+  analysis, decomposition, risk/confirmation, and routing knowledge. A neutral
+  provider-sanitization module and registered-Skill request compiler separate
+  provider transport from Skill semantics; the JSON-contract adapter retains
+  only compatibility wrappers around that compiler.
+- No Assembly, Deliverable, Feature Graph, provider framework, workflow engine,
+  graph persistence, or trust-boundary expansion was introduced. Controlled
+  execution, inspection, reviewable publication, explicit acceptance, revision
+  lineage, immutable history, secret handling, and Broker boundaries remain in
+  place.
+- Automated verification passed with `688 passed, 9 skipped`. The final
+  clean-suite result and real-browser evidence are recorded in the Verification
+  state section.
+
+## V1 workflow-native UI recovery — implemented and browser verified
+
+- Overview is state-specific and Workflow is the live Work spine. New Work no
+  longer renders empty CAD/Agent panels; reviewable geometry is central; one
+  failed Part attempt owns one blocked attempt node and exact recovery.
+- Completed Work Design and User request nodes do not inherit a sibling Part
+  failure. Selected-node commands are gated to the exact Part/Run scope, so a
+  later sibling failure cannot replace the selected attempt's recovery.
+- Agent Design, Activity, and Technical Evidence are distinct. Activity is
+  concise product language; exact sanitized protocol evidence is lazy, bounded,
+  and outside the initial DOM.
+- The policy-block owner fixture uses the real bounded Episode and records that
+  `create_contract` contained an executable-source field outside the Skill
+  action. CadFlow rejected it before execution: no geometry, no CAD result, no
+  user input required, and a new bounded retry is useful.
+- NiceGUI ownership was decomposed into focused action-lifecycle, graph,
+  stopped-attempt, Activity/evidence, Work Design, and style modules.
+  `nicegui_app.py` decreased from 6,840 to 5,974 physical lines. No parallel
+  domain/workflow state or new product capability was introduced.
+- Real browser verification covered Home, New Work, Work Design, multi-Part,
+  ready, running, blocked, clarification, reviewable, selected attempt,
+  Activity, Technical Evidence, history, English/Chinese, 1440/1024/414, and a
+  real command lifecycle. All 23 distinct captures and timing/method details
+  are recorded in `../ux/workflow-native-ui-verification.md`.
+- Focused Workflow-native projection/UI verification passed with `87 passed`.
+  The complete final suite result is recorded in the Verification state below.
+
 ## M2.7 onboarding, Settings, recovery, and Live Agent Example — implemented and verified
 
 - The existing NiceGUI shell presents Home / Works / Settings and prioritizes
@@ -44,7 +182,7 @@ are not.
   traces, logs, or screenshots. Secret-bearing generic gate payloads now fail
   before any Run log mutation.
 - Start Product Example creates a new micro-servo bracket Work with the original
-  request and one real Part Job attempt only. It does not preload a design brief,
+  request and no preselected Part Job. It does not preload a design brief,
   candidate source, STEP/STL, reviewable result, or accepted pointer. Continue
   uses the configured adapter and existing bounded Design Episode, Tool Broker,
   sandbox, inspection, publication, Accept, and Revise boundaries.
@@ -95,6 +233,69 @@ are not.
   the next acceptance milestone; M2 is not complete. The live screenshot named
   `live-example-design-and-model-zh.png` intentionally shows the honest
   no-candidate safe-stop state because the real run did not reach geometry.
+
+## M2.8 UI convergence — implemented and verified
+
+- Overview now owns one dominant Work-level action. Agent Activity explains
+  progress without repeating the command, Part cards navigate to Workflow, and
+  empty Agent Design, geometry, and Agent Output states remain compact until
+  durable evidence exists.
+- Current Attention remains a derived presentation projection. A single-Part
+  Work uses one compact current-task row; a multi-Part Work uses an independent
+  per-Part index. Ready, Running, Needs you, Review, Blocked, Accepted, and
+  completed presentation states do not alter domain status or persist UI state.
+- The Dynamic Work Graph renders its existing nodes, edges, branches, and
+  revision provenance as compact topology instead of four fixed equal-width
+  state columns. The four phases remain orientation chips.
+- Desktop Workflow uses graph-and-inspector master-detail; 1024px and mobile
+  stack without page-level horizontal overflow. Node detail prioritizes state,
+  explanation, valid action, and relevant result before technical ids.
+- Real in-app browser verification covered beginning/ready Overview,
+  clarification, reviewable geometry and acceptance, accepted-result revision,
+  two-Part attention/branching, selected-node changes, immutable Run Snapshot,
+  Chinese, 1440px, 1024px, and 414px layouts. Eleven screenshots are under
+  `../ux/screenshots/ui-convergence/`.
+- Focused behavior verification passed with `32 passed`. The clean complete
+  suite result is recorded in the Verification state section below.
+- No workflow/domain architecture, graph persistence, Work decomposition,
+  Assembly, Deliverable, Provider, Agent-role, or security capability was added.
+
+## M2.9 Work Design and skill/knowledge consolidation — implemented and verified
+
+- Normal New Design and Live Product Example entry now create a Work before any
+  Part Job. The registered `work_design` v0.1 Episode reasons over the whole
+  objective, generated versus reference components, interfaces, dependencies,
+  assumptions, and material ambiguity.
+- The provider may request semantic Work context, propose a strict Work Design,
+  ask one focused Work-scoped clarification, request Part Job creation, or stop
+  honestly. It cannot assign Work/Part/Run identities or mutate the manifest.
+- `WorkOrchestrator` owns the durable transition: it validates a completed
+  proposal, assigns stable Part Job and initial Run identities, preserves
+  append-only history and accepted pointers, and creates no Assembly Job.
+- Overview and Dynamic Workflow project the same `work_design` record. The
+  graph shows User request → Work Design → optional clarification/recovery →
+  Part decomposition → real Part branches; Part Design begins only after the
+  Part Jobs exist.
+- Runtime Skill knowledge comes from bounded repository-contained Markdown
+  sources declared by the active Skill. Legacy stage prompt builders and the
+  fake planner remain explicitly labeled compatibility/test support rather than
+  parallel authorities.
+- Current V1 runtime authority remains exactly `work_design`, `design_part`,
+  and `model_program`. Revision is lineage plus a revision request through the
+  existing Part Design capability; self-review/repair stays inside the bounded
+  `design_part` loop. Assembly is an explicit future capability and remains
+  frozen for V1. Long-term role vocabulary is not an implementation backlog.
+- A deterministic two-Part example uses the same product backend, Episode,
+  Orchestrator, manifest, and projection path. It treats the camera and 2020
+  extrusion as references and does not claim Assembly execution.
+- Automated verification passed with `684 passed, 9 skipped` in the clean
+  complete suite. The focused Work Design matrix covers single-Part,
+  multi-Part, reference-component, clarification/resume, unsupported, and
+  insufficient-context cases.
+- Real in-app browser verification covered the normal 0-Part New Design entry,
+  confirmation boundary, completed two-Part Overview, visible Work Design →
+  Part decomposition graph path, English/Chinese, and 1440px/1024px/414px
+  layouts. No page-level overflow or browser warning/error was observed.
 
 ## Implemented and usable now
 
@@ -342,8 +543,8 @@ one-shot orchestration, not Agentic design.
 - Work / Part Job projection: v2 manifests own ordered attempt histories, while
   legacy evidence with incomplete ownership remains compatibility-projected.
 - Current Work presentation: the target product projection is manifest and
-  artifact-reference based. Legacy stage/availability presentation still reads
-  sanitized Run metadata through an explicit compatibility boundary.
+  artifact-reference based. Legacy stage/availability presentation is confined
+  to compatibility reads and immutable Run Snapshot.
 - Provider usage: different entry points do not consistently use the configured
   adapter.
 - Revision: narrow field-level native CAD IR patches only.
@@ -380,6 +581,35 @@ Current approximate Python line distribution:
 - CAD IR: 0.6k lines;
 - CadQuery and backend layer: 0.5k lines.
 
+The M2.9 audit measured `41,702` source Python lines across `79`
+modules versus the `39,762`-line M2.8 baseline: `+1,940` lines (`+4.88%`) for
+the registered Skill, bounded Work Episode, durable record/Orchestrator route,
+API/UI projection, and compatibility integration. Tests moved from `15,409` to
+`15,632` Python lines (`+223`), plus an 85-line deterministic acceptance script
+and a 33-line Skill contract. No workflow engine, graph persistence, provider
+framework, Assembly runtime, or new source module was introduced.
+
+The largest source modules after M2.9 are `nicegui_app.py` (5,954),
+`pipeline/runner.py` (4,344), `workflow_console/backend.py` (2,815),
+`agents/episode.py` (1,913), `workflow_page_view_model.py` (1,841), and
+`review_surface.py` (1,613). This is acceptable for the narrow milestone but is
+a real concentration signal: the next change to Work Episode or graph behavior
+should prefer focused extraction/reuse rather than extending these files with a
+second runtime model.
+
+The V1 consolidation measures approximately `42,945` source Python lines across
+`82` modules, `81` top-level source classes, and `16,029` test lines with the
+same counting method used by the pre-change audit (`42,338` source lines, `79`
+modules, `81` top-level source classes, `15,935` test lines).
+The `+598` source-line and `+3` module change reflects three narrow boundaries:
+canonical interaction, registered-Skill request compilation, and neutral
+provider sanitization. The largest files remain `nicegui_app.py` (6,840
+physical lines), `pipeline/runner.py` (4,732), `backend.py` (3,125),
+`agents/episode.py` (2,054), `workflow_page_view_model.py` (2,050), and
+`product_usability.py` (2,028). This consolidation removed dead legacy Work
+scanning helpers, but further decomposition of the NiceGUI and backend modules
+remains warranted only when it closes a concrete product loop.
+
 This reflects the former product priority. Further Workflow Cockpit polish is
 not the current milestone unless required to preserve safe operation during
 migration.
@@ -392,8 +622,8 @@ architecture:
 - flat closed-family CAD IR;
 - deterministic fixed-action behavior in the current `create_part_ir`
   compatibility product path;
-- detailed Workflow still contains legacy stage/availability compatibility
-  presentation, but it is secondary to the manifest-derived Overview;
+- compatibility Run Snapshot retains legacy fixed-stage presentation; normal
+  Current Work Workflow does not;
 - hard-coded capability labeling in reviewed-part results;
 - multiple compatibility/evaluation entry points remain callable outside
   product authority;
@@ -403,6 +633,31 @@ These are migration tasks, not accepted target behavior.
 
 ## Verification state
 
+- PR #4 Work Design Inspector closure passed on 2026-08-21 with `711 passed,
+  9 skipped` in the complete clean suite, `88 passed` in the final focused
+  lifecycle set, and successful Python compilation. Real NiceGUI verification
+  covered local rejection, Agent-reported stop, historical unknown, existing
+  Part failure, successful Work Design, developer-fixture filtering, scoped
+  confirmation, English/Chinese, and 1440/1024/414 layouts. All viewports had
+  no page-level horizontal overflow and browser error/warning logs were empty.
+  Six new screenshots and hashes are recorded in
+  `../ux/workflow-native-ui-verification.md`.
+- V1 workflow-native UI recovery passed on 2026-08-13 with `693 passed, 9
+  skipped` in 404.88 seconds in the complete repository suite, plus `87 passed`
+  in the focused projection/UI set. Real in-app browser verification covered
+  17 distinct required states, lazy evidence, exact selected Part/Run command
+  scope, stable viewer disclosure, English/Chinese, and 1440/1024/414 layouts
+  without page-level horizontal overflow. Evidence and SHA-256 hashes are in
+  `../ux/workflow-native-ui-verification.md`.
+- V1 canonical consolidation passed on 2026-08-13 with `688 passed, 9 skipped`
+  in the complete repository suite. Real NiceGUI verification covered Home,
+  0-Part New Work, completed Work Design, multi-Part branches, focused
+  clarification recovery, Part design, reviewable geometry and Accept,
+  selected Workflow nodes, and immutable History. Chinese and English were
+  exercised; 1440px, 1024px, and 414px had no page-level horizontal overflow;
+  no browser warning/error was recorded. Eleven screenshots are under
+  `../ux/screenshots/v1-canonical-consolidation/`. Browser verification exposed
+  and then re-verified the isolated developer-Work index/detail resolver.
 - Automated verified for Package 3 on 2026-08-08: `160 passed` targeted,
   including live WSL2 product/attack coverage, and `644 passed, 2 skipped` in
   576.21 seconds for the complete suite with the live sandbox enabled.
@@ -545,6 +800,68 @@ These are migration tasks, not accepted target behavior.
   2 skipped`. Real-browser Product Golden, bilingual, Detailed Workflow,
   Accept, accepted-result Revise, Advanced/Evidence, 1440px, 1024px, and 414px
   checks passed with the ten requested screenshots.
+- M2.8 Dynamic Work Graph verification passed on 2026-08-09. Current Work now
+  projects request, Part Job, attempt, clarification/answer/resume,
+  design/candidate/build, typed recovery, reviewable, accepted, and explicit
+  revision nodes only when their durable evidence exists. Four canonical
+  phases are orientation regions, not graph nodes. Historical Run Snapshots
+  retain the read-only compatibility graph. Real NiceGUI browser verification
+  passed for beginning, blocked, clarification/resume, reviewable, accepted,
+  revision with the accepted pointer preserved, real two-Part branching,
+  selected-node detail, Run Snapshot return, Chinese, 1440px, 1024px, and
+  390px layouts; screenshots are saved under
+  `../ux/screenshots/dynamic-work-graph/`. Focused verification passed with
+  `84 passed`; the complete suite passed with `661 passed, 9 skipped`.
+- The M2.8 Workflow Command Surface correction passed on 2026-08-09. Current
+  Attention is now a derived per-Part presentation rather than a second global
+  state; selecting request, active attempt, clarification, recovery,
+  reviewable, accepted, or historical nodes exposes only commands already
+  authorized by the Work/Part/Run/result domain. Historical Run Snapshots show
+  the Run request, meaningful outcome, validation/stop state, and available
+  geometry before the collapsed legacy compatibility graph. Real NiceGUI
+  browser verification covered beginning Work, unanswered and answered
+  clarification, retryable and unsupported stops, reviewable acceptance,
+  accepted-result revision with the accepted pointer retained, two parallel
+  Part attention points, and a read-only historical Run. Nine screenshots are
+  saved under `../ux/screenshots/workflow-command-surface/`. Focused
+  verification passed with `69 passed`; the complete suite passed with `663
+  passed, 9 skipped`.
+- The M2.8 UI convergence pass completed on 2026-08-09. Focused behavior tests
+  passed with `32 passed`; the clean complete suite passed with `664 passed, 9
+  skipped`. Real-browser verification and screenshots cover the simplified
+  Overview, compact Current Attention, topology-first graph, nearby node
+  inspector, all required owner states, and 1440px/1024px/414px layouts.
+- M2.9 Work Design verification passed on 2026-08-10. The normal UI begins
+  with the durable Work request and no Part Job, then a completed provider-
+  selected Work Design is projected through CadFlow-owned decomposition into
+  the exact real Part branches. The clean complete suite passed with `674
+  passed, 9 skipped`; the deterministic multi-Part acceptance script reported
+  `passed=true`, two generated Part Jobs, two reference components, no Assembly
+  Job, and no accepted pointer. Real in-app browser checks covered the 0-Part
+  action, completed Overview/Agent Output, visible Work path, bilingual copy,
+  and 1440px/1024px/414px responsive layouts without page overflow or console
+  warnings/errors.
+- The M2.9 Workflow interaction-integrity correction passed on 2026-08-12.
+  Selected Work Design, Part, attempt, recovery, and result nodes now project
+  only evidence and actions owned by their exact durable Work/Part/Run/result
+  scope. Workflow commands retain those exact target identities through
+  confirmation and execution. Pending commands render an acknowledged Running
+  state with duplicate protection, while typed Episode outcomes replace it with
+  an honest reviewable, clarification, blocked, or failed terminal state. Real
+  in-app browser verification covered independent Camera Cradle and Extrusion
+  Adapter branches, exact empty/output states, exact retry targeting, reload
+  reprojection, duplicate prevention, provider failure, and clarification
+  answer/resume evidence. Focused verification passed with `109 passed, 1
+  skipped`; the clean complete suite passed with `684 passed, 9 skipped`.
+- M2.8 added only optional durable revision provenance on Part attempts because
+  parent Run/result causality cannot be recovered honestly from prompt text,
+  attempt order, or timestamps. No graph persistence, workflow engine, Agent
+  framework, Provider abstraction, Assembly execution, Deliverables, or new
+  security layer was introduced.
+- The normal product entry creates a 0-Part Work and runs Work Design before
+  durable Part Job creation. Legacy planning is not treated as hidden canonical
+  decomposition, and multi-Part graph truth comes only from durable Part Jobs
+  and their independent attempts/results.
 - Target architecture verification: M1 passed. Seven bounded M2 internal
   packages are contract-tested, and execution/publication have current-host
   WSL2 acceptance. The external-provider benchmark and user acceptance remain
@@ -568,21 +885,23 @@ These are migration tasks, not accepted target behavior.
 ## Current milestone
 
 M0 and M1 are complete. The M2 backend vertical slice is implemented through
-reviewable publication and explicit accept/revise routes. The M2.5 Workbench MVP
-usability gate and M2.6 canonical Product Golden comprehensibility gate are
-complete. The external-provider M2 benchmark is now the current milestone; M2
-itself remains unaccepted until that benchmark and an explicit user acceptance
-pass.
+reviewable publication and explicit accept/revise routes. The M2.5 Workbench,
+M2.6 Product Golden, M2.7 onboarding/recovery, and M2.8 Dynamic Work Graph
+product gates are complete. The external-provider M2 benchmark is now the
+remaining formal acceptance gate, but the current product stage is CadFlow V1
+Owner Use / Real Design Trials. M2 itself remains unaccepted until the
+external-provider benchmark and an explicit user acceptance pass.
 
 Delivery order:
 
-1. run the M2 external-provider benchmark and explicit user acceptance;
-2. preserve the completed M2.5 Workbench and M2.6 Product Golden gates while
-   fixing any benchmark-driven usability defects;
+1. run V1 Owner Use / Real Design Trials, including the M2 external-provider
+   benchmark and explicit user acceptance;
+2. preserve the completed M2.5–M2.9 and V1 consolidation product gates while fixing any
+   benchmark-driven usability defects;
 3. M3 feature-graph/model-program geometry paths;
 4. M4 multi-Part Job and Assembly Job progression;
 5. M5 integrated Deliverable Package and drawings;
-6. M6 Workbench expansion beyond the single-Part Job MVP.
+6. M6 Workbench expansion beyond the current Work Design/Part Job MVP.
 
 See:
 

@@ -72,6 +72,30 @@ def test_part_job_keeps_ordered_attempt_history_and_can_accept_either_attempt():
     assert len(first["part_jobs"][0]["attempts"]) == 1
 
 
+def test_revision_attempt_provenance_is_optional_durable_and_backward_compatible():
+    first = append_part_attempt(
+        _work(),
+        part_job_id="clamp",
+        run_id="clamp_attempt_1",
+        created_at="2026-07-25T00:01:00+00:00",
+    )
+    revised = append_part_attempt(
+        first,
+        part_job_id="clamp",
+        run_id="clamp_attempt_2",
+        created_at="2026-07-25T00:02:00+00:00",
+        parent_run_id="clamp_attempt_1",
+        source_result_id="part_result:clamp:first",
+    )
+
+    old_attempt, revision_attempt = revised["part_jobs"][0]["attempts"]
+    assert old_attempt["parent_run_id"] is None
+    assert old_attempt["source_result_id"] is None
+    assert revision_attempt["parent_run_id"] == "clamp_attempt_1"
+    assert revision_attempt["source_result_id"] == "part_result:clamp:first"
+    assert project_work_record(revised) == revised
+
+
 def test_legacy_v1_work_projection_preserves_runs_without_rewriting_source():
     legacy = {
         "schema_version": 1,
