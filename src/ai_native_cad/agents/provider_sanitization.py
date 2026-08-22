@@ -14,6 +14,11 @@ _API_ENV_VAR_RE = re.compile(
 _SECRET_VALUE_RE = re.compile(
     r"\b(?:sk|pk|pat|ghp|gho|ghu|ghs|xoxb|xoxp)-[A-Za-z0-9_-]{8,}\b"
 )
+_CONTRACT_FIELD_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,119}")
+_CONTRACT_FIELD_PATH_RE = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]{0,119}(?:\[\])?"
+    r"(?:\.[A-Za-z_][A-Za-z0-9_]{0,119}(?:\[\])?)*"
+)
 _PRIVATE_KEY_TOKENS = (
     "api_key", "apikey", "access_key", "secret", "token", "password",
     "credential", "transcript", "chat_log", "chatlog", "runtime_log",
@@ -45,6 +50,14 @@ def sanitize_provider_string(value: str) -> str:
     return _SECRET_VALUE_RE.sub("[redacted-secret]", value)
 
 
+def is_safe_contract_field_name(value: Any) -> bool:
+    return isinstance(value, str) and bool(_CONTRACT_FIELD_NAME_RE.fullmatch(value))
+
+
+def is_safe_contract_field_path(value: Any) -> bool:
+    return isinstance(value, str) and bool(_CONTRACT_FIELD_PATH_RE.fullmatch(value))
+
+
 def _private_key(key: str, value: Any, preserve_cad_paths: bool) -> bool:
     lowered = key.lower()
     if any(token in lowered for token in _PRIVATE_KEY_TOKENS):
@@ -57,6 +70,8 @@ def _private_key(key: str, value: Any, preserve_cad_paths: bool) -> bool:
             and isinstance(value, str)
             and bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", value))
         )
+    if lowered == "field_path":
+        return not is_safe_contract_field_path(value)
     return (
         lowered in _FILESYSTEM_KEYS
         or lowered.endswith("_dir")
@@ -65,4 +80,9 @@ def _private_key(key: str, value: Any, preserve_cad_paths: bool) -> bool:
     )
 
 
-__all__ = ["sanitize_provider_payload", "sanitize_provider_string"]
+__all__ = [
+    "is_safe_contract_field_name",
+    "is_safe_contract_field_path",
+    "sanitize_provider_payload",
+    "sanitize_provider_string",
+]

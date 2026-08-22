@@ -455,3 +455,36 @@ Saved screenshot evidence:
 Final verification passed: `187 passed` in the affected integration set,
 Python compilation for `src` and `tests`, `git diff --check`, and the clean
 complete repository suite with `752 passed, 9 skipped` in 410.13 seconds.
+
+## V1 Work Design Contract Visibility correction — 2026-08-22
+
+This backend-only correction does not change the Workflow graph, Inspector,
+Owner copy, actions, or interaction lifecycle. The first `work_design` provider
+request now discloses the exact CadFlow-owned machine-readable contract. The
+same focused authority supplies provider disclosure, local validation, and
+repair feedback for top-level and nested generated-Part, reference-component,
+and relation objects. Safe diagnostics distinguish `missing`, `extra`,
+`invalid_type`, `invalid_value`, and `invalid_shape`, carry stable wildcard
+field paths, and list the expected fields for the local object. Unsafe
+identity, authority, credential, source, and path-shaped keys remain terminal
+and are not echoed.
+
+Automated verification passed with `95 passed` in the focused provider,
+validator, repair, and registry set; `326 passed` across the broader Work
+Design, WorkOrchestrator, Owner UX, and Workflow set; Python compilation for
+`src` and `tests`; `git diff --check`; and `799 passed, 9 skipped` in the clean
+complete suite. A browser sanity check was attempted, but no CadFlow service was
+running at the local `127.0.0.1:8780` endpoint. Because no UI or projection code
+changed, no service was started solely for this check; the Owner UX/Workflow
+regression tests remained green.
+
+The new external-provider retry appended request
+`work_design_contract_visibility_07009fe8e7ba4b448a2bfda7af4941d5` to the
+existing `机械臂` Work and preserved the three prior Episodes and accepted
+pointers. DeepSeek `deepseek-v4-flash` returned a proposal that passed the
+canonical Work Design validator with four generated Parts. Its next response
+encoded `create_part_jobs` as an object rather than the registered string action,
+so the existing action boundary stopped the Episode with
+`action_not_registered`. No Part Job, CAD, geometry, result, or acceptance was
+created. The field-contract correction therefore succeeded on the real
+proposal; action-envelope conformance is a separate follow-up risk.

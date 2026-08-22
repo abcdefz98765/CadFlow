@@ -10,6 +10,7 @@ from typing import Any
 
 from ai_native_cad.agents.provider_sanitization import sanitize_provider_payload
 from ai_native_cad.agents.registry import RUNTIME_SKILL_REGISTRY
+from ai_native_cad.agents.work_design_contract import work_design_contract_description
 
 
 def compile_registered_skill_action_request(
@@ -54,6 +55,8 @@ def compile_registered_skill_action_request(
             for item in RUNTIME_SKILL_REGISTRY.knowledge_for_skill(skill.skill_id)
         ],
     }
+    if skill.skill_id == "work_design":
+        safe_manifest["work_design_contract"] = work_design_contract_description()
     return {
         "operation": f"{skill.skill_id}_action",
         "response_format": {"type": "json_object"},

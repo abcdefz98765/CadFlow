@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
@@ -54,6 +55,16 @@ _FAILURE_DIAGNOSTIC_OPTIONAL_FIELDS = {
     "contract_repair_exhausted",
     "contract_repair_turn_count",
 }
+_FAILURE_DIAGNOSTIC_WORK_DESIGN_FIELDS = {
+    "field_issue",
+    "field_path",
+    "expected_fields",
+}
+_SAFE_CONTRACT_FIELD_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,119}")
+_SAFE_CONTRACT_FIELD_PATH_RE = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]{0,119}(?:\[\])?"
+    r"(?:\.[A-Za-z_][A-Za-z0-9_]{0,119}(?:\[\])?)*"
+)
 
 
 def _require_failure_diagnostic(value: dict[str, Any] | None) -> None:
@@ -68,9 +79,12 @@ def _require_failure_diagnostic(value: dict[str, Any] | None) -> None:
         or not fields <= (
             _FAILURE_DIAGNOSTIC_REQUIRED_FIELDS
             | _FAILURE_DIAGNOSTIC_OPTIONAL_FIELDS
+            | _FAILURE_DIAGNOSTIC_WORK_DESIGN_FIELDS
         )
         or bool(fields & _FAILURE_DIAGNOSTIC_OPTIONAL_FIELDS)
         != (_FAILURE_DIAGNOSTIC_OPTIONAL_FIELDS <= fields)
+        or bool(fields & _FAILURE_DIAGNOSTIC_WORK_DESIGN_FIELDS)
+        != (_FAILURE_DIAGNOSTIC_WORK_DESIGN_FIELDS <= fields)
     ):
         raise ValueError("failure_diagnostic has an invalid shape")
     if value.get("schema_version") != 1:
@@ -94,6 +108,26 @@ def _require_failure_diagnostic(value: dict[str, Any] | None) -> None:
         turn_count = value.get("contract_repair_turn_count")
         if not isinstance(turn_count, int) or isinstance(turn_count, bool) or turn_count < 0:
             raise ValueError("failure_diagnostic contract repair count is invalid")
+    if _FAILURE_DIAGNOSTIC_WORK_DESIGN_FIELDS <= fields:
+        if value.get("field_issue") not in {
+            "missing", "extra", "invalid_type", "invalid_value", "invalid_shape",
+        }:
+            raise ValueError("failure_diagnostic field_issue is invalid")
+        field_path = value.get("field_path")
+        if not isinstance(field_path, str) or not _SAFE_CONTRACT_FIELD_PATH_RE.fullmatch(field_path):
+            raise ValueError("failure_diagnostic field_path is invalid")
+        expected_fields = value.get("expected_fields")
+        if (
+            not isinstance(expected_fields, list)
+            or not 1 <= len(expected_fields) <= 32
+            or len(set(expected_fields)) != len(expected_fields)
+            or any(
+                not isinstance(item, str)
+                or not _SAFE_CONTRACT_FIELD_NAME_RE.fullmatch(item)
+                for item in expected_fields
+            )
+        ):
+            raise ValueError("failure_diagnostic expected_fields is invalid")
 
 
 @dataclass(frozen=True)

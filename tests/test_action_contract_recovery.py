@@ -20,6 +20,11 @@ from ai_native_cad.agents import (
     run_work_design_episode,
 )
 from ai_native_cad.agents.registry import RUNTIME_SKILL_REGISTRY
+from ai_native_cad.agents.provider_sanitization import sanitize_provider_payload
+from ai_native_cad.agents.work_design_contract import (
+    work_design_contract_description,
+    work_design_fields,
+)
 from ai_native_cad.workflow_console.agent_activity import significant_activity
 
 
@@ -169,6 +174,201 @@ def test_work_design_repairs_case_b_acceptance_criteria_contract_mistake(
     )
     assert feedback["expected_work_design_fields"] == sorted(_proposal())
     assert "Does not wobble" not in json.dumps(feedback)
+
+
+def test_first_work_design_provider_request_discloses_complete_canonical_contract(
+    tmp_path,
+):
+    _, client = _run_work_design(
+        tmp_path,
+        [{"action": "stop", "stop_reason": "insufficient_context"}],
+    )
+
+    disclosed = client.requests[0]["skill"]["work_design_contract"]
+    assert disclosed == work_design_contract_description()
+    assert disclosed["additional_fields"] is False
+    assert tuple(disclosed["required_fields"]) == work_design_fields()
+    generated = disclosed["fields"]["generated_parts"]
+    assert (generated["type"], generated["min_items"], generated["max_items"]) == (
+        "list", 1, 12,
+    )
+    assert generated["unique_by"] == "key"
+    assert generated["items"]["additional_fields"] is False
+    assert tuple(generated["items"]["required_fields"]) == work_design_fields(
+        "generated_parts[]"
+    )
+    assert generated["items"]["fields"]["key"] == {
+        "type": "text", "non_empty": True, "max_length": 120,
+    }
+    references = disclosed["fields"]["reference_components"]
+    assert references["max_items"] == 24
+    assert references["items"]["additional_fields"] is False
+    assert tuple(references["items"]["required_fields"]) == work_design_fields(
+        "reference_components[]"
+    )
+    for relation_name, maximum in (("interfaces", 48), ("dependencies", 24)):
+        relation = disclosed["fields"][relation_name]
+        assert relation["max_items"] == maximum
+        assert relation["items"]["additional_fields"] is False
+        assert tuple(relation["items"]["required_fields"]) == work_design_fields(
+            f"{relation_name}[]"
+        )
+    assert disclosed["fields"]["assembly_expected"] == {"type": "boolean"}
+    assert disclosed["fields"]["recommendation"]["max_length"] == 1_000
+
+
+def test_provider_sanitizer_preserves_only_safe_contract_field_paths():
+    assert sanitize_provider_payload(
+        {"field_path": "generated_parts[].key"}
+    ) == {"field_path": "generated_parts[].key"}
+    assert sanitize_provider_payload({"field_path": "C:/private/work.json"}) == {}
+    assert sanitize_provider_payload({"field_path": "../private"}) == {}
+
+
+@pytest.mark.parametrize(
+    ("scope", "unsafe_key", "expected_parent_path"),
+    [
+        ("top", "api_key", "work_design"),
+        ("generated_part", "targetWorkId", "generated_parts[]"),
+    ],
+)
+def test_unsafe_extra_field_names_never_enter_diagnostics_or_evidence(
+    tmp_path,
+    scope,
+    unsafe_key,
+    expected_parent_path,
+):
+    raw_marker = "RAW_UNSAFE_FIELD_VALUE_MUST_NOT_PERSIST"
+    invalid = _proposal()
+    if scope == "top":
+        invalid[unsafe_key] = raw_marker
+    else:
+        invalid["generated_parts"][0][unsafe_key] = raw_marker
+    adapter, client = _adapter([
+        {"action": "propose_work_design", "work_design": invalid}
+    ])
+
+    with pytest.raises(EpisodeContractError) as caught:
+        run_work_design_episode(
+            adapter=adapter,
+            work_context=_work_context(),
+            artifact_dir=tmp_path,
+            run_id="work_design_run",
+        )
+
+    diagnostic = caught.value.failure_diagnostic
+    assert diagnostic["field_issue"] == "extra"
+    assert diagnostic["field_path"] == expected_parent_path
+    assert diagnostic["requested_capability_or_context"] is None
+    assert diagnostic["expected_fields"] == sorted(
+        work_design_fields(
+            "generated_parts[]" if scope == "generated_part" else ""
+        )
+    )
+    assert unsafe_key not in json.dumps(diagnostic)
+    assert raw_marker not in json.dumps(diagnostic)
+    assert len(client.requests) == 1
+    persisted_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    )
+    assert unsafe_key not in persisted_text
+    assert raw_marker not in persisted_text
+    assert "action_contract_feedback" not in persisted_text
+    assert not (tmp_path / "agent_events.jsonl").exists()
+    assert not (tmp_path / "agent_result.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("case", "field_issue", "field_path", "object_path"),
+    [
+        ("top_extra", "extra", "acceptance_criteria", ""),
+        ("top_missing", "missing", "recommendation", ""),
+        ("missing_and_extra", "missing", "recommendation", ""),
+        (
+            "generated_extra",
+            "extra",
+            "generated_parts[].acceptance_criteria",
+            "generated_parts[]",
+        ),
+        ("generated_missing", "missing", "generated_parts[].key", "generated_parts[]"),
+        (
+            "reference_shape",
+            "invalid_shape",
+            "reference_components[]",
+            "reference_components[]",
+        ),
+        ("interface_missing", "missing", "interfaces[].from", "interfaces[]"),
+        ("dependency_shape", "invalid_shape", "dependencies[]", "dependencies[]"),
+        ("wrong_type", "invalid_type", "assembly_expected", ""),
+        ("invalid_value", "invalid_value", "recommendation", ""),
+    ],
+)
+def test_work_design_mismatch_feedback_is_precise_local_and_value_free(
+    tmp_path,
+    case,
+    field_issue,
+    field_path,
+    object_path,
+):
+    invalid = _proposal()
+    invalid["concept_summary"] = "RAW_PAYLOAD_VALUE_MUST_NOT_LEAK"
+    if case == "top_extra":
+        invalid["acceptance_criteria"] = ["RAW acceptance"]
+    elif case == "top_missing":
+        del invalid["recommendation"]
+    elif case == "missing_and_extra":
+        del invalid["recommendation"]
+        invalid["acceptance_criteria"] = ["RAW acceptance"]
+    elif case == "generated_extra":
+        invalid["generated_parts"][0]["acceptance_criteria"] = ["RAW acceptance"]
+    elif case == "generated_missing":
+        del invalid["generated_parts"][0]["key"]
+    elif case == "reference_shape":
+        invalid["reference_components"] = ["RAW reference component"]
+    elif case == "interface_missing":
+        invalid["interfaces"] = [{"to": "target", "description": "RAW relation"}]
+    elif case == "dependency_shape":
+        invalid["dependencies"] = ["RAW dependency"]
+    elif case == "wrong_type":
+        invalid["assembly_expected"] = "RAW boolean"
+    elif case == "invalid_value":
+        invalid["recommendation"] = ""
+
+    result, client = _run_work_design(
+        tmp_path,
+        [
+            {"action": "propose_work_design", "work_design": invalid},
+            {"action": "propose_work_design", "work_design": _proposal()},
+            {"action": "create_part_jobs"},
+        ],
+    )
+
+    assert result.status == "completed"
+    feedback = client.requests[1]["state"]["action_contract_feedback"]
+    assert feedback["field_issue"] == field_issue
+    assert feedback["field_path"] == field_path
+    assert feedback["expected_fields"] == sorted(work_design_fields(object_path))
+    assert feedback["expected_work_design_fields"] == sorted(work_design_fields())
+    assert "RAW" not in json.dumps(feedback)
+
+
+def test_exhausted_work_design_repair_preserves_precise_terminal_diagnostic(tmp_path):
+    invalid = _proposal()
+    invalid["acceptance_criteria"] = ["RAW_PAYLOAD_VALUE_MUST_NOT_LEAK"]
+    action = {"action": "propose_work_design", "work_design": invalid}
+
+    result, client = _run_work_design(tmp_path, [action, action, action])
+
+    assert result.contract_repair_exhausted is True
+    assert result.failure_diagnostic["field_issue"] == "extra"
+    assert result.failure_diagnostic["field_path"] == "acceptance_criteria"
+    assert result.failure_diagnostic["expected_fields"] == sorted(work_design_fields())
+    assert "RAW_PAYLOAD_VALUE_MUST_NOT_LEAK" not in json.dumps(
+        result.failure_diagnostic
+    )
+    assert len(client.requests) == 3
 
 
 def test_contract_repair_budget_exhausts_once_after_two_corrections(tmp_path):

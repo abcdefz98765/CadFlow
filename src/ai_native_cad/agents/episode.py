@@ -31,6 +31,15 @@ from ai_native_cad.agents.model_program_runtime import (
     validate_model_program_parameters,
 )
 from ai_native_cad.agents.provider_context import sanitize_provider_payload
+from ai_native_cad.agents.provider_sanitization import (
+    is_safe_contract_field_name,
+    is_safe_contract_field_path,
+)
+from ai_native_cad.agents.work_design_contract import (
+    WorkDesignField,
+    work_design_field,
+    work_design_fields,
+)
 
 
 class StopReason(str, Enum):
@@ -57,6 +66,9 @@ class AgentActionRejection(ValueError):
         reason_code: str = "invalid_action_contract",
         rejected_action: str | None = None,
         requested_capability_or_context: str | None = None,
+        field_issue: str | None = None,
+        field_path: str | None = None,
+        expected_fields: tuple[str, ...] | list[str] | None = None,
         human_safe_detail: str = "The Agent response did not match the allowed action contract.",
         side_effect_started: bool = False,
     ) -> None:
@@ -76,6 +88,17 @@ class AgentActionRejection(ValueError):
             "human_safe_detail": _short_text(human_safe_detail),
             "side_effect_started": side_effect_started is True,
         }
+        safe_field_issue = _safe_work_design_field_issue(field_issue)
+        safe_field_path = (
+            field_path if is_safe_contract_field_path(field_path) else None
+        )
+        safe_expected_fields = _safe_expected_fields(expected_fields)
+        if safe_field_issue is not None:
+            self.failure_diagnostic["field_issue"] = safe_field_issue
+        if safe_field_path is not None:
+            self.failure_diagnostic["field_path"] = safe_field_path
+        if safe_expected_fields is not None:
+            self.failure_diagnostic["expected_fields"] = safe_expected_fields
 
 
 class UnknownAgentActionError(AgentActionRejection):
@@ -160,20 +183,6 @@ ACTION_REQUIRED_FIELDS: dict[str, frozenset[str]] = {
     "ask_user": frozenset({"action", "questions"}),
     "stop": frozenset({"action", "stop_reason"}),
 }
-
-WORK_DESIGN_FIELDS = frozenset({
-    "objective",
-    "concept_summary",
-    "generated_parts",
-    "reference_components",
-    "interfaces",
-    "dependencies",
-    "assumptions",
-    "unresolved_questions",
-    "assembly_expected",
-    "recommendation",
-})
-
 
 @dataclass(frozen=True)
 class AgentObjective:
@@ -2191,22 +2200,18 @@ def validate_work_design_proposal(value: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalize the small provider-authored Work Design contract."""
 
     if not isinstance(value, dict):
-        raise EpisodeContractError(
+        raise _work_design_contract_error(
             "work_design must be an object",
-            reason_code="invalid_work_design_contract",
-            rejected_action="propose_work_design",
+            "work_design",
+            field_issue="invalid_shape",
+            field_path="work_design",
+            expected_fields=work_design_fields(),
         )
-    allowed = WORK_DESIGN_FIELDS
-    if set(value) != allowed:
-        raise EpisodeContractError(
-            "work_design fields do not match the canonical contract",
-            reason_code="invalid_work_design_contract",
-            rejected_action="propose_work_design",
-            requested_capability_or_context=_first_safe_identifier(
-                set(value) ^ allowed
-            ),
-            human_safe_detail="The Agent's Work Design fields did not match the typed Work Design contract.",
-        )
+    _validate_work_design_object_fields(
+        value,
+        object_path="",
+        field_path_prefix="",
+    )
     for forbidden in ("part_job_id", "run_id", "work_id", "manifest", "path", "command"):
         if _contains_key(value, forbidden):
             raise EpisodeContractError(
@@ -2217,71 +2222,122 @@ def validate_work_design_proposal(value: dict[str, Any]) -> dict[str, Any]:
                 requested_capability_or_context=forbidden,
                 human_safe_detail="The Agent tried to supply a product identity or side effect that CadFlow owns.",
             )
-    objective = _required_bounded_text(value["objective"], "objective", 2_000)
-    concept = _required_bounded_text(value["concept_summary"], "concept_summary", 4_000)
-    recommendation = _required_bounded_text(value["recommendation"], "recommendation", 1_000)
+    top_fields = work_design_fields()
+    objective = _required_bounded_text(
+        value["objective"], "objective", work_design_field("objective"),
+        field_path="objective", expected_fields=top_fields,
+    )
+    concept = _required_bounded_text(
+        value["concept_summary"], "concept_summary", work_design_field("concept_summary"),
+        field_path="concept_summary", expected_fields=top_fields,
+    )
+    recommendation = _required_bounded_text(
+        value["recommendation"], "recommendation", work_design_field("recommendation"),
+        field_path="recommendation", expected_fields=top_fields,
+    )
     raw_parts = value["generated_parts"]
-    if not isinstance(raw_parts, list) or not 1 <= len(raw_parts) <= 12:
-        raise _work_design_contract_error(
-            "work_design requires one to twelve generated Parts",
-            "generated_parts",
-        )
+    _validate_work_design_list(
+        raw_parts,
+        work_design_field("generated_parts"),
+        label="generated_parts",
+        field_path="generated_parts",
+        expected_fields=top_fields,
+    )
     generated_parts: list[dict[str, Any]] = []
     keys: set[str] = set()
+    generated_fields = work_design_fields("generated_parts[]")
+    unique_key_field = work_design_field("generated_parts").unique_by
+    if unique_key_field is None:
+        raise RuntimeError("canonical generated Parts require a unique key field")
     for raw in raw_parts:
-        expected_part_fields = {"key", "name", "role", "interfaces", "dependencies"}
-        if not isinstance(raw, dict) or set(raw) != expected_part_fields:
-            raise _work_design_contract_error(
-                "generated Part fields do not match the canonical contract",
-                _first_safe_identifier(set(raw) ^ expected_part_fields)
-                if isinstance(raw, dict)
-                else "generated_parts",
-            )
-        key = _required_bounded_text(raw["key"], "generated Part key", 120)
+        _validate_work_design_object_fields(
+            raw,
+            object_path="generated_parts[]",
+            field_path_prefix="generated_parts[]",
+        )
+        key = _required_bounded_text(
+            raw[unique_key_field], "generated Part key",
+            work_design_field(unique_key_field, "generated_parts[]"),
+            field_path=f"generated_parts[].{unique_key_field}",
+            expected_fields=generated_fields,
+        )
         if key in keys:
             raise _work_design_contract_error(
                 "generated Part keys must be unique",
-                "generated_parts.key",
+                unique_key_field,
+                field_issue="invalid_value",
+                field_path=f"generated_parts[].{unique_key_field}",
+                expected_fields=generated_fields,
             )
         keys.add(key)
         generated_parts.append(
             {
                 "key": key,
-                "name": _required_bounded_text(raw["name"], "generated Part name", 200),
-                "role": _required_bounded_text(raw["role"], "generated Part role", 1_000),
-                "interfaces": _bounded_text_list(raw["interfaces"], "generated Part interfaces", 24, 1_000),
-                "dependencies": _bounded_text_list(raw["dependencies"], "generated Part dependencies", 12, 500),
+                "name": _required_bounded_text(
+                    raw["name"], "generated Part name", work_design_field("name", "generated_parts[]"),
+                    field_path="generated_parts[].name", expected_fields=generated_fields,
+                ),
+                "role": _required_bounded_text(
+                    raw["role"], "generated Part role", work_design_field("role", "generated_parts[]"),
+                    field_path="generated_parts[].role", expected_fields=generated_fields,
+                ),
+                "interfaces": _bounded_text_list(
+                    raw["interfaces"], "generated Part interfaces",
+                    work_design_field("interfaces", "generated_parts[]"),
+                    field_path="generated_parts[].interfaces", expected_fields=generated_fields,
+                ),
+                "dependencies": _bounded_text_list(
+                    raw["dependencies"], "generated Part dependencies",
+                    work_design_field("dependencies", "generated_parts[]"),
+                    field_path="generated_parts[].dependencies", expected_fields=generated_fields,
+                ),
             }
         )
     raw_references = value["reference_components"]
-    if not isinstance(raw_references, list) or len(raw_references) > 24:
-        raise _work_design_contract_error(
-            "reference_components must be a bounded list",
-            "reference_components",
-        )
+    _validate_work_design_list(
+        raw_references,
+        work_design_field("reference_components"),
+        label="reference_components",
+        field_path="reference_components",
+        expected_fields=top_fields,
+    )
     reference_components: list[dict[str, Any]] = []
+    reference_fields = work_design_fields("reference_components[]")
     for raw in raw_references:
-        expected_reference_fields = {"name", "role", "interfaces"}
-        if not isinstance(raw, dict) or set(raw) != expected_reference_fields:
-            raise _work_design_contract_error(
-                "reference component fields do not match the canonical contract",
-                _first_safe_identifier(set(raw) ^ expected_reference_fields)
-                if isinstance(raw, dict)
-                else "reference_components",
-            )
+        _validate_work_design_object_fields(
+            raw,
+            object_path="reference_components[]",
+            field_path_prefix="reference_components[]",
+        )
         reference_components.append(
             {
-                "name": _required_bounded_text(raw["name"], "reference component name", 200),
-                "role": _required_bounded_text(raw["role"], "reference component role", 1_000),
-                "interfaces": _bounded_text_list(raw["interfaces"], "reference component interfaces", 24, 1_000),
+                "name": _required_bounded_text(
+                    raw["name"], "reference component name",
+                    work_design_field("name", "reference_components[]"),
+                    field_path="reference_components[].name", expected_fields=reference_fields,
+                ),
+                "role": _required_bounded_text(
+                    raw["role"], "reference component role",
+                    work_design_field("role", "reference_components[]"),
+                    field_path="reference_components[].role", expected_fields=reference_fields,
+                ),
+                "interfaces": _bounded_text_list(
+                    raw["interfaces"], "reference component interfaces",
+                    work_design_field("interfaces", "reference_components[]"),
+                    field_path="reference_components[].interfaces", expected_fields=reference_fields,
+                ),
             }
         )
-    interfaces = _bounded_relation_list(value["interfaces"], "interfaces", 48)
-    dependencies = _bounded_relation_list(value["dependencies"], "dependencies", 24)
-    if not isinstance(value["assembly_expected"], bool):
+    interfaces = _bounded_relation_list(value["interfaces"], "interfaces")
+    dependencies = _bounded_relation_list(value["dependencies"], "dependencies")
+    assembly_spec = work_design_field("assembly_expected")
+    if not _matches_work_design_type(value["assembly_expected"], assembly_spec):
         raise _work_design_contract_error(
             "assembly_expected must be boolean",
             "assembly_expected",
+            field_issue="invalid_type",
+            field_path="assembly_expected",
+            expected_fields=top_fields,
         )
     return {
         "schema_version": 1,
@@ -2291,57 +2347,224 @@ def validate_work_design_proposal(value: dict[str, Any]) -> dict[str, Any]:
         "reference_components": reference_components,
         "interfaces": interfaces,
         "dependencies": dependencies,
-        "assumptions": _bounded_text_list(value["assumptions"], "assumptions", 24, 1_000),
-        "unresolved_questions": _bounded_text_list(value["unresolved_questions"], "unresolved_questions", 12, 1_000),
+        "assumptions": _bounded_text_list(
+            value["assumptions"], "assumptions", work_design_field("assumptions"),
+            field_path="assumptions", expected_fields=top_fields,
+        ),
+        "unresolved_questions": _bounded_text_list(
+            value["unresolved_questions"], "unresolved_questions",
+            work_design_field("unresolved_questions"),
+            field_path="unresolved_questions", expected_fields=top_fields,
+        ),
         "assembly_expected": value["assembly_expected"],
         "recommendation": recommendation,
     }
 
 
-def _bounded_relation_list(value: Any, label: str, maximum: int) -> list[dict[str, str]]:
-    if not isinstance(value, list) or len(value) > maximum:
-        raise _work_design_contract_error(f"{label} must be a bounded list", label)
+def _validate_work_design_object_fields(
+    value: Any,
+    *,
+    object_path: str,
+    field_path_prefix: str,
+) -> None:
+    """Validate one object shape; missing wins deterministically over extra."""
+
+    expected_fields = work_design_fields(object_path)
+    if not isinstance(value, dict):
+        raise _work_design_contract_error(
+            "Work Design entry must be an object",
+            field_path_prefix.rstrip("[]") or "work_design",
+            field_issue="invalid_shape",
+            field_path=field_path_prefix or "work_design",
+            expected_fields=expected_fields,
+        )
+    actual_fields = set(value)
+    missing = set(expected_fields) - actual_fields
+    extra = actual_fields - set(expected_fields)
+    if missing:
+        field = _first_safe_identifier(missing) or "unknown_field"
+        issue = "missing"
+    elif extra:
+        safe_extra_fields = tuple(
+            field
+            for field in (_safe_work_design_extra_field(item) for item in extra)
+            if field is not None
+        )
+        unsafe_extra_present = len(safe_extra_fields) != len(extra)
+        field = None if unsafe_extra_present else sorted(safe_extra_fields)[0]
+        issue = "extra"
+    else:
+        return
+    parent_path = field_path_prefix or "work_design"
+    path = (
+        f"{field_path_prefix}.{field}"
+        if field_path_prefix and field is not None
+        else field or parent_path
+    )
+    raise _work_design_contract_error(
+        "Work Design fields do not match the canonical contract",
+        field,
+        field_issue=issue,
+        field_path=path,
+        expected_fields=expected_fields,
+    )
+
+
+def _validate_work_design_list(
+    value: Any,
+    spec: WorkDesignField,
+    *,
+    label: str,
+    field_path: str,
+    expected_fields: tuple[str, ...],
+) -> None:
+    if not _matches_work_design_type(value, spec):
+        raise _work_design_contract_error(
+            f"{label} must be a list",
+            spec.name,
+            field_issue="invalid_type",
+            field_path=field_path,
+            expected_fields=expected_fields,
+        )
+    minimum = spec.min_items or 0
+    maximum = spec.max_items
+    if len(value) < minimum or (maximum is not None and len(value) > maximum):
+        raise _work_design_contract_error(
+            f"{label} must satisfy its bounded list size",
+            spec.name,
+            field_issue="invalid_value",
+            field_path=field_path,
+            expected_fields=expected_fields,
+        )
+
+
+def _bounded_relation_list(value: Any, label: str) -> list[dict[str, str]]:
+    _validate_work_design_list(
+        value,
+        work_design_field(label),
+        label=label,
+        field_path=label,
+        expected_fields=work_design_fields(),
+    )
     result = []
+    relation_path = f"{label}[]"
+    relation_fields = work_design_fields(relation_path)
     for item in value:
-        expected_relation_fields = {"from", "to", "description"}
-        if not isinstance(item, dict) or set(item) != expected_relation_fields:
-            raise _work_design_contract_error(
-                f"{label} entries require from, to, and description",
-                _first_safe_identifier(set(item) ^ expected_relation_fields)
-                if isinstance(item, dict)
-                else label,
-            )
+        _validate_work_design_object_fields(
+            item,
+            object_path=relation_path,
+            field_path_prefix=relation_path,
+        )
         result.append(
             {
-                "from": _required_bounded_text(item["from"], f"{label} from", 200),
-                "to": _required_bounded_text(item["to"], f"{label} to", 200),
-                "description": _required_bounded_text(item["description"], f"{label} description", 1_000),
+                "from": _required_bounded_text(
+                    item["from"], f"{label} from", work_design_field("from", relation_path),
+                    field_path=f"{relation_path}.from", expected_fields=relation_fields,
+                ),
+                "to": _required_bounded_text(
+                    item["to"], f"{label} to", work_design_field("to", relation_path),
+                    field_path=f"{relation_path}.to", expected_fields=relation_fields,
+                ),
+                "description": _required_bounded_text(
+                    item["description"], f"{label} description",
+                    work_design_field("description", relation_path),
+                    field_path=f"{relation_path}.description", expected_fields=relation_fields,
+                ),
             }
         )
     return result
 
 
-def _bounded_text_list(value: Any, label: str, maximum: int, item_limit: int) -> list[str]:
-    if not isinstance(value, list) or len(value) > maximum:
-        raise _work_design_contract_error(f"{label} must be a bounded list", label)
-    return [_required_bounded_text(item, label, item_limit) for item in value]
+def _bounded_text_list(
+    value: Any,
+    label: str,
+    spec: WorkDesignField,
+    *,
+    field_path: str,
+    expected_fields: tuple[str, ...],
+) -> list[str]:
+    _validate_work_design_list(
+        value,
+        spec,
+        label=label,
+        field_path=field_path,
+        expected_fields=expected_fields,
+    )
+    item_spec = WorkDesignField(
+        name=spec.name,
+        value_type=spec.item_type or "text",
+        non_empty=spec.item_non_empty,
+        max_length=spec.item_max_length,
+    )
+    return [
+        _required_bounded_text(
+            item,
+            label,
+            item_spec,
+            field_path=f"{field_path}[]",
+            expected_fields=expected_fields,
+        )
+        for item in value
+    ]
 
 
-def _required_bounded_text(value: Any, label: str, limit: int) -> str:
-    if not isinstance(value, str) or not value.strip() or len(value.strip()) > limit:
+def _required_bounded_text(
+    value: Any,
+    label: str,
+    spec: WorkDesignField,
+    *,
+    field_path: str,
+    expected_fields: tuple[str, ...],
+) -> str:
+    if not _matches_work_design_type(value, spec):
+        raise _work_design_contract_error(
+            f"{label} must be text",
+            spec.name,
+            field_issue="invalid_type",
+            field_path=field_path,
+            expected_fields=expected_fields,
+        )
+    normalized = value.strip()
+    if (
+        (spec.non_empty and not normalized)
+        or (spec.max_length is not None and len(normalized) > spec.max_length)
+    ):
         raise _work_design_contract_error(
             f"{label} must be non-empty bounded text",
-            label,
+            spec.name,
+            field_issue="invalid_value",
+            field_path=field_path,
+            expected_fields=expected_fields,
         )
-    return value.strip()
+    return normalized
 
 
-def _work_design_contract_error(message: str, field: str | None) -> EpisodeContractError:
+def _matches_work_design_type(value: Any, spec: WorkDesignField) -> bool:
+    expected_types = {
+        "text": str,
+        "boolean": bool,
+        "list": list,
+    }
+    expected = expected_types.get(spec.value_type)
+    return expected is not None and isinstance(value, expected)
+
+
+def _work_design_contract_error(
+    message: str,
+    field: str | None,
+    *,
+    field_issue: str,
+    field_path: str,
+    expected_fields: tuple[str, ...],
+) -> EpisodeContractError:
     return EpisodeContractError(
         message,
         reason_code="invalid_work_design_contract",
         rejected_action="propose_work_design",
         requested_capability_or_context=field,
+        field_issue=field_issue,
+        field_path=field_path,
+        expected_fields=expected_fields,
         human_safe_detail=(
             "The Agent's Work Design did not match the bounded Work Design contract."
         ),
@@ -2434,6 +2657,16 @@ def _forbidden_contract_repair_field(value: Any) -> str | None:
     return None
 
 
+def _safe_work_design_extra_field(value: Any) -> str | None:
+    """Return only a normal field identifier that is safe to echo diagnostically."""
+
+    if not is_safe_contract_field_name(value):
+        return None
+    if _forbidden_contract_repair_field({value: None}) is not None:
+        return None
+    return value
+
+
 def _normalized_contract_field(value: Any) -> str:
     """Normalize field spelling without retaining or inspecting its value."""
 
@@ -2471,6 +2704,12 @@ def _contract_repair_feedback(
     )
     if reason_code not in _CONTRACT_REPAIR_REASON_CODES and not ordering_allowed:
         return None
+    if (
+        reason_code == "invalid_work_design_contract"
+        and diagnostic.get("field_issue") == "extra"
+        and diagnostic.get("requested_capability_or_context") is None
+    ):
+        return None
     action = diagnostic.get("rejected_action")
     if not isinstance(action, str):
         return None
@@ -2505,7 +2744,21 @@ def _contract_repair_feedback(
     ):
         feedback["invalid_field"] = invalid_field
     if action == "propose_work_design" or reason_code == "invalid_work_design_contract":
-        feedback["expected_work_design_fields"] = sorted(WORK_DESIGN_FIELDS)
+        feedback["expected_work_design_fields"] = sorted(work_design_fields())
+        field_issue = _safe_work_design_field_issue(diagnostic.get("field_issue"))
+        raw_field_path = diagnostic.get("field_path")
+        field_path = (
+            raw_field_path
+            if is_safe_contract_field_path(raw_field_path)
+            else None
+        )
+        expected_fields = _safe_expected_fields(diagnostic.get("expected_fields"))
+        if field_issue is not None:
+            feedback["field_issue"] = field_issue
+        if field_path is not None:
+            feedback["field_path"] = field_path
+        if expected_fields is not None:
+            feedback["expected_fields"] = expected_fields
     return feedback
 
 
@@ -2806,6 +3059,29 @@ def _safe_diagnostic_identifier(
     if not all(character.isalnum() or character in "_.:-[]" for character in text):
         return fallback
     return text
+
+
+def _safe_work_design_field_issue(value: Any) -> str | None:
+    if value in {"missing", "extra", "invalid_type", "invalid_value", "invalid_shape"}:
+        return str(value)
+    return None
+
+
+def _safe_expected_fields(value: Any) -> list[str] | None:
+    """Keep only a bounded identifier list; never inspect or reflect field values."""
+
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple, set, frozenset)) or len(value) > 32:
+        return None
+    safe = {
+        item
+        for item in (_safe_diagnostic_identifier(field) for field in value)
+        if item is not None
+    }
+    if not safe or len(safe) != len(value):
+        return None
+    return sorted(safe)
 
 
 def _first_safe_identifier(values: Any) -> str | None:

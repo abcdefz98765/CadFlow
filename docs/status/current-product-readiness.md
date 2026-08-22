@@ -883,6 +883,33 @@ These are migration tasks, not accepted target behavior.
   path. CadFlow is ready to continue Owner Real Design Trials, but the real
   mechanical-arm design is not complete and external-provider output quality
   remains a trial risk.
+- The V1 Work Design Contract Visibility correction completed on 2026-08-22.
+  The first `work_design` provider request now carries the exact CadFlow-owned
+  machine-readable Work Design contract, including nested generated-Part,
+  reference-component, relation, list-bound, text-bound, Boolean, uniqueness,
+  and no-additional-field rules. Provider disclosure, local validation, and
+  repair feedback derive from one focused contract authority; typed safe
+  diagnostics distinguish missing, extra, type, value, and shape failures with
+  stable field paths and local expected-field sets. The two-turn repair budget,
+  source-free evidence, authority boundaries, Workflow projection, and Owner UI
+  structure are unchanged.
+- Correction verification passed with `95 passed` in the focused contract set,
+  `326 passed` across the broader Work Design/Owner UX/Workflow/orchestrator
+  set, Python compilation for `src` and `tests`, `git diff --check`, and `799
+  passed, 9 skipped` in the complete suite. A browser sanity check was attempted,
+  but no CadFlow service was running at the local `127.0.0.1:8780` endpoint;
+  because the correction changed no UI or projection code, no service was
+  started solely for this check. The affected Owner UX and Workflow automated
+  regressions are included in the 326-test set.
+- A new real DeepSeek `deepseek-v4-flash` Episode on the existing `机械臂` Work
+  preserved all three earlier Episodes and accepted pointers. The first
+  provider proposal passed the canonical Work Design validator and described
+  four generated Parts. The provider then returned `create_part_jobs` in an
+  object-style action envelope, which the existing action parser truthfully
+  blocked as `action_not_registered`; therefore the valid proposal was not
+  promoted to `current_design` and no Part Jobs, CAD, geometry, result, or
+  acceptance were created. Work Design field-contract visibility is verified;
+  provider action-envelope conformance remains a separate real-trial risk.
 - M2.8 added only optional durable revision provenance on Part attempts because
   parent Run/result causality cannot be recovered honestly from prompt text,
   attempt order, or timestamps. No graph persistence, workflow engine, Agent
