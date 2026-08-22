@@ -648,7 +648,7 @@ def build_agent_first_workflow_projection(
 
     request_id = add_node({
         "id": "work:request",
-        "label": "用户请求" if language == "zh" else "User request",
+        "label": "用户目标" if language == "zh" else "User Goal",
         "kind": "request",
         "status": "completed" if _dict(overview.get("user_input")).get("durable") else "not_started",
         "group": "intent",
@@ -668,8 +668,11 @@ def build_agent_first_workflow_projection(
     work_design = _dict(entity.get("work_design"))
     work_design_status = str(work_design.get("status") or "not_started")
     work_design_node_id: str | None = None
-    decomposition_node_id: str | None = None
     work_path_node_ids: list[str] = []
+    # Work Design carries decomposition details in its inspector instead of
+    # introducing a derived graph node for that presentation concern.  Keep
+    # the existing authority boundary: a compatibility/imported Work whose
+    # durable record predates Work Design must not gain a fabricated node.
     if work_design_status != "not_started" or not raw_jobs:
         work_design_run_id = (
             str(work_design.get("run_id"))
@@ -740,26 +743,6 @@ def build_agent_first_workflow_projection(
                 work_artifact_nodes[artifact_id] = node_id
             work_tail_id = node_id
 
-        if work_design_status == "completed":
-            decomposition_node_id = add_node({
-                "id": "work:decomposition",
-                "label": "零件分解" if language == "zh" else "Part decomposition",
-                "kind": "decomposition",
-                "status": "completed",
-                "group": "design",
-                "run_id": work_design.get("run_id"),
-                "summary": (
-                    f"{len(raw_jobs)} 个生成零件任务" if language == "zh"
-                    else f"{len(raw_jobs)} generated Part Job{'s' if len(raw_jobs) != 1 else ''}"
-                ),
-                "detail": {
-                    "type": "decomposition",
-                    "work_design": _dict(overview.get("work_design")),
-                    "agent_output": work_design_output,
-                },
-            })
-            work_path_node_ids.append(decomposition_node_id)
-            add_edge(work_design_node_id, decomposition_node_id, "decomposed")
     compatibility_sources = {
         str(item.get("source") or "")
         for item in raw_jobs
@@ -808,7 +791,7 @@ def build_agent_first_workflow_projection(
             },
         })
         add_edge(
-            decomposition_node_id or work_design_node_id or request_id,
+            work_design_node_id or request_id,
             part_node_id,
             "imported" if compatibility_mode else ("decomposed" if len(raw_jobs) > 1 else "created"),
         )
@@ -1620,18 +1603,14 @@ def _workflow_reference_node(
     artifact_id = str(reference.get("artifact_id") or "")
     node_checkpoint = checkpoint in {
         "clarification_decision",
-        "design_brief",
-        "model_program_candidate",
-        "geometry_candidate",
-        "cad_ir_draft",
-        "execution_observation",
         "product_design_routing",
         "work_design_routing",
         "reviewable_result",
     }
     if not node_checkpoint:
-        # Diagnostic/source/STEP payloads remain lazy Technical Evidence. They
-        # do not become graph nodes and should not be read during projection.
+        # Part-attempt design briefs, candidates, and execution observations
+        # remain in Activity/Technical Evidence. They do not become graph
+        # nodes and should not be read during projection.
         return None
     payload = _read_reference(
         backend, work_id, reference, reference_cache=reference_cache
@@ -1711,57 +1690,6 @@ def _workflow_reference_node(
                 "status": "completed",
                 "summary": payload.get("answer"),
                 "detail": {"type": "answer", "question": payload.get("question"), "answer": payload.get("answer"), "evidence": payload},
-            },
-        }
-    if checkpoint == "design_brief":
-        design_content = _dict(payload.get("content")) or payload
-        return {
-            "edge_type": "designed",
-            "node": {
-                **common,
-                "id": f"design:{artifact_id}",
-                "label": "Agent 设计" if language == "zh" else "Agent design",
-                "kind": "design",
-                "status": "completed",
-                "summary": design_content.get("concept") or ("已保存设计摘要" if language == "zh" else "Persisted design summary"),
-                "detail": {
-                    "type": "agent_design",
-                    "agent_design": design_content,
-                    "agent_output": scope_output,
-                    "evidence": payload,
-                },
-            },
-        }
-    if trust_role == "candidate" and checkpoint in {"model_program_candidate", "geometry_candidate", "cad_ir_draft"}:
-        return {
-            "edge_type": "generated",
-            "node": {
-                **common,
-                "id": f"candidate:{artifact_id}",
-                "label": "设计候选" if language == "zh" else "Design candidate",
-                "kind": "candidate",
-                "status": "completed",
-                "summary": "候选已保存，尚未接受。" if language == "zh" else "Candidate persisted; not accepted.",
-                "detail": {"type": "candidate", "evidence": payload, "reference": reference},
-            },
-        }
-    if checkpoint == "execution_observation":
-        passed = reference.get("validation_status") in {"passed", "completed", "valid"}
-        codes = payload.get("codes") if isinstance(payload.get("codes"), list) else []
-        return {
-            "edge_type": "validated" if passed else "failed",
-            "node": {
-                **common,
-                "id": f"build:{artifact_id}",
-                "label": "构建与检查" if language == "zh" else "Build and inspect",
-                "kind": "build",
-                "status": "completed" if passed else "failed",
-                "summary": (
-                    "本地构建与几何检查通过。" if passed and language == "zh"
-                    else "Local build and geometry inspection passed." if passed
-                    else ("验证失败：" if language == "zh" else "Validation failed: ") + ", ".join(str(item) for item in codes[:3])
-                ),
-                "detail": {"type": "build", "evidence": payload, "reference": reference},
             },
         }
     if checkpoint in {"product_design_routing", "work_design_routing"}:
@@ -1906,6 +1834,17 @@ def _workflow_attempt_status(
         return "blocked"
     if any(item.get("checkpoint") == "reviewable_result" and item.get("trust_role") == "reviewable_result" for item in references):
         return "completed"
+    if any(
+        item.get("checkpoint") == "execution_observation"
+        and (
+            item.get("trust_role") == "diagnostic"
+            or item.get("validation_status") in {"blocked", "failed", "rejected"}
+        )
+        for item in references
+    ):
+        # Internal execution turns stay folded into the Attempt, but a durable
+        # failed observation must still change that Attempt's visible state.
+        return "failed"
     if run_id == active_run_id:
         # A current attempt is ready, not necessarily executing.  The NiceGUI
         # action lifecycle overlays Running only while the local command is

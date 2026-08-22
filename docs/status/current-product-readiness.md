@@ -25,6 +25,26 @@ external-provider M2
 acceptance and later-milestone modeling, Assembly, and Deliverable capabilities
 are not.
 
+## Semantic Workflow Map visual correction — implemented and browser verified
+
+- Current Work now renders as a compact semantic DAG with a quiet four-phase
+  orientation strip and a selected-node Inspector. Real Work Design fans out
+  to independent Part Job lanes; Attempt, Reviewable, Accepted, blocked, and
+  revision lineage remain visible without exposing internal Agent/tool turns.
+- The redundant presentation-only Part Decomposition node was removed. This
+  does not change Work, Part Job, Run, accepted-result, recovery, revision, or
+  compatibility authority semantics.
+- Part identity uses a compact branch label; result-sourced revisions use a
+  dashed child lane. Assembly remains absent unless a real Assembly Job exists.
+- Selection still consumes the cached projection and refreshes only the
+  Inspector. Real browser tracing measured 1.43-5.78 ms server-side and
+  273 ms median / 283 ms p95 through the browser-control transport.
+- English 1440 px and Chinese 1024/414 px checks passed. Mobile keeps graph-local
+  horizontal scrolling with no page-level overflow; browser runtime logs were
+  clean.
+- Verification passed 112 focused Workflow/NiceGUI tests, Python compilation,
+  and the complete clean suite (`715 passed, 9 skipped`).
+
 ## V1 failure causality and NiceGUI boundaries — implemented and automated verified
 
 - New bounded Episode rejections persist a small `failure_diagnostic` at the

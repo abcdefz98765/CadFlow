@@ -276,8 +276,8 @@ def test_dynamic_graph_phase_groups_and_node_labels_are_bilingual(tmp_path):
 
     assert [item["label"] for item in chinese["phase_groups"]] == ["意图", "设计", "构建与评估", "接受与交付"]
     assert [item["label"] for item in english["phase_groups"]] == ["Intent", "Design", "Build & Evaluate", "Accept & Deliver"]
-    assert chinese["nodes"][0]["label"] == "用户请求"
-    assert english["nodes"][0]["label"] == "User request"
+    assert chinese["nodes"][0]["label"] == "用户目标"
+    assert english["nodes"][0]["label"] == "User Goal"
 
 
 def test_multi_part_current_work_has_one_branch_per_durable_part_job(tmp_path):
@@ -302,12 +302,241 @@ def test_multi_part_current_work_has_one_branch_per_durable_part_job(tmp_path):
     assert {
         node["part_job_id"] for node in page["nodes"] if node["kind"] == "part"
     } == {"base", "cover"}
+    assert next(node for node in page["nodes"] if node["id"] == "work:request")["label"] == "User Goal"
+    assert not any(node["kind"] == "decomposition" for node in page["nodes"])
     assert not any(node["kind"] == "assembly" for node in page["nodes"])
     assert page["workflow_graph"]["compatibility_mode"] is False
     assert len(page["current_attention"]) == 2
     assert {item["part_job_id"] for item in page["current_attention"]} == {"base", "cover"}
     assert {item["state"] for item in page["current_attention"]} == {"ready"}
     assert all(item["part_label"] for item in page["current_attention"])
+
+
+def test_semantic_graph_folds_internal_attempt_evidence_but_keeps_results_and_revision(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    work_id = "semantic_projection_work"
+    part_job_id = "clamp"
+    first_run_id = "clamp_attempt_1"
+    revision_run_id = "clamp_attempt_2"
+    result_id = "clamp_reviewable_1"
+    backend.create_work("Clamp", "Design a compact clamp.", work_id=work_id)
+    backend.create_work_part_attempt(
+        work_id, part_job_id, role="Fixture clamp", run_id=first_run_id
+    )
+    backend.create_work_part_attempt(
+        work_id,
+        part_job_id,
+        role="Fixture clamp",
+        run_id=revision_run_id,
+        parent_run_id=first_run_id,
+    )
+
+    def register_evidence(
+        artifact_id: str,
+        checkpoint: str,
+        trust_role: str,
+        content: dict,
+        *,
+        source_artifact_ids: list[str] | None = None,
+        validation_status: str = "recorded",
+    ) -> None:
+        relative_path = f"evidence/{artifact_id}.json"
+        target = backend._work_runs_root(work_id) / revision_run_id / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(content) + "\n", encoding="utf-8")
+        reference = create_artifact_reference(
+            artifact_id=artifact_id,
+            work_id=work_id,
+            run_id=revision_run_id,
+            part_job_id=part_job_id,
+            relative_path=relative_path,
+            phase="design",
+            checkpoint=checkpoint,
+            trust_role=trust_role,
+            source_artifact_ids=source_artifact_ids,
+            validation_status=validation_status,
+        )
+        manifest = register_artifact_references(
+            backend._read_work_manifest(work_id), [reference]
+        )
+        backend._write_work_manifest(work_id, manifest)
+
+    for checkpoint in (
+        "design_brief",
+        "model_program_candidate",
+        "geometry_candidate",
+        "cad_ir_draft",
+        "execution_observation",
+    ):
+        register_evidence(
+            f"internal_{checkpoint}",
+            checkpoint,
+            "candidate" if checkpoint != "execution_observation" else "observation",
+            {"checkpoint": checkpoint, "codes": []},
+        )
+    register_evidence(
+        "clamp_question",
+        "clarification_decision",
+        "diagnostic",
+        {"questions": [{"question": "Which fastener size is required?"}]},
+        validation_status="user_input_required",
+    )
+    register_evidence(
+        "clamp_answer",
+        "clarification_decision",
+        "accepted_input",
+        {"question": "Which fastener size is required?", "answer": "M5"},
+        source_artifact_ids=["clamp_question"],
+        validation_status="passed",
+    )
+
+    reviewable_path = "results/reviewable_result.json"
+    reviewable_target = (
+        backend._work_runs_root(work_id) / first_run_id / reviewable_path
+    )
+    reviewable_target.parent.mkdir(parents=True, exist_ok=True)
+    reviewable_target.write_text(
+        json.dumps({"geometry": {"valid": True}, "validation": {}}) + "\n",
+        encoding="utf-8",
+    )
+    reviewable_reference = create_artifact_reference(
+        artifact_id=result_id,
+        work_id=work_id,
+        run_id=first_run_id,
+        part_job_id=part_job_id,
+        relative_path=reviewable_path,
+        phase="accept_deliver",
+        checkpoint="reviewable_result",
+        trust_role="reviewable_result",
+        validation_status="passed",
+    )
+    manifest = register_artifact_references(
+        backend._read_work_manifest(work_id), [reviewable_reference]
+    )
+    manifest["accepted_part_results"] = {
+        part_job_id: {
+            "status": "approved",
+            "result_id": result_id,
+            "part_job_id": part_job_id,
+            "attempt_run_id": first_run_id,
+            "run_id": first_run_id,
+            "review_id": "review_1",
+            "artifact_ids": [result_id],
+        }
+    }
+    manifest["work_design"].update({
+        "status": "completed",
+        "current_design": {"generated_parts": [{"part_job_id": part_job_id}]},
+    })
+    manifest["part_jobs"][0]["attempts"][1]["source_result_id"] = result_id
+    backend._write_work_manifest(work_id, manifest)
+    _register_route_stop(
+        backend, work_id, part_job_id, revision_run_id, "provider_failure"
+    )
+
+    page = build_workflow_page_view_model(backend, work_id, language="en")
+    nodes = page["nodes"]
+    node_ids = {node["id"] for node in nodes}
+    node_kinds = {node["kind"] for node in nodes}
+
+    assert "work:decomposition" not in node_ids
+    assert not node_kinds & {"design", "candidate", "build", "decomposition"}
+    assert not any(
+        checkpoint in node["id"]
+        for checkpoint in {
+            "design_brief",
+            "model_program_candidate",
+            "geometry_candidate",
+            "cad_ir_draft",
+            "execution_observation",
+        }
+        for node in nodes
+    )
+    revision_attempt = next(
+        node
+        for node in nodes
+        if node["id"] == f"attempt:{part_job_id}:{revision_run_id}"
+    )
+    assert {
+        f"internal_{checkpoint}"
+        for checkpoint in {
+            "design_brief",
+            "model_program_candidate",
+            "geometry_candidate",
+            "cad_ir_draft",
+            "execution_observation",
+        }
+    } <= {
+        reference["artifact_id"]
+        for reference in revision_attempt["detail"]["agent_output"][
+            "technical_evidence_references"
+        ]
+    }
+    assert {"decision", "reviewable", "accepted", "attempt", "part"} <= node_kinds
+    assert not any(node["kind"] == "assembly" for node in nodes)
+    assert any(
+        edge["source"] == "work:design" and edge["target"] == f"part:{part_job_id}"
+        for edge in page["edges"]
+    )
+    assert any(
+        edge["type"] == "revised"
+        and edge["source"] == f"result:{result_id}"
+        and edge["target"] == f"attempt:{part_job_id}:{revision_run_id}"
+        for edge in page["edges"]
+    )
+    assert revision_attempt["status"] == "blocked"
+
+
+def test_failed_execution_observation_marks_folded_attempt_failed(tmp_path):
+    backend = WorkflowConsoleBackend(project_root=tmp_path)
+    work_id = "failed_observation_work"
+    part_job_id = "bracket"
+    run_id = "bracket_attempt_1"
+    backend.create_work("Bracket", "Design a bracket.", work_id=work_id)
+    backend.create_work_part_attempt(
+        work_id, part_job_id, role="Mounting bracket", run_id=run_id
+    )
+    relative_path = "episodes/failed_observation.json"
+    target = backend._work_runs_root(work_id) / run_id / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps({"codes": ["cad_execution_failed"]}) + "\n",
+        encoding="utf-8",
+    )
+    reference = create_artifact_reference(
+        artifact_id="failed_execution_observation",
+        work_id=work_id,
+        run_id=run_id,
+        part_job_id=part_job_id,
+        relative_path=relative_path,
+        phase="build_evaluate",
+        checkpoint="execution_observation",
+        trust_role="diagnostic",
+        validation_status="failed",
+    )
+    manifest = register_artifact_references(
+        backend._read_work_manifest(work_id), [reference]
+    )
+    backend._write_work_manifest(work_id, manifest)
+
+    page = build_workflow_page_view_model(backend, work_id, language="en")
+    attempt = next(
+        node
+        for node in page["nodes"]
+        if node["id"] == f"attempt:{part_job_id}:{run_id}"
+    )
+
+    assert attempt["status"] == "failed"
+    assert not any(
+        node["kind"] == "build" or "execution_observation" in node["id"]
+        for node in page["nodes"]
+    )
+    assert "failed_execution_observation" in {
+        item["artifact_id"]
+        for item in attempt["detail"]["agent_output"][
+            "technical_evidence_references"
+        ]
+    }
 
 
 def test_two_part_selected_node_scope_isolated_from_work_and_sibling_output(tmp_path):

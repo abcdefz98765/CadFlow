@@ -309,17 +309,14 @@ def test_overview_and_dynamic_graph_share_work_design_state(tmp_path: Path) -> N
     work = backend.get_work_detail(work_id)
     graph = build_agent_first_workflow_projection(backend, work_id, work, overview, language="en")
     node_ids = {item["id"] for item in graph["nodes"]}
-    assert {"work:request", "work:design", "work:decomposition"} <= node_ids
-    assert graph["workflow_graph"]["work_path_node_ids"] == [
-        "work:design",
-        "work:decomposition",
-    ]
+    assert {"work:request", "work:design"} <= node_ids
+    assert "work:decomposition" not in node_ids
+    assert graph["workflow_graph"]["work_path_node_ids"] == ["work:design"]
     part_nodes = [item for item in graph["nodes"] if item["kind"] == "part"]
     assert len(part_nodes) == overview["work_design"]["part_job_count"] == 2
     edges = {(item["source"], item["target"]) for item in graph["edges"]}
     assert ("work:request", "work:design") in edges
-    assert ("work:design", "work:decomposition") in edges
-    assert all(("work:decomposition", item["id"]) in edges for item in part_nodes)
+    assert all(("work:design", item["id"]) in edges for item in part_nodes)
 
 
 def test_episode_evidence_distinguishes_dynamic_context_from_static_knowledge(tmp_path: Path) -> None:

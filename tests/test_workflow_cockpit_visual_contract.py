@@ -12,6 +12,7 @@ from ai_native_cad.examples import golden_desktop_robot_arm as golden_service
 from ai_native_cad.pipeline import runner as pipeline_runner
 from ai_native_cad.workflow_console import WorkflowConsoleBackend
 from ai_native_cad.workflow_console.nicegui_app import WORKFLOW_UI_CSS, WORK_USER_PAGES
+from ai_native_cad.workflow_console import workflow_graph_ui
 from ai_native_cad.workflow_console.workflow_page_view_model import build_workflow_page_view_model
 
 
@@ -39,6 +40,122 @@ def test_visual_tokens_keep_status_selection_attention_and_horizontal_graph_sepa
     assert ".workflow-dot.status-execution_skipped" in WORKFLOW_UI_CSS
     assert ".workflow-dot.status-reviewable" in WORKFLOW_UI_CSS
     assert ".workflow-dot.status-accepted" in WORKFLOW_UI_CSS
+
+
+def test_dynamic_renderer_keeps_compact_semantic_topology_and_local_scroll_contract():
+    source = inspect.getsource(workflow_graph_ui)
+
+    # Rendering consumes the existing projection (spine, branches, attempts and
+    # edges) rather than introducing graph-owned layout or state.
+    assert "dynamic-spine-row" in source
+    assert "dynamic-branch-list" in source
+    assert 'variant="part"' in source
+    assert "dynamic-attempt-label" in source
+    assert "Revision from result" in source
+    assert "Recovery child" in source
+    assert 'ui.element("button")' in source
+    assert 'data-node-id="{node_id}"' in source
+    assert 'aria-label="{aria_label}"' in source
+    assert 'type="button"' in source
+    assert "summary" not in inspect.getsource(workflow_graph_ui._render_dynamic_graph_node)
+
+    # Compact controls remain comfortably clickable, preserve selection as an
+    # outer ring, and make state readable through both glyph and label.
+    assert ".dynamic-node{box-sizing:border-box" in WORKFLOW_UI_CSS
+    assert "min-height:44px" in WORKFLOW_UI_CSS
+    assert ".dynamic-node.selected{border-color:#2563eb;outline:3px" in WORKFLOW_UI_CSS
+    assert "box-shadow:inset 0 0 0 2px" in WORKFLOW_UI_CSS
+    assert ".workflow-dot.status-running:after{content:'↻'" in WORKFLOW_UI_CSS
+    assert ".workflow-dot.status-reviewable:after{content:'◉'" in WORKFLOW_UI_CSS
+    assert ".workflow-dot.status-accepted:after{content:'✓'" in WORKFLOW_UI_CSS
+    assert ".workflow-dot.status-blocked:after,.workflow-dot.status-failed:after{content:'×'" in WORKFLOW_UI_CSS
+
+    # The shared fan-out trunk and the dashed child revision connector remain
+    # graph-local, including on narrow screens where only this surface scrolls.
+    assert ".dynamic-branch-list:before" in WORKFLOW_UI_CSS
+    assert ".dynamic-branch-list.from-work-path" in WORKFLOW_UI_CSS
+    assert ".dynamic-branch:before" in WORKFLOW_UI_CSS
+    assert ".dynamic-attempt-row.revision:before" in WORKFLOW_UI_CSS
+    assert ".dynamic-attempt-row.revision.from-result" in WORKFLOW_UI_CSS
+    assert "border-left:2px dashed" in WORKFLOW_UI_CSS
+    assert "overscroll-behavior-x:contain" in WORKFLOW_UI_CSS
+    assert "@media(max-width:760px){.dynamic-workflow-shell" in WORKFLOW_UI_CSS
+
+
+def test_dynamic_node_renders_as_escaped_button_and_targets_projected_selection():
+    class Element:
+        def __init__(self, tag, text=None):
+            self.tag = tag
+            self.text = text
+            self.class_names = ""
+            self.properties = ""
+            self.handlers = {}
+
+        def classes(self, value):
+            self.class_names = value
+            return self
+
+        def props(self, value):
+            self.properties = value
+            return self
+
+        def on(self, event, callback):
+            self.handlers[event] = callback
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class UI:
+        def __init__(self):
+            self.elements = []
+
+        def element(self, tag):
+            item = Element(tag)
+            self.elements.append(item)
+            return item
+
+        def row(self):
+            item = Element("row")
+            self.elements.append(item)
+            return item
+
+        def label(self, value):
+            item = Element("label", value)
+            self.elements.append(item)
+            return item
+
+    ui = UI()
+    selected = []
+    node_id = 'part:<camera>"'
+    workflow_graph_ui._render_dynamic_graph_node(
+        ui,
+        {
+            "id": node_id,
+            "label": 'Camera <Cradle> "long label"',
+            "kind": "part",
+            "status": "blocked",
+            "selected": True,
+        },
+        {"design": "Design"},
+        selected.append,
+        "en",
+        variant="part",
+    )
+
+    button = ui.elements[0]
+    assert button.tag == "button"
+    assert {"dynamic-node-part", "blocked", "selected"} <= set(
+        button.class_names.split()
+    )
+    assert 'type="button"' in button.properties
+    assert "&lt;camera&gt;&quot;" in button.properties
+    assert "Camera &lt;Cradle&gt; &quot;long label&quot;. Blocked." in button.properties
+    button.handlers["click"](None)
+    assert selected == [node_id]
 
 
 def test_current_work_does_not_fabricate_part_branches_or_legacy_graph_nodes(tmp_path, monkeypatch):

@@ -320,3 +320,50 @@ global failure surface: `01-blocked-overview.png` is
   retry-copy correction: `88 passed`.
 - Python compilation: passed for `src` and `tests`.
 - Complete clean repository suite: `711 passed, 9 skipped` in 435.85 seconds.
+
+## V1 Semantic Workflow Map verification — 2026-08-22
+
+This correction keeps the canonical Current Work projection and the
+Inspector-only selection boundary. It changes only the projection vocabulary
+used for the map and its NiceGUI/CSS presentation:
+
+- the topological spine is User Goal -> Work Design;
+- real Part Jobs fan out directly from Work Design (or User Goal for honest
+  compatibility data that has no durable Work Design);
+- a Part is a compact branch identity, while Attempts, Reviewable Results, and
+  Accepted Results remain state markers on that branch;
+- result-sourced revisions use a dashed child lane and preserve their source
+  result and accepted pointer;
+- internal design briefs, candidates, CAD drafts, execution observations, and
+  Agent turns remain Inspector Activity/Technical Evidence rather than graph
+  nodes. A failed durable execution observation still marks its owning Attempt
+  as Failed;
+- the former derived `work:decomposition` presentation node was removed because
+  it duplicated the real Work Design -> Part Job transition;
+- no Assembly node, new domain object, persisted layout, alternate projection,
+  graph engine, or dependency was added.
+
+Browser verification covered a zero-Part blocked Work Design, single-Part
+reviewable/accepted state, two-Part fan-out with parallel blocked attention,
+result-sourced revision, and a read-only historical Run Snapshot. English was
+checked at 1440 px; Chinese was checked at 1024 px and 414 px. At 414 px the
+page remained `399 == 399` CSS pixels while the graph intentionally scrolled
+locally (`341 < 640`, `overflow-x: auto`). Browser warnings/errors were empty.
+
+Ten alternating selections on the two-Part graph measured 268-283 ms through
+browser control (273 ms median, 283 ms p95). Server tracing measured 1.43-5.78
+ms per selection and emitted only `workflow_inspector_render` and
+`workflow_node_selection`; it emitted no artifact read, canonical projection,
+sidebar, graph, or viewer refresh. The final multi-Part page render itself was
+12.95 ms after projection; the separate cold projection cost was dominated by
+existing artifact reads and is not a graph-layout cost.
+
+The eight baseline captures are retained under
+`docs/ux/screenshots/semantic-workflow-map/before/`. The verified results are
+under `docs/ux/screenshots/semantic-workflow-map/after/`, including zero-Part,
+single-Part, multi-Part, blocked, revision, reviewable, accepted, 1024 px,
+414 px, and historical Run cases.
+
+Final verification passed: 112 focused Workflow/NiceGUI tests, Python
+compilation for `src` and `tests`, and the complete clean repository suite with
+`715 passed, 9 skipped` in 435.47 seconds.
