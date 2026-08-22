@@ -9,6 +9,10 @@ import pytest
 from ai_native_cad.agents import JsonContractAgentAdapter
 from ai_native_cad.agents.episode import EpisodeContractError, validate_work_design_proposal
 from ai_native_cad.agents.registry import RUNTIME_SKILL_REGISTRY
+from ai_native_cad.agents.work_design_contract import (
+    work_design_contract_description,
+    work_design_fields,
+)
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
 from ai_native_cad.workflow_console.action_lifecycle import _continue_work_design_async
 from ai_native_cad.workflow_console.product_usability import build_agent_first_workflow_projection
@@ -67,6 +71,195 @@ def _proposal(*, part_count: int = 1, reference_component: bool = False) -> dict
     }
 
 
+def test_canonical_work_design_sample_normalizes_without_contract_drift() -> None:
+    proposal = _proposal(part_count=2, reference_component=True)
+
+    normalized = validate_work_design_proposal(proposal)
+    disclosure = work_design_contract_description()
+
+    assert set(proposal) == set(work_design_fields())
+    assert set(normalized) - {"schema_version"} == set(work_design_fields())
+    assert set(disclosure["fields"]) == set(work_design_fields())
+    assert set(disclosure["fields"]["generated_parts"]["items"]["fields"]) == set(
+        work_design_fields("generated_parts[]")
+    )
+    assert set(disclosure["fields"]["reference_components"]["items"]["fields"]) == set(
+        work_design_fields("reference_components[]")
+    )
+    assert set(disclosure["fields"]["interfaces"]["items"]["fields"]) == set(
+        work_design_fields("interfaces[]")
+    )
+
+
+def _contract_sample(contract: dict) -> dict:
+    return {
+        name: _contract_sample_field(field)
+        for name, field in contract["fields"].items()
+    }
+
+
+def _contract_sample_field(field: dict):
+    if field["type"] == "text":
+        return "x"
+    if field["type"] == "boolean":
+        return False
+    if field["type"] == "list":
+        return _contract_list_values(field, max(field["min_items"], 1))
+    raise AssertionError(f"unsupported canonical test field type: {field['type']}")
+
+
+def _contract_list_values(field: dict, count: int) -> list:
+    items = field["items"]
+    if items["type"] == "text":
+        return ["x"] * count
+    values = [_contract_sample(items) for _ in range(count)]
+    unique_by = field.get("unique_by")
+    if unique_by is not None:
+        for index, item in enumerate(values):
+            item[unique_by] = f"key_{index}"
+    return values
+
+
+def _contract_boundary_cases(
+    contract: dict,
+    *,
+    value_path: tuple = (),
+    field_prefix: str = "",
+):
+    for name, field in contract["fields"].items():
+        path = value_path + (name,)
+        field_path = f"{field_prefix}.{name}" if field_prefix else name
+        yield path, field_path, field
+        if field["type"] != "list":
+            continue
+        items = field["items"]
+        item_path = path + (0,)
+        item_field_path = f"{field_path}[]"
+        if items["type"] == "object":
+            yield from _contract_boundary_cases(
+                items,
+                value_path=item_path,
+                field_prefix=item_field_path,
+            )
+        elif items["type"] == "text":
+            yield item_path, item_field_path, items
+
+
+def _set_contract_value(value: dict, path: tuple, replacement) -> None:
+    target = value
+    for part in path[:-1]:
+        target = target[part]
+    target[path[-1]] = replacement
+
+
+_CANONICAL_DESCRIPTION = work_design_contract_description()
+_CANONICAL_BOUNDARY_CASES = tuple(
+    _contract_boundary_cases(_CANONICAL_DESCRIPTION)
+)
+
+
+@pytest.mark.parametrize(
+    ("value_path", "field_path", "field"),
+    [case for case in _CANONICAL_BOUNDARY_CASES if case[2]["type"] == "text"],
+)
+def test_all_canonical_text_bounds_drive_validator(
+    value_path,
+    field_path,
+    field,
+) -> None:
+    exact = _contract_sample(_CANONICAL_DESCRIPTION)
+    _set_contract_value(exact, value_path, "x" * field["max_length"])
+    validate_work_design_proposal(exact)
+
+    too_long = _contract_sample(_CANONICAL_DESCRIPTION)
+    _set_contract_value(too_long, value_path, "x" * (field["max_length"] + 1))
+    with pytest.raises(EpisodeContractError) as caught:
+        validate_work_design_proposal(too_long)
+    assert caught.value.failure_diagnostic["field_issue"] == "invalid_value"
+    assert caught.value.failure_diagnostic["field_path"] == field_path
+
+
+@pytest.mark.parametrize(
+    ("value_path", "field_path", "field"),
+    [case for case in _CANONICAL_BOUNDARY_CASES if case[2]["type"] == "list"],
+)
+def test_all_canonical_list_bounds_drive_validator(
+    value_path,
+    field_path,
+    field,
+) -> None:
+    at_minimum = _contract_sample(_CANONICAL_DESCRIPTION)
+    _set_contract_value(
+        at_minimum,
+        value_path,
+        _contract_list_values(field, field["min_items"]),
+    )
+    validate_work_design_proposal(at_minimum)
+
+    at_maximum = _contract_sample(_CANONICAL_DESCRIPTION)
+    _set_contract_value(
+        at_maximum,
+        value_path,
+        _contract_list_values(field, field["max_items"]),
+    )
+    validate_work_design_proposal(at_maximum)
+
+    above_maximum = _contract_sample(_CANONICAL_DESCRIPTION)
+    _set_contract_value(
+        above_maximum,
+        value_path,
+        _contract_list_values(field, field["max_items"] + 1),
+    )
+    with pytest.raises(EpisodeContractError) as caught:
+        validate_work_design_proposal(above_maximum)
+    assert caught.value.failure_diagnostic["field_issue"] == "invalid_value"
+    assert caught.value.failure_diagnostic["field_path"] == field_path
+
+
+@pytest.mark.parametrize(
+    ("value_path", "field_path", "field"),
+    [case for case in _CANONICAL_BOUNDARY_CASES if case[2]["type"] == "boolean"],
+)
+def test_all_canonical_boolean_types_drive_validator(
+    value_path,
+    field_path,
+    field,
+) -> None:
+    for valid_value in (False, True):
+        valid = _contract_sample(_CANONICAL_DESCRIPTION)
+        _set_contract_value(valid, value_path, valid_value)
+        validate_work_design_proposal(valid)
+
+    invalid = _contract_sample(_CANONICAL_DESCRIPTION)
+    _set_contract_value(invalid, value_path, "false")
+    with pytest.raises(EpisodeContractError) as caught:
+        validate_work_design_proposal(invalid)
+    assert caught.value.failure_diagnostic["field_issue"] == "invalid_type"
+    assert caught.value.failure_diagnostic["field_path"] == field_path
+
+
+@pytest.mark.parametrize(
+    ("value_path", "field_path", "field"),
+    [case for case in _CANONICAL_BOUNDARY_CASES if case[2].get("unique_by")],
+)
+def test_all_canonical_unique_keys_drive_validator(
+    value_path,
+    field_path,
+    field,
+) -> None:
+    invalid = _contract_sample(_CANONICAL_DESCRIPTION)
+    duplicates = _contract_list_values(field, 2)
+    duplicates[1][field["unique_by"]] = duplicates[0][field["unique_by"]]
+    _set_contract_value(invalid, value_path, duplicates)
+
+    with pytest.raises(EpisodeContractError) as caught:
+        validate_work_design_proposal(invalid)
+    assert caught.value.failure_diagnostic["field_issue"] == "invalid_value"
+    assert caught.value.failure_diagnostic["field_path"] == (
+        f"{field_path}[].{field['unique_by']}"
+    )
+
+
 def _backend(tmp_path: Path, responses: list[dict]) -> tuple[WorkflowConsoleBackend, SequencedWorkDesignClient]:
     backend = WorkflowConsoleBackend(project_root=tmp_path)
     client = SequencedWorkDesignClient(responses)
@@ -115,6 +308,69 @@ def test_normal_entry_runs_real_work_design_before_cad_parts(tmp_path: Path, par
     assert manifest["assembly_job"] is None
     assert client.requests[0]["operation"] == "work_design_action"
     assert client.requests[0]["skill"]["skill_id"] == "work_design"
+
+
+def test_contract_repair_exhaustion_routes_through_work_orchestrator(tmp_path: Path) -> None:
+    invalid = {"action": "request_context", "parameters": {}}
+    backend, client = _backend(tmp_path, [invalid, invalid, invalid])
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+
+    result = backend.run_work_design_episode(work_id, request_id="repair_exhausted")
+
+    diagnostic = result["episode"]["failure_diagnostic"]
+    assert result["episode"]["status"] == "safely_blocked"
+    assert diagnostic["contract_repair_exhausted"] is True
+    assert diagnostic["contract_repair_turn_count"] == 2
+    assert diagnostic["requested_capability_or_context"] == "parameters"
+    assert len(client.requests) == 3
+    manifest = backend._read_work_manifest(work_id)
+    assert manifest["part_jobs"] == []
+    assert manifest["work_design"]["status"] == "blocked"
+
+
+def test_unsafe_extra_field_is_redacted_from_durable_work_design_failure(
+    tmp_path: Path,
+) -> None:
+    unsafe_key = "api_key"
+    raw_marker = "RAW_UNSAFE_FIELD_VALUE_MUST_NOT_PERSIST"
+    invalid = _proposal()
+    invalid[unsafe_key] = raw_marker
+    backend, client = _backend(
+        tmp_path,
+        [{"action": "propose_work_design", "work_design": invalid}],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+
+    result = backend.run_work_design_episode(
+        work_id,
+        request_id="unsafe_extra_field",
+    )
+
+    diagnostic = result["episode"]["failure_diagnostic"]
+    assert result["episode"]["status"] == "safely_blocked"
+    assert diagnostic["field_issue"] == "extra"
+    assert diagnostic["field_path"] == "work_design"
+    assert diagnostic["requested_capability_or_context"] is None
+    assert unsafe_key not in json.dumps(diagnostic)
+    assert raw_marker not in json.dumps(diagnostic)
+    assert len(client.requests) == 1
+    manifest = backend._read_work_manifest(work_id)
+    episode_dir = (
+        backend._work_runs_root(work_id)
+        / manifest["work_design"]["run_id"]
+        / "episodes"
+        / "work_design"
+        / "unsafe_extra_field"
+    )
+    persisted_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in episode_dir.rglob("*")
+        if path.is_file()
+    )
+    assert (episode_dir / "product_route_result.json").exists()
+    assert unsafe_key not in persisted_text
+    assert raw_marker not in persisted_text
+    assert "action_contract_feedback" not in persisted_text
 
 
 def test_reference_components_are_not_generated_part_jobs(tmp_path: Path) -> None:

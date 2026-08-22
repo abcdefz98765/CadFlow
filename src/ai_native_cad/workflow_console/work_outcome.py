@@ -26,6 +26,17 @@ def project_stopped_attempt(
         if isinstance(episode.get("failure_diagnostic"), dict)
         else None
     )
+    if isinstance(diagnostic, dict) and episode.get("contract_repair_exhausted") is True:
+        # Older persisted diagnostics may predate the two repair fields while
+        # the immutable episode summary already records them.
+        repair_turn_count = diagnostic.get("contract_repair_turn_count")
+        if not isinstance(repair_turn_count, int):
+            repair_turn_count = episode.get("contract_repair_turn_count")
+        diagnostic = {
+            **diagnostic,
+            "contract_repair_exhausted": True,
+            "contract_repair_turn_count": repair_turn_count,
+        }
     geometry_generated = episode.get("execution_succeeded") is True
     result_published = bool(episode.get("reviewable_result_id"))
 
@@ -121,11 +132,40 @@ def _project_policy_diagnostic(
     rejected_action = diagnostic.get("rejected_action")
     requested = diagnostic.get("requested_capability_or_context")
     side_effect_started = diagnostic.get("side_effect_started") is True
+    contract_repair_exhausted = diagnostic.get("contract_repair_exhausted") is True
+    raw_repair_turn_count = diagnostic.get("contract_repair_turn_count")
+    contract_repair_turn_count = (
+        raw_repair_turn_count
+        if isinstance(raw_repair_turn_count, int) and raw_repair_turn_count >= 0
+        else 0
+    )
     category, owner, retryable, action_key = _diagnostic_policy(stage, reason_code)
     action_text = str(rejected_action or ("Agent action" if language != "zh" else "Agent 动作"))
     requested_text = str(requested) if requested else None
 
-    if category == "agent_action_problem":
+    if contract_repair_exhausted:
+        what = (
+            "Agent 连续提交了不符合要求的动作。"
+            if language == "zh"
+            else "The Agent repeatedly submitted actions that did not meet the required contract."
+        )
+        if contract_repair_turn_count:
+            why = (
+                f"CadFlow 在 {contract_repair_turn_count} 次纠正后停止了本次尝试。"
+                + (f"最后一个无效字段：{requested_text}。" if requested_text else "")
+                if language == "zh"
+                else f"CadFlow stopped this attempt after {contract_repair_turn_count} correction attempts."
+                + (f" Last invalid field: {requested_text}." if requested_text else "")
+            )
+        else:
+            why = (
+                "CadFlow 在允许的纠正次数用尽后停止了本次尝试。"
+                + (f"最后一个无效字段：{requested_text}。" if requested_text else "")
+                if language == "zh"
+                else "CadFlow stopped this attempt after the allowed correction attempts were used."
+                + (f" Last invalid field: {requested_text}." if requested_text else "")
+            )
+    elif category == "agent_action_problem":
         what = (
             f"Agent 返回的 {action_text} 动作未通过 CadFlow 的有界动作校验。"
             if language == "zh"
@@ -240,6 +280,8 @@ def _project_policy_diagnostic(
         "side_effect_started": side_effect_started,
         "typed_stop_reason": "policy_blocked",
         "historical_diagnostic_missing": False,
+        "contract_repair_exhausted": contract_repair_exhausted,
+        "contract_repair_turn_count": contract_repair_turn_count,
     }
 
 

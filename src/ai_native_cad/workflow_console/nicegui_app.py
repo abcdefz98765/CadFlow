@@ -1357,7 +1357,15 @@ def _render_work_overview(
         None,
     )
 
-    _render_action_feedback_panel(ui, state, language)
+    # Durable Work recovery owns terminal diagnosis; keep this panel for
+    # in-process feedback so a stopped state is not explained twice.
+    _render_action_feedback_panel(
+        ui,
+        state,
+        language,
+        transient_only=True,
+        has_durable_recovery=bool(recovery),
+    )
     if recovery:
         _render_recovery_card(ui, recovery, overview, actions.backend, state, refresh, language)
     has_agent_design = agent_design.get("evidence_status") in {
@@ -2724,12 +2732,30 @@ def _render_run_strip(
                         ui.label("Based on an earlier attempt" if not run.get("is_current") else "Current attempt").classes("workflow-meta")
 
 
-def _render_action_feedback_panel(ui: Any, state: dict[str, Any], language: str) -> None:
-    """Show the latest action result persistently instead of a transient toast."""
+def _render_action_feedback_panel(
+    ui: Any,
+    state: dict[str, Any],
+    language: str,
+    *,
+    transient_only: bool = False,
+    has_durable_recovery: bool = False,
+) -> None:
+    """Show compact in-process activity and non-durable action failures.
+
+    A successful action is intentionally handed back to refreshed Work state,
+    rather than repeating a terminal acknowledgement beside its durable result.
+    """
     execution = state.get("action_execution")
     if not isinstance(execution, dict) or execution.get("status") in {None, "idle", "confirming"}:
         return
     status = str(execution.get("status"))
+    terminal_failure_without_recovery = (
+        status in {"failed", "warning"} and not has_durable_recovery
+    )
+    if status == "succeeded" or (
+        transient_only and status != "pending" and not terminal_failure_without_recovery
+    ):
+        return
     outcome = str(execution.get("runtime_outcome") or "")
     if status == "pending":
         title = "命令已接受" if language == "zh" else "Command accepted"
@@ -2754,19 +2780,9 @@ def _render_action_feedback_panel(ui: Any, state: dict[str, Any], language: str)
                         if language == "zh"
                         else "Running; the actual Episode outcome will replace this acknowledgement."
                     ).classes("text-xs text-blue-800")
-                if status == "succeeded" and execution.get("action_key") == "select_candidate_part":
-                    ui.label("装配计划已保存为用户覆盖版本。零件请求及后续阶段已标记为过期。已有 Run 和已批准结果保持不变。" if language == "zh" else "The Assembly Plan was saved as a user override. Part Request and downstream stages are stale. Existing Runs and accepted results are unchanged.").classes("text-xs")
-                    ui.label(i18n_copy(language, "next_create_part_request")).classes("text-xs font-medium")
-                if status == "succeeded" and execution.get("action_key") == "accept_reviewable_result":
-                    ui.label(i18n_copy(language, "accept_success_detail")).classes("text-xs")
-                if status == "succeeded" and execution.get("action_key") == "revise_reviewable_result":
-                    ui.label(i18n_copy(language, "revise_success_detail")).classes("text-xs")
                 if status in {"failed", "warning"} and execution.get("error_detail"):
                     with ui.expansion(i18n_copy(language, "details"), icon="error_outline").classes("w-full"):
                         ui.label(str(execution["error_detail"])).classes("text-xs whitespace-pre-wrap")
-                with ui.expansion(i18n_copy(language, "action_details"), icon="rule").classes("w-full"):
-                    target = {key: execution.get(key) for key in ("action_key", "target_work_id", "target_part_job_id", "target_run_id", "target_stage_id", "runtime_outcome")}
-                    ui.label(json.dumps(target, ensure_ascii=False, sort_keys=True)).classes("text-xs whitespace-pre-wrap workflow-meta")
             close = ui.button(icon="close", on_click=lambda: state.__setitem__("action_execution", None)).props("flat round dense")
             close.tooltip(i18n_copy(language, "close"))
 

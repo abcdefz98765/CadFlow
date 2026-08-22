@@ -31,6 +31,15 @@ from ai_native_cad.agents.model_program_runtime import (
     validate_model_program_parameters,
 )
 from ai_native_cad.agents.provider_context import sanitize_provider_payload
+from ai_native_cad.agents.provider_sanitization import (
+    is_safe_contract_field_name,
+    is_safe_contract_field_path,
+)
+from ai_native_cad.agents.work_design_contract import (
+    WorkDesignField,
+    work_design_field,
+    work_design_fields,
+)
 
 
 class StopReason(str, Enum):
@@ -57,6 +66,9 @@ class AgentActionRejection(ValueError):
         reason_code: str = "invalid_action_contract",
         rejected_action: str | None = None,
         requested_capability_or_context: str | None = None,
+        field_issue: str | None = None,
+        field_path: str | None = None,
+        expected_fields: tuple[str, ...] | list[str] | None = None,
         human_safe_detail: str = "The Agent response did not match the allowed action contract.",
         side_effect_started: bool = False,
     ) -> None:
@@ -76,6 +88,17 @@ class AgentActionRejection(ValueError):
             "human_safe_detail": _short_text(human_safe_detail),
             "side_effect_started": side_effect_started is True,
         }
+        safe_field_issue = _safe_work_design_field_issue(field_issue)
+        safe_field_path = (
+            field_path if is_safe_contract_field_path(field_path) else None
+        )
+        safe_expected_fields = _safe_expected_fields(expected_fields)
+        if safe_field_issue is not None:
+            self.failure_diagnostic["field_issue"] = safe_field_issue
+        if safe_field_path is not None:
+            self.failure_diagnostic["field_path"] = safe_field_path
+        if safe_expected_fields is not None:
+            self.failure_diagnostic["expected_fields"] = safe_expected_fields
 
 
 class UnknownAgentActionError(AgentActionRejection):
@@ -127,6 +150,39 @@ _FORBIDDEN_EXECUTION_FIELDS = frozenset({
     "shell", "shell_command", "script",
 })
 
+ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
+    "request_context": frozenset({"action", "context_key", "reason"}),
+    "create_contract": frozenset({"action", "contract_type", "contract", "assumptions", "summary"}),
+    "patch_contract": frozenset({"action", "contract_type", "contract", "assumptions", "summary"}),
+    "submit_contract": frozenset({"action", "contract_type", "contract", "assumptions", "summary"}),
+    "repair_contract": frozenset({"action", "contract_type", "contract", "assumptions", "summary"}),
+    "request_validation": frozenset({"action", "reason"}),
+    "create_model_program": frozenset({"action", "model_program", "assumptions", "summary"}),
+    "patch_model_program": frozenset({"action", "model_program", "assumptions", "summary"}),
+    "request_execution": frozenset({"action"}),
+    "inspect_observation": frozenset({"action"}),
+    "propose_work_design": frozenset({"action", "work_design", "assumptions", "summary"}),
+    "create_part_jobs": frozenset({"action"}),
+    "ask_user": frozenset({"action", "questions", "reason"}),
+    "stop": frozenset({"action", "stop_reason", "reason"}),
+}
+
+ACTION_REQUIRED_FIELDS: dict[str, frozenset[str]] = {
+    "request_context": frozenset({"action", "context_key"}),
+    "create_contract": frozenset({"action", "contract_type", "contract"}),
+    "patch_contract": frozenset({"action", "contract_type", "contract"}),
+    "submit_contract": frozenset({"action", "contract_type", "contract"}),
+    "repair_contract": frozenset({"action", "contract_type", "contract"}),
+    "request_validation": frozenset({"action"}),
+    "create_model_program": frozenset({"action", "model_program"}),
+    "patch_model_program": frozenset({"action", "model_program"}),
+    "request_execution": frozenset({"action"}),
+    "inspect_observation": frozenset({"action"}),
+    "propose_work_design": frozenset({"action", "work_design"}),
+    "create_part_jobs": frozenset({"action"}),
+    "ask_user": frozenset({"action", "questions"}),
+    "stop": frozenset({"action", "stop_reason"}),
+}
 
 @dataclass(frozen=True)
 class AgentObjective:
@@ -188,13 +244,14 @@ class EpisodeBudget:
     max_executions: int = 3
     max_observation_inspections: int = 3
     timeout_seconds: float = 180.0
+    max_contract_repair_turns: int = 2
 
     def __post_init__(self) -> None:
         if any(value < 0 for value in (
             self.max_steps, self.max_context_requests, self.max_context_bytes,
             self.max_contract_submissions, self.max_repair_attempts,
             self.max_source_submissions, self.max_executions,
-            self.max_observation_inspections,
+            self.max_observation_inspections, self.max_contract_repair_turns,
         )) or self.timeout_seconds < 0:
             raise ValueError("episode budgets must be non-negative")
 
@@ -266,22 +323,7 @@ class AgentAction:
                     "The Agent requested an action that is not registered for bounded Episodes."
                 ),
             )
-        allowed_fields = {
-            "request_context": {"action", "context_key", "reason"},
-            "create_contract": {"action", "contract_type", "contract", "assumptions", "summary"},
-            "patch_contract": {"action", "contract_type", "contract", "assumptions", "summary"},
-            "submit_contract": {"action", "contract_type", "contract", "assumptions", "summary"},
-            "repair_contract": {"action", "contract_type", "contract", "assumptions", "summary"},
-            "request_validation": {"action", "reason"},
-            "create_model_program": {"action", "model_program", "assumptions", "summary"},
-            "patch_model_program": {"action", "model_program", "assumptions", "summary"},
-            "request_execution": {"action"},
-            "inspect_observation": {"action"},
-            "propose_work_design": {"action", "work_design", "assumptions", "summary"},
-            "create_part_jobs": {"action"},
-            "ask_user": {"action", "questions", "reason"},
-            "stop": {"action", "stop_reason", "reason"},
-        }[action]
+        allowed_fields = ACTION_ALLOWED_FIELDS[action]
         if set(value) != (set(value) & allowed_fields) or "action" not in value:
             raise EpisodeContractError(
                 f"{action} contains fields outside its strict action contract",
@@ -509,6 +551,8 @@ class AgentEpisodeResult:
     execution_succeeded: bool
     output_validated: bool
     failure_diagnostic: dict[str, Any] | None = None
+    contract_repair_turn_count: int = 0
+    contract_repair_exhausted: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -536,6 +580,8 @@ class AgentEpisodeResult:
             "execution_succeeded": self.execution_succeeded,
             "output_validated": self.output_validated,
             "failure_diagnostic": deepcopy(self.failure_diagnostic),
+            "contract_repair_turn_count": self.contract_repair_turn_count,
+            "contract_repair_exhausted": self.contract_repair_exhausted,
         }
 
 
@@ -556,6 +602,8 @@ class WorkDesignEpisodeResult:
     skill_id: str = "work_design"
     skill_version: str = "0.1.0"
     capability_mode: str = "provider_selected_work_design"
+    contract_repair_turn_count: int = 0
+    contract_repair_exhausted: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -573,6 +621,8 @@ class WorkDesignEpisodeResult:
             "work_design_available": self.work_design is not None,
             "part_job_creation_requested": self.part_job_creation_requested,
             "failure_diagnostic": deepcopy(self.failure_diagnostic),
+            "contract_repair_turn_count": self.contract_repair_turn_count,
+            "contract_repair_exhausted": self.contract_repair_exhausted,
         }
 
 
@@ -819,6 +869,10 @@ class EpisodeOrchestrator:
         latest_observation_id: str | None = None
         latest_observation_inspected = False
         latest_failure_diagnostic: dict[str, Any] | None = None
+        contract_feedback: dict[str, Any] | None = None
+        contract_repair_turns = 0
+        contract_repair_exhausted = False
+        side_effect_started = False
         state = "created"
         supplied_context: list[dict[str, Any]] = []
 
@@ -868,9 +922,58 @@ class EpisodeOrchestrator:
                 failure_diagnostic=deepcopy(
                     failure_diagnostic or latest_failure_diagnostic
                 ),
+                contract_repair_turn_count=contract_repair_turns,
+                contract_repair_exhausted=contract_repair_exhausted,
             )
             self.writer.finish(result)
             return result
+
+        def handle_contract_rejection(
+            rejection: AgentActionRejection,
+            raw_action: Any,
+        ) -> AgentEpisodeResult | None:
+            nonlocal contract_feedback, contract_repair_turns
+            nonlocal contract_repair_exhausted, state
+            next_feedback = _contract_repair_feedback(
+                rejection,
+                raw_action,
+                allowed_actions=self.capabilities.allowed_actions,
+                skill_id=self.capabilities.skill_id,
+                side_effect_started=side_effect_started,
+            )
+            if next_feedback is None:
+                if side_effect_started:
+                    rejection.failure_diagnostic = {
+                        **deepcopy(rejection.failure_diagnostic),
+                        "side_effect_started": True,
+                    }
+                raise rejection
+            exhausted = contract_repair_turns >= self.budget.max_contract_repair_turns
+            event = {
+                "event_type": "system_observation",
+                "step": steps,
+                "observation": "action_contract_feedback",
+                **next_feedback,
+                "contract_repair_turn_count": (
+                    contract_repair_turns
+                    if exhausted
+                    else contract_repair_turns + 1
+                ),
+                "contract_repair_exhausted": exhausted,
+            }
+            self.writer.event(event)
+            if exhausted:
+                contract_repair_exhausted = True
+                return finish(
+                    StopReason.POLICY_BLOCKED,
+                    failure_diagnostic=_contract_repair_exhausted_diagnostic(
+                        rejection, contract_repair_turns
+                    ),
+                )
+            contract_repair_turns += 1
+            contract_feedback = next_feedback
+            state = "correcting_action_contract"
+            return None
 
         while True:
             if time.monotonic() - started >= self.budget.timeout_seconds:
@@ -886,6 +989,7 @@ class EpisodeOrchestrator:
                 "supplied_context": supplied_context,
                 "draft": draft,
                 "validation_feedback": feedback,
+                "action_contract_feedback": contract_feedback,
                 "model_program": (
                     {
                         "candidate_id": current_candidate_id,
@@ -920,30 +1024,41 @@ class EpisodeOrchestrator:
                 )
                 return finish(StopReason.PROVIDER_FAILURE)
             self.writer.provider_response(steps + 1, supplied_action)
-            action = AgentAction.from_value(supplied_action)
-            if action.action not in self.capabilities.allowed_actions:
-                raise UnknownAgentActionError(
-                    f"action is not enabled for this episode: {action.action}",
-                    rejection_stage="skill_action_authorization",
-                    reason_code="action_not_allowed_for_skill",
-                    rejected_action=action.action,
-                    requested_capability_or_context=action.action,
-                    human_safe_detail=(
-                        "The Agent requested an action that the active Skill does not allow."
-                    ),
-                )
             steps += 1
+            try:
+                action = AgentAction.from_value(supplied_action)
+                if action.action not in self.capabilities.allowed_actions:
+                    raise UnknownAgentActionError(
+                        f"action is not enabled for this episode: {action.action}",
+                        rejection_stage="skill_action_authorization",
+                        reason_code="action_not_allowed_for_skill",
+                        rejected_action=action.action,
+                        requested_capability_or_context=action.action,
+                        human_safe_detail=(
+                            "The Agent requested an action that the active Skill does not allow."
+                        ),
+                    )
+            except AgentActionRejection as rejection:
+                terminal = handle_contract_rejection(rejection, supplied_action)
+                if terminal is not None:
+                    return terminal
+                continue
+            contract_feedback = None
 
             if action.action == "request_context":
                 if context_requests >= self.budget.max_context_requests:
                     self.writer.event({"step": steps, "action": action.action, "context_key": action.context_key, "reason": action.reason, "observation": "context_budget_exhausted"})
                     return finish(StopReason.BUDGET_EXHAUSTED)
                 if not action.context_key:
-                    raise EpisodeContractError(
+                    rejection = EpisodeContractError(
                         "request_context requires context_key",
                         reason_code="missing_context_key",
                         rejected_action=action.action,
                     )
+                    terminal = handle_contract_rejection(rejection, supplied_action)
+                    if terminal is not None:
+                        return terminal
+                    continue
                 item = self.context_broker.resolve(
                     action.context_key,
                     allowed_keys=self.capabilities.allowed_context_keys,
@@ -1161,6 +1276,9 @@ class EpisodeOrchestrator:
                     },
                     context=invocation_context,
                 )
+                side_effect_started = (
+                    side_effect_started or observation.side_effect_started
+                )
                 executions += 1
                 latest_observation_id = f"observation_{executions:03d}"
                 latest_observation = observation.as_dict()
@@ -1259,6 +1377,9 @@ class EpisodeOrchestrator:
                         "contract_type": "cad_ir_draft",
                         "contract": draft,
                     },
+                )
+                side_effect_started = (
+                    side_effect_started or observation.side_effect_started
                 )
                 feedback = observation.output
                 if not isinstance(feedback, dict) or not isinstance(feedback.get("valid"), bool):
@@ -1594,6 +1715,7 @@ def run_design_part_episode(
         max_executions=limits.max_executions,
         max_observation_inspections=limits.max_observation_inspections,
         timeout_seconds=limits.timeout_seconds,
+        max_contract_repair_turns=limits.max_contract_repair_turns,
     )
     orchestrator = EpisodeOrchestrator(
         objective=envelope.objective,
@@ -1720,6 +1842,7 @@ def run_work_design_episode(
         max_executions=0,
         max_observation_inspections=0,
         timeout_seconds=limits.timeout_seconds,
+        max_contract_repair_turns=limits.max_contract_repair_turns,
     )
     artifact_dir.mkdir(parents=True, exist_ok=True)
     provider_identity = _safe_provider_identity(
@@ -1733,6 +1856,9 @@ def run_work_design_episode(
     supplied_context: list[dict[str, Any]] = []
     context_manifest: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
+    contract_feedback: dict[str, Any] | None = None
+    contract_repair_turns = 0
+    contract_repair_exhausted = False
     knowledge = RUNTIME_SKILL_REGISTRY.knowledge_for_skill(skill.skill_id)
 
     def persist_response(sequence: int, value: Any) -> None:
@@ -1768,6 +1894,8 @@ def run_work_design_episode(
             failure_diagnostic=deepcopy(failure_diagnostic),
             skill_id=skill.skill_id,
             skill_version=skill.version,
+            contract_repair_turn_count=contract_repair_turns,
+            contract_repair_exhausted=contract_repair_exhausted,
         )
         knowledge_manifest = [
             {
@@ -1810,6 +1938,49 @@ def run_work_design_episode(
         )
         return result
 
+    def handle_contract_rejection(
+        rejection: AgentActionRejection,
+        raw_action: Any,
+    ) -> WorkDesignEpisodeResult | None:
+        nonlocal contract_feedback, contract_repair_turns
+        nonlocal contract_repair_exhausted, state
+        next_feedback = _contract_repair_feedback(
+            rejection,
+            raw_action,
+            allowed_actions=skill.allowed_actions,
+            skill_id=skill.skill_id,
+            side_effect_started=False,
+        )
+        if next_feedback is None:
+            raise rejection
+        exhausted = contract_repair_turns >= episode_budget.max_contract_repair_turns
+        events.append(
+            {
+                "event_type": "system_observation",
+                "step": steps,
+                "observation": "action_contract_feedback",
+                **next_feedback,
+                "contract_repair_turn_count": (
+                    contract_repair_turns
+                    if exhausted
+                    else contract_repair_turns + 1
+                ),
+                "contract_repair_exhausted": exhausted,
+            }
+        )
+        if exhausted:
+            contract_repair_exhausted = True
+            return finish(
+                StopReason.POLICY_BLOCKED,
+                failure_diagnostic=_contract_repair_exhausted_diagnostic(
+                    rejection, contract_repair_turns
+                ),
+            )
+        contract_repair_turns += 1
+        contract_feedback = next_feedback
+        state = "correcting_action_contract"
+        return None
+
     state = "created"
     while True:
         if time.monotonic() - started >= episode_budget.timeout_seconds or steps >= episode_budget.max_steps:
@@ -1820,6 +1991,7 @@ def run_work_design_episode(
             "context_envelope": envelope.as_dict(),
             "supplied_context": supplied_context,
             "work_design": draft,
+            "action_contract_feedback": contract_feedback,
         }
         try:
             supplied_action = supplier(provider_state)
@@ -1834,28 +2006,39 @@ def run_work_design_episode(
             )
             return finish(StopReason.PROVIDER_FAILURE)
         persist_response(steps + 1, supplied_action)
-        action = AgentAction.from_value(supplied_action)
-        if action.action not in skill.allowed_actions:
-            raise UnknownAgentActionError(
-                f"action is not enabled for this episode: {action.action}",
-                rejection_stage="skill_action_authorization",
-                reason_code="action_not_allowed_for_skill",
-                rejected_action=action.action,
-                requested_capability_or_context=action.action,
-                human_safe_detail=(
-                    "The Agent requested an action that the Work Design Skill does not allow."
-                ),
-            )
         steps += 1
+        try:
+            action = AgentAction.from_value(supplied_action)
+            if action.action not in skill.allowed_actions:
+                raise UnknownAgentActionError(
+                    f"action is not enabled for this episode: {action.action}",
+                    rejection_stage="skill_action_authorization",
+                    reason_code="action_not_allowed_for_skill",
+                    rejected_action=action.action,
+                    requested_capability_or_context=action.action,
+                    human_safe_detail=(
+                        "The Agent requested an action that the Work Design Skill does not allow."
+                    ),
+                )
+        except AgentActionRejection as rejection:
+            terminal = handle_contract_rejection(rejection, supplied_action)
+            if terminal is not None:
+                return terminal
+            continue
+        contract_feedback = None
         if action.action == "request_context":
             if context_requests >= episode_budget.max_context_requests:
                 return finish(StopReason.BUDGET_EXHAUSTED)
             if not action.context_key:
-                raise EpisodeContractError(
+                rejection = EpisodeContractError(
                     "request_context requires context_key",
                     reason_code="missing_context_key",
                     rejected_action=action.action,
                 )
+                terminal = handle_contract_rejection(rejection, supplied_action)
+                if terminal is not None:
+                    return terminal
+                continue
             item = broker.resolve(
                 action.context_key,
                 allowed_keys=skill.allowed_context_keys,
@@ -1885,7 +2068,13 @@ def run_work_design_episode(
             if proposals >= episode_budget.max_contract_submissions:
                 return finish(StopReason.BUDGET_EXHAUSTED)
             assert action.work_design is not None
-            draft = validate_work_design_proposal(action.work_design)
+            try:
+                draft = validate_work_design_proposal(action.work_design)
+            except AgentActionRejection as rejection:
+                terminal = handle_contract_rejection(rejection, supplied_action)
+                if terminal is not None:
+                    return terminal
+                continue
             proposals += 1
             _write_json(
                 artifact_dir / "work_design_submissions" / f"submission_{proposals:03d}.json",
@@ -1906,19 +2095,27 @@ def run_work_design_episode(
             continue
         if action.action == "create_part_jobs":
             if draft is None:
-                raise EpisodeContractError(
+                rejection = EpisodeContractError(
                     "create_part_jobs requires a valid Work Design proposal",
                     rejection_stage="episode_action_ordering",
                     reason_code="work_design_proposal_missing",
                     rejected_action=action.action,
                 )
+                terminal = handle_contract_rejection(rejection, supplied_action)
+                if terminal is not None:
+                    return terminal
+                continue
             if draft["unresolved_questions"]:
-                raise EpisodeContractError(
+                rejection = EpisodeContractError(
                     "create_part_jobs requires no unresolved material questions",
                     rejection_stage="episode_action_ordering",
                     reason_code="work_design_questions_unresolved",
                     rejected_action=action.action,
                 )
+                terminal = handle_contract_rejection(rejection, supplied_action)
+                if terminal is not None:
+                    return terminal
+                continue
             events.append(
                 {
                     "event_type": "agent_action",
@@ -1956,12 +2153,16 @@ def run_work_design_episode(
         if action.action == "stop":
             reason = action.stop_reason or StopReason.INSUFFICIENT_CONTEXT
             if reason == StopReason.COMPLETED:
-                raise EpisodeContractError(
+                rejection = EpisodeContractError(
                     "work_design completes only through create_part_jobs",
                     rejection_stage="episode_action_ordering",
                     reason_code="work_design_completion_action_required",
                     rejected_action=action.action,
                 )
+                terminal = handle_contract_rejection(rejection, supplied_action)
+                if terminal is not None:
+                    return terminal
+                continue
             if reason.value not in skill.stop_reasons:
                 raise EpisodeContractError(
                     "stop reason is not enabled for the active skill",
@@ -1999,33 +2200,18 @@ def validate_work_design_proposal(value: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalize the small provider-authored Work Design contract."""
 
     if not isinstance(value, dict):
-        raise EpisodeContractError(
+        raise _work_design_contract_error(
             "work_design must be an object",
-            reason_code="invalid_work_design_contract",
-            rejected_action="propose_work_design",
+            "work_design",
+            field_issue="invalid_shape",
+            field_path="work_design",
+            expected_fields=work_design_fields(),
         )
-    allowed = {
-        "objective",
-        "concept_summary",
-        "generated_parts",
-        "reference_components",
-        "interfaces",
-        "dependencies",
-        "assumptions",
-        "unresolved_questions",
-        "assembly_expected",
-        "recommendation",
-    }
-    if set(value) != allowed:
-        raise EpisodeContractError(
-            "work_design fields do not match the canonical contract",
-            reason_code="invalid_work_design_contract",
-            rejected_action="propose_work_design",
-            requested_capability_or_context=_first_safe_identifier(
-                set(value) ^ allowed
-            ),
-            human_safe_detail="The Agent's Work Design fields did not match the typed Work Design contract.",
-        )
+    _validate_work_design_object_fields(
+        value,
+        object_path="",
+        field_path_prefix="",
+    )
     for forbidden in ("part_job_id", "run_id", "work_id", "manifest", "path", "command"):
         if _contains_key(value, forbidden):
             raise EpisodeContractError(
@@ -2036,65 +2222,122 @@ def validate_work_design_proposal(value: dict[str, Any]) -> dict[str, Any]:
                 requested_capability_or_context=forbidden,
                 human_safe_detail="The Agent tried to supply a product identity or side effect that CadFlow owns.",
             )
-    objective = _required_bounded_text(value["objective"], "objective", 2_000)
-    concept = _required_bounded_text(value["concept_summary"], "concept_summary", 4_000)
-    recommendation = _required_bounded_text(value["recommendation"], "recommendation", 1_000)
+    top_fields = work_design_fields()
+    objective = _required_bounded_text(
+        value["objective"], "objective", work_design_field("objective"),
+        field_path="objective", expected_fields=top_fields,
+    )
+    concept = _required_bounded_text(
+        value["concept_summary"], "concept_summary", work_design_field("concept_summary"),
+        field_path="concept_summary", expected_fields=top_fields,
+    )
+    recommendation = _required_bounded_text(
+        value["recommendation"], "recommendation", work_design_field("recommendation"),
+        field_path="recommendation", expected_fields=top_fields,
+    )
     raw_parts = value["generated_parts"]
-    if not isinstance(raw_parts, list) or not 1 <= len(raw_parts) <= 12:
-        raise _work_design_contract_error(
-            "work_design requires one to twelve generated Parts",
-            "generated_parts",
-        )
+    _validate_work_design_list(
+        raw_parts,
+        work_design_field("generated_parts"),
+        label="generated_parts",
+        field_path="generated_parts",
+        expected_fields=top_fields,
+    )
     generated_parts: list[dict[str, Any]] = []
     keys: set[str] = set()
+    generated_fields = work_design_fields("generated_parts[]")
+    unique_key_field = work_design_field("generated_parts").unique_by
+    if unique_key_field is None:
+        raise RuntimeError("canonical generated Parts require a unique key field")
     for raw in raw_parts:
-        if not isinstance(raw, dict) or set(raw) != {"key", "name", "role", "interfaces", "dependencies"}:
-            raise _work_design_contract_error(
-                "generated Part fields do not match the canonical contract",
-                "generated_parts",
-            )
-        key = _required_bounded_text(raw["key"], "generated Part key", 120)
+        _validate_work_design_object_fields(
+            raw,
+            object_path="generated_parts[]",
+            field_path_prefix="generated_parts[]",
+        )
+        key = _required_bounded_text(
+            raw[unique_key_field], "generated Part key",
+            work_design_field(unique_key_field, "generated_parts[]"),
+            field_path=f"generated_parts[].{unique_key_field}",
+            expected_fields=generated_fields,
+        )
         if key in keys:
             raise _work_design_contract_error(
                 "generated Part keys must be unique",
-                "generated_parts.key",
+                unique_key_field,
+                field_issue="invalid_value",
+                field_path=f"generated_parts[].{unique_key_field}",
+                expected_fields=generated_fields,
             )
         keys.add(key)
         generated_parts.append(
             {
                 "key": key,
-                "name": _required_bounded_text(raw["name"], "generated Part name", 200),
-                "role": _required_bounded_text(raw["role"], "generated Part role", 1_000),
-                "interfaces": _bounded_text_list(raw["interfaces"], "generated Part interfaces", 24, 1_000),
-                "dependencies": _bounded_text_list(raw["dependencies"], "generated Part dependencies", 12, 500),
+                "name": _required_bounded_text(
+                    raw["name"], "generated Part name", work_design_field("name", "generated_parts[]"),
+                    field_path="generated_parts[].name", expected_fields=generated_fields,
+                ),
+                "role": _required_bounded_text(
+                    raw["role"], "generated Part role", work_design_field("role", "generated_parts[]"),
+                    field_path="generated_parts[].role", expected_fields=generated_fields,
+                ),
+                "interfaces": _bounded_text_list(
+                    raw["interfaces"], "generated Part interfaces",
+                    work_design_field("interfaces", "generated_parts[]"),
+                    field_path="generated_parts[].interfaces", expected_fields=generated_fields,
+                ),
+                "dependencies": _bounded_text_list(
+                    raw["dependencies"], "generated Part dependencies",
+                    work_design_field("dependencies", "generated_parts[]"),
+                    field_path="generated_parts[].dependencies", expected_fields=generated_fields,
+                ),
             }
         )
     raw_references = value["reference_components"]
-    if not isinstance(raw_references, list) or len(raw_references) > 24:
-        raise _work_design_contract_error(
-            "reference_components must be a bounded list",
-            "reference_components",
-        )
+    _validate_work_design_list(
+        raw_references,
+        work_design_field("reference_components"),
+        label="reference_components",
+        field_path="reference_components",
+        expected_fields=top_fields,
+    )
     reference_components: list[dict[str, Any]] = []
+    reference_fields = work_design_fields("reference_components[]")
     for raw in raw_references:
-        if not isinstance(raw, dict) or set(raw) != {"name", "role", "interfaces"}:
-            raise _work_design_contract_error(
-                "reference component fields do not match the canonical contract",
-                "reference_components",
-            )
+        _validate_work_design_object_fields(
+            raw,
+            object_path="reference_components[]",
+            field_path_prefix="reference_components[]",
+        )
         reference_components.append(
             {
-                "name": _required_bounded_text(raw["name"], "reference component name", 200),
-                "role": _required_bounded_text(raw["role"], "reference component role", 1_000),
-                "interfaces": _bounded_text_list(raw["interfaces"], "reference component interfaces", 24, 1_000),
+                "name": _required_bounded_text(
+                    raw["name"], "reference component name",
+                    work_design_field("name", "reference_components[]"),
+                    field_path="reference_components[].name", expected_fields=reference_fields,
+                ),
+                "role": _required_bounded_text(
+                    raw["role"], "reference component role",
+                    work_design_field("role", "reference_components[]"),
+                    field_path="reference_components[].role", expected_fields=reference_fields,
+                ),
+                "interfaces": _bounded_text_list(
+                    raw["interfaces"], "reference component interfaces",
+                    work_design_field("interfaces", "reference_components[]"),
+                    field_path="reference_components[].interfaces", expected_fields=reference_fields,
+                ),
             }
         )
-    interfaces = _bounded_relation_list(value["interfaces"], "interfaces", 48)
-    dependencies = _bounded_relation_list(value["dependencies"], "dependencies", 24)
-    if not isinstance(value["assembly_expected"], bool):
+    interfaces = _bounded_relation_list(value["interfaces"], "interfaces")
+    dependencies = _bounded_relation_list(value["dependencies"], "dependencies")
+    assembly_spec = work_design_field("assembly_expected")
+    if not _matches_work_design_type(value["assembly_expected"], assembly_spec):
         raise _work_design_contract_error(
             "assembly_expected must be boolean",
             "assembly_expected",
+            field_issue="invalid_type",
+            field_path="assembly_expected",
+            expected_fields=top_fields,
         )
     return {
         "schema_version": 1,
@@ -2104,54 +2347,224 @@ def validate_work_design_proposal(value: dict[str, Any]) -> dict[str, Any]:
         "reference_components": reference_components,
         "interfaces": interfaces,
         "dependencies": dependencies,
-        "assumptions": _bounded_text_list(value["assumptions"], "assumptions", 24, 1_000),
-        "unresolved_questions": _bounded_text_list(value["unresolved_questions"], "unresolved_questions", 12, 1_000),
+        "assumptions": _bounded_text_list(
+            value["assumptions"], "assumptions", work_design_field("assumptions"),
+            field_path="assumptions", expected_fields=top_fields,
+        ),
+        "unresolved_questions": _bounded_text_list(
+            value["unresolved_questions"], "unresolved_questions",
+            work_design_field("unresolved_questions"),
+            field_path="unresolved_questions", expected_fields=top_fields,
+        ),
         "assembly_expected": value["assembly_expected"],
         "recommendation": recommendation,
     }
 
 
-def _bounded_relation_list(value: Any, label: str, maximum: int) -> list[dict[str, str]]:
-    if not isinstance(value, list) or len(value) > maximum:
-        raise _work_design_contract_error(f"{label} must be a bounded list", label)
+def _validate_work_design_object_fields(
+    value: Any,
+    *,
+    object_path: str,
+    field_path_prefix: str,
+) -> None:
+    """Validate one object shape; missing wins deterministically over extra."""
+
+    expected_fields = work_design_fields(object_path)
+    if not isinstance(value, dict):
+        raise _work_design_contract_error(
+            "Work Design entry must be an object",
+            field_path_prefix.rstrip("[]") or "work_design",
+            field_issue="invalid_shape",
+            field_path=field_path_prefix or "work_design",
+            expected_fields=expected_fields,
+        )
+    actual_fields = set(value)
+    missing = set(expected_fields) - actual_fields
+    extra = actual_fields - set(expected_fields)
+    if missing:
+        field = _first_safe_identifier(missing) or "unknown_field"
+        issue = "missing"
+    elif extra:
+        safe_extra_fields = tuple(
+            field
+            for field in (_safe_work_design_extra_field(item) for item in extra)
+            if field is not None
+        )
+        unsafe_extra_present = len(safe_extra_fields) != len(extra)
+        field = None if unsafe_extra_present else sorted(safe_extra_fields)[0]
+        issue = "extra"
+    else:
+        return
+    parent_path = field_path_prefix or "work_design"
+    path = (
+        f"{field_path_prefix}.{field}"
+        if field_path_prefix and field is not None
+        else field or parent_path
+    )
+    raise _work_design_contract_error(
+        "Work Design fields do not match the canonical contract",
+        field,
+        field_issue=issue,
+        field_path=path,
+        expected_fields=expected_fields,
+    )
+
+
+def _validate_work_design_list(
+    value: Any,
+    spec: WorkDesignField,
+    *,
+    label: str,
+    field_path: str,
+    expected_fields: tuple[str, ...],
+) -> None:
+    if not _matches_work_design_type(value, spec):
+        raise _work_design_contract_error(
+            f"{label} must be a list",
+            spec.name,
+            field_issue="invalid_type",
+            field_path=field_path,
+            expected_fields=expected_fields,
+        )
+    minimum = spec.min_items or 0
+    maximum = spec.max_items
+    if len(value) < minimum or (maximum is not None and len(value) > maximum):
+        raise _work_design_contract_error(
+            f"{label} must satisfy its bounded list size",
+            spec.name,
+            field_issue="invalid_value",
+            field_path=field_path,
+            expected_fields=expected_fields,
+        )
+
+
+def _bounded_relation_list(value: Any, label: str) -> list[dict[str, str]]:
+    _validate_work_design_list(
+        value,
+        work_design_field(label),
+        label=label,
+        field_path=label,
+        expected_fields=work_design_fields(),
+    )
     result = []
+    relation_path = f"{label}[]"
+    relation_fields = work_design_fields(relation_path)
     for item in value:
-        if not isinstance(item, dict) or set(item) != {"from", "to", "description"}:
-            raise _work_design_contract_error(
-                f"{label} entries require from, to, and description",
-                label,
-            )
+        _validate_work_design_object_fields(
+            item,
+            object_path=relation_path,
+            field_path_prefix=relation_path,
+        )
         result.append(
             {
-                "from": _required_bounded_text(item["from"], f"{label} from", 200),
-                "to": _required_bounded_text(item["to"], f"{label} to", 200),
-                "description": _required_bounded_text(item["description"], f"{label} description", 1_000),
+                "from": _required_bounded_text(
+                    item["from"], f"{label} from", work_design_field("from", relation_path),
+                    field_path=f"{relation_path}.from", expected_fields=relation_fields,
+                ),
+                "to": _required_bounded_text(
+                    item["to"], f"{label} to", work_design_field("to", relation_path),
+                    field_path=f"{relation_path}.to", expected_fields=relation_fields,
+                ),
+                "description": _required_bounded_text(
+                    item["description"], f"{label} description",
+                    work_design_field("description", relation_path),
+                    field_path=f"{relation_path}.description", expected_fields=relation_fields,
+                ),
             }
         )
     return result
 
 
-def _bounded_text_list(value: Any, label: str, maximum: int, item_limit: int) -> list[str]:
-    if not isinstance(value, list) or len(value) > maximum:
-        raise _work_design_contract_error(f"{label} must be a bounded list", label)
-    return [_required_bounded_text(item, label, item_limit) for item in value]
+def _bounded_text_list(
+    value: Any,
+    label: str,
+    spec: WorkDesignField,
+    *,
+    field_path: str,
+    expected_fields: tuple[str, ...],
+) -> list[str]:
+    _validate_work_design_list(
+        value,
+        spec,
+        label=label,
+        field_path=field_path,
+        expected_fields=expected_fields,
+    )
+    item_spec = WorkDesignField(
+        name=spec.name,
+        value_type=spec.item_type or "text",
+        non_empty=spec.item_non_empty,
+        max_length=spec.item_max_length,
+    )
+    return [
+        _required_bounded_text(
+            item,
+            label,
+            item_spec,
+            field_path=f"{field_path}[]",
+            expected_fields=expected_fields,
+        )
+        for item in value
+    ]
 
 
-def _required_bounded_text(value: Any, label: str, limit: int) -> str:
-    if not isinstance(value, str) or not value.strip() or len(value.strip()) > limit:
+def _required_bounded_text(
+    value: Any,
+    label: str,
+    spec: WorkDesignField,
+    *,
+    field_path: str,
+    expected_fields: tuple[str, ...],
+) -> str:
+    if not _matches_work_design_type(value, spec):
+        raise _work_design_contract_error(
+            f"{label} must be text",
+            spec.name,
+            field_issue="invalid_type",
+            field_path=field_path,
+            expected_fields=expected_fields,
+        )
+    normalized = value.strip()
+    if (
+        (spec.non_empty and not normalized)
+        or (spec.max_length is not None and len(normalized) > spec.max_length)
+    ):
         raise _work_design_contract_error(
             f"{label} must be non-empty bounded text",
-            label,
+            spec.name,
+            field_issue="invalid_value",
+            field_path=field_path,
+            expected_fields=expected_fields,
         )
-    return value.strip()
+    return normalized
 
 
-def _work_design_contract_error(message: str, field: str) -> EpisodeContractError:
+def _matches_work_design_type(value: Any, spec: WorkDesignField) -> bool:
+    expected_types = {
+        "text": str,
+        "boolean": bool,
+        "list": list,
+    }
+    expected = expected_types.get(spec.value_type)
+    return expected is not None and isinstance(value, expected)
+
+
+def _work_design_contract_error(
+    message: str,
+    field: str | None,
+    *,
+    field_issue: str,
+    field_path: str,
+    expected_fields: tuple[str, ...],
+) -> EpisodeContractError:
     return EpisodeContractError(
         message,
         reason_code="invalid_work_design_contract",
         rejected_action="propose_work_design",
         requested_capability_or_context=field,
+        field_issue=field_issue,
+        field_path=field_path,
+        expected_fields=expected_fields,
         human_safe_detail=(
             "The Agent's Work Design did not match the bounded Work Design contract."
         ),
@@ -2164,6 +2577,203 @@ def _contains_key(value: Any, key: str) -> bool:
     if isinstance(value, list):
         return any(_contains_key(item, key) for item in value)
     return False
+
+
+_CONTRACT_REPAIR_REASON_CODES = frozenset({
+    "action_contract_extra_fields",
+    "invalid_action_payload",
+    "invalid_work_design_contract",
+    "missing_context_key",
+    "invalid_question_contract",
+})
+
+_WORK_DESIGN_ORDERING_REPAIR_REASON_CODES = frozenset({
+    "work_design_proposal_missing",
+    "work_design_questions_unresolved",
+    "work_design_completion_action_required",
+})
+
+_CONTRACT_REPAIR_FORBIDDEN_FIELDS = frozenset({
+    "work_id", "run_id", "part_id", "part_job_id", "assembly_job_id",
+    "workspace_id", "source_run_id", "target_work_id",
+    "manifest", "path", "file_path", "directory", "working_directory",
+    "evidence_root", "executable_path",
+    "command", "shell", "script", "source", "source_code", "executable",
+    "cad_code", "cadquery_code", "model_code", "python_code",
+    "credential", "credentials", "api_key", "secret", "token", "password",
+    "environment", "environment_variables", "env", "network", "network_access",
+    "filesystem", "filesystem_access", "process", "subprocess", "tools",
+    "tool", "tool_id", "tool_name", "tool_authority", "allowed_tools",
+    "authority", "authorization", "authentication", "permission",
+    "permissions", "bypass", "identity", "capability", "access",
+    "uid", "gid",
+    "candidate_id", "observation_id", "execution_id",
+})
+
+
+def _forbidden_contract_repair_field(value: Any) -> str | None:
+    """Return only a forbidden field name; values are never inspected or exposed."""
+
+    if isinstance(value, AgentAction):
+        value = {
+            "action": value.action,
+            "context_key": value.context_key,
+            "contract": value.contract,
+            "model_program": value.model_program,
+            "work_design": value.work_design,
+            "questions": list(value.questions),
+        }
+    if isinstance(value, dict):
+        for raw_key, item in value.items():
+            key = _normalized_contract_field(raw_key)
+            if key in _CONTRACT_REPAIR_FORBIDDEN_FIELDS:
+                return key
+            if key.endswith((
+                "_work_id", "_run_id", "_part_id", "_part_job_id",
+                "_assembly_job_id", "_workspace_id",
+            )):
+                return key
+            segments = tuple(part for part in key.split("_") if part)
+            if any(
+                part in {
+                    "credential", "credentials", "password", "secret",
+                    "shell", "command", "executable", "environment",
+                    "network", "filesystem", "manifest", "path", "source",
+                    "subprocess", "process", "tool", "tools", "authority",
+                    "authorization", "authentication", "permission",
+                    "permissions", "bypass", "identity", "capability", "access",
+                }
+                for part in segments
+            ):
+                return key
+            nested = _forbidden_contract_repair_field(item)
+            if nested:
+                return nested
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            nested = _forbidden_contract_repair_field(item)
+            if nested:
+                return nested
+    return None
+
+
+def _safe_work_design_extra_field(value: Any) -> str | None:
+    """Return only a normal field identifier that is safe to echo diagnostically."""
+
+    if not is_safe_contract_field_name(value):
+        return None
+    if _forbidden_contract_repair_field({value: None}) is not None:
+        return None
+    return value
+
+
+def _normalized_contract_field(value: Any) -> str:
+    """Normalize field spelling without retaining or inspecting its value."""
+
+    source = str(value).strip().replace("-", "_")
+    characters: list[str] = []
+    for index, character in enumerate(source):
+        if (
+            character.isupper()
+            and index > 0
+            and source[index - 1] != "_"
+            and (source[index - 1].islower() or source[index - 1].isdigit())
+        ):
+            characters.append("_")
+        characters.append(character.lower())
+    return "".join(characters)
+
+
+def _contract_repair_feedback(
+    rejection: AgentActionRejection,
+    raw_action: Any,
+    *,
+    allowed_actions: frozenset[str],
+    skill_id: str,
+    side_effect_started: bool,
+) -> dict[str, Any] | None:
+    """Build the small safe correction contract for narrowly repairable mistakes."""
+
+    if side_effect_started or _forbidden_contract_repair_field(raw_action):
+        return None
+    diagnostic = rejection.failure_diagnostic
+    reason_code = str(diagnostic.get("reason_code") or "")
+    ordering_allowed = (
+        skill_id == "work_design"
+        and reason_code in _WORK_DESIGN_ORDERING_REPAIR_REASON_CODES
+    )
+    if reason_code not in _CONTRACT_REPAIR_REASON_CODES and not ordering_allowed:
+        return None
+    if (
+        reason_code == "invalid_work_design_contract"
+        and diagnostic.get("field_issue") == "extra"
+        and diagnostic.get("requested_capability_or_context") is None
+    ):
+        return None
+    action = diagnostic.get("rejected_action")
+    if not isinstance(action, str):
+        return None
+    if action not in ACTION_ALLOWED_FIELDS or action not in allowed_actions:
+        return None
+    if isinstance(raw_action, dict) and raw_action.get("action") != action:
+        return None
+
+    messages = {
+        "action_contract_extra_fields": "Return the action again using only its allowed fields.",
+        "invalid_action_payload": "Return the action again with the required typed payload.",
+        "invalid_work_design_contract": "Return the Work Design again using the expected fields and value types.",
+        "missing_context_key": "Return request_context again with one allowed context_key.",
+        "invalid_question_contract": "Return ask_user again with focused field and question entries.",
+        "work_design_proposal_missing": "Propose a valid Work Design before requesting Part creation.",
+        "work_design_questions_unresolved": "Resolve material Work Design questions before requesting Part creation.",
+        "work_design_completion_action_required": "Complete Work Design by requesting create_part_jobs after a valid proposal.",
+    }
+    feedback: dict[str, Any] = {
+        "kind": "action_contract_feedback",
+        "rejected_action": action,
+        "reason_code": reason_code,
+        "message": messages[reason_code],
+        "allowed_fields": sorted(ACTION_ALLOWED_FIELDS[action]),
+        "required_fields": sorted(ACTION_REQUIRED_FIELDS[action]),
+    }
+    invalid_field = diagnostic.get("requested_capability_or_context")
+    if (
+        isinstance(invalid_field, str)
+        and invalid_field
+        and _forbidden_contract_repair_field({invalid_field: None}) is None
+    ):
+        feedback["invalid_field"] = invalid_field
+    if action == "propose_work_design" or reason_code == "invalid_work_design_contract":
+        feedback["expected_work_design_fields"] = sorted(work_design_fields())
+        field_issue = _safe_work_design_field_issue(diagnostic.get("field_issue"))
+        raw_field_path = diagnostic.get("field_path")
+        field_path = (
+            raw_field_path
+            if is_safe_contract_field_path(raw_field_path)
+            else None
+        )
+        expected_fields = _safe_expected_fields(diagnostic.get("expected_fields"))
+        if field_issue is not None:
+            feedback["field_issue"] = field_issue
+        if field_path is not None:
+            feedback["field_path"] = field_path
+        if expected_fields is not None:
+            feedback["expected_fields"] = expected_fields
+    return feedback
+
+
+def _contract_repair_exhausted_diagnostic(
+    rejection: AgentActionRejection,
+    turn_count: int,
+) -> dict[str, Any]:
+    diagnostic = deepcopy(rejection.failure_diagnostic)
+    diagnostic.update(
+        {
+            "contract_repair_exhausted": True,
+            "contract_repair_turn_count": turn_count,
+        }
+    )
+    return diagnostic
 
 
 def _safe_provider_identity(value: dict[str, Any]) -> dict[str, Any]:
@@ -2449,6 +3059,29 @@ def _safe_diagnostic_identifier(
     if not all(character.isalnum() or character in "_.:-[]" for character in text):
         return fallback
     return text
+
+
+def _safe_work_design_field_issue(value: Any) -> str | None:
+    if value in {"missing", "extra", "invalid_type", "invalid_value", "invalid_shape"}:
+        return str(value)
+    return None
+
+
+def _safe_expected_fields(value: Any) -> list[str] | None:
+    """Keep only a bounded identifier list; never inspect or reflect field values."""
+
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple, set, frozenset)) or len(value) > 32:
+        return None
+    safe = {
+        item
+        for item in (_safe_diagnostic_identifier(field) for field in value)
+        if item is not None
+    }
+    if not safe or len(safe) != len(value):
+        return None
+    return sorted(safe)
 
 
 def _first_safe_identifier(values: Any) -> str | None:

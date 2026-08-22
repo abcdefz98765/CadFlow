@@ -853,6 +853,63 @@ These are migration tasks, not accepted target behavior.
   reprojection, duplicate prevention, provider failure, and clarification
   answer/resume evidence. Focused verification passed with `109 passed, 1
   skipped`; the clean complete suite passed with `684 passed, 9 skipped`.
+- The V1 Owner UX & Autonomous Recovery pass completed on 2026-08-22. Current
+  Work and selected-node surfaces now give one durable diagnosis before one
+  primary recovery action; raw action metadata, repeated terminal feedback,
+  repeated state grids, and the contradictory blocked/ready copy are absent
+  from the normal Owner surface. A pending retry temporarily replaces the old
+  stop diagnosis with a quiet Running Inspector.
+- The existing bounded Episode loops can now return a source-free typed action-
+  contract observation and accept at most two correction turns in the same
+  Episode. The allowlist is limited to strict payload/field/question/Work
+  Design mistakes and three Work Design ordering mistakes. Any started side
+  effect, Work/Run/Part identity, path/source/command/tool/credential/network/
+  filesystem authority, provider transport failure, user stop/input,
+  environment failure, timeout, publication-integrity failure, or unknown
+  action remains non-repairable. Repair Activity is presentation evidence, not
+  a Workflow node.
+- Verification passed with `187 passed` across the affected integration set,
+  Python compilation for `src` and `tests`, and the complete clean suite with
+  `752 passed, 9 skipped`. Browser acceptance covered Running, successful Work
+  Design, same-Episode auto-repair, repair exhaustion, user input, environment
+  unavailability, blocked Part Attempt, Reviewable, Accepted, multi-Part,
+  revision, English/Chinese, and 1440/1024/414 layouts. Page-level horizontal
+  overflow was absent at 1024 and 414, and browser warnings/errors were empty.
+- A real retry of the Owner's `机械臂` Work preserved its earlier Episodes and
+  reached a new honest terminal Work Design rejection on the final invalid
+  field `key`; no CAD ran, no geometry/result was published, and no Part Job
+  was fabricated. Deterministic Developer Work evidence separately proves the
+  successful same-Episode correction path and the clean two-turn exhaustion
+  path. CadFlow is ready to continue Owner Real Design Trials, but the real
+  mechanical-arm design is not complete and external-provider output quality
+  remains a trial risk.
+- The V1 Work Design Contract Visibility correction completed on 2026-08-22.
+  The first `work_design` provider request now carries the exact CadFlow-owned
+  machine-readable Work Design contract, including nested generated-Part,
+  reference-component, relation, list-bound, text-bound, Boolean, uniqueness,
+  and no-additional-field rules. Provider disclosure, local validation, and
+  repair feedback derive from one focused contract authority; typed safe
+  diagnostics distinguish missing, extra, type, value, and shape failures with
+  stable field paths and local expected-field sets. The two-turn repair budget,
+  source-free evidence, authority boundaries, Workflow projection, and Owner UI
+  structure are unchanged.
+- Correction verification passed with `95 passed` in the focused contract set,
+  `326 passed` across the broader Work Design/Owner UX/Workflow/orchestrator
+  set, Python compilation for `src` and `tests`, `git diff --check`, and `799
+  passed, 9 skipped` in the complete suite. A browser sanity check was attempted,
+  but no CadFlow service was running at the local `127.0.0.1:8780` endpoint;
+  because the correction changed no UI or projection code, no service was
+  started solely for this check. The affected Owner UX and Workflow automated
+  regressions are included in the 326-test set.
+- A new real DeepSeek `deepseek-v4-flash` Episode on the existing `机械臂` Work
+  preserved all three earlier Episodes and accepted pointers. The first
+  provider proposal passed the canonical Work Design validator and described
+  four generated Parts. The provider then returned `create_part_jobs` in an
+  object-style action envelope, which the existing action parser truthfully
+  blocked as `action_not_registered`; therefore the valid proposal was not
+  promoted to `current_design` and no Part Jobs, CAD, geometry, result, or
+  acceptance were created. Work Design field-contract visibility is verified;
+  provider action-envelope conformance remains a separate real-trial risk.
 - M2.8 added only optional durable revision provenance on Part attempts because
   parent Run/result causality cannot be recovered honestly from prompt text,
   attempt order, or timestamps. No graph persistence, workflow engine, Agent

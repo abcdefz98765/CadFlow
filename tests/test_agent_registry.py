@@ -174,6 +174,7 @@ def test_provider_selects_context_contract_and_validation_actions(tmp_path, monk
             ),
         }
     ]
+    assert "work_design_contract" not in client.requests[0]["skill"]
     assert [
         item["id"] for item in client.requests[0]["skill"]["knowledge"]
     ] == [
@@ -286,13 +287,28 @@ def test_provider_can_ask_user_instead_of_guessing(tmp_path):
     assert result.stop_reason == StopReason.USER_INPUT_REQUIRED
     assert result.context_request_count == 1
 
-    unfocused = _adapter([{"action": "ask_user", "questions": []}])
-    with pytest.raises(EpisodeContractError, match="focused"):
-        run_design_part_episode(
-            adapter=unfocused,
-            handoff=_handoff(),
-            artifact_dir=tmp_path / "unfocused",
-        )
+    unfocused = _adapter([
+        {"action": "ask_user", "questions": []},
+        {
+            "action": "ask_user",
+            "questions": [{
+                "field": "clearance_mm",
+                "question": "What radial clearance is required?",
+            }],
+        },
+    ])
+    corrected = run_design_part_episode(
+        adapter=unfocused,
+        handoff=_handoff(),
+        artifact_dir=tmp_path / "unfocused",
+    )
+    feedback = unfocused.client.requests[1]["state"]["action_contract_feedback"]
+    assert feedback["kind"] == "action_contract_feedback"
+    assert feedback["reason_code"] == "invalid_question_contract"
+    assert feedback["rejected_action"] == "ask_user"
+    assert corrected.stop_reason == StopReason.USER_INPUT_REQUIRED
+    assert corrected.step_count == 2
+    assert corrected.contract_repair_turn_count == 1
 
 
 def test_skill_rejects_legacy_context_and_executable_contract_fields(tmp_path):

@@ -367,3 +367,124 @@ single-Part, multi-Part, blocked, revision, reviewable, accepted, 1024 px,
 Final verification passed: 112 focused Workflow/NiceGUI tests, Python
 compilation for `src` and `tests`, and the complete clean repository suite with
 `715 passed, 9 skipped` in 435.47 seconds.
+
+## V1 Owner UX & Autonomous Recovery verification — 2026-08-22
+
+The UX audit found that the selected Inspector rendered transient terminal
+feedback, a durable status pill, generic readiness copy, the CTA, durable
+diagnosis, a Boolean fact matrix, a second state grid, Activity, and Technical
+Evidence in that order. Diagnosis therefore arrived after the action, while
+`Blocked` and `Ready when you are` appeared together. The corrected normal
+order is selected object -> durable diagnosis when present -> ownership/next-
+action sentence -> one primary CTA -> relevant design evidence -> collapsed
+Activity -> collapsed Technical Evidence. Pending actions instead show only a
+compact acknowledgement, Running state, one running sentence, and the disabled
+CTA; a terminal command failure remains visible when no durable recovery owns
+it.
+
+Action-contract recovery lives in the existing Work Design and Part/Model
+Program Episode loops. It adds no Agent, Skill, provider abstraction, Workflow
+node, persistence model, or CAD authority. A rejected action counts as an
+Episode step. Safe feedback contains only the rejected action, reason code,
+allowed/required fields, an optional safe invalid-field identifier, and the
+expected Work Design fields. At most two follow-up correction calls are
+allowed. The final failure diagnostic records exhaustion/count and is accepted
+by the existing strict WorkOrchestrator port as an additive, validated fact.
+
+Repairable reason codes are:
+
+- `action_contract_extra_fields`
+- `invalid_action_payload`
+- `invalid_work_design_contract`
+- `missing_context_key`
+- `invalid_question_contract`
+- Work Design only: `work_design_proposal_missing`,
+  `work_design_questions_unresolved`, and
+  `work_design_completion_action_required`
+
+Recursive forbidden-field scanning and cumulative `side_effect_started`
+conservatively prevent repair across product identity, Work scope, execution,
+tool, policy, credential, filesystem, network, and authority boundaries.
+Unknown actions/values, context authorization/availability, provider
+transport/JSON failure, user-input stops, environment/runtime failure,
+timeouts/resource budgets, Tool Broker/Sandbox rejection, and publication
+integrity remain terminal.
+
+Browser acceptance matrix:
+
+| Case | Result |
+| --- | --- |
+| Work Design Running | final Inspector contained only acknowledgement, Running, running sentence, disabled CTA, Activity/Evidence |
+| Work Design successful | scripted real Work reached completed Work Design and one real Part Job |
+| Contract error auto-repaired | two distinct contract mistakes corrected in the same Episode; Activity collapsed them to one `Corrected the action format` row |
+| Contract repair exhausted | one terminal summary showed two correction attempts, final field, no additional design input, no CAD/result, and one Retry |
+| User input required | real clarification node exposed the question and one answer action |
+| Environment failure | real Settings surface showed Local CAD execution `Unavailable`; attempt-level environment ownership/retry policy is automated-verified |
+| Part Attempt blocked | two-Part fixture retained exact Camera Cradle/Extrusion Adapter attempt scope |
+| Reviewable / Accepted | stable geometry/validation evidence and the explicit accepted pointer were visible |
+| Multi-Part / revision | independent Part branches and a result-sourced revision lane were visible; accepted result remained intact |
+| Responsive / language | English and Chinese checked; 1024 was `1009 == 1009`, 414 was `399 == 399` client/scroll width |
+
+Ten alternating browser-control node selections measured 267-303 ms (278.6 ms
+average), including tool transport and DOM acknowledgement. The cached
+presentation-only selection function and Inspector-only refresh boundary remain
+covered by no-I/O tests; no backend read, canonical reprojection, sidebar,
+graph, or viewer rebuild was added. Browser warning/error logs were empty.
+
+The real Owner `机械臂` retry appended one Episode to the existing Work Design
+Run and preserved prior evidence. The external provider ended with
+`invalid_work_design_contract` on the safe diagnostic field `key`; CadFlow
+published no CAD, geometry, result, or Part Job. This is a truthful failed real
+trial, not proof that arbitrary mechanical-arm design works. The scripted
+Developer Works separately prove successful auto-repair and repair exhaustion
+through the real WorkOrchestrator/persistence path.
+
+Saved screenshot evidence:
+
+| Screenshot | SHA-256 |
+| --- | --- |
+| `before/01-mechanical-arm-work-design-blocked-1440-zh.png` | `1ccc58f20ba7cee75a1130981903cf0566e96229a9a2b9be7a3db36c2a6b41f4` |
+| `after/01-mechanical-arm-work-design-blocked-1440-en.png` | `076086a90a63c96896d7c8a8c3ed654a8d1ded570f21e8b76e752619379d24c6` |
+| `after/02-mechanical-arm-work-design-blocked-1440-zh.png` | `665cc7beeca2fcf61951883624563279150ab87179a171f1a37712641399a25f` |
+| `after/03-contract-repair-auto-repaired-1440-en.png` | `54c8ba1ca603afbb17cc5f20646f06d9fa1961cf589e0bd64807458acc3088a9` |
+| `after/04-contract-repair-exhausted-1440-en.png` | `ecf5fd56070c43ac05fa6656503f2ec67002dbd209b96ac543e3967c1c2d5a82` |
+| `after/05-work-design-running-quiet-1440-en.png` | `044cfcea241cee3eb538d097d37c1d0bcd898bc348125317842bdb528c0c0c8e` |
+| `after/06-responsive-1024-en.png` | `aeac0f9beff2862cb84058e9a484e7c3c8f85a36d9c6317db228ae157188a7b4` |
+| `after/07-responsive-414-en.png` | `6a64cf802fa6fdf4bb5ec9736ce783ff14be288a9ae41dddde01a6f07d2b76e1` |
+
+Final verification passed: `187 passed` in the affected integration set,
+Python compilation for `src` and `tests`, `git diff --check`, and the clean
+complete repository suite with `752 passed, 9 skipped` in 410.13 seconds.
+
+## V1 Work Design Contract Visibility correction — 2026-08-22
+
+This backend-only correction does not change the Workflow graph, Inspector,
+Owner copy, actions, or interaction lifecycle. The first `work_design` provider
+request now discloses the exact CadFlow-owned machine-readable contract. The
+same focused authority supplies provider disclosure, local validation, and
+repair feedback for top-level and nested generated-Part, reference-component,
+and relation objects. Safe diagnostics distinguish `missing`, `extra`,
+`invalid_type`, `invalid_value`, and `invalid_shape`, carry stable wildcard
+field paths, and list the expected fields for the local object. Unsafe
+identity, authority, credential, source, and path-shaped keys remain terminal
+and are not echoed.
+
+Automated verification passed with `95 passed` in the focused provider,
+validator, repair, and registry set; `326 passed` across the broader Work
+Design, WorkOrchestrator, Owner UX, and Workflow set; Python compilation for
+`src` and `tests`; `git diff --check`; and `799 passed, 9 skipped` in the clean
+complete suite. A browser sanity check was attempted, but no CadFlow service was
+running at the local `127.0.0.1:8780` endpoint. Because no UI or projection code
+changed, no service was started solely for this check; the Owner UX/Workflow
+regression tests remained green.
+
+The new external-provider retry appended request
+`work_design_contract_visibility_07009fe8e7ba4b448a2bfda7af4941d5` to the
+existing `机械臂` Work and preserved the three prior Episodes and accepted
+pointers. DeepSeek `deepseek-v4-flash` returned a proposal that passed the
+canonical Work Design validator with four generated Parts. Its next response
+encoded `create_part_jobs` as an object rather than the registered string action,
+so the existing action boundary stopped the Episode with
+`action_not_registered`. No Part Job, CAD, geometry, result, or acceptance was
+created. The field-contract correction therefore succeeded on the real
+proposal; action-envelope conformance is a separate follow-up risk.
