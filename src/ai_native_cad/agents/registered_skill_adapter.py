@@ -10,7 +10,7 @@ from typing import Any
 
 from ai_native_cad.agents.provider_sanitization import sanitize_provider_payload
 from ai_native_cad.agents.registry import RUNTIME_SKILL_REGISTRY
-from ai_native_cad.agents.work_design_contract import work_design_contract_description
+from ai_native_cad.agents.agent_action_contract import agent_action_contract_description
 
 
 def compile_registered_skill_action_request(
@@ -31,6 +31,11 @@ def compile_registered_skill_action_request(
         "allowed_tools": sorted(skill.allowed_tools),
         "output_contract_types": sorted(skill.output_contract_types),
         "stop_reasons": sorted(skill.stop_reasons),
+        "agent_action_contract": agent_action_contract_description(
+            skill.allowed_actions,
+            allowed_context_keys=skill.allowed_context_keys,
+            allowed_stop_reasons=skill.stop_reasons,
+        ),
         "delegated_skills": [
             {
                 "skill_id": delegated.skill_id,
@@ -55,14 +60,13 @@ def compile_registered_skill_action_request(
             for item in RUNTIME_SKILL_REGISTRY.knowledge_for_skill(skill.skill_id)
         ],
     }
-    if skill.skill_id == "work_design":
-        safe_manifest["work_design_contract"] = work_design_contract_description()
     return {
         "operation": f"{skill.skill_id}_action",
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": skill.compile_system_prompt()},
             {"role": "system", "content": skill.compile_action_contract()},
+            {"role": "system", "content": "The action discriminator is the JSON string in the action field, never an object."},
             {"role": "system", "content": "Registered capability: " + json.dumps(safe_manifest, sort_keys=True)},
             {"role": "user", "content": json.dumps(safe_state, sort_keys=True)},
         ],

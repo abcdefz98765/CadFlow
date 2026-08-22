@@ -70,6 +70,25 @@ def test_invalid_agent_response_evidence_omits_secrets_and_private_reasoning(tmp
     assert '"contract_status": "received"' in exchange
 
 
+def test_non_string_action_discriminator_evidence_never_persists_nested_payload(tmp_path):
+    nested_marker = "NESTED_ACTION_PAYLOAD_MUST_NOT_PERSIST"
+    with pytest.raises(ValueError):
+        _orchestrator(tmp_path).run(
+            lambda state: {
+                "action": {
+                    "name": nested_marker,
+                    "command": nested_marker,
+                    "arguments": {"text": nested_marker},
+                }
+            }
+        )
+
+    exchange = (tmp_path / "agent_exchange.jsonl").read_text(encoding="utf-8")
+    assert nested_marker not in exchange
+    assert '"action_discriminator_type": "object"' in exchange
+    assert '"received_fields": ["action"]' in exchange
+
+
 def test_step_context_and_submission_budgets_are_enforced(tmp_path):
     result = _orchestrator(tmp_path / "steps", budget=EpisodeBudget(max_steps=1)).run(
         lambda state: AgentAction(action="request_context", context_key="reviewed_part_handoff")

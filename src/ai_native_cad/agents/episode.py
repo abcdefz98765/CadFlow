@@ -21,6 +21,13 @@ from ai_native_cad.agents.registry import (
     RUNTIME_SKILL_REGISTRY,
     SkillDefinition,
 )
+from ai_native_cad.agents.agent_action_contract import (
+    ACTION_CONTRACTS,
+    ACTION_ALLOWED_FIELDS,
+    ACTION_REQUIRED_FIELDS,
+    action_contract,
+    action_discriminator_description,
+)
 from ai_native_cad.agents.tool_broker import (
     MODEL_PROGRAM_TOOL,
     STRUCTURED_CONTRACT_TOOL,
@@ -109,22 +116,19 @@ class EpisodeContractError(AgentActionRejection):
     """Raised when an action attempts to cross the structured contract boundary."""
 
 
-ALLOWLISTED_ACTIONS = frozenset({
-    "request_context",
-    "create_contract",
-    "patch_contract",
-    "submit_contract",
-    "request_validation",
-    "create_model_program",
-    "patch_model_program",
-    "request_execution",
-    "inspect_observation",
-    "repair_contract",
-    "propose_work_design",
-    "create_part_jobs",
-    "ask_user",
-    "stop",
-})
+def _matches_action_outer_type(value: Any, expected_type: Any) -> bool:
+    """Validate the few outer JSON types declared by the action authority."""
+
+    expected_types = {
+        "string": str,
+        "object": dict,
+        "list": list,
+    }
+    expected_class = expected_types.get(expected_type)
+    return expected_class is not None and isinstance(value, expected_class)
+
+
+ALLOWLISTED_ACTIONS = frozenset(ACTION_CONTRACTS)
 
 CONTEXT_KEYS = frozenset({
     "intent_active",
@@ -149,40 +153,6 @@ _FORBIDDEN_EXECUTION_FIELDS = frozenset({
     "cad_code", "cadquery_code", "command", "model_code", "python_code",
     "shell", "shell_command", "script",
 })
-
-ACTION_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
-    "request_context": frozenset({"action", "context_key", "reason"}),
-    "create_contract": frozenset({"action", "contract_type", "contract", "assumptions", "summary"}),
-    "patch_contract": frozenset({"action", "contract_type", "contract", "assumptions", "summary"}),
-    "submit_contract": frozenset({"action", "contract_type", "contract", "assumptions", "summary"}),
-    "repair_contract": frozenset({"action", "contract_type", "contract", "assumptions", "summary"}),
-    "request_validation": frozenset({"action", "reason"}),
-    "create_model_program": frozenset({"action", "model_program", "assumptions", "summary"}),
-    "patch_model_program": frozenset({"action", "model_program", "assumptions", "summary"}),
-    "request_execution": frozenset({"action"}),
-    "inspect_observation": frozenset({"action"}),
-    "propose_work_design": frozenset({"action", "work_design", "assumptions", "summary"}),
-    "create_part_jobs": frozenset({"action"}),
-    "ask_user": frozenset({"action", "questions", "reason"}),
-    "stop": frozenset({"action", "stop_reason", "reason"}),
-}
-
-ACTION_REQUIRED_FIELDS: dict[str, frozenset[str]] = {
-    "request_context": frozenset({"action", "context_key"}),
-    "create_contract": frozenset({"action", "contract_type", "contract"}),
-    "patch_contract": frozenset({"action", "contract_type", "contract"}),
-    "submit_contract": frozenset({"action", "contract_type", "contract"}),
-    "repair_contract": frozenset({"action", "contract_type", "contract"}),
-    "request_validation": frozenset({"action"}),
-    "create_model_program": frozenset({"action", "model_program"}),
-    "patch_model_program": frozenset({"action", "model_program"}),
-    "request_execution": frozenset({"action"}),
-    "inspect_observation": frozenset({"action"}),
-    "propose_work_design": frozenset({"action", "work_design"}),
-    "create_part_jobs": frozenset({"action"}),
-    "ask_user": frozenset({"action", "questions"}),
-    "stop": frozenset({"action", "stop_reason"}),
-}
 
 @dataclass(frozen=True)
 class AgentObjective:
@@ -310,7 +280,16 @@ class AgentAction:
                 human_safe_detail="The Agent returned a value instead of one typed action object.",
             )
         action = value.get("action")
-        if not isinstance(action, str) or action not in ALLOWLISTED_ACTIONS:
+        if "action" in value and not isinstance(action, str):
+            raise EpisodeContractError(
+                "agent action discriminator must be a string",
+                reason_code="invalid_action_discriminator",
+                field_issue="invalid_type",
+                field_path="action",
+                expected_fields=("action",),
+                human_safe_detail="The Agent action discriminator must be a JSON string.",
+            )
+        if action not in ALLOWLISTED_ACTIONS:
             raise UnknownAgentActionError(
                 f"unknown agent action: {action!r}",
                 rejection_stage="skill_action_authorization",
@@ -336,6 +315,29 @@ class AgentAction:
                     f"The Agent returned fields that the {action} action does not allow."
                 ),
             )
+        missing_fields = ACTION_REQUIRED_FIELDS[action] - set(value)
+        if missing_fields:
+            raise EpisodeContractError(
+                f"{action} is missing required action fields",
+                reason_code="invalid_action_payload",
+                rejected_action=action,
+                requested_capability_or_context=_first_safe_identifier(missing_fields),
+                human_safe_detail=(
+                    f"The Agent did not provide all required fields for the {action} action."
+                ),
+            )
+        for field_name, raw_value in value.items():
+            expected_type = action_contract(action).fields[field_name].get("type")
+            if not _matches_action_outer_type(raw_value, expected_type):
+                raise EpisodeContractError(
+                    f"{field_name} has an invalid outer action field type",
+                    reason_code="invalid_action_payload",
+                    rejected_action=action,
+                    requested_capability_or_context=field_name,
+                    human_safe_detail=(
+                        f"The Agent returned the wrong value type for the {field_name} action field."
+                    ),
+                )
         raw_reason = value.get("stop_reason")
         try:
             stop_reason = StopReason(raw_reason) if raw_reason is not None else None
@@ -2585,6 +2587,7 @@ _CONTRACT_REPAIR_REASON_CODES = frozenset({
     "invalid_work_design_contract",
     "missing_context_key",
     "invalid_question_contract",
+    "invalid_action_discriminator",
 })
 
 _WORK_DESIGN_ORDERING_REPAIR_REASON_CODES = frozenset({
@@ -2602,7 +2605,7 @@ _CONTRACT_REPAIR_FORBIDDEN_FIELDS = frozenset({
     "cad_code", "cadquery_code", "model_code", "python_code",
     "credential", "credentials", "api_key", "secret", "token", "password",
     "environment", "environment_variables", "env", "network", "network_access",
-    "filesystem", "filesystem_access", "process", "subprocess", "tools",
+    "filesystem", "filesystem_access", "process", "subprocess", "function", "operation", "tools",
     "tool", "tool_id", "tool_name", "tool_authority", "allowed_tools",
     "authority", "authorization", "authentication", "permission",
     "permissions", "bypass", "identity", "capability", "access",
@@ -2640,6 +2643,7 @@ def _forbidden_contract_repair_field(value: Any) -> str | None:
                     "shell", "command", "executable", "environment",
                     "network", "filesystem", "manifest", "path", "source",
                     "subprocess", "process", "tool", "tools", "authority",
+                    "function", "operation",
                     "authorization", "authentication", "permission",
                     "permissions", "bypass", "identity", "capability", "access",
                 }
@@ -2710,6 +2714,16 @@ def _contract_repair_feedback(
         and diagnostic.get("requested_capability_or_context") is None
     ):
         return None
+    if reason_code == "invalid_action_discriminator":
+        discriminator = action_discriminator_description(allowed_actions)
+        return {
+            "kind": "action_contract_feedback",
+            "reason_code": reason_code,
+            "message": "Return exactly one action object with action as a JSON string.",
+            "field_issue": "invalid_type",
+            "field_path": "action",
+            **discriminator,
+        }
     action = diagnostic.get("rejected_action")
     if not isinstance(action, str):
         return None
@@ -2805,7 +2819,7 @@ def _safe_agent_response(value: Any) -> dict[str, Any]:
     else:
         return {"contract_status": "invalid", "response_type": type(value).__name__}
     allowed = {
-        "action", "context_key", "reason", "contract_type", "stop_reason",
+        "context_key", "reason", "contract_type", "stop_reason",
         "summary", "questions", "assumptions",
     }
     result: dict[str, Any] = {
@@ -2813,6 +2827,12 @@ def _safe_agent_response(value: Any) -> dict[str, Any]:
         for key in allowed
         if key in raw
     }
+    if "action" in raw:
+        action = raw["action"]
+        if isinstance(action, str):
+            result["action"] = sanitize_provider_payload(action)
+        else:
+            result["action_discriminator_type"] = _safe_action_discriminator_type(action)
     blocked_field_tokens = (
         "authorization", "credential", "api_key", "secret", "token",
         "password", "cookie", "reasoning", "chain_of_thought",
@@ -2860,6 +2880,20 @@ def _safe_agent_response(value: Any) -> dict[str, Any]:
             "content_retained_in": "work_design.json",
         }
     return result
+
+
+def _safe_action_discriminator_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "list"
+    return "other"
 
 
 def _reject_execution_fields(

@@ -20,6 +20,19 @@ from ai_native_cad.agents import (
     run_work_design_episode,
 )
 from ai_native_cad.agents.registry import RUNTIME_SKILL_REGISTRY
+from ai_native_cad.agents.agent_action_contract import (
+    ACTION_CONTRACTS,
+    ACTION_ALLOWED_FIELDS,
+    ACTION_REQUIRED_FIELDS,
+    action_contract,
+    action_discriminator_description,
+    agent_action_contract_description,
+)
+from ai_native_cad.agents.episode import (
+    ACTION_ALLOWED_FIELDS as VALIDATOR_ACTION_ALLOWED_FIELDS,
+    ACTION_REQUIRED_FIELDS as VALIDATOR_ACTION_REQUIRED_FIELDS,
+    AgentAction,
+)
 from ai_native_cad.agents.provider_sanitization import sanitize_provider_payload
 from ai_native_cad.agents.work_design_contract import (
     work_design_contract_description,
@@ -176,7 +189,7 @@ def test_work_design_repairs_case_b_acceptance_criteria_contract_mistake(
     assert "Does not wobble" not in json.dumps(feedback)
 
 
-def test_first_work_design_provider_request_discloses_complete_canonical_contract(
+def test_first_work_design_provider_request_discloses_active_canonical_action_contract(
     tmp_path,
 ):
     _, client = _run_work_design(
@@ -184,37 +197,220 @@ def test_first_work_design_provider_request_discloses_complete_canonical_contrac
         [{"action": "stop", "stop_reason": "insufficient_context"}],
     )
 
-    disclosed = client.requests[0]["skill"]["work_design_contract"]
-    assert disclosed == work_design_contract_description()
-    assert disclosed["additional_fields"] is False
-    assert tuple(disclosed["required_fields"]) == work_design_fields()
-    generated = disclosed["fields"]["generated_parts"]
-    assert (generated["type"], generated["min_items"], generated["max_items"]) == (
-        "list", 1, 12,
+    skill = RUNTIME_SKILL_REGISTRY.skill("work_design")
+    disclosed = client.requests[0]["skill"]["agent_action_contract"]
+    assert disclosed == agent_action_contract_description(
+        skill.allowed_actions,
+        allowed_context_keys=skill.allowed_context_keys,
+        allowed_stop_reasons=skill.stop_reasons,
     )
-    assert generated["unique_by"] == "key"
-    assert generated["items"]["additional_fields"] is False
-    assert tuple(generated["items"]["required_fields"]) == work_design_fields(
-        "generated_parts[]"
+    variants = disclosed["variants"]
+    assert {variant["fields"]["action"]["const"] for variant in variants} == set(
+        skill.allowed_actions
     )
-    assert generated["items"]["fields"]["key"] == {
-        "type": "text", "non_empty": True, "max_length": 120,
+    for variant in variants:
+        action = variant["fields"]["action"]["const"]
+        assert variant["fields"]["action"] == {"type": "string", "const": action}
+        assert variant["additional_fields"] is False
+        assert variant["allowed_fields"] == sorted(ACTION_ALLOWED_FIELDS[action])
+        assert variant["required_fields"] == sorted(ACTION_REQUIRED_FIELDS[action])
+    create_part_jobs = next(
+        variant for variant in variants
+        if variant["fields"]["action"]["const"] == "create_part_jobs"
+    )
+    assert create_part_jobs == {
+        "type": "object",
+        "required_fields": ["action"],
+        "allowed_fields": ["action"],
+        "fields": {"action": {"type": "string", "const": "create_part_jobs"}},
+        "additional_fields": False,
     }
-    references = disclosed["fields"]["reference_components"]
-    assert references["max_items"] == 24
-    assert references["items"]["additional_fields"] is False
-    assert tuple(references["items"]["required_fields"]) == work_design_fields(
-        "reference_components[]"
-    )
-    for relation_name, maximum in (("interfaces", 48), ("dependencies", 24)):
-        relation = disclosed["fields"][relation_name]
-        assert relation["max_items"] == maximum
-        assert relation["items"]["additional_fields"] is False
-        assert tuple(relation["items"]["required_fields"]) == work_design_fields(
-            f"{relation_name}[]"
+    work_design = next(
+        variant for variant in variants
+        if variant["fields"]["action"]["const"] == "propose_work_design"
+    )["fields"]["work_design"]
+    assert work_design == work_design_contract_description()
+    ask_user = next(
+        variant for variant in variants
+        if variant["fields"]["action"]["const"] == "ask_user"
+    )["fields"]["questions"]
+    assert ask_user == {
+        "type": "list",
+        "min_items": 1,
+        "items": {
+            "type": "object",
+            "required_fields": ["field", "question"],
+            "fields": {
+                "field": {"type": "string", "non_empty": True},
+                "question": {"type": "string", "non_empty": True},
+            },
+        },
+    }
+
+
+def test_registered_skill_action_contract_matches_validator_authority_for_every_skill():
+    assert VALIDATOR_ACTION_ALLOWED_FIELDS is ACTION_ALLOWED_FIELDS
+    assert VALIDATOR_ACTION_REQUIRED_FIELDS is ACTION_REQUIRED_FIELDS
+    for skill_id in ("work_design", "design_part", "model_program"):
+        skill = RUNTIME_SKILL_REGISTRY.skill(skill_id)
+        contract = agent_action_contract_description(
+            skill.allowed_actions,
+            allowed_context_keys=skill.allowed_context_keys,
+            allowed_stop_reasons=skill.stop_reasons,
         )
-    assert disclosed["fields"]["assembly_expected"] == {"type": "boolean"}
-    assert disclosed["fields"]["recommendation"]["max_length"] == 1_000
+        variants = {
+            variant["fields"]["action"]["const"]: variant
+            for variant in contract["variants"]
+        }
+        assert set(variants) == set(skill.allowed_actions)
+        for action, variant in variants.items():
+            assert variant["allowed_fields"] == sorted(ACTION_ALLOWED_FIELDS[action])
+            assert variant["required_fields"] == sorted(ACTION_REQUIRED_FIELDS[action])
+
+
+def test_action_variants_enforce_canonical_required_and_allowed_fields():
+    for action, contract in ACTION_CONTRACTS.items():
+        action_only = {"action": action}
+        required_payload_fields = contract.required_fields - {"action"}
+        if required_payload_fields:
+            with pytest.raises(EpisodeContractError) as caught:
+                AgentAction.from_value(action_only)
+            assert caught.value.failure_diagnostic["reason_code"] == "invalid_action_payload"
+        else:
+            assert AgentAction.from_value(action_only).action == action
+        with pytest.raises(EpisodeContractError) as caught:
+            AgentAction.from_value({**action_only, "unexpected": "value"})
+        assert caught.value.failure_diagnostic["reason_code"] == "action_contract_extra_fields"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"action": "stop"},
+        {"action": "request_validation", "reason": []},
+        {"action": "request_context", "context_key": {}},
+        {"action": "create_contract", "contract_type": "cad_ir_draft", "contract": []},
+        {"action": "ask_user", "questions": {}},
+    ],
+)
+def test_action_outer_field_types_are_strictly_enforced(value):
+    with pytest.raises(EpisodeContractError) as caught:
+        AgentAction.from_value(value)
+
+    assert caught.value.failure_diagnostic["reason_code"] == "invalid_action_payload"
+
+
+def test_action_contract_disclosure_mutation_does_not_change_later_disclosures_or_work_design():
+    skill = RUNTIME_SKILL_REGISTRY.skill("work_design")
+    first = agent_action_contract_description(
+        skill.allowed_actions,
+        allowed_context_keys=skill.allowed_context_keys,
+        allowed_stop_reasons=skill.stop_reasons,
+    )
+    proposed = next(
+        variant for variant in first["variants"]
+        if variant["fields"]["action"]["const"] == "propose_work_design"
+    )
+    proposed["fields"]["work_design"]["fields"]["generated_parts"]["items"]["fields"]["key"]["max_length"] = 1
+
+    authority_work_design = action_contract("propose_work_design").fields["work_design"]
+    with pytest.raises(TypeError):
+        authority_work_design["fields"]["generated_parts"]["items"]["fields"]["key"]["max_length"] = 1
+    with pytest.raises(AttributeError):
+        authority_work_design["required_fields"].append("unexpected")
+
+    second = agent_action_contract_description(
+        skill.allowed_actions,
+        allowed_context_keys=skill.allowed_context_keys,
+        allowed_stop_reasons=skill.stop_reasons,
+    )
+    fresh_work_design = next(
+        variant for variant in second["variants"]
+        if variant["fields"]["action"]["const"] == "propose_work_design"
+    )["fields"]["work_design"]
+    assert fresh_work_design == work_design_contract_description()
+    assert fresh_work_design["fields"]["generated_parts"]["items"]["fields"]["key"]["max_length"] == 120
+    assert json.loads(json.dumps(second)) == second
+
+
+def test_object_action_envelope_is_repaired_without_normalization_then_canonical_action_succeeds(
+    tmp_path,
+):
+    result, client = _run_work_design(
+        tmp_path,
+        [
+            {"action": "propose_work_design", "work_design": _proposal()},
+            {"action": {"name": "create_part_jobs", "arguments": {}}},
+            {"action": "create_part_jobs"},
+        ],
+    )
+
+    assert result.status == "completed"
+    assert result.step_count == 3
+    assert result.contract_repair_turn_count == 1
+    feedback = client.requests[2]["state"]["action_contract_feedback"]
+    assert feedback == {
+        "kind": "action_contract_feedback",
+        "reason_code": "invalid_action_discriminator",
+        "message": "Return exactly one action object with action as a JSON string.",
+        "field_issue": "invalid_type",
+        "field_path": "action",
+        **action_discriminator_description(
+            RUNTIME_SKILL_REGISTRY.skill("work_design").allowed_actions
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    "nested_field",
+    [
+        "command", "authority", "tool", "function", "operation",
+        "function_name", "invokeFunction", "operation_name", "requestedOperation",
+    ],
+)
+def test_command_or_authority_shaped_object_action_is_terminal_without_retry(
+    tmp_path, nested_field
+):
+    adapter, client = _adapter([
+        {"action": {"name": "create_part_jobs", nested_field: "must-not-execute"}},
+        {"action": "create_part_jobs"},
+    ])
+
+    with pytest.raises(EpisodeContractError) as caught:
+        run_work_design_episode(
+            adapter=adapter,
+            work_context=_work_context(),
+            artifact_dir=tmp_path,
+            run_id="work_design_run",
+        )
+
+    assert caught.value.failure_diagnostic["reason_code"] == "invalid_action_discriminator"
+    assert len(client.requests) == 1
+
+
+def test_unknown_string_action_keeps_existing_non_repairable_authorization_boundary():
+    with pytest.raises(ValueError) as caught:
+        AgentAction.from_value({"action": "unknown_action"})
+
+    assert caught.value.failure_diagnostic["reason_code"] == "action_not_registered"
+
+
+def test_missing_action_stays_terminal_and_does_not_request_contract_repair(tmp_path):
+    adapter, client = _adapter([
+        {},
+        {"action": "propose_work_design", "work_design": _proposal()},
+    ])
+
+    with pytest.raises(ValueError) as caught:
+        run_work_design_episode(
+            adapter=adapter,
+            work_context=_work_context(),
+            artifact_dir=tmp_path,
+            run_id="work_design_run",
+        )
+
+    assert caught.value.failure_diagnostic["reason_code"] == "action_not_registered"
+    assert len(client.requests) == 1
 
 
 def test_provider_sanitizer_preserves_only_safe_contract_field_paths():

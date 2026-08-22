@@ -910,6 +910,37 @@ These are migration tasks, not accepted target behavior.
   promoted to `current_design` and no Part Jobs, CAD, geometry, result, or
   acceptance were created. Work Design field-contract visibility is verified;
   provider action-envelope conformance remains a separate real-trial risk.
+- The V1 Agent Action Contract Visibility correction now gives every registered
+  Skill request an active-only machine-readable variant set derived from the
+  same focused authority used by `AgentAction` validation and typed repair
+  feedback. Each variant declares the string `action` discriminator, required
+  and allowed fields, value types, and additional-field policy; the
+  `propose_work_design.work_design` field embeds the existing canonical Work
+  Design contract rather than duplicating it. Non-string discriminators remain
+  strict failures and are never normalized or searched for nested intent. A
+  safe format-only mistake may use the unchanged two-turn repair budget, while
+  unknown actions and authority-, identity-, path-, source-, tool-, command-,
+  credential-, network-, filesystem-, process-, or side-effect-bearing payloads
+  remain terminal.
+- Correction verification passed with `375 passed` across the broad affected
+  Agent/Work Design/provider/orchestrator set, `95 passed` in the Owner UX and
+  Workflow smoke set, `80 passed` after the final immutable-authority hardening,
+  Python compilation for `src` and `tests`, `git diff --check`, and `820 passed,
+  9 skipped` in the complete suite. Independent review reported no remaining
+  actionable findings.
+- A new real DeepSeek `deepseek-v4-flash` Episode on the existing `机械臂` Work
+  preserved all four prior Episodes and all accepted pointers. Its first action
+  was a canonical-string `propose_work_design`; the resulting contract-valid
+  proposal contained five generated Parts rather than the target four. Its
+  next action was the exact canonical `{"action":"create_part_jobs"}` shape,
+  proving the action-envelope visibility correction in the live provider path.
+  CadFlow correctly refused creation because a material servo-model question
+  remained, returned focused `work_design_questions_unresolved` feedback, and
+  received a canonical `ask_user` action. The Episode stopped as
+  `user_input_required` with zero Part Jobs, zero new Part Runs, no CAD or
+  geometry, and no accepted-pointer change. The new trial blocker is therefore
+  product-level design clarification and a five-Part decomposition, not action-
+  envelope conformance.
 - M2.8 added only optional durable revision provenance on Part attempts because
   parent Run/result causality cannot be recovered honestly from prompt text,
   attempt order, or timestamps. No graph persistence, workflow engine, Agent
