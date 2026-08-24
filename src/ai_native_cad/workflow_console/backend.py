@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import hashlib
 import inspect
+import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from ai_native_cad.agents import DeterministicAgentAdapter, JsonContractProviderError
 from ai_native_cad.agents import make_json_contract_adapter_from_env
@@ -101,6 +103,8 @@ GATE_DECISION_ACTIONS = {
     REVISE_EXISTING_MODEL,
 }
 GATE_DECISION_STAGES = SUPPORTED_STAGES | {"review", "outputs"}
+_WORK_DESIGN_ANSWER_LOCKS: dict[str, threading.Lock] = {}
+_WORK_DESIGN_ANSWER_LOCKS_GUARD = threading.Lock()
 
 
 class WorkflowConsoleBackend:
@@ -1131,6 +1135,20 @@ class WorkflowConsoleBackend:
         projected = project_work_record(manifest)
         validate_work_record(projected)
         _write_json(path, projected)
+
+    @contextmanager
+    def _work_design_answer_guard(self, work_id: str) -> Iterator[None]:
+        """Serialize one Work's clarification consumption within this process."""
+
+        self._require_safe_run_id(work_id)
+        lock_key = str(self._work_manifest_path(work_id).resolve())
+        with _WORK_DESIGN_ANSWER_LOCKS_GUARD:
+            lock = _WORK_DESIGN_ANSWER_LOCKS.setdefault(
+                lock_key,
+                threading.Lock(),
+            )
+        with lock:
+            yield
 
     def activate_work_lineage(
         self,

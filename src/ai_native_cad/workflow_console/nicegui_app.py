@@ -1321,6 +1321,60 @@ def _confirm_workspace_dialog(
         _create_workspace_ui(path, name, include_examples, state, refresh)
 
 
+def _visible_overview_recovery(
+    overview: dict[str, Any],
+    state: dict[str, Any],
+    recovery: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Keep durable recovery visible unless its exact Work scope is running.
+
+    Pending lifecycle state is presentation-only.  It may temporarily replace
+    an earlier diagnosis only when it targets this Work and every persisted
+    recovery Run/Part identifier it carries.  A missing shared Run/Part target
+    is deliberately not enough to hide immutable recovery evidence.
+    """
+
+    if not recovery:
+        return recovery
+    execution = state.get("action_execution")
+    if not isinstance(execution, dict) or execution.get("status") != "pending":
+        return recovery
+    advanced = overview.get("advanced") if isinstance(overview.get("advanced"), dict) else {}
+    work = overview.get("work") if isinstance(overview.get("work"), dict) else {}
+    work_id = advanced.get("work_id") or work.get("work_id")
+    if not isinstance(work_id, str) or not work_id or execution.get("target_work_id") != work_id:
+        return recovery
+
+    recovery_run_id = recovery.get("run_id")
+    recovery_part_job_id = recovery.get("part_job_id")
+    has_run_scope = isinstance(recovery_run_id, str) and bool(recovery_run_id)
+    has_part_scope = isinstance(recovery_part_job_id, str) and bool(recovery_part_job_id)
+    if not has_run_scope and not has_part_scope:
+        return recovery
+    if has_run_scope and execution.get("target_run_id") != recovery_run_id:
+        return recovery
+    # A missing recovery Part target means Work scope, not an unspecified Part.
+    # Therefore a pending Part command cannot replace its diagnosis.  Conversely,
+    # a Part diagnosis requires the same Part command to be running.
+    execution_part_job_id = execution.get("target_part_job_id")
+    if has_part_scope:
+        if execution_part_job_id != recovery_part_job_id:
+            return recovery
+    elif execution_part_job_id is not None:
+        return recovery
+
+    recommended_action = (
+        recovery.get("recommended_action")
+        if isinstance(recovery.get("recommended_action"), dict)
+        else {}
+    )
+    recovery_stage_id = recovery.get("stage_id") or recommended_action.get("target_stage_id")
+    if isinstance(recovery_stage_id, str) and recovery_stage_id:
+        if execution.get("target_stage_id") != recovery_stage_id:
+            return recovery
+    return None
+
+
 def _render_work_overview(
     ui: Any,
     data: dict[str, Any],
@@ -1347,6 +1401,13 @@ def _render_work_overview(
     preview = overview.get("preview") if isinstance(overview.get("preview"), dict) else {}
     result = overview.get("current_result") if isinstance(overview.get("current_result"), dict) else None
     recovery = overview.get("recovery") if isinstance(overview.get("recovery"), dict) else None
+    visible_recovery = _visible_overview_recovery(overview, state, recovery)
+    recovery_running = bool(
+        recovery is not None
+        and visible_recovery is None
+        and recommendation
+        and _pending_action_matches(state, recommendation)
+    )
     agent_output = overview.get("agent_output") if isinstance(overview.get("agent_output"), dict) else {}
     active_job = next(
         (
@@ -1364,10 +1425,10 @@ def _render_work_overview(
         state,
         language,
         transient_only=True,
-        has_durable_recovery=bool(recovery),
+        has_durable_recovery=bool(visible_recovery),
     )
-    if recovery:
-        _render_recovery_card(ui, recovery, overview, actions.backend, state, refresh, language)
+    if visible_recovery:
+        _render_recovery_card(ui, visible_recovery, overview, actions.backend, state, refresh, language)
     has_agent_design = agent_design.get("evidence_status") in {
         "persisted_summary",
         "persisted_work_design",
@@ -1396,7 +1457,7 @@ def _render_work_overview(
         if has_agent_design:
             _render_agent_design_summary(ui, agent_design, capability, language)
 
-    if not recovery:
+    if not visible_recovery:
         _render_overview_current_task(
             ui,
             recommendation,
@@ -1407,6 +1468,7 @@ def _render_work_overview(
             state,
             refresh,
             language,
+            action_running=recovery_running,
         )
 
     has_preview = bool(preview.get("viewer_url"))
@@ -1527,10 +1589,13 @@ def _render_overview_current_task(
     state: dict[str, Any],
     refresh: Callable[[], None],
     language: str,
+    *,
+    action_running: bool = False,
 ) -> None:
     task_state = str((active_job or {}).get("state") or "ready")
-    execution = state.get("action_execution") if isinstance(state.get("action_execution"), dict) else {}
-    action_running = execution.get("status") == "pending"
+    action_running = action_running or bool(
+        recommendation and _pending_action_matches(state, recommendation)
+    )
     user_state = {
         "design": "ready",
         "reviewable": "review",

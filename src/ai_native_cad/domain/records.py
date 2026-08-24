@@ -272,6 +272,7 @@ def record_work_design_outcome(
     artifact_ids: list[str],
     knowledge_ids: list[str],
     assigned_design: dict[str, Any] | None = None,
+    candidate_design: dict[str, Any] | None = None,
     updated_at: str | None = None,
 ) -> dict[str, Any]:
     """Record one Work Design Episode and optionally materialize its Part Jobs."""
@@ -300,6 +301,13 @@ def record_work_design_outcome(
     design["status"] = status
     design["knowledge_ids"] = _unique_ids(knowledge_ids, "knowledge_ids")
     design["updated_at"] = timestamp
+    if status == "user_input_required":
+        design["current_unresolved_status"] = "pending_question"
+    if candidate_design is not None:
+        if status != "user_input_required":
+            raise ValueError("only a Work Design awaiting user input may retain an active candidate")
+        design["current_design"] = deepcopy(candidate_design)
+        design["current_design_role"] = "active_candidate"
     if assigned_design is not None:
         if status != "completed":
             raise ValueError("only a completed Work Design may be assigned")
@@ -335,6 +343,8 @@ def record_work_design_outcome(
             }
             projected["part_jobs"].append(job)
         design["current_design"] = normalized_design
+        design["current_design_role"] = "materialized"
+        design["current_unresolved_status"] = "none"
         design["question_artifact_id"] = None
     projected["updated_at"] = timestamp
     validate_work_record(projected)
@@ -366,10 +376,12 @@ def record_work_design_answer(
             "field": _require_text(field, "field"),
             "question": _require_text(question, "question"),
             "answer": _require_text(answer, "answer"),
+            "resolution_status": "resolved",
         }
     )
     design["status"] = "in_progress"
     design["question_artifact_id"] = None
+    design["current_unresolved_status"] = "answered_pending_proposal"
     design["updated_at"] = updated_at or _now()
     projected["updated_at"] = design["updated_at"]
     validate_work_record(projected)
@@ -822,6 +834,8 @@ def _empty_work_design() -> dict[str, Any]:
         "status": "not_started",
         "run_id": None,
         "current_design": None,
+        "current_design_role": None,
+        "current_unresolved_status": "none",
         "episodes": [],
         "clarification_answers": [],
         "question_artifact_id": None,
@@ -841,6 +855,14 @@ def _project_work_design(value: Any) -> dict[str, Any]:
     projected["current_design"] = deepcopy(
         value.get("current_design") if isinstance(value.get("current_design"), dict) else None
     )
+    current_design_role = value.get("current_design_role")
+    if current_design_role in {"active_candidate", "materialized"}:
+        projected["current_design_role"] = current_design_role
+    elif projected["current_design"] is not None and projected["status"] == "completed":
+        projected["current_design_role"] = "materialized"
+    current_unresolved_status = value.get("current_unresolved_status")
+    if current_unresolved_status in {"none", "pending_question", "answered_pending_proposal"}:
+        projected["current_unresolved_status"] = current_unresolved_status
     projected["episodes"] = [
         deepcopy(item)
         for item in value.get("episodes", [])

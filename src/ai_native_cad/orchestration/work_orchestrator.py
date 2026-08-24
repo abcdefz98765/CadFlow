@@ -233,6 +233,14 @@ class WorkOrchestrator:
                 if isinstance(work_design.get("current_design"), dict)
                 else {}
             ),
+            previous_work_design_role=(
+                work_design.get("current_design_role")
+                if isinstance(work_design.get("current_design_role"), str)
+                else None
+            ),
+            current_unresolved_status=str(
+                work_design.get("current_unresolved_status") or "none"
+            ),
             clarification_answers=tuple(
                 deepcopy(item)
                 for item in work_design.get("clarification_answers", [])
@@ -249,6 +257,19 @@ class WorkOrchestrator:
         outcome = self.design.run_work_design_episode(request)
         if not outcome.artifacts:
             raise RuntimeError("Agent Design port returned no durable Work Design evidence")
+        question_artifact_id = next(
+            (
+                item.artifact_id
+                for item in outcome.artifacts
+                if item.checkpoint == "clarification_decision"
+                and item.validation_status == "user_input_required"
+            ),
+            None,
+        )
+        if outcome.stop_reason == "user_input_required" and question_artifact_id is None:
+            raise RuntimeError(
+                "user_input_required Work Design outcome lacks real question evidence"
+            )
         references = [
             create_artifact_reference(
                 artifact_id=artifact.artifact_id,
@@ -293,15 +314,6 @@ class WorkOrchestrator:
                     if isinstance(item, dict)
                 },
             )
-        question_artifact_id = next(
-            (
-                item.artifact_id
-                for item in outcome.artifacts
-                if item.checkpoint == "clarification_decision"
-                and item.validation_status == "user_input_required"
-            ),
-            None,
-        )
         status = (
             "completed"
             if outcome.status == "completed"
@@ -319,6 +331,12 @@ class WorkOrchestrator:
             artifact_ids=[item.artifact_id for item in outcome.artifacts],
             knowledge_ids=list(outcome.knowledge_ids),
             assigned_design=assigned_design,
+            candidate_design=(
+                outcome.work_design
+                if status == "user_input_required"
+                and isinstance(outcome.work_design, dict)
+                else None
+            ),
             updated_at=_now(),
         )
         if question_artifact_id:
@@ -388,57 +406,74 @@ class WorkOrchestrator:
 
         if self.design is None:
             raise ValueError("Agent Design port is unavailable")
-        work = self.store.read_work(work_id)
-        work_design = work.get("work_design") if isinstance(work.get("work_design"), dict) else {}
-        if work_design.get("run_id") != run_id:
-            raise ValueError("Work clarification must target the active Work Design Run")
-        question_reference = next(
-            (
-                item
-                for item in work.get("artifact_references", [])
-                if isinstance(item, dict)
-                and item.get("artifact_id") == question_artifact_id
-                and item.get("run_id") == run_id
-                and item.get("part_job_id") is None
-                and item.get("checkpoint") == "clarification_decision"
-                and item.get("validation_status") == "user_input_required"
-            ),
-            None,
-        )
-        if question_reference is None:
-            raise ValueError("Work clarification question is not registered")
-        artifact = self.design.record_work_design_answer(
-            work_id=work_id,
-            run_id=run_id,
-            answer_id=answer_id,
-            question_artifact_id=question_artifact_id,
-            field=field,
-            question=question,
-            answer=answer,
-        )
-        reference = create_artifact_reference(
-            artifact_id=artifact.artifact_id,
-            work_id=work_id,
-            run_id=run_id,
-            relative_path=artifact.relative_path,
-            phase="intent",
-            checkpoint=artifact.checkpoint,
-            trust_role=artifact.trust_role,
-            source_artifact_ids=list(artifact.source_artifact_ids),
-            validation_status=artifact.validation_status,
-            created_at=_now(),
-        )
-        updated = register_artifact_references(work, [reference], updated_at=_now())
-        updated = record_work_design_answer(
-            updated,
-            artifact_id=artifact.artifact_id,
-            question_artifact_id=question_artifact_id,
-            field=field,
-            question=question,
-            answer=answer,
-            updated_at=_now(),
-        )
-        self.store.write_work(work_id, updated)
+        with self.store.work_design_answer_guard(work_id):
+            work = self.store.read_work(work_id)
+            work_design = (
+                work.get("work_design")
+                if isinstance(work.get("work_design"), dict)
+                else {}
+            )
+            if work_design.get("run_id") != run_id:
+                raise ValueError("Work clarification must target the active Work Design Run")
+            if (
+                work_design.get("status") != "user_input_required"
+                or work_design.get("question_artifact_id") != question_artifact_id
+                or any(
+                    isinstance(item, dict)
+                    and item.get("question_artifact_id") == question_artifact_id
+                    for item in work_design.get("clarification_answers", [])
+                )
+            ):
+                raise ValueError(
+                    "Work clarification must target the active unanswered question"
+                )
+            question_reference = next(
+                (
+                    item
+                    for item in work.get("artifact_references", [])
+                    if isinstance(item, dict)
+                    and item.get("artifact_id") == question_artifact_id
+                    and item.get("run_id") == run_id
+                    and item.get("part_job_id") is None
+                    and item.get("checkpoint") == "clarification_decision"
+                    and item.get("validation_status") == "user_input_required"
+                ),
+                None,
+            )
+            if question_reference is None:
+                raise ValueError("Work clarification question is not registered")
+            artifact = self.design.record_work_design_answer(
+                work_id=work_id,
+                run_id=run_id,
+                answer_id=answer_id,
+                question_artifact_id=question_artifact_id,
+                field=field,
+                question=question,
+                answer=answer,
+            )
+            reference = create_artifact_reference(
+                artifact_id=artifact.artifact_id,
+                work_id=work_id,
+                run_id=run_id,
+                relative_path=artifact.relative_path,
+                phase="intent",
+                checkpoint=artifact.checkpoint,
+                trust_role=artifact.trust_role,
+                source_artifact_ids=list(artifact.source_artifact_ids),
+                validation_status=artifact.validation_status,
+                created_at=_now(),
+            )
+            updated = register_artifact_references(work, [reference], updated_at=_now())
+            updated = record_work_design_answer(
+                updated,
+                artifact_id=artifact.artifact_id,
+                question_artifact_id=question_artifact_id,
+                field=field,
+                question=question,
+                answer=answer,
+                updated_at=_now(),
+            )
+            self.store.write_work(work_id, updated)
         self.store.invalidate_projection()
         return {
             "answer_artifact_id": artifact.artifact_id,

@@ -25,6 +25,9 @@ from ai_native_cad.agents.agent_action_contract import (
     ACTION_CONTRACTS,
     ACTION_ALLOWED_FIELDS,
     ACTION_REQUIRED_FIELDS,
+    MODEL_PROGRAM_SUBMISSION_API_ID,
+    MODEL_PROGRAM_SUBMISSION_FIELDS,
+    MODEL_PROGRAM_SUBMISSION_REQUESTED_OUTPUTS,
     action_contract,
     action_discriminator_description,
 )
@@ -1790,10 +1793,20 @@ def run_work_design_episode(
             "previous_work_design",
             run_id,
             "work_design",
-            "accepted_work_state",
-            {"present": bool(prior_design)},
-            prior_design,
+            "active_work_design",
+            {
+                "present": bool(prior_design),
+                "semantic_role": work_context.get("previous_work_design_role"),
+                "current_unresolved_status": work_context.get("current_unresolved_status") or "none",
+            },
+            {
+                "semantic_role": work_context.get("previous_work_design_role") or "active_candidate",
+                "proposal": prior_design,
+                "proposal_unresolved_questions_status": "historical",
+                "current_unresolved_status": work_context.get("current_unresolved_status") or "none",
+            },
             work_id=work_id,
+            trust_role="candidate",
         ),
         ContextItem(
             "work_clarification_answers",
@@ -1801,7 +1814,15 @@ def run_work_design_episode(
             "clarification_decision",
             "accepted_work_state",
             {"answer_count": len(answers)},
-            {"answers": answers},
+            {
+                "answers": [
+                    {
+                        **item,
+                        "resolution_status": "resolved",
+                    }
+                    for item in answers
+                ]
+            },
             work_id=work_id,
         ),
     ]
@@ -1983,10 +2004,65 @@ def run_work_design_episode(
         state = "correcting_action_contract"
         return None
 
+    initial_context_keys = tuple(
+        context_key
+        for context_key, present in (
+            ("previous_work_design", bool(prior_design)),
+            ("work_clarification_answers", bool(answers)),
+        )
+        if present
+    )
+    for context_key in initial_context_keys:
+        item = broker.resolve(
+            context_key,
+            allowed_keys=skill.allowed_context_keys,
+            expected_work_id=work_id,
+        )
+        encoded_size = len(json.dumps(item.content, sort_keys=True).encode("utf-8"))
+        if context_bytes + encoded_size > episode_budget.max_context_bytes:
+            events.append(
+                {
+                    "event_type": "system_observation",
+                    "step": steps,
+                    "observation": "budget_exhausted",
+                    "budget_kind": "initial_context_bytes",
+                    "context_byte_count": context_bytes,
+                    "requested_context_bytes": encoded_size,
+                    "limit_context_bytes": episode_budget.max_context_bytes,
+                }
+            )
+            return finish(StopReason.BUDGET_EXHAUSTED)
+        context_bytes += encoded_size
+        entry = {**item.manifest_entry(), "content_byte_count": encoded_size}
+        context_manifest.append(entry)
+        supplied_context.append({**entry, "content": item.content, "initial": True})
+
     state = "created"
     while True:
-        if time.monotonic() - started >= episode_budget.timeout_seconds or steps >= episode_budget.max_steps:
-            events.append({"step": steps, "observation": "budget_exhausted"})
+        elapsed_seconds = time.monotonic() - started
+        if elapsed_seconds >= episode_budget.timeout_seconds:
+            events.append(
+                {
+                    "event_type": "system_observation",
+                    "step": steps,
+                    "observation": "budget_exhausted",
+                    "budget_kind": "timeout",
+                    "elapsed_seconds": round(elapsed_seconds, 3),
+                    "limit_seconds": episode_budget.timeout_seconds,
+                }
+            )
+            return finish(StopReason.BUDGET_EXHAUSTED)
+        if steps >= episode_budget.max_steps:
+            events.append(
+                {
+                    "event_type": "system_observation",
+                    "step": steps,
+                    "observation": "budget_exhausted",
+                    "budget_kind": "max_steps",
+                    "step_count": steps,
+                    "limit_steps": episode_budget.max_steps,
+                }
+            )
             return finish(StopReason.BUDGET_EXHAUSTED)
         provider_state = {
             "state": state,
@@ -2009,6 +2085,20 @@ def run_work_design_episode(
             return finish(StopReason.PROVIDER_FAILURE)
         persist_response(steps + 1, supplied_action)
         steps += 1
+        elapsed_seconds = time.monotonic() - started
+        if elapsed_seconds >= episode_budget.timeout_seconds:
+            events.append(
+                {
+                    "event_type": "system_observation",
+                    "step": steps,
+                    "observation": "budget_exhausted",
+                    "budget_kind": "timeout",
+                    "elapsed_seconds": round(elapsed_seconds, 3),
+                    "limit_seconds": episode_budget.timeout_seconds,
+                    "boundary": "post_provider_return",
+                }
+            )
+            return finish(StopReason.BUDGET_EXHAUSTED)
         try:
             action = AgentAction.from_value(supplied_action)
             if action.action not in skill.allowed_actions:
@@ -2051,7 +2141,7 @@ def run_work_design_episode(
                 return finish(StopReason.BUDGET_EXHAUSTED)
             context_requests += 1
             context_bytes += encoded_size
-            entry = item.manifest_entry()
+            entry = {**item.manifest_entry(), "content_byte_count": encoded_size}
             if entry not in context_manifest:
                 context_manifest.append(entry)
             supplied_context.append({**entry, "content": item.content})
@@ -2160,6 +2250,20 @@ def run_work_design_episode(
                     rejection_stage="episode_action_ordering",
                     reason_code="work_design_completion_action_required",
                     rejected_action=action.action,
+                )
+                terminal = handle_contract_rejection(rejection, supplied_action)
+                if terminal is not None:
+                    return terminal
+                continue
+            if reason == StopReason.USER_INPUT_REQUIRED:
+                rejection = EpisodeContractError(
+                    "user_input_required requires ask_user with a real focused question",
+                    rejection_stage="episode_action_ordering",
+                    reason_code="work_design_question_action_required",
+                    rejected_action=action.action,
+                    human_safe_detail=(
+                        "The Agent requested user input without providing a focused question."
+                    ),
                 )
                 terminal = handle_contract_rejection(rejection, supplied_action)
                 if terminal is not None:
@@ -2594,6 +2698,7 @@ _WORK_DESIGN_ORDERING_REPAIR_REASON_CODES = frozenset({
     "work_design_proposal_missing",
     "work_design_questions_unresolved",
     "work_design_completion_action_required",
+    "work_design_question_action_required",
 })
 
 _CONTRACT_REPAIR_FORBIDDEN_FIELDS = frozenset({
@@ -2741,6 +2846,7 @@ def _contract_repair_feedback(
         "work_design_proposal_missing": "Propose a valid Work Design before requesting Part creation.",
         "work_design_questions_unresolved": "Resolve material Work Design questions before requesting Part creation.",
         "work_design_completion_action_required": "Complete Work Design by requesting create_part_jobs after a valid proposal.",
+        "work_design_question_action_required": "Use ask_user with one real focused question before stopping for user input.",
     }
     feedback: dict[str, Any] = {
         "kind": "action_contract_feedback",
@@ -2944,12 +3050,7 @@ def _validate_model_program_action(
     *,
     rejected_action: str | None = None,
 ) -> None:
-    if not isinstance(value, dict) or set(value) != {
-        "api_id",
-        "source",
-        "parameters",
-        "requested_outputs",
-    }:
+    if not isinstance(value, dict) or set(value) != MODEL_PROGRAM_SUBMISSION_FIELDS:
         raise EpisodeContractError(
             "model-program submission requires exactly api_id, source, parameters, and requested_outputs",
             reason_code="invalid_model_program_contract",
@@ -2958,9 +3059,9 @@ def _validate_model_program_action(
                 "The Agent's model-program action did not match the typed model-program contract."
             ),
         )
-    if value.get("api_id") != "cadquery_v1":
+    if value.get("api_id") != MODEL_PROGRAM_SUBMISSION_API_ID:
         raise EpisodeContractError(
-            "model-program api_id must be cadquery_v1",
+            f"model-program api_id must be {MODEL_PROGRAM_SUBMISSION_API_ID}",
             rejection_stage="skill_action_authorization",
             reason_code="model_program_api_not_allowed",
             rejected_action=rejected_action,
@@ -2988,9 +3089,12 @@ def _validate_model_program_action(
             rejected_action=rejected_action,
             human_safe_detail="The Agent returned model parameters outside the typed JSON contract.",
         ) from exc
-    if value.get("requested_outputs") != ["step"]:
+    if value.get("requested_outputs") != list(
+        MODEL_PROGRAM_SUBMISSION_REQUESTED_OUTPUTS
+    ):
         raise EpisodeContractError(
-            "model-program requested_outputs must be exactly ['step']",
+            "model-program requested_outputs must be exactly "
+            f"{list(MODEL_PROGRAM_SUBMISSION_REQUESTED_OUTPUTS)!r}",
             rejection_stage="skill_action_authorization",
             reason_code="model_program_output_not_allowed",
             rejected_action=rejected_action,

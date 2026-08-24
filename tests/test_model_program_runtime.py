@@ -13,7 +13,10 @@ from ai_native_cad.agents import (
     SandboxAttestation,
     ToolInvocationContext,
 )
-from ai_native_cad.agents.model_program_runtime import SandboxExecutionResult
+from ai_native_cad.agents.model_program_runtime import (
+    MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH,
+    SandboxExecutionResult,
+)
 
 
 VALID_SOURCE = """import cadquery as cq
@@ -198,19 +201,28 @@ def test_parameters_and_invocation_context_are_strict(tmp_path) -> None:
     executor = FakeSandboxExecutor(_archive())
     broker = CadFlowToolBroker(sandbox_executor=executor)
 
-    invalid = broker.invoke(
-        MODEL_PROGRAM_TOOL,
-        skill_id="model_program",
-        payload=_payload(parameters={"bad": float("nan")}),
-        context=_context(tmp_path),
-    )
+    invalid = [
+        broker.invoke(
+            MODEL_PROGRAM_TOOL,
+            skill_id="model_program",
+            payload=_payload(parameters=parameters),
+            context=_context(tmp_path),
+        )
+        for parameters in (
+            {"bad": float("nan")},
+            {"": 1},
+            {"x" * (MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH + 1): 1},
+        )
+    ]
     missing_context = broker.invoke(
         MODEL_PROGRAM_TOOL,
         skill_id="model_program",
         payload=_payload(),
     )
 
-    assert invalid.codes == ("invalid_model_program_request",)
+    assert all(
+        item.codes == ("invalid_model_program_request",) for item in invalid
+    )
     assert missing_context.codes == ("invalid_execution_context",)
     assert executor.calls == 0
 
