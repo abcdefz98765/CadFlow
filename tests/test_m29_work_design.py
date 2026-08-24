@@ -461,7 +461,7 @@ def test_local_work_design_rejection_reaches_selected_design_recovery_without_ca
     assert selected["id"] == "work:design"
     recovery = selected["detail"]["recovery"]
     assert recovery["rejected_action"] == "create_contract"
-    assert recovery["technical_reason"] == "action_not_allowed_for_skill"
+    assert recovery["technical_reason"] == "invalid_action_payload"
     assert recovery["resolution_owner"] == "agent"
     assert recovery["code_executed"] is False
     assert recovery["geometry_generated"] is False

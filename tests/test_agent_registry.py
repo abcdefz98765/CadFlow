@@ -174,7 +174,11 @@ def test_provider_selects_context_contract_and_validation_actions(tmp_path, monk
             ),
         }
     ]
-    assert "work_design_contract" not in client.requests[0]["skill"]
+    action_contract = client.requests[0]["skill"]["agent_action_contract"]
+    assert {
+        variant["fields"]["action"]["const"]
+        for variant in action_contract["variants"]
+    } == DESIGN_PART_SKILL.allowed_actions
     assert [
         item["id"] for item in client.requests[0]["skill"]["knowledge"]
     ] == [
