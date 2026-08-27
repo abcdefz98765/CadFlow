@@ -2,22 +2,34 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from ai_native_cad.agents import JsonContractAgentAdapter
-from ai_native_cad.agents.episode import EpisodeContractError, validate_work_design_proposal
+from ai_native_cad.agents.episode import (
+    EpisodeBudget,
+    EpisodeContractError,
+    run_work_design_episode,
+    validate_work_design_proposal,
+)
 from ai_native_cad.agents.registry import RUNTIME_SKILL_REGISTRY
 from ai_native_cad.agents.work_design_contract import (
     work_design_contract_description,
     work_design_fields,
 )
+from ai_native_cad.orchestration.ports import WorkDesignEpisodeRequest
 from ai_native_cad.workflow_console.backend import WorkflowConsoleBackend
 from ai_native_cad.workflow_console.action_lifecycle import _continue_work_design_async
 from ai_native_cad.workflow_console.product_usability import build_agent_first_workflow_projection
 from ai_native_cad.workflow_console.routes import dispatch_route
 from ai_native_cad.workflow_console.selected_node_inspector_ui import _work_design_recovery
+from ai_native_cad.workflow_console.orchestrator_adapters import (
+    _work_design_request_fingerprint_v1,
+)
 from ai_native_cad.workflow_console.workflow_page_view_model import (
     build_workbench_overview_view_model,
     build_workflow_page_view_model,
@@ -89,6 +101,22 @@ def test_canonical_work_design_sample_normalizes_without_contract_drift() -> Non
     assert set(disclosure["fields"]["interfaces"]["items"]["fields"]) == set(
         work_design_fields("interfaces[]")
     )
+
+
+def test_work_design_episode_request_rejects_schema_version_two() -> None:
+    with pytest.raises(ValueError, match="schema_version 1 only"):
+        WorkDesignEpisodeRequest(
+            request_id="schema_two_request",
+            work_id="schema_two_work",
+            run_id="schema_two_run",
+            title="Schema Two",
+            objective="This request version is unsupported.",
+            previous_work_design={},
+            clarification_answers=(),
+            existing_part_jobs=(),
+            accepted_part_results={},
+            schema_version=2,
+        )
 
 
 def _contract_sample(contract: dict) -> dict:
@@ -423,6 +451,734 @@ def test_ambiguity_pauses_at_work_scope_and_resumes_without_fabricated_part(tmp_
     resumed = backend.run_work_design_episode(work_id, request_id="clarify_002")
     assert resumed["episode"]["status"] == "completed"
     assert len(backend._read_work_manifest(work_id)["part_jobs"]) == 1
+
+
+def test_clarification_outcome_replays_same_request_without_mutable_state_identity(
+    tmp_path: Path,
+) -> None:
+    pending = _proposal()
+    pending["unresolved_questions"] = ["Which servo model must fit?"]
+    backend, client = _backend(
+        tmp_path,
+        [
+            {"action": "propose_work_design", "work_design": pending},
+            {
+                "action": "ask_user",
+                "questions": [
+                    {"field": "servo_model", "question": "Which servo model must fit?"}
+                ],
+            },
+        ],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+    first = backend.run_work_design_episode(work_id, request_id="replay_clarification")
+    manifest_path = backend._work_manifest_path(work_id)
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = backend._read_work_manifest(work_id)
+    route_result = json.loads(
+        (
+            backend._work_runs_root(work_id)
+            / manifest["work_design"]["run_id"]
+            / "episodes"
+            / "work_design"
+            / "replay_clarification"
+            / "product_route_result.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert route_result["request_fingerprint_version"] == 2
+
+    replay = backend.run_work_design_episode(work_id, request_id="replay_clarification")
+
+    assert first["episode"]["stop_reason"] == "user_input_required"
+    assert replay["episode"]["idempotent_replay"] is True
+    assert replay["episode"]["episode_id"] == first["episode"]["episode_id"]
+    assert len(client.requests) == 2
+    assert manifest_path.read_bytes() == manifest_bytes
+
+
+def test_pre_stage_b_work_design_fingerprint_replays_from_immutable_objective(
+    tmp_path: Path,
+) -> None:
+    pending = _proposal()
+    pending["unresolved_questions"] = ["Which servo model must fit?"]
+    backend, client = _backend(
+        tmp_path,
+        [
+            {"action": "propose_work_design", "work_design": pending},
+            {
+                "action": "ask_user",
+                "questions": [
+                    {"field": "servo_model", "question": "Which servo model must fit?"}
+                ],
+            },
+        ],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+    first = backend.run_work_design_episode(work_id, request_id="legacy_replay")
+    manifest = backend._read_work_manifest(work_id)
+    legacy_request = WorkDesignEpisodeRequest(
+        request_id="legacy_replay",
+        work_id=work_id,
+        run_id=manifest["work_design"]["run_id"],
+        title="Camera Mount",
+        objective="Mount a compact camera to a 2020 extrusion with replaceable adapters.",
+        previous_work_design={},
+        clarification_answers=(),
+        existing_part_jobs=(),
+        accepted_part_results={},
+    )
+    route_result_path = (
+        backend._work_runs_root(work_id)
+        / manifest["work_design"]["run_id"]
+        / "episodes"
+        / "work_design"
+        / "legacy_replay"
+        / "product_route_result.json"
+    )
+    legacy_route = json.loads(route_result_path.read_text(encoding="utf-8"))
+    legacy_route["request_fingerprint"] = _work_design_request_fingerprint_v1(
+        legacy_request
+    )
+    legacy_route.pop("request_fingerprint_version")
+    route_result_path.write_text(
+        json.dumps(legacy_route, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    manifest_bytes = backend._work_manifest_path(work_id).read_bytes()
+
+    replay = backend.run_work_design_episode(work_id, request_id="legacy_replay")
+
+    assert replay["episode"]["idempotent_replay"] is True
+    assert replay["episode"]["episode_id"] == first["episode"]["episode_id"]
+    assert len(client.requests) == 2
+    assert backend._work_manifest_path(work_id).read_bytes() == manifest_bytes
+
+
+def test_stop_user_input_without_ask_user_creates_no_phantom_question(
+    tmp_path: Path,
+) -> None:
+    backend, _ = _backend(
+        tmp_path,
+        [
+            {
+                "action": "stop",
+                "stop_reason": "user_input_required",
+                "reason": "Need input but supplied no question.",
+            },
+            {
+                "action": "stop",
+                "stop_reason": "insufficient_context",
+                "reason": "No focused question is available.",
+            },
+        ],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+
+    result = backend.run_work_design_episode(work_id, request_id="no_phantom_question")
+
+    manifest = backend._read_work_manifest(work_id)
+    assert result["episode"]["stop_reason"] == "insufficient_context"
+    assert manifest["work_design"]["status"] == "blocked"
+    assert manifest["work_design"]["question_artifact_id"] is None
+    assert manifest["work_design"]["current_unresolved_status"] == "none"
+    assert not any(
+        item["checkpoint"] == "clarification_decision"
+        and item["validation_status"] == "user_input_required"
+        for item in manifest["artifact_references"]
+    )
+    episode_dir = (
+        backend._work_runs_root(work_id)
+        / manifest["work_design"]["run_id"]
+        / "episodes"
+        / "work_design"
+        / "no_phantom_question"
+    )
+    assert not (episode_dir / "user_input_request.json").exists()
+
+
+def test_work_question_accepts_only_one_answer_without_second_history_mutation(
+    tmp_path: Path,
+) -> None:
+    backend, _ = _backend(
+        tmp_path,
+        [
+            {
+                "action": "ask_user",
+                "questions": [
+                    {"field": "servo_model", "question": "Which servo model must fit?"}
+                ],
+            }
+        ],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+    backend.run_work_design_episode(work_id, request_id="single_answer")
+    manifest = backend._read_work_manifest(work_id)
+    question = next(
+        item
+        for item in manifest["artifact_references"]
+        if item["checkpoint"] == "clarification_decision"
+        and item["validation_status"] == "user_input_required"
+    )
+    backend.answer_work_design_question(
+        work_id,
+        run_id=manifest["work_design"]["run_id"],
+        answer_id="sg90_answer_once",
+        question_artifact_id=question["artifact_id"],
+        field="servo_model",
+        question="Which servo model must fit?",
+        answer="TowerPro SG90",
+    )
+    manifest_path = backend._work_manifest_path(work_id)
+    manifest_bytes = manifest_path.read_bytes()
+
+    with pytest.raises(ValueError, match="active unanswered question"):
+        backend.answer_work_design_question(
+            work_id,
+            run_id=manifest["work_design"]["run_id"],
+            answer_id="mg90s_answer_rejected",
+            question_artifact_id=question["artifact_id"],
+            field="servo_model",
+            question="Which servo model must fit?",
+            answer="MG90S",
+        )
+
+    assert manifest_path.read_bytes() == manifest_bytes
+    answer_dir = (
+        backend._work_runs_root(work_id)
+        / manifest["work_design"]["run_id"]
+        / "work_design"
+        / "clarifications"
+    )
+    assert sorted(path.name for path in answer_dir.iterdir()) == ["sg90_answer_once.json"]
+
+
+def test_concurrent_work_question_answers_are_serialized_per_work(tmp_path: Path) -> None:
+    backend, _ = _backend(
+        tmp_path,
+        [
+            {
+                "action": "ask_user",
+                "questions": [
+                    {"field": "servo_model", "question": "Which servo model must fit?"}
+                ],
+            }
+        ],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+    backend.run_work_design_episode(work_id, request_id="concurrent_answer")
+    manifest = backend._read_work_manifest(work_id)
+    question = next(
+        item
+        for item in manifest["artifact_references"]
+        if item["checkpoint"] == "clarification_decision"
+        and item["validation_status"] == "user_input_required"
+    )
+    barrier = threading.Barrier(2)
+
+    def submit(answer_id: str, answer: str):
+        barrier.wait(timeout=5)
+        try:
+            return backend.answer_work_design_question(
+                work_id,
+                run_id=manifest["work_design"]["run_id"],
+                answer_id=answer_id,
+                question_artifact_id=question["artifact_id"],
+                field="servo_model",
+                question="Which servo model must fit?",
+                answer=answer,
+            )
+        except Exception as exc:  # deterministic assertion inspects the losing call
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = [
+            future.result(timeout=10)
+            for future in (
+                executor.submit(submit, "concurrent_sg90", "TowerPro SG90"),
+                executor.submit(submit, "concurrent_mg90s", "MG90S"),
+            )
+        ]
+
+    successes = [item for item in outcomes if isinstance(item, dict)]
+    failures = [item for item in outcomes if isinstance(item, Exception)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert isinstance(failures[0], ValueError)
+    assert "active unanswered question" in str(failures[0])
+    completed = backend._read_work_manifest(work_id)
+    assert len(completed["work_design"]["clarification_answers"]) == 1
+    answer_dir = (
+        backend._work_runs_root(work_id)
+        / manifest["work_design"]["run_id"]
+        / "work_design"
+        / "clarifications"
+    )
+    assert len(list(answer_dir.glob("*.json"))) == 1
+
+
+def test_work_answer_recovers_after_manifest_commit_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, _ = _backend(
+        tmp_path,
+        [
+            {
+                "action": "ask_user",
+                "questions": [
+                    {"field": "servo_model", "question": "Which servo model must fit?"}
+                ],
+            }
+        ],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+    backend.run_work_design_episode(work_id, request_id="answer_commit_recovery")
+    manifest = backend._read_work_manifest(work_id)
+    question = next(
+        item
+        for item in manifest["artifact_references"]
+        if item["checkpoint"] == "clarification_decision"
+        and item["validation_status"] == "user_input_required"
+    )
+    manifest_path = backend._work_manifest_path(work_id)
+    manifest_before = manifest_path.read_bytes()
+    original_write = backend._write_work_manifest
+    fail_next_write = True
+
+    def injected_write(target_work_id: str, value: dict) -> None:
+        nonlocal fail_next_write
+        if fail_next_write:
+            fail_next_write = False
+            raise OSError("injected manifest commit failure")
+        original_write(target_work_id, value)
+
+    monkeypatch.setattr(backend, "_write_work_manifest", injected_write)
+    answer_kwargs = {
+        "run_id": manifest["work_design"]["run_id"],
+        "answer_id": "recoverable_sg90",
+        "question_artifact_id": question["artifact_id"],
+        "field": "servo_model",
+        "question": "Which servo model must fit?",
+        "answer": "TowerPro SG90",
+    }
+
+    with pytest.raises(OSError, match="injected manifest commit failure"):
+        backend.answer_work_design_question(work_id, **answer_kwargs)
+
+    answer_path = (
+        backend._work_runs_root(work_id)
+        / manifest["work_design"]["run_id"]
+        / "work_design"
+        / "clarifications"
+        / "recoverable_sg90.json"
+    )
+    answer_bytes = answer_path.read_bytes()
+    assert manifest_path.read_bytes() == manifest_before
+
+    with pytest.raises(ValueError, match="durable answer evidence"):
+        backend.answer_work_design_question(
+            work_id,
+            **{**answer_kwargs, "answer": "MG90S"},
+        )
+    with pytest.raises(ValueError, match="durable answer evidence"):
+        backend.answer_work_design_question(
+            work_id,
+            **{
+                **answer_kwargs,
+                "answer_id": "different_answer_id",
+                "answer": "MG90S",
+            },
+        )
+    assert manifest_path.read_bytes() == manifest_before
+    assert answer_path.read_bytes() == answer_bytes
+
+    recovered = backend.answer_work_design_question(work_id, **answer_kwargs)
+
+    assert recovered["answer_artifact_id"] == "work_clarification:recoverable_sg90"
+    assert answer_path.read_bytes() == answer_bytes
+    committed = backend._read_work_manifest(work_id)
+    assert committed["work_design"]["status"] == "in_progress"
+    assert committed["work_design"]["question_artifact_id"] is None
+    assert len(committed["work_design"]["clarification_answers"]) == 1
+    assert committed["work_design"]["clarification_answers"][0]["answer"] == (
+        "TowerPro SG90"
+    )
+
+
+def test_post_provider_timeout_blocks_create_part_jobs_action(tmp_path: Path) -> None:
+    class SlowCreateClient(SequencedWorkDesignClient):
+        def generate_json_contract(self, request: dict) -> dict:
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                return {"action": "propose_work_design", "work_design": _proposal()}
+            time.sleep(0.3)
+            return {"action": "create_part_jobs"}
+
+    client = SlowCreateClient([])
+    adapter = JsonContractAgentAdapter(
+        client,
+        provider="scripted",
+        model="slow-create-fixture",
+    )
+    artifact_dir = tmp_path / "post_provider_timeout"
+
+    result = run_work_design_episode(
+        adapter=adapter,
+        work_context={
+            "work_id": "slow_work",
+            "title": "Slow Work",
+            "description": "Design a compact reversible fixture.",
+        },
+        artifact_dir=artifact_dir,
+        run_id="slow_run",
+        budget=EpisodeBudget(timeout_seconds=0.2),
+    )
+
+    assert len(client.requests) == 2
+    assert result.stop_reason.value == "budget_exhausted"
+    assert result.part_job_creation_requested is False
+    events = [
+        json.loads(line)
+        for line in (artifact_dir / "agent_events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[-1]["budget_kind"] == "timeout"
+    assert events[-1]["boundary"] == "post_provider_return"
+    assert not any(item.get("action") == "create_part_jobs" for item in events)
+
+
+def test_validated_clarification_candidate_and_answer_are_initial_resume_context(
+    tmp_path: Path,
+) -> None:
+    pending = _proposal()
+    pending["unresolved_questions"] = ["Which servo envelope must the bracket fit?"]
+    backend, client = _backend(
+        tmp_path,
+        [
+            {"action": "propose_work_design", "work_design": pending},
+            {"action": "create_part_jobs"},
+            {
+                "action": "ask_user",
+                "questions": [
+                    {
+                        "field": "servo_model",
+                        "question": "Which servo model must fit?",
+                        "reason": "The mounting envelope is material.",
+                    }
+                ],
+                "reason": "The mounting envelope is material.",
+            },
+        ],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+    first = backend.run_work_design_episode(work_id, request_id="sg90_clarify_001")
+    first_manifest = backend._read_work_manifest(work_id)
+    assert first["episode"]["stop_reason"] == "user_input_required"
+    assert first_manifest["part_jobs"] == []
+    assert first_manifest["accepted_part_results"] == {}
+    assert first_manifest["work_design"]["current_design"] == {
+        **pending,
+        "schema_version": 1,
+    }
+    assert first_manifest["work_design"]["current_design_role"] == "active_candidate"
+    assert first_manifest["work_design"]["current_unresolved_status"] == "pending_question"
+
+    first_episode_dir = (
+        backend._work_runs_root(work_id)
+        / first_manifest["work_design"]["run_id"]
+        / "episodes"
+        / "work_design"
+        / "sg90_clarify_001"
+    )
+    historical_proposal_path = (
+        first_episode_dir / "work_design_submissions" / "submission_001.json"
+    )
+    historical_proposal_bytes = historical_proposal_path.read_bytes()
+    first_agent_result = json.loads(
+        (first_episode_dir / "agent_result.json").read_text(encoding="utf-8")
+    )
+    assert first_agent_result["step_count"] == 3
+    question = next(
+        item
+        for item in first_manifest["artifact_references"]
+        if item["checkpoint"] == "clarification_decision"
+        and item["validation_status"] == "user_input_required"
+    )
+    proposal_reference = next(
+        item
+        for item in first_manifest["artifact_references"]
+        if item["artifact_id"].endswith(":proposal")
+    )
+    assert proposal_reference["trust_role"] == "candidate"
+    assert proposal_reference["validation_status"] == "locally_validated"
+
+    backend.answer_work_design_question(
+        work_id,
+        run_id=first_manifest["work_design"]["run_id"],
+        answer_id="sg90_answer",
+        question_artifact_id=question["artifact_id"],
+        field="servo_model",
+        question="Which servo model must fit?",
+        answer="TowerPro SG90",
+    )
+    answered_manifest = backend._read_work_manifest(work_id)
+    assert answered_manifest["work_design"]["current_design"]["unresolved_questions"] == [
+        "Which servo envelope must the bracket fit?"
+    ]
+    assert answered_manifest["work_design"]["current_unresolved_status"] == (
+        "answered_pending_proposal"
+    )
+    assert answered_manifest["work_design"]["clarification_answers"][-1][
+        "resolution_status"
+    ] == "resolved"
+
+    fresh = _proposal()
+    fresh["assumptions"] = [
+        "Use the accepted TowerPro SG90 envelope",
+        "Prototype cable routing remains a reversible layout assumption",
+    ]
+    client.responses.extend(
+        [
+            {"action": "propose_work_design", "work_design": fresh},
+            {"action": "create_part_jobs"},
+        ]
+    )
+    resumed = backend.run_work_design_episode(work_id, request_id="sg90_clarify_002")
+
+    assert resumed["episode"]["status"] == "completed"
+    assert historical_proposal_path.read_bytes() == historical_proposal_bytes
+    completed_manifest = backend._read_work_manifest(work_id)
+    assert len(completed_manifest["part_jobs"]) == 1
+    assert completed_manifest["accepted_part_results"] == {}
+    assert completed_manifest["work_design"]["current_design_role"] == "materialized"
+    assert completed_manifest["work_design"]["current_unresolved_status"] == "none"
+
+    initial_resume_context = client.requests[3]["state"]["supplied_context"]
+    by_key = {item["context_key"]: item for item in initial_resume_context}
+    assert set(by_key) == {"previous_work_design", "work_clarification_answers"}
+    assert all(item["initial"] is True for item in by_key.values())
+    assert by_key["previous_work_design"]["trust_role"] == "candidate"
+    assert by_key["previous_work_design"]["content"]["semantic_role"] == (
+        "active_candidate"
+    )
+    assert by_key["previous_work_design"]["content"][
+        "proposal_unresolved_questions_status"
+    ] == "historical"
+    assert by_key["previous_work_design"]["content"]["current_unresolved_status"] == (
+        "answered_pending_proposal"
+    )
+    accepted_answers = by_key["work_clarification_answers"]["content"]["answers"]
+    assert accepted_answers[-1]["field"] == "servo_model"
+    assert accepted_answers[-1]["answer"] == "TowerPro SG90"
+    assert accepted_answers[-1]["resolution_status"] == "resolved"
+
+    resumed_episode_dir = (
+        backend._work_runs_root(work_id)
+        / completed_manifest["work_design"]["run_id"]
+        / "episodes"
+        / "work_design"
+        / "sg90_clarify_002"
+    )
+    context_manifest = json.loads(
+        (resumed_episode_dir / "context_manifest.json").read_text(encoding="utf-8")
+    )
+    resumed_agent_result = json.loads(
+        (resumed_episode_dir / "agent_result.json").read_text(encoding="utf-8")
+    )
+    assert resumed_agent_result["step_count"] == 2
+    assert {item["context_key"] for item in context_manifest["items"]} == set(by_key)
+    assert all(item["content_byte_count"] > 0 for item in context_manifest["items"])
+    assert resumed_agent_result["context_request_count"] == 0
+    assert resumed_agent_result["context_byte_count"] == sum(
+        item["content_byte_count"] for item in context_manifest["items"]
+    )
+
+
+def test_resume_marks_answered_field_resolved_and_allows_new_material_question(
+    tmp_path: Path,
+) -> None:
+    pending = _proposal()
+    pending["unresolved_questions"] = ["Which servo model must fit?"]
+    backend, client = _backend(
+        tmp_path,
+        [
+            {"action": "propose_work_design", "work_design": pending},
+            {
+                "action": "ask_user",
+                "questions": [
+                    {"field": "servo_model", "question": "Which servo model must fit?"}
+                ],
+            },
+        ],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+    backend.run_work_design_episode(work_id, request_id="resolved_field_001")
+    manifest = backend._read_work_manifest(work_id)
+    question = next(
+        item
+        for item in manifest["artifact_references"]
+        if item["checkpoint"] == "clarification_decision"
+    )
+    backend.answer_work_design_question(
+        work_id,
+        run_id=manifest["work_design"]["run_id"],
+        answer_id="resolved_servo_model",
+        question_artifact_id=question["artifact_id"],
+        field="servo_model",
+        question="Which servo model must fit?",
+        answer="TowerPro SG90",
+    )
+    client.responses.extend(
+        [
+            {
+                "action": "ask_user",
+                "questions": [
+                    {
+                        "field": "retention_method",
+                        "question": "Must the servo be tool-free removable?",
+                    }
+                ],
+            },
+        ]
+    )
+
+    resumed = backend.run_work_design_episode(work_id, request_id="resolved_field_002")
+
+    assert resumed["episode"]["stop_reason"] == "user_input_required"
+    assert backend._read_work_manifest(work_id)["part_jobs"] == []
+    episode_dir = (
+        backend._work_runs_root(work_id)
+        / manifest["work_design"]["run_id"]
+        / "episodes"
+        / "work_design"
+        / "resolved_field_002"
+    )
+    question_request = json.loads(
+        (episode_dir / "user_input_request.json").read_text(encoding="utf-8")
+    )
+    agent_result = json.loads(
+        (episode_dir / "agent_result.json").read_text(encoding="utf-8")
+    )
+    assert agent_result["contract_repair_turn_count"] == 0
+    assert [item["field"] for item in question_request["questions"]] == [
+        "retention_method"
+    ]
+    initial_context = client.requests[2]["state"]["supplied_context"]
+    answers = next(
+        item["content"]["answers"]
+        for item in initial_context
+        if item["context_key"] == "work_clarification_answers"
+    )
+    assert answers[-1]["field"] == "servo_model"
+    assert answers[-1]["resolution_status"] == "resolved"
+
+
+def test_resume_create_part_jobs_cannot_reuse_prior_candidate_as_fresh_draft(
+    tmp_path: Path,
+) -> None:
+    pending = _proposal()
+    pending["unresolved_questions"] = ["Which servo model must fit?"]
+    backend, client = _backend(
+        tmp_path,
+        [
+            {"action": "propose_work_design", "work_design": pending},
+            {
+                "action": "ask_user",
+                "questions": [
+                    {"field": "servo_model", "question": "Which servo model must fit?"}
+                ],
+            },
+        ],
+    )
+    work_id = backend.list_works(limit=10, offset=0)["works"][0]["work_id"]
+    backend.run_work_design_episode(work_id, request_id="fresh_guard_001")
+    manifest = backend._read_work_manifest(work_id)
+    question = next(
+        item
+        for item in manifest["artifact_references"]
+        if item["checkpoint"] == "clarification_decision"
+    )
+    backend.answer_work_design_question(
+        work_id,
+        run_id=manifest["work_design"]["run_id"],
+        answer_id="fresh_guard_answer",
+        question_artifact_id=question["artifact_id"],
+        field="servo_model",
+        question="Which servo model must fit?",
+        answer="TowerPro SG90",
+    )
+    client.responses.extend(
+        [
+            {"action": "create_part_jobs"},
+            {
+                "action": "stop",
+                "stop_reason": "insufficient_context",
+                "reason": "A fresh proposal is still required.",
+            },
+        ]
+    )
+
+    resumed = backend.run_work_design_episode(work_id, request_id="fresh_guard_002")
+
+    assert resumed["episode"]["status"] == "safely_blocked"
+    assert backend._read_work_manifest(work_id)["part_jobs"] == []
+    episode_dir = (
+        backend._work_runs_root(work_id)
+        / manifest["work_design"]["run_id"]
+        / "episodes"
+        / "work_design"
+        / "fresh_guard_002"
+    )
+    agent_result = json.loads(
+        (episode_dir / "agent_result.json").read_text(encoding="utf-8")
+    )
+    assert agent_result["contract_repair_turn_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("budget", "expected_kind", "expected_limit_key", "expected_usage_key"),
+    [
+        (EpisodeBudget(max_steps=0), "max_steps", "limit_steps", "step_count"),
+        (EpisodeBudget(timeout_seconds=0), "timeout", "limit_seconds", "elapsed_seconds"),
+    ],
+)
+def test_work_design_budget_exhaustion_persists_exact_guard_kind(
+    tmp_path: Path,
+    budget: EpisodeBudget,
+    expected_kind: str,
+    expected_limit_key: str,
+    expected_usage_key: str,
+) -> None:
+    client = SequencedWorkDesignClient([])
+    adapter = JsonContractAgentAdapter(
+        client,
+        provider="scripted",
+        model="budget-fixture",
+    )
+    artifact_dir = tmp_path / expected_kind
+
+    result = run_work_design_episode(
+        adapter=adapter,
+        work_context={
+            "work_id": "budget_work",
+            "title": "Budget Work",
+            "description": "Design a compact reversible fixture.",
+        },
+        artifact_dir=artifact_dir,
+        run_id="budget_run",
+        budget=budget,
+    )
+
+    assert result.stop_reason.value == "budget_exhausted"
+    assert client.requests == []
+    events = [
+        json.loads(line)
+        for line in (artifact_dir / "agent_events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    diagnostic = events[-1]
+    assert diagnostic["observation"] == "budget_exhausted"
+    assert diagnostic["budget_kind"] == expected_kind
+    assert diagnostic[expected_limit_key] == 0
+    assert diagnostic[expected_usage_key] >= 0
 
 
 @pytest.mark.parametrize("reason", ["unsupported_capability", "insufficient_context"])

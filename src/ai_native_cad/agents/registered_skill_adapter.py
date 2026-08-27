@@ -10,7 +10,13 @@ from typing import Any
 
 from ai_native_cad.agents.provider_sanitization import sanitize_provider_payload
 from ai_native_cad.agents.registry import RUNTIME_SKILL_REGISTRY
-from ai_native_cad.agents.agent_action_contract import agent_action_contract_description
+from ai_native_cad.agents.agent_action_contract import (
+    agent_action_contract_description,
+    model_program_submission_contract_description,
+)
+from ai_native_cad.agents.model_program_policy import (
+    cadquery_model_program_policy_manifest,
+)
 
 
 def compile_registered_skill_action_request(
@@ -44,6 +50,18 @@ def compile_registered_skill_action_request(
                 "allowed_tools": sorted(delegated.allowed_tools),
                 "output_contract_types": sorted(delegated.output_contract_types),
                 "prohibited_side_effects": list(delegated.prohibited_side_effects),
+                **(
+                    {
+                        "model_program_action_payload": (
+                            model_program_submission_contract_description()
+                        ),
+                        "cadquery_model_program_policy": (
+                            cadquery_model_program_policy_manifest()
+                        ),
+                    }
+                    if delegated.skill_id == "model_program"
+                    else {}
+                ),
             }
             for delegated in (
                 RUNTIME_SKILL_REGISTRY.skill(item)

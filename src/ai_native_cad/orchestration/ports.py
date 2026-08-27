@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
-from typing import Any, Protocol
+from typing import Any, ContextManager, Protocol
 
 
 def _require_safe_id(value: str, label: str) -> str:
@@ -183,9 +183,13 @@ class WorkDesignEpisodeRequest:
     clarification_answers: tuple[dict[str, Any], ...]
     existing_part_jobs: tuple[dict[str, Any], ...]
     accepted_part_results: dict[str, Any]
+    previous_work_design_role: str | None = None
+    current_unresolved_status: str = "none"
     schema_version: int = 1
 
     def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError("Work Design request supports schema_version 1 only")
         _require_safe_id(self.request_id, "request_id")
         _require_safe_id(self.work_id, "work_id")
         _require_safe_id(self.run_id, "run_id")
@@ -193,6 +197,14 @@ class WorkDesignEpisodeRequest:
             raise ValueError("Work Design title must be non-empty")
         if not isinstance(self.objective, str) or not self.objective.strip():
             raise ValueError("Work Design objective must be non-empty")
+        if self.previous_work_design_role not in {None, "active_candidate", "materialized"}:
+            raise ValueError("Work Design context has an invalid design role")
+        if self.current_unresolved_status not in {
+            "none",
+            "pending_question",
+            "answered_pending_proposal",
+        }:
+            raise ValueError("Work Design context has an invalid unresolved status")
 
     def manifest(self) -> dict[str, Any]:
         return {
@@ -485,6 +497,8 @@ class WorkStorePort(Protocol):
     def read_work(self, work_id: str) -> dict[str, Any]: ...
 
     def write_work(self, work_id: str, work: dict[str, Any]) -> None: ...
+
+    def work_design_answer_guard(self, work_id: str) -> ContextManager[None]: ...
 
     def verify_reviewable_evidence(
         self,

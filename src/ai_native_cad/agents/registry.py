@@ -131,7 +131,6 @@ WORK_DESIGN_SKILL = SkillDefinition(
     ),
     stop_reasons=frozenset(
         {
-            "user_input_required",
             "unsupported_capability",
             "insufficient_context",
             "budget_exhausted",
@@ -392,7 +391,7 @@ RUNTIME_KNOWLEDGE = (
     KnowledgeDefinition(
         knowledge_id="verification_state_vocabulary",
         scope="shared",
-        source="knowledge/README.md",
+        source="knowledge/verification_state_vocabulary.md",
     ),
     KnowledgeDefinition(
         knowledge_id="model_program_cadquery_v1",

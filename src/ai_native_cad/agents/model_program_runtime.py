@@ -50,6 +50,8 @@ MODEL_PROGRAM_LIMITS = {
     "stdout_bytes": 262_144,
     "stderr_bytes": 262_144,
 }
+MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH = 64
+MODEL_PROGRAM_REQUESTED_OUTPUTS = ("step",)
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 
@@ -82,7 +84,7 @@ class ModelProgramExecutionRequest:
             raise ValueError("unsupported model-program execution request schema")
         if not _SAFE_ID.fullmatch(self.candidate_id):
             raise ValueError("candidate_id must be a path-safe identifier")
-        if self.requested_outputs != ("step",):
+        if self.requested_outputs != MODEL_PROGRAM_REQUESTED_OUTPUTS:
             raise ValueError("model-program execution supports exactly one STEP output")
         validate_model_program_parameters(self.parameters)
 
@@ -233,8 +235,15 @@ def _validate_parameter_node(value: Any, *, depth: int) -> None:
         return
     if isinstance(value, dict):
         for key, child in value.items():
-            if not isinstance(key, str) or not key or len(key) > 64:
-                raise ValueError("parameter keys must be non-empty strings up to 64 characters")
+            if (
+                not isinstance(key, str)
+                or not key
+                or len(key) > MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH
+            ):
+                raise ValueError(
+                    "parameter keys must be non-empty strings up to "
+                    f"{MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH} characters"
+                )
             _validate_parameter_node(child, depth=depth + 1)
         return
     raise ValueError("parameters contain a non-JSON value")
@@ -242,6 +251,8 @@ def _validate_parameter_node(value: Any, *, depth: int) -> None:
 
 __all__ = [
     "MODEL_PROGRAM_LIMITS",
+    "MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH",
+    "MODEL_PROGRAM_REQUESTED_OUTPUTS",
     "REQUIRED_MODEL_PROGRAM_CONTROLS",
     "ModelProgramExecutionRequest",
     "ModelProgramSandboxExecutor",

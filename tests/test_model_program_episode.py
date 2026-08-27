@@ -12,6 +12,9 @@ from ai_native_cad.agents import (
     ToolObservation,
     run_design_part_episode,
 )
+from ai_native_cad.agents.model_program_runtime import (
+    MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH,
+)
 
 
 SOURCE = """import cadquery as cq
@@ -77,11 +80,11 @@ def _handoff():
     }
 
 
-def _program(source=SOURCE):
+def _program(source=SOURCE, parameters=None):
     return {
         "api_id": "cadquery_v1",
         "source": source,
-        "parameters": {"length": 30, "width": 20, "height": 10},
+        "parameters": parameters or {"length": 30, "width": 20, "height": 10},
         "requested_outputs": ["step"],
     }
 
@@ -293,6 +296,33 @@ def test_model_program_actions_reject_provider_identity_path_and_command_fields(
             tool_broker=broker,
             run_id="run_1",
         )
+    assert broker.calls == []
+
+
+@pytest.mark.parametrize(
+    "key", ["", "x" * (MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH + 1)]
+)
+def test_model_program_action_rejects_parameter_keys_outside_disclosed_contract(
+    tmp_path, key
+):
+    broker = RecordingBroker([_observation()])
+
+    with pytest.raises(EpisodeContractError, match="parameter keys must be"):
+        run_design_part_episode(
+            adapter=_adapter(
+                [
+                    {
+                        "action": "create_model_program",
+                        "model_program": _program(parameters={key: 1}),
+                    }
+                ]
+            ),
+            handoff=_handoff(),
+            artifact_dir=tmp_path,
+            tool_broker=broker,
+            run_id="run_1",
+        )
+
     assert broker.calls == []
 
 

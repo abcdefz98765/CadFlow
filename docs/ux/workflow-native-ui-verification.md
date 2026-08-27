@@ -487,4 +487,12 @@ encoded `create_part_jobs` as an object rather than the registered string action
 so the existing action boundary stopped the Episode with
 `action_not_registered`. No Part Job, CAD, geometry, result, or acceptance was
 created. The field-contract correction therefore succeeded on the real
-proposal; action-envelope conformance is a separate follow-up risk.
+proposal; action-envelope conformance was a separate follow-up risk.
+
+In the subsequent real Owner mechanical-arm trial, the accepted SG90 answer no
+longer repeated as an unresolved question. Work Design converged with five
+generated Parts, and five real Part Jobs were materialized. A first Part Design
+smoke executed against one materialized Part, but did not produce CAD success or
+a reviewable output. The next blocker is now the Part execution runtime: budget
+semantics, live attempts, and bounded multi-Part execution remain to be
+verified.

@@ -12,6 +12,11 @@ from ai_native_cad.workflow_console.selected_node_inspector_ui import (
 from ai_native_cad.workflow_console.workflow_graph_ui import current_attention_is_redundant
 from ai_native_cad.workflow_console.work_outcome import project_stopped_attempt
 from ai_native_cad.workflow_console.agent_activity import significant_activity
+from ai_native_cad.workflow_console.action_lifecycle import _action_identity
+from ai_native_cad.workflow_console.nicegui_app import (
+    _render_overview_current_task,
+    _visible_overview_recovery,
+)
 
 
 class _Element:
@@ -28,6 +33,9 @@ class _Element:
         return self
 
     def tooltip(self, _value):
+        return self
+
+    def disable(self):
         return self
 
     def on(self, _event, _callback):
@@ -62,9 +70,193 @@ class _RecordingUI:
     def button(self, *_args, **_kwargs):
         return _Element(self, "button")
 
+    def badge(self, value):
+        return _Element(self, "badge", str(value))
+
 
 def _label_text(ui):
     return [text for tag, text, _classes in ui.events if tag == "label"]
+
+
+def _overview_recovery_scope():
+    return {
+        "advanced": {"work_id": "owner_fixture"},
+        "work": {"active_part": "camera_cradle"},
+    }, {
+        "run_id": "camera_attempt_1",
+        "part_job_id": "camera_cradle",
+        "title": "Previous attempt stopped",
+    }
+
+
+def _pending_recovery_state(**overrides):
+    execution = {
+        "status": "pending",
+        "target_work_id": "owner_fixture",
+        "target_part_job_id": "camera_cradle",
+        "target_run_id": "camera_attempt_1",
+    }
+    execution.update(overrides)
+    return {"action_execution": execution}
+
+
+def test_overview_pending_same_scope_hides_only_visible_recovery():
+    overview, recovery = _overview_recovery_scope()
+
+    assert _visible_overview_recovery(overview, _pending_recovery_state(), recovery) is None
+    assert recovery == {
+        "run_id": "camera_attempt_1",
+        "part_job_id": "camera_cradle",
+        "title": "Previous attempt stopped",
+    }
+
+
+def test_overview_pending_scope_mismatch_keeps_recovery_visible():
+    overview, recovery = _overview_recovery_scope()
+
+    for mismatch in (
+        {"target_work_id": "sibling_work"},
+        {"target_part_job_id": "extrusion_adapter"},
+        {"target_run_id": "camera_attempt_2"},
+        {"target_run_id": None, "target_part_job_id": None},
+    ):
+        assert _visible_overview_recovery(overview, _pending_recovery_state(**mismatch), recovery) is recovery
+
+
+def test_work_scoped_recovery_is_not_hidden_by_pending_part_action():
+    overview, recovery = _overview_recovery_scope()
+    work_recovery = {key: value for key, value in recovery.items() if key != "part_job_id"}
+
+    assert _visible_overview_recovery(overview, _pending_recovery_state(), work_recovery) is work_recovery
+
+
+def test_work_scoped_recovery_is_hidden_by_same_work_pending_action():
+    overview, recovery = _overview_recovery_scope()
+    work_recovery = {key: value for key, value in recovery.items() if key != "part_job_id"}
+
+    assert _visible_overview_recovery(
+        overview,
+        _pending_recovery_state(target_part_job_id=None),
+        work_recovery,
+    ) is None
+
+
+def test_overview_terminal_lifecycle_restores_latest_durable_recovery():
+    overview, _recovery = _overview_recovery_scope()
+    latest_recoveries = (
+        {"run_id": "camera_attempt_2", "part_job_id": "camera_cradle", "title": "Result ready for review"},
+        {"run_id": "camera_attempt_2", "part_job_id": "camera_cradle", "title": "Your answer is needed"},
+        {"run_id": "camera_attempt_2", "part_job_id": "camera_cradle", "title": "Attempt budget reached"},
+    )
+
+    for status, recovery in zip(("succeeded", "warning", "failed"), latest_recoveries, strict=True):
+        state = _pending_recovery_state(status=status)
+        assert _visible_overview_recovery(overview, state, recovery) is recovery
+
+
+def test_overview_pending_stage_scope_must_match_when_recovery_has_one():
+    overview, recovery = _overview_recovery_scope()
+    recovery = {**recovery, "recommended_action": {"target_stage_id": "attempt:camera_cradle:camera_attempt_1"}}
+
+    assert _visible_overview_recovery(
+        overview,
+        _pending_recovery_state(target_stage_id="another-stage"),
+        recovery,
+    ) is recovery
+    assert _visible_overview_recovery(
+        overview,
+        _pending_recovery_state(target_stage_id="attempt:camera_cradle:camera_attempt_1"),
+        recovery,
+    ) is None
+
+
+def test_overview_current_task_marks_only_its_pending_action_running():
+    recommendation = {
+        "key": "continue_agent",
+        "label": "Continue Camera Cradle",
+        "target_work_id": "owner_fixture",
+        "part_job_id": "camera_cradle",
+        "target_run_id": "camera_attempt_1",
+    }
+    state = _pending_recovery_state()
+    state["action_execution"]["identity"] = _action_identity(recommendation)
+    ui = _RecordingUI()
+
+    _render_overview_current_task(
+        ui,
+        recommendation,
+        {"part_job_id": "camera_cradle", "name": "Camera Cradle", "state": "design"},
+        None,
+        {"advanced": {"work_id": "owner_fixture"}},
+        object(),
+        state,
+        lambda: None,
+        "en",
+    )
+
+    assert "Running" in _label_text(ui)
+
+    mismatched = {**recommendation, "target_run_id": "camera_attempt_2"}
+    ui = _RecordingUI()
+    _render_overview_current_task(
+        ui,
+        mismatched,
+        {"part_job_id": "camera_cradle", "name": "Camera Cradle", "state": "design"},
+        None,
+        {"advanced": {"work_id": "owner_fixture"}},
+        object(),
+        state,
+        lambda: None,
+        "en",
+    )
+
+    assert "Ready" in _label_text(ui)
+
+
+def test_overview_hidden_recovery_does_not_make_different_recommendation_running(monkeypatch):
+    import ai_native_cad.workflow_console.nicegui_app as app
+
+    recovery_cards = []
+    feedback_options = []
+    monkeypatch.setattr(app, "_render_recovery_card", lambda *_args: recovery_cards.append(True))
+    monkeypatch.setattr(app, "_render_action_feedback_panel", lambda *_args, **kwargs: feedback_options.append(kwargs))
+    monkeypatch.setattr(app, "_render_workbench_advanced", lambda *_args: None)
+    recovery = {
+        "run_id": "camera_attempt_1",
+        "part_job_id": "camera_cradle",
+        "title": "Previous attempt stopped",
+    }
+    running_action = {
+        "key": "retry_agent",
+        "target_work_id": "owner_fixture",
+        "part_job_id": "camera_cradle",
+        "target_run_id": "camera_attempt_1",
+    }
+    state = _pending_recovery_state()
+    state["action_execution"]["identity"] = _action_identity(running_action)
+    data = {
+        "language": "en",
+        "workbench_overview": {
+            "work": {"active_part": "camera_cradle"},
+            "objective": {}, "user_input": {}, "agent_design": {}, "transformation": {},
+            "recommendation": {**running_action, "key": "continue_agent", "label": "Continue Camera Cradle"},
+            "capability": {}, "agent_activity": {}, "preview": {}, "agent_output": {},
+            "part_jobs": [{"part_job_id": "camera_cradle", "name": "Camera Cradle", "state": "design"}],
+            "recovery": recovery,
+            "advanced": {"work_id": "owner_fixture"},
+            "history": {},
+        },
+    }
+    ui = _RecordingUI()
+
+    app._render_work_overview(
+        ui, data, type("Actions", (), {"backend": object()})(), state, lambda: None, lambda _page: None
+    )
+
+    assert recovery_cards == []
+    assert feedback_options == [{"transient_only": True, "has_durable_recovery": False}]
+    assert "Ready" in _label_text(ui)
+    assert "Running" not in _label_text(ui)
 
 
 def test_stopped_attempt_is_short_natural_language_without_audit_matrix():

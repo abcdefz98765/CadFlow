@@ -64,6 +64,9 @@ class WorkflowConsoleWorkStore:
     def write_work(self, work_id: str, work: dict[str, Any]) -> None:
         self.backend._write_work_manifest(work_id, work)
 
+    def work_design_answer_guard(self, work_id: str):
+        return self.backend._work_design_answer_guard(work_id)
+
     def verify_reviewable_evidence(
         self,
         work_id: str,
@@ -216,7 +219,7 @@ class WorkflowConsoleAgentDesign:
         if episode_dir.exists():
             return _read_idempotent_work_design_outcome(
                 route_result_path,
-                request_fingerprint=request_fingerprint,
+                request=request,
             )
         episode_dir.mkdir(parents=True, exist_ok=False)
         adapter = self.backend.stage_runner.agent_adapter
@@ -235,6 +238,8 @@ class WorkflowConsoleAgentDesign:
                         "title": request.title,
                         "description": request.objective,
                         "previous_work_design": request.previous_work_design,
+                        "previous_work_design_role": request.previous_work_design_role,
+                        "current_unresolved_status": request.current_unresolved_status,
                         "clarification_answers": list(request.clarification_answers),
                         "existing_part_jobs": list(request.existing_part_jobs),
                         "existing_part_job_count": len(request.existing_part_jobs),
@@ -271,6 +276,7 @@ class WorkflowConsoleAgentDesign:
             {
                 "schema_version": 1,
                 "request_fingerprint": request_fingerprint,
+                "request_fingerprint_version": 2,
                 "request_identity": {
                     "request_id": request.request_id,
                     "work_id": request.work_id,
@@ -305,25 +311,50 @@ class WorkflowConsoleAgentDesign:
         )
         relative_path = f"work_design/clarifications/{answer_id}.json"
         destination = self.backend._require_child_path(run_path, relative_path)
-        if destination.exists():
+        expected = {
+            "schema_version": 1,
+            "checkpoint": "clarification_decision",
+            "scope": "work",
+            "work_id": work_id,
+            "run_id": run_id,
+            "question_artifact_id": question_artifact_id,
+            "field": field,
+            "question": question,
+            "answer": answer,
+            "source": "user",
+        }
+        existing_identical = False
+        clarification_dir = destination.parent
+        if clarification_dir.exists():
+            for existing_path in clarification_dir.glob("*.json"):
+                if not existing_path.is_file() or existing_path.is_symlink():
+                    raise RuntimeError("Work Design clarification evidence is invalid")
+                try:
+                    existing = json.loads(existing_path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise RuntimeError(
+                        "Work Design clarification evidence is unreadable"
+                    ) from exc
+                if existing.get("question_artifact_id") != question_artifact_id:
+                    continue
+                comparable = {key: existing.get(key) for key in expected}
+                if existing_path == destination and comparable == expected:
+                    existing_identical = True
+                    continue
+                raise ValueError(
+                    "Work clarification question already has durable answer evidence"
+                )
+        if destination.exists() and not existing_identical:
             raise FileExistsError("Work Design clarification answer already exists")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        _write_json(
-            destination,
-            {
-                "schema_version": 1,
-                "checkpoint": "clarification_decision",
-                "scope": "work",
-                "work_id": work_id,
-                "run_id": run_id,
-                "question_artifact_id": question_artifact_id,
-                "field": field,
-                "question": question,
-                "answer": answer,
-                "source": "user",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
+        if not existing_identical:
+            _write_json(
+                destination,
+                {
+                    **expected,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
         return DesignEpisodeArtifact(
             artifact_id=f"work_clarification:{answer_id}",
             relative_path=relative_path,
@@ -515,10 +546,16 @@ def _work_design_outcome(
                 ),
                 checkpoint="work_design",
                 trust_role="candidate",
-                validation_status="passed" if result.status == "completed" else "not_validated",
+                validation_status=(
+                    "passed" if result.status == "completed" else "locally_validated"
+                ),
             )
         )
     if result.stop_reason.value == "user_input_required":
+        if not (episode_dir / "user_input_request.json").is_file():
+            raise RuntimeError(
+                "user_input_required Work Design result lacks persisted question evidence"
+            )
         artifacts.append(
             DesignEpisodeArtifact(
                 artifact_id=f"work_design:{result.episode_id}:user_input_request",
@@ -627,6 +664,27 @@ def _blocked_work_design_outcome(
 
 
 def _work_design_request_fingerprint(request: WorkDesignEpisodeRequest) -> str:
+    """Bind replay to immutable request identity, not later Work projections."""
+
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "fingerprint_version": 2,
+                "request_id": request.request_id,
+                "work_id": request.work_id,
+                "run_id": request.run_id,
+                "schema_version": request.schema_version,
+                "objective": request.objective.strip(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _work_design_request_fingerprint_v1(request: WorkDesignEpisodeRequest) -> str:
+    """Reproduce the pre-Stage-B fingerprint for existing append-only evidence."""
+
     return hashlib.sha256(
         json.dumps(request.manifest(), sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -635,7 +693,7 @@ def _work_design_request_fingerprint(request: WorkDesignEpisodeRequest) -> str:
 def _read_idempotent_work_design_outcome(
     route_result_path: Path,
     *,
-    request_fingerprint: str,
+    request: WorkDesignEpisodeRequest,
 ) -> WorkDesignEpisodeOutcome:
     if not route_result_path.is_file():
         raise RuntimeError("Work Design request has incomplete evidence; use a new request id")
@@ -643,12 +701,66 @@ def _read_idempotent_work_design_outcome(
         payload = json.loads(route_result_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError("Work Design request evidence is unreadable") from exc
-    if payload.get("request_fingerprint") != request_fingerprint:
+    expected_identity = {
+        "request_id": request.request_id,
+        "work_id": request.work_id,
+        "run_id": request.run_id,
+        "scope": "work",
+    }
+    if payload.get("request_identity") != expected_identity:
+        raise ValueError("request_id is already bound to a different Work Design request")
+    stored_fingerprint = payload.get("request_fingerprint")
+    fingerprint_version = payload.get("request_fingerprint_version")
+    if fingerprint_version == 2:
+        fingerprint_matches = stored_fingerprint == _work_design_request_fingerprint(request)
+    elif fingerprint_version in {None, 1}:
+        fingerprint_matches = (
+            request.schema_version == 1
+            and (
+                stored_fingerprint == _work_design_request_fingerprint_v1(request)
+                or (
+                    _is_sha256(stored_fingerprint)
+                    and _legacy_work_design_objective_matches(route_result_path, request)
+                )
+            )
+        )
+    else:
+        raise RuntimeError("Work Design request uses an unsupported fingerprint version")
+    if not fingerprint_matches:
         raise ValueError("request_id is already bound to a different Work Design request")
     episode = payload.get("episode")
     if not isinstance(episode, dict):
         raise RuntimeError("Work Design request evidence is incomplete")
     return WorkDesignEpisodeOutcome.from_dict(episode, idempotent_replay=True)
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _legacy_work_design_objective_matches(
+    route_result_path: Path,
+    request: WorkDesignEpisodeRequest,
+) -> bool:
+    """Verify a legacy fingerprint against immutable Episode objective evidence."""
+
+    fingerprint = route_result_path.parent / "agent_episode.json"
+    if not fingerprint.is_file():
+        return False
+    try:
+        episode = json.loads(fingerprint.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    objective = episode.get("objective")
+    return (
+        isinstance(objective, dict)
+        and objective.get("operation") == "work_design"
+        and objective.get("summary") == request.objective.strip()
+    )
 
 
 def _design_handoff(request: DesignPartEpisodeRequest) -> dict[str, Any]:

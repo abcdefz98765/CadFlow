@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,18 @@ from ai_native_cad.agents import (
     run_design_part_episode,
 )
 from ai_native_cad.agents.episode import ContextItem, EpisodeContractError
+from ai_native_cad.agents.agent_action_contract import (
+    model_program_submission_contract_description,
+)
+from ai_native_cad.agents.model_program_runtime import (
+    MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH,
+)
+from ai_native_cad.agents.model_program_policy import (
+    cadquery_model_program_policy_manifest,
+)
+from ai_native_cad.agents.registered_skill_adapter import (
+    compile_registered_skill_action_request,
+)
 
 
 class SequencedActionClient:
@@ -115,6 +128,95 @@ def test_design_part_registry_delegates_only_to_cadflow_model_program_skill():
     assert delegated.stop_reasons == frozenset()
 
 
+def test_shared_vocabulary_mapping_and_private_knowledge_isolation():
+    shared = RUNTIME_SKILL_REGISTRY.knowledge_for_skill(
+        "design_part", "verification_state_vocabulary"
+    )[0]
+
+    assert shared.source == "knowledge/verification_state_vocabulary.md"
+    content = shared.load_content()
+    assert {
+        state
+        for state in (
+            "verified",
+            "measured",
+            "assumed",
+            "unverified",
+            "unsupported",
+            "not_requested",
+        )
+        if f"`{state}`" in content
+    } == {
+        "verified",
+        "measured",
+        "assumed",
+        "unverified",
+        "unsupported",
+        "not_requested",
+    }
+    assert "explicit accepted-result pointer" in content
+    assert "`candidate` is not `reviewable`" in content
+    assert "`reviewable` is not `accepted`" in content
+    assert "knowledge/README.md" != shared.source
+    with pytest.raises(ValueError, match="not declared"):
+        RUNTIME_SKILL_REGISTRY.knowledge_for_skill(
+            "design_part", "model_program_cadquery_v1"
+        )
+
+
+def test_design_part_strategy_routes_legacy_ir_limits_to_model_program_before_stopping():
+    strategy = Path(
+        "skills/design_part/knowledge/structured_contract_strategy.md"
+    ).read_text(encoding="utf-8")
+
+    assert "choose the delegated\n`model_program` strategy" in strategy
+    assert "only when material input is missing" in strategy
+    assert (
+        "only when neither the structured compatibility route\n"
+        "nor the declared model-program route"
+    ) in strategy
+
+
+def test_design_part_compiler_exposes_only_canonical_public_model_program_detail():
+    request = compile_registered_skill_action_request(
+        {"part_brief": "Make a compact bracket."},
+        DESIGN_PART_SKILL.manifest(),
+    )
+    delegated = request["skill"]["delegated_skills"]
+
+    assert len(delegated) == 1
+    detail = delegated[0]
+    assert detail["model_program_action_payload"] == (
+        model_program_submission_contract_description()
+    )
+    assert detail["model_program_action_payload"]["fields"]["parameters"][
+        "property_names"
+    ] == {
+        "type": "string",
+        "non_empty": True,
+        "max_length": MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH,
+    }
+    assert detail["cadquery_model_program_policy"] == (
+        cadquery_model_program_policy_manifest()
+    )
+    assert detail["cadquery_model_program_policy"]["authority"] == {
+        "source_execution": False,
+        "filesystem": False,
+        "network": False,
+        "process": False,
+        "dependency_installation": False,
+        "publication": False,
+    }
+    assert [item["id"] for item in request["skill"]["knowledge"]] == [
+        "verification_state_vocabulary",
+        "design_part_structured_contract_strategy",
+    ]
+    assert all(
+        item["source"] != "policies/model_program_cadquery_v1.md"
+        for item in request["skill"]["knowledge"]
+    )
+
+
 def test_provider_selects_context_contract_and_validation_actions(tmp_path, monkeypatch):
     monkeypatch.delenv("CADFLOW_MODEL_PROGRAM_SANDBOX", raising=False)
     adapter = _adapter(
@@ -171,6 +273,12 @@ def test_provider_selects_context_contract_and_validation_actions(tmp_path, monk
             "output_contract_types": ["model_program_candidate"],
             "prohibited_side_effects": list(
                 MODEL_PROGRAM_SKILL.prohibited_side_effects
+            ),
+            "model_program_action_payload": (
+                model_program_submission_contract_description()
+            ),
+            "cadquery_model_program_policy": (
+                cadquery_model_program_policy_manifest()
             ),
         }
     ]

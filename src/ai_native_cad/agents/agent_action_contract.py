@@ -12,6 +12,12 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
+from ai_native_cad.agents.model_program_policy import CADQUERY_MODEL_PROGRAM_API
+from ai_native_cad.agents.model_program_runtime import (
+    MODEL_PROGRAM_LIMITS,
+    MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH,
+    MODEL_PROGRAM_REQUESTED_OUTPUTS,
+)
 from ai_native_cad.agents.work_design_contract import work_design_contract_description
 
 
@@ -66,6 +72,42 @@ _QUESTION_LIST_FIELD = {
         },
     },
 }
+
+MODEL_PROGRAM_SUBMISSION_FIELDS = frozenset(
+    {"api_id", "source", "parameters", "requested_outputs"}
+)
+MODEL_PROGRAM_SUBMISSION_API_ID = CADQUERY_MODEL_PROGRAM_API
+MODEL_PROGRAM_SUBMISSION_REQUESTED_OUTPUTS = MODEL_PROGRAM_REQUESTED_OUTPUTS
+
+
+def model_program_submission_contract_description() -> dict[str, Any]:
+    """Describe the exact provider submission CadFlow already validates."""
+
+    return {
+        "type": "object",
+        "required_fields": sorted(MODEL_PROGRAM_SUBMISSION_FIELDS),
+        "allowed_fields": sorted(MODEL_PROGRAM_SUBMISSION_FIELDS),
+        "fields": {
+            "api_id": {"type": "string", "const": MODEL_PROGRAM_SUBMISSION_API_ID},
+            "source": {"type": "string", "non_empty": True},
+            "parameters": {
+                "type": "object",
+                "finite_json": True,
+                "max_bytes": MODEL_PROGRAM_LIMITS["parameter_bytes"],
+                "max_depth": MODEL_PROGRAM_LIMITS["parameter_depth"],
+                "property_names": {
+                    "type": "string",
+                    "non_empty": True,
+                    "max_length": MODEL_PROGRAM_PARAMETER_KEY_MAX_LENGTH,
+                },
+            },
+            "requested_outputs": {
+                "type": "list",
+                "const": list(MODEL_PROGRAM_SUBMISSION_REQUESTED_OUTPUTS),
+            },
+        },
+        "additional_fields": False,
+    }
 
 
 def _contract(
@@ -207,4 +249,8 @@ __all__ = [
     "action_contract",
     "action_discriminator_description",
     "agent_action_contract_description",
+    "MODEL_PROGRAM_SUBMISSION_FIELDS",
+    "MODEL_PROGRAM_SUBMISSION_API_ID",
+    "MODEL_PROGRAM_SUBMISSION_REQUESTED_OUTPUTS",
+    "model_program_submission_contract_description",
 ]
