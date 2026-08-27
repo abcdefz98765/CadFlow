@@ -938,9 +938,16 @@ These are migration tasks, not accepted target behavior.
   remained, returned focused `work_design_questions_unresolved` feedback, and
   received a canonical `ask_user` action. The Episode stopped as
   `user_input_required` with zero Part Jobs, zero new Part Runs, no CAD or
-  geometry, and no accepted-pointer change. The new trial blocker is therefore
+  geometry, and no accepted-pointer change. The new trial blocker was therefore
   product-level design clarification and a five-Part decomposition, not action-
   envelope conformance.
+- In the subsequent real Owner mechanical-arm trial, the accepted SG90 answer
+  no longer repeated as an unresolved question. Work Design converged with five
+  generated Parts, and all five real Part Jobs were materialized. A first Part
+  Design smoke executed against one materialized Part, but it did not produce
+  CAD success or a reviewable output. The next blocker moved to the Part
+  execution runtime: budget semantics, live attempts, and bounded multi-Part
+  execution remain to be verified.
 - M2.8 added only optional durable revision provenance on Part attempts because
   parent Run/result causality cannot be recovered honestly from prompt text,
   attempt order, or timestamps. No graph persistence, workflow engine, Agent
