@@ -550,7 +550,7 @@ def test_work_design_mismatch_feedback_is_precise_local_and_value_free(
     assert "RAW" not in json.dumps(feedback)
 
 
-def test_exhausted_work_design_repair_preserves_precise_terminal_diagnostic(tmp_path):
+def test_exhausted_work_design_repair_records_exact_budget_diagnostic(tmp_path):
     invalid = _proposal()
     invalid["acceptance_criteria"] = ["RAW_PAYLOAD_VALUE_MUST_NOT_LEAK"]
     action = {"action": "propose_work_design", "work_design": invalid}
@@ -558,12 +558,14 @@ def test_exhausted_work_design_repair_preserves_precise_terminal_diagnostic(tmp_
     result, client = _run_work_design(tmp_path, [action, action, action])
 
     assert result.contract_repair_exhausted is True
-    assert result.failure_diagnostic["field_issue"] == "extra"
-    assert result.failure_diagnostic["field_path"] == "acceptance_criteria"
-    assert result.failure_diagnostic["expected_fields"] == sorted(work_design_fields())
-    assert "RAW_PAYLOAD_VALUE_MUST_NOT_LEAK" not in json.dumps(
-        result.failure_diagnostic
-    )
+    assert result.stop_reason == StopReason.BUDGET_EXHAUSTED
+    assert result.failure_diagnostic == {
+        "reason_code": "budget_exhausted.contract_repair_turns",
+        "budget_kind": "contract_repair_turns",
+        "used": 2,
+        "limit": 2,
+        "agent_steps": 3,
+    }
     assert len(client.requests) == 3
 
 
@@ -572,12 +574,11 @@ def test_contract_repair_budget_exhausts_once_after_two_corrections(tmp_path):
     result, client = _run_work_design(tmp_path, [bad, bad, bad])
 
     assert result.status == "safely_blocked"
-    assert result.stop_reason == StopReason.POLICY_BLOCKED
+    assert result.stop_reason == StopReason.BUDGET_EXHAUSTED
     assert result.step_count == 3
     assert result.contract_repair_turn_count == 2
     assert result.contract_repair_exhausted is True
-    assert result.failure_diagnostic["contract_repair_exhausted"] is True
-    assert result.failure_diagnostic["contract_repair_turn_count"] == 2
+    assert result.failure_diagnostic["budget_kind"] == "contract_repair_turns"
     assert len(client.requests) == 3
     events = (tmp_path / "agent_events.jsonl").read_text(encoding="utf-8")
     assert events.count('"observation": "action_contract_feedback"') == 3

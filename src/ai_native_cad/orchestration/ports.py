@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, replace
 from typing import Any, ContextManager, Protocol
@@ -60,6 +61,25 @@ _FAILURE_DIAGNOSTIC_WORK_DESIGN_FIELDS = {
     "field_path",
     "expected_fields",
 }
+_BUDGET_FAILURE_DIAGNOSTIC_FIELDS = {
+    "reason_code",
+    "budget_kind",
+    "used",
+    "limit",
+    "agent_steps",
+}
+_BUDGET_FAILURE_KINDS = {
+    "wall_clock_seconds",
+    "agent_steps",
+    "context_requests",
+    "context_bytes",
+    "contract_submissions",
+    "repair_attempts",
+    "source_submissions",
+    "cad_executions",
+    "observation_inspections",
+    "contract_repair_turns",
+}
 _SAFE_CONTRACT_FIELD_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,119}")
 _SAFE_CONTRACT_FIELD_PATH_RE = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]{0,119}(?:\[\])?"
@@ -71,6 +91,25 @@ def _require_failure_diagnostic(value: dict[str, Any] | None) -> None:
     """Validate the small, source-free rejection fact carried by route evidence."""
 
     if value is None:
+        return
+    if isinstance(value, dict) and set(value) == _BUDGET_FAILURE_DIAGNOSTIC_FIELDS:
+        budget_kind = value.get("budget_kind")
+        if budget_kind not in _BUDGET_FAILURE_KINDS:
+            raise ValueError("failure_diagnostic budget kind is invalid")
+        if value.get("reason_code") != f"budget_exhausted.{budget_kind}":
+            raise ValueError("failure_diagnostic budget reason code is invalid")
+        for field in ("used", "limit"):
+            item = value.get(field)
+            if (
+                isinstance(item, bool)
+                or not isinstance(item, (int, float))
+                or not math.isfinite(item)
+                or item < 0
+            ):
+                raise ValueError(f"failure_diagnostic budget {field} is invalid")
+        steps = value.get("agent_steps")
+        if isinstance(steps, bool) or not isinstance(steps, int) or steps < 0:
+            raise ValueError("failure_diagnostic budget agent_steps is invalid")
         return
     fields = set(value) if isinstance(value, dict) else set()
     if (

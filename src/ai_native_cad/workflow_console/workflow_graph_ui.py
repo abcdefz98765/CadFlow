@@ -7,6 +7,7 @@ from html import escape
 from typing import Any, Callable
 
 from ai_native_cad.workflow_console.i18n import status_label
+from ai_native_cad.workflow_console.action_lifecycle import active_executions_for_work
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -20,24 +21,33 @@ def workflow_graph_with_runtime(
 ) -> dict[str, Any]:
     """Overlay the honest in-process command state without persisting it."""
 
-    execution = state.get("action_execution")
-    if not isinstance(execution, dict) or execution.get("status") != "pending":
-        return graph
-    target_node_id = execution.get("target_stage_id")
-    if not isinstance(target_node_id, str):
+    executions = active_executions_for_work(state, graph.get("work_id"))
+    # The graph may be rendered without a Work id in compatibility tests; in
+    # that case overlay every scoped execution.  No graph state is persisted.
+    if not executions:
+        executions = [
+            item for item in state.get("action_executions_by_identity", {}).values()
+            if isinstance(item, dict) and item.get("status") in {"confirming", "pending"}
+        ]
+    if not executions:
         return graph
     projected = deepcopy(graph)
+    targets = {
+        execution.get("target_stage_id")
+        or (
+            f"attempt:{execution.get('target_part_job_id')}:{execution.get('target_run_id')}"
+            if execution.get("target_part_job_id") and execution.get("target_run_id")
+            else None
+        )
+        for execution in executions
+    }
+    targets.discard(None)
     for node in projected.get("nodes", []):
-        if isinstance(node, dict) and node.get("id") == target_node_id:
-            node["status"] = "running"
-            node["user_state"] = "running"
-            node["user_state_label"] = "运行中" if language == "zh" else "Running"
-            node["attention"] = "running"
+        if isinstance(node, dict) and node.get("id") in targets:
+            node.update({"status": "running", "user_state": "running", "user_state_label": "运行中" if language == "zh" else "Running", "attention": "running"})
     for item in projected.get("current_attention", []):
-        if isinstance(item, dict) and item.get("node_id") == target_node_id:
-            item["state"] = "running"
-            item["state_label"] = "运行中" if language == "zh" else "Running"
-            item["kind"] = "running"
+        if isinstance(item, dict) and item.get("node_id") in targets:
+            item.update({"state": "running", "state_label": "运行中" if language == "zh" else "Running", "kind": "running"})
     return projected
 
 
@@ -65,16 +75,14 @@ def render_current_attention(
     state: dict[str, Any] | None = None,
 ) -> None:
     items = [item for item in graph.get("current_attention", []) if isinstance(item, dict)]
-    execution = (state or {}).get("action_execution")
+    executions = active_executions_for_work(state or {}, graph.get("work_id"))
 
     def visible_state(item: dict[str, Any]) -> tuple[str, str]:
         running = bool(
-            isinstance(execution, dict)
-            and execution.get("status") == "pending"
-            and execution.get("target_work_id")
-            and (
+            any(
                 execution.get("target_run_id") == _dict(item.get("primary_action")).get("target_run_id")
                 or execution.get("target_stage_id") == item.get("node_id")
+                for execution in executions
             )
         )
         if running:

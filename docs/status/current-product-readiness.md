@@ -1,6 +1,6 @@
 # Current Product Readiness
 
-Status date: 2026-08-21.
+Status date: 2026-09-05.
 
 This document distinguishes the Agent-first target architecture from the
 implemented deterministic product, accepted M1 runtime foundation, bounded M2
@@ -24,6 +24,58 @@ the M2.6 canonical Product Golden and M2.7 usability integration are implemented
 external-provider M2
 acceptance and later-milestone modeling, Assembly, and Deliverable capabilities
 are not.
+
+## V1 Part execution runtime — implemented and under final acceptance
+
+- The clarification-convergence branch completed its real Owner Trial: the
+  SG90 answer converged Work Design, materialized five real Part Jobs, and
+  entered the first `design_part` Episode. It was squash-merged as
+  `90d2fe7`; Work Design V1 remains frozen except for correctness fixes.
+- Every bounded Episode now preserves its exact exhausted resource in the
+  existing failure diagnostic: wall-clock seconds, Agent steps, context
+  requests/bytes, contract/source submissions, repair attempts, CAD
+  executions, observation inspections, or contract-protocol repair turns.
+  The compatible top-level stop reason remains `budget_exhausted`.
+- Minimal timing and request accounting distinguish total, provider, tool, and
+  CAD execution milliseconds; provider logical requests are distinct from HTTP
+  transport attempts. Transport attempts are reported only when observed at
+  the adapter boundary and otherwise remain unavailable.
+- Part retry is two-phase: CadFlow first appends and persists exactly one child
+  Attempt, immediately refreshes the canonical Workflow, then runs the long
+  Episode. Historical attempts and accepted-result pointers remain unchanged.
+- A small local dispatcher advances the durable runnable Part frontier with at
+  most two concurrent Part Episodes. It does not infer dependencies from prose,
+  duplicate an initial Attempt, or introduce scheduler/workflow persistence.
+  Blocked Parts remain on explicit Retry and are excluded from the batch
+  frontier.
+- Provider and Part-local validation work may overlap. Because the current
+  attested WSL launcher does not declare a multi-flight contract, only the
+  actual CAD executor boundary is process-wide single-flight.
+- Work mutation uses short per-Work critical sections around fresh-read,
+  ownership verification, Part-scoped merge, and write. Provider/CAD latency
+  stays outside that lock. Sibling evidence, accepted pointers, and independent
+  terminal outcomes are retained in either completion order.
+- The 2026-09-05 real Part 4 child retry became durable as
+  `机械臂_part_4_2` before the provider returned. It stopped at 252.750 seconds
+  after four Agent steps/four logical requests/four observed transport
+  attempts and three context requests. Provider time was 252.748 seconds;
+  tool and CAD time were zero. The exact exhausted resource was the unchanged
+  180-second Episode wall-clock budget.
+- Final verification passed 238 focused tests, the complete repository suite
+  (`878 passed, 9 skipped`), Python compilation, and `git diff --check`.
+  Browser checks passed at 1440/1024/414 widths. A real Work-level mechanical-
+  arm run proved simultaneous scoped states and independent terminal outcomes:
+  Part 2 wall-clock exhaustion, Part 3 provider failure, and Part 5 policy
+  blocking, with sibling progress and all accepted pointers preserved. The
+  trial also found and closed a final eligibility gap so an already-blocked
+  active Attempt is no longer returned to a later runnable frontier.
+
+No Episode or provider limit was increased. The wall-clock guard is currently
+cooperative at provider/tool boundaries rather than a hard interrupt, so a
+single in-flight provider request can return after the nominal limit before the
+Episode records the exact timeout. Local CAD execution on this machine still
+reports `Needs setup`; that is the next CAD capability blocker, not a reason to
+broaden this runtime milestone.
 
 ## Semantic Workflow Map visual correction — implemented and browser verified
 

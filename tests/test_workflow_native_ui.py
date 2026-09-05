@@ -272,6 +272,28 @@ def test_canonical_part_recovery_maps_start_new_attempt_to_existing_retry_comman
     assert recovery == durable_recovery
 
 
+def test_canonical_part_retry_also_requires_a_new_child_attempt():
+    interaction = project_canonical_interaction(
+        work_id="owner_fixture",
+        work_design={"status": "completed"},
+        parts=[{
+            "part_job_id": "camera_cradle",
+            "name": "Camera Cradle",
+            "state": "design",
+            "latest_attempt_run_id": "camera_attempt_1",
+        }],
+        current_result=None,
+        recovery={
+            "part_job_id": "camera_cradle",
+            "run_id": "camera_attempt_1",
+            "recommended_action": {"key": "retry_agent", "label": "Retry"},
+        },
+        language="en",
+    )
+
+    assert interaction["work"]["primary_action"]["recovery_mode"] == "new_attempt"
+
+
 def test_scoped_recovery_command_is_not_replaced_by_sibling_or_generic_part_authority():
     interaction = _workflow_node_interaction(
         {

@@ -690,6 +690,13 @@ def _workbench_part_jobs(
             }
             for item in references
         )
+        attempt_blocked = any(
+            item.get("run_id") == latest_run_id
+            and item.get("part_job_id") == part_id
+            and item.get("validation_status") == "blocked"
+            and item.get("checkpoint") in {"failure_diagnostic", "product_design_routing"}
+            for item in references
+        ) and not bool(latest_result_id)
         jobs.append(
             {
                 "part_job_id": part_id,
@@ -699,6 +706,7 @@ def _workbench_part_jobs(
                 "latest_attempt_run_id": latest_run_id,
                 "latest_attempt_source": attempts[-1].get("source") if attempts else None,
                 "has_agent_progress": has_agent_progress,
+                "attempt_blocked": attempt_blocked,
                 "state": state,
                 "state_label": status_label(language, state),
                 "reviewable_result_id": latest_result_id,

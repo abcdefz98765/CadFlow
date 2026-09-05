@@ -3,9 +3,13 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
+import ai_native_cad.agents.tool_broker as tool_broker_module
 from ai_native_cad.agents import (
     MODEL_PROGRAM_TOOL,
     REQUIRED_MODEL_PROGRAM_CONTROLS,
@@ -76,6 +80,25 @@ class RaisingSandboxExecutor(FakeSandboxExecutor):
     def execute(self, request):
         self.calls += 1
         raise RuntimeError("C:\\secret\\executor details")
+
+
+class ConcurrencyTrackingSandboxExecutor(FakeSandboxExecutor):
+    def __init__(self, archive: bytes) -> None:
+        super().__init__(archive)
+        self.active = 0
+        self.max_active = 0
+        self._lock = threading.Lock()
+
+    def execute(self, request) -> SandboxExecutionResult:
+        with self._lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        try:
+            time.sleep(0.03)
+            return super().execute(request)
+        finally:
+            with self._lock:
+                self.active -= 1
 
 
 def _context(tmp_path: Path) -> ToolInvocationContext:
@@ -152,7 +175,9 @@ def _add(archive: tarfile.TarFile, name: str, value: bytes) -> None:
     archive.addfile(info, io.BytesIO(value))
 
 
-def test_attested_execution_persists_append_only_candidate_evidence(tmp_path) -> None:
+def test_attested_execution_persists_append_only_candidate_evidence(tmp_path, monkeypatch) -> None:
+    monotonic = iter([10.0, 10.25])
+    monkeypatch.setattr(tool_broker_module.time, "monotonic", lambda: next(monotonic))
     executor = FakeSandboxExecutor(_archive())
     broker = CadFlowToolBroker(sandbox_executor=executor)
 
@@ -167,6 +192,8 @@ def test_attested_execution_persists_append_only_candidate_evidence(tmp_path) ->
     assert observation.side_effect_started is True
     assert observation.execution_id
     assert observation.attestation_digest == executor.attestation.digest
+    assert observation.cad_execution_ms == 250
+    assert observation.as_dict()["cad_execution_ms"] == 250
     assert observation.output["reviewable"] is False
     assert observation.output["accepted"] is False
     assert observation.output["deliverable"] is False
@@ -177,6 +204,29 @@ def test_attested_execution_persists_append_only_candidate_evidence(tmp_path) ->
     assert (manifest_path.parent / "source.py").read_text(encoding="utf-8") == VALID_SOURCE
     assert "D:\\secret" not in (manifest_path.parent / "stdout.txt").read_text(encoding="utf-8")
     assert executor.calls == 1
+
+
+def test_cad_executor_is_single_flight_across_parallel_part_brokers(tmp_path) -> None:
+    executor = ConcurrencyTrackingSandboxExecutor(_archive())
+    brokers = [
+        CadFlowToolBroker(sandbox_executor=executor),
+        CadFlowToolBroker(sandbox_executor=executor),
+    ]
+
+    def invoke(index: int):
+        return brokers[index].invoke(
+            MODEL_PROGRAM_TOOL,
+            skill_id="model_program",
+            payload=_payload(candidate_id=f"candidate-{index}"),
+            context=_context(tmp_path / str(index)),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        observations = list(pool.map(invoke, range(2)))
+
+    assert all(item.success for item in observations)
+    assert executor.calls == 2
+    assert executor.max_active == 1
 
 
 def test_static_policy_rejection_has_zero_runtime_or_file_side_effect(tmp_path) -> None:
@@ -192,6 +242,7 @@ def test_static_policy_rejection_has_zero_runtime_or_file_side_effect(tmp_path) 
 
     assert observation.success is False
     assert observation.side_effect_started is False
+    assert observation.cad_execution_ms == 0
     assert executor.calls == 0
     assert not (tmp_path / "candidates").exists()
     assert "import os" not in json.dumps(observation.as_dict())

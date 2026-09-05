@@ -11,12 +11,34 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+import threading
 import time
 from typing import Any, Callable
 from urllib import error, request
 
 
 UrlOpen = Callable[..., Any]
+
+
+class _ThreadLocalTransportAccounting:
+    """Expose only this thread's completed HTTP-attempt count for one call."""
+
+    def _initialize_transport_accounting(self) -> None:
+        self._transport_accounting = threading.local()
+
+    def _begin_transport_call(self) -> None:
+        self._transport_accounting.attempt_count = 0
+
+    def _record_transport_attempt(self) -> None:
+        current = getattr(self._transport_accounting, "attempt_count", 0)
+        self._transport_accounting.attempt_count = max(0, int(current)) + 1
+
+    def consume_transport_attempt_count(self) -> int | None:
+        value = getattr(self._transport_accounting, "attempt_count", None)
+        self._transport_accounting.attempt_count = None
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        return max(0, value)
 
 
 @dataclass(frozen=True)
@@ -35,7 +57,7 @@ class JsonProviderEndpoint:
         return self.base_url.rstrip("/") + "/" + self.endpoint.strip("/")
 
 
-class OpenAICompatibleJsonContractClient:
+class OpenAICompatibleJsonContractClient(_ThreadLocalTransportAccounting):
     """OpenAI-compatible `/chat/completions` client.
 
     This is suitable for providers such as DeepSeek that expose an
@@ -54,6 +76,7 @@ class OpenAICompatibleJsonContractClient:
         self._endpoint = endpoint
         self._urlopen = urlopen or request.urlopen
         self._api_key = api_key
+        self._initialize_transport_accounting()
 
     @property
     def provider_identity(self) -> dict[str, Any]:
@@ -68,6 +91,7 @@ class OpenAICompatibleJsonContractClient:
         }
 
     def generate_json_contract(self, contract_request: dict[str, Any]) -> Any:
+        self._begin_transport_call()
         payload = {
             "model": self._endpoint.model,
             "messages": contract_request["messages"],
@@ -81,10 +105,11 @@ class OpenAICompatibleJsonContractClient:
             timeout_seconds=_request_timeout(contract_request, self._endpoint.timeout_seconds),
             max_retries=_request_retries(contract_request, self._endpoint.max_retries),
             api_key=self._api_key,
+            on_transport_attempt=self._record_transport_attempt,
         )
 
 
-class OpenAIResponsesJsonContractClient:
+class OpenAIResponsesJsonContractClient(_ThreadLocalTransportAccounting):
     """OpenAI Responses API client for JSON-contract generation."""
 
     def __init__(
@@ -99,6 +124,7 @@ class OpenAIResponsesJsonContractClient:
         self._endpoint = endpoint
         self._urlopen = urlopen or request.urlopen
         self._api_key = api_key
+        self._initialize_transport_accounting()
 
     @property
     def provider_identity(self) -> dict[str, Any]:
@@ -113,6 +139,7 @@ class OpenAIResponsesJsonContractClient:
         }
 
     def generate_json_contract(self, contract_request: dict[str, Any]) -> Any:
+        self._begin_transport_call()
         payload = {
             "model": self._endpoint.model,
             "input": [
@@ -130,6 +157,7 @@ class OpenAIResponsesJsonContractClient:
             timeout_seconds=_request_timeout(contract_request, self._endpoint.timeout_seconds),
             max_retries=_request_retries(contract_request, self._endpoint.max_retries),
             api_key=self._api_key,
+            on_transport_attempt=self._record_transport_attempt,
         )
 
 
@@ -237,6 +265,7 @@ def _post_json_with_bearer_auth(
     timeout_seconds: int,
     max_retries: int,
     api_key: str | None = None,
+    on_transport_attempt: Callable[[], None] | None = None,
 ) -> Any:
     api_key = api_key or os.environ.get(endpoint.api_key_env_var)
     if not api_key:
@@ -252,6 +281,8 @@ def _post_json_with_bearer_auth(
     for attempt in range(attempts):
         http_request = request.Request(endpoint.url, data=body, headers=headers, method="POST")
         try:
+            if on_transport_attempt is not None:
+                on_transport_attempt()
             with urlopen(http_request, timeout=timeout_seconds) as response:
                 response_body = response.read().decode("utf-8")
                 parsed = json.loads(response_body)

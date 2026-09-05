@@ -347,9 +347,14 @@ def test_contract_repair_exhaustion_routes_through_work_orchestrator(tmp_path: P
 
     diagnostic = result["episode"]["failure_diagnostic"]
     assert result["episode"]["status"] == "safely_blocked"
-    assert diagnostic["contract_repair_exhausted"] is True
-    assert diagnostic["contract_repair_turn_count"] == 2
-    assert diagnostic["requested_capability_or_context"] == "parameters"
+    assert result["episode"]["stop_reason"] == "budget_exhausted"
+    assert diagnostic == {
+        "reason_code": "budget_exhausted.contract_repair_turns",
+        "budget_kind": "contract_repair_turns",
+        "used": 2,
+        "limit": 2,
+        "agent_steps": 3,
+    }
     assert len(client.requests) == 3
     manifest = backend._read_work_manifest(work_id)
     assert manifest["part_jobs"] == []

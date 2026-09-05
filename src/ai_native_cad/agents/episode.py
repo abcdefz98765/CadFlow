@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -558,6 +559,12 @@ class AgentEpisodeResult:
     failure_diagnostic: dict[str, Any] | None = None
     contract_repair_turn_count: int = 0
     contract_repair_exhausted: bool = False
+    elapsed_total_ms: int = 0
+    provider_ms: int = 0
+    tool_ms: int = 0
+    cad_execution_ms: int = 0
+    provider_logical_request_count: int = 0
+    provider_transport_attempt_count: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -587,6 +594,12 @@ class AgentEpisodeResult:
             "failure_diagnostic": deepcopy(self.failure_diagnostic),
             "contract_repair_turn_count": self.contract_repair_turn_count,
             "contract_repair_exhausted": self.contract_repair_exhausted,
+            "elapsed_total_ms": self.elapsed_total_ms,
+            "provider_ms": self.provider_ms,
+            "tool_ms": self.tool_ms,
+            "cad_execution_ms": self.cad_execution_ms,
+            "provider_logical_request_count": self.provider_logical_request_count,
+            "provider_transport_attempt_count": self.provider_transport_attempt_count,
         }
 
 
@@ -609,6 +622,12 @@ class WorkDesignEpisodeResult:
     capability_mode: str = "provider_selected_work_design"
     contract_repair_turn_count: int = 0
     contract_repair_exhausted: bool = False
+    elapsed_total_ms: int = 0
+    provider_ms: int = 0
+    tool_ms: int = 0
+    cad_execution_ms: int = 0
+    provider_logical_request_count: int = 0
+    provider_transport_attempt_count: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -628,7 +647,59 @@ class WorkDesignEpisodeResult:
             "failure_diagnostic": deepcopy(self.failure_diagnostic),
             "contract_repair_turn_count": self.contract_repair_turn_count,
             "contract_repair_exhausted": self.contract_repair_exhausted,
+            "elapsed_total_ms": self.elapsed_total_ms,
+            "provider_ms": self.provider_ms,
+            "tool_ms": self.tool_ms,
+            "cad_execution_ms": self.cad_execution_ms,
+            "provider_logical_request_count": self.provider_logical_request_count,
+            "provider_transport_attempt_count": self.provider_transport_attempt_count,
         }
+
+
+def _elapsed_seconds(started: float) -> float:
+    """Return a finite, non-negative monotonic duration for durable evidence."""
+
+    now = time.monotonic()
+    if not math.isfinite(started) or not math.isfinite(now):
+        return 0.0
+    return max(0.0, now - started)
+
+
+def _elapsed_ms(started: float) -> int:
+    """Return a finite, non-negative monotonic duration in milliseconds."""
+
+    return max(0, int(_elapsed_seconds(started) * 1000))
+
+
+def _budget_exhaustion_diagnostic(
+    *,
+    budget_kind: str,
+    used: int | float,
+    limit: int | float,
+    agent_steps: int,
+) -> dict[str, Any]:
+    """Small, stable evidence for a CadFlow-enforced budget boundary."""
+
+    return {
+        "reason_code": f"budget_exhausted.{budget_kind}",
+        "budget_kind": budget_kind,
+        "used": used,
+        "limit": limit,
+        "agent_steps": agent_steps,
+    }
+
+
+def _consume_provider_transport_attempt_count(supplier: Any) -> int | None:
+    """Consume the current provider call's safe transport count, if available."""
+
+    adapter = getattr(supplier, "adapter", None)
+    consume = getattr(adapter, "consume_provider_transport_attempt_count", None)
+    if not callable(consume):
+        return None
+    value = consume()
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return max(0, value)
 
 
 class ActionSupplier(Protocol):
@@ -866,6 +937,9 @@ class EpisodeOrchestrator:
         episode_id = uuid4().hex
         steps = context_requests = context_bytes = submissions = repairs = 0
         source_submissions = executions = inspections = 0
+        provider_ms = tool_ms = cad_execution_ms = 0
+        provider_logical_request_count = 0
+        provider_transport_attempt_count: int | None = None
         draft: dict[str, Any] | None = None
         feedback: dict[str, Any] | None = None
         current_program: dict[str, Any] | None = None
@@ -929,6 +1003,12 @@ class EpisodeOrchestrator:
                 ),
                 contract_repair_turn_count=contract_repair_turns,
                 contract_repair_exhausted=contract_repair_exhausted,
+                elapsed_total_ms=_elapsed_ms(started),
+                provider_ms=max(0, provider_ms),
+                tool_ms=max(0, tool_ms),
+                cad_execution_ms=max(0, cad_execution_ms),
+                provider_logical_request_count=provider_logical_request_count,
+                provider_transport_attempt_count=provider_transport_attempt_count,
             )
             self.writer.finish(result)
             return result
@@ -970,9 +1050,12 @@ class EpisodeOrchestrator:
             if exhausted:
                 contract_repair_exhausted = True
                 return finish(
-                    StopReason.POLICY_BLOCKED,
-                    failure_diagnostic=_contract_repair_exhausted_diagnostic(
-                        rejection, contract_repair_turns
+                    StopReason.BUDGET_EXHAUSTED,
+                    failure_diagnostic=_budget_exhaustion_diagnostic(
+                        budget_kind="contract_repair_turns",
+                        used=contract_repair_turns,
+                        limit=self.budget.max_contract_repair_turns,
+                        agent_steps=steps,
                     ),
                 )
             contract_repair_turns += 1
@@ -981,12 +1064,13 @@ class EpisodeOrchestrator:
             return None
 
         while True:
-            if time.monotonic() - started >= self.budget.timeout_seconds:
+            elapsed_seconds = _elapsed_seconds(started)
+            if elapsed_seconds >= self.budget.timeout_seconds:
                 self.writer.event({"step": steps, "observation": "timeout"})
-                return finish(StopReason.BUDGET_EXHAUSTED)
+                return finish(StopReason.BUDGET_EXHAUSTED, failure_diagnostic=_budget_exhaustion_diagnostic(budget_kind="wall_clock_seconds", used=round(elapsed_seconds, 3), limit=self.budget.timeout_seconds, agent_steps=steps))
             if steps >= self.budget.max_steps:
                 self.writer.event({"step": steps, "observation": "step_budget_exhausted"})
-                return finish(StopReason.BUDGET_EXHAUSTED)
+                return finish(StopReason.BUDGET_EXHAUSTED, failure_diagnostic=_budget_exhaustion_diagnostic(budget_kind="agent_steps", used=steps, limit=self.budget.max_steps, agent_steps=steps))
 
             provider_state = {
                 "state": state,
@@ -1016,9 +1100,19 @@ class EpisodeOrchestrator:
                     else None
                 ),
             }
+            provider_started = time.monotonic()
+            provider_logical_request_count += 1
             try:
                 supplied_action = supplier(provider_state)
             except Exception as exc:
+                provider_ms += _elapsed_ms(provider_started)
+                observed_attempts = _consume_provider_transport_attempt_count(
+                    supplier
+                )
+                if observed_attempts is not None:
+                    provider_transport_attempt_count = (
+                        provider_transport_attempt_count or 0
+                    ) + observed_attempts
                 self.writer.event(
                     {
                         "event_type": "system_observation",
@@ -1028,8 +1122,33 @@ class EpisodeOrchestrator:
                     }
                 )
                 return finish(StopReason.PROVIDER_FAILURE)
+            provider_ms += _elapsed_ms(provider_started)
+            observed_attempts = _consume_provider_transport_attempt_count(supplier)
+            if observed_attempts is not None:
+                provider_transport_attempt_count = (
+                    provider_transport_attempt_count or 0
+                ) + observed_attempts
             self.writer.provider_response(steps + 1, supplied_action)
             steps += 1
+            elapsed_seconds = _elapsed_seconds(started)
+            if elapsed_seconds >= self.budget.timeout_seconds:
+                self.writer.event(
+                    {
+                        "step": steps,
+                        "observation": "timeout",
+                        "boundary": "post_provider_return",
+                        "elapsed_seconds": round(elapsed_seconds, 3),
+                    }
+                )
+                return finish(
+                    StopReason.BUDGET_EXHAUSTED,
+                    failure_diagnostic=_budget_exhaustion_diagnostic(
+                        budget_kind="wall_clock_seconds",
+                        used=round(elapsed_seconds, 3),
+                        limit=self.budget.timeout_seconds,
+                        agent_steps=steps,
+                    ),
+                )
             try:
                 action = AgentAction.from_value(supplied_action)
                 if action.action not in self.capabilities.allowed_actions:
@@ -1053,7 +1172,7 @@ class EpisodeOrchestrator:
             if action.action == "request_context":
                 if context_requests >= self.budget.max_context_requests:
                     self.writer.event({"step": steps, "action": action.action, "context_key": action.context_key, "reason": action.reason, "observation": "context_budget_exhausted"})
-                    return finish(StopReason.BUDGET_EXHAUSTED)
+                    return finish(StopReason.BUDGET_EXHAUSTED, failure_diagnostic=_budget_exhaustion_diagnostic(budget_kind="context_requests", used=context_requests, limit=self.budget.max_context_requests, agent_steps=steps))
                 if not action.context_key:
                     rejection = EpisodeContractError(
                         "request_context requires context_key",
@@ -1081,7 +1200,7 @@ class EpisodeOrchestrator:
                             "observation": "context_byte_budget_exhausted",
                         }
                     )
-                    return finish(StopReason.BUDGET_EXHAUSTED)
+                    return finish(StopReason.BUDGET_EXHAUSTED, failure_diagnostic=_budget_exhaustion_diagnostic(budget_kind="context_bytes", used=context_bytes + item_bytes, limit=self.budget.max_context_bytes, agent_steps=steps))
                 context_requests += 1
                 context_bytes += item_bytes
                 self.writer.add_context(item)
@@ -1098,12 +1217,12 @@ class EpisodeOrchestrator:
             }:
                 if submissions >= self.budget.max_contract_submissions:
                     self.writer.event({"step": steps, "action": action.action, "observation": "submission_budget_exhausted"})
-                    return finish(StopReason.BUDGET_EXHAUSTED)
+                    return finish(StopReason.BUDGET_EXHAUSTED, failure_diagnostic=_budget_exhaustion_diagnostic(budget_kind="contract_submissions", used=submissions, limit=self.budget.max_contract_submissions, agent_steps=steps))
                 is_repair = action.action in {"patch_contract", "repair_contract"}
                 if is_repair:
                     if repairs >= self.budget.max_repair_attempts:
                         self.writer.event({"step": steps, "action": action.action, "observation": "repair_budget_exhausted"})
-                        return finish(StopReason.BUDGET_EXHAUSTED)
+                        return finish(StopReason.BUDGET_EXHAUSTED, failure_diagnostic=_budget_exhaustion_diagnostic(budget_kind="repair_attempts", used=repairs, limit=self.budget.max_repair_attempts, agent_steps=steps))
                     repairs += 1
                 if (
                     action.contract_type not in self.capabilities.allowed_contract_types
@@ -1150,6 +1269,7 @@ class EpisodeOrchestrator:
                     return finish(
                         StopReason.BUDGET_EXHAUSTED,
                         result_kind="model_program",
+                        failure_diagnostic=_budget_exhaustion_diagnostic(budget_kind="source_submissions", used=source_submissions, limit=self.budget.max_source_submissions, agent_steps=steps),
                     )
                 is_repair = action.action == "patch_model_program"
                 if action.action == "create_model_program" and current_program is not None:
@@ -1185,6 +1305,7 @@ class EpisodeOrchestrator:
                         return finish(
                             StopReason.BUDGET_EXHAUSTED,
                             result_kind="model_program",
+                            failure_diagnostic=_budget_exhaustion_diagnostic(budget_kind="repair_attempts", used=repairs, limit=self.budget.max_repair_attempts, agent_steps=steps),
                         )
                     repairs += 1
                 assert action.model_program is not None
@@ -1246,6 +1367,7 @@ class EpisodeOrchestrator:
                     return finish(
                         StopReason.BUDGET_EXHAUSTED,
                         result_kind="model_program",
+                        failure_diagnostic=_budget_exhaustion_diagnostic(budget_kind="cad_executions", used=executions, limit=self.budget.max_executions, agent_steps=steps),
                     )
                 run_id = str(
                     self.context_envelope.workflow.get("active_leaf_run_id")
@@ -1269,6 +1391,7 @@ class EpisodeOrchestrator:
                         rejected_action=action.action,
                         human_safe_detail="CadFlow could not bind the execution request to safe Work and Run identity.",
                     ) from exc
+                tool_started = time.monotonic()
                 observation = self.tool_broker.invoke(
                     MODEL_PROGRAM_TOOL,
                     skill_id="model_program",
@@ -1281,6 +1404,14 @@ class EpisodeOrchestrator:
                     },
                     context=invocation_context,
                 )
+                tool_elapsed = _elapsed_ms(tool_started)
+                tool_ms += tool_elapsed
+                observed_cad_ms = observation.cad_execution_ms
+                if isinstance(observed_cad_ms, bool) or not isinstance(
+                    observed_cad_ms, int
+                ):
+                    observed_cad_ms = 0
+                cad_execution_ms += min(tool_elapsed, max(0, observed_cad_ms))
                 side_effect_started = (
                     side_effect_started or observation.side_effect_started
                 )
@@ -1346,6 +1477,7 @@ class EpisodeOrchestrator:
                     return finish(
                         StopReason.BUDGET_EXHAUSTED,
                         result_kind="model_program",
+                        failure_diagnostic=_budget_exhaustion_diagnostic(budget_kind="observation_inspections", used=inspections, limit=self.budget.max_observation_inspections, agent_steps=steps),
                     )
                 inspections += 1
                 latest_observation_inspected = True
@@ -1375,6 +1507,7 @@ class EpisodeOrchestrator:
                         reason_code="structured_contract_missing",
                         rejected_action=action.action,
                     )
+                tool_started = time.monotonic()
                 observation = self.tool_broker.invoke(
                     STRUCTURED_CONTRACT_TOOL,
                     skill_id=self.capabilities.skill_id,
@@ -1383,6 +1516,7 @@ class EpisodeOrchestrator:
                         "contract": draft,
                     },
                 )
+                tool_ms += _elapsed_ms(tool_started)
                 side_effect_started = (
                     side_effect_started or observation.side_effect_started
                 )
@@ -1875,6 +2009,9 @@ def run_work_design_episode(
     episode_id = uuid4().hex
     started = time.monotonic()
     steps = context_requests = context_bytes = proposals = 0
+    provider_ms = tool_ms = cad_execution_ms = 0
+    provider_logical_request_count = 0
+    provider_transport_attempt_count: int | None = None
     draft: dict[str, Any] | None = None
     supplied_context: list[dict[str, Any]] = []
     context_manifest: list[dict[str, Any]] = []
@@ -1919,6 +2056,12 @@ def run_work_design_episode(
             skill_version=skill.version,
             contract_repair_turn_count=contract_repair_turns,
             contract_repair_exhausted=contract_repair_exhausted,
+            elapsed_total_ms=_elapsed_ms(started),
+            provider_ms=max(0, provider_ms),
+            tool_ms=max(0, tool_ms),
+            cad_execution_ms=max(0, cad_execution_ms),
+            provider_logical_request_count=provider_logical_request_count,
+            provider_transport_attempt_count=provider_transport_attempt_count,
         )
         knowledge_manifest = [
             {
@@ -1994,9 +2137,12 @@ def run_work_design_episode(
         if exhausted:
             contract_repair_exhausted = True
             return finish(
-                StopReason.POLICY_BLOCKED,
-                failure_diagnostic=_contract_repair_exhausted_diagnostic(
-                    rejection, contract_repair_turns
+                StopReason.BUDGET_EXHAUSTED,
+                failure_diagnostic=_budget_exhaustion_diagnostic(
+                    budget_kind="contract_repair_turns",
+                    used=contract_repair_turns,
+                    limit=episode_budget.max_contract_repair_turns,
+                    agent_steps=steps,
                 ),
             )
         contract_repair_turns += 1
@@ -2031,7 +2177,15 @@ def run_work_design_episode(
                     "limit_context_bytes": episode_budget.max_context_bytes,
                 }
             )
-            return finish(StopReason.BUDGET_EXHAUSTED)
+            return finish(
+                StopReason.BUDGET_EXHAUSTED,
+                failure_diagnostic=_budget_exhaustion_diagnostic(
+                    budget_kind="context_bytes",
+                    used=context_bytes + encoded_size,
+                    limit=episode_budget.max_context_bytes,
+                    agent_steps=steps,
+                ),
+            )
         context_bytes += encoded_size
         entry = {**item.manifest_entry(), "content_byte_count": encoded_size}
         context_manifest.append(entry)
@@ -2039,7 +2193,7 @@ def run_work_design_episode(
 
     state = "created"
     while True:
-        elapsed_seconds = time.monotonic() - started
+        elapsed_seconds = _elapsed_seconds(started)
         if elapsed_seconds >= episode_budget.timeout_seconds:
             events.append(
                 {
@@ -2051,7 +2205,15 @@ def run_work_design_episode(
                     "limit_seconds": episode_budget.timeout_seconds,
                 }
             )
-            return finish(StopReason.BUDGET_EXHAUSTED)
+            return finish(
+                StopReason.BUDGET_EXHAUSTED,
+                failure_diagnostic=_budget_exhaustion_diagnostic(
+                    budget_kind="wall_clock_seconds",
+                    used=round(elapsed_seconds, 3),
+                    limit=episode_budget.timeout_seconds,
+                    agent_steps=steps,
+                ),
+            )
         if steps >= episode_budget.max_steps:
             events.append(
                 {
@@ -2063,7 +2225,15 @@ def run_work_design_episode(
                     "limit_steps": episode_budget.max_steps,
                 }
             )
-            return finish(StopReason.BUDGET_EXHAUSTED)
+            return finish(
+                StopReason.BUDGET_EXHAUSTED,
+                failure_diagnostic=_budget_exhaustion_diagnostic(
+                    budget_kind="agent_steps",
+                    used=steps,
+                    limit=episode_budget.max_steps,
+                    agent_steps=steps,
+                ),
+            )
         provider_state = {
             "state": state,
             "context_envelope": envelope.as_dict(),
@@ -2071,9 +2241,17 @@ def run_work_design_episode(
             "work_design": draft,
             "action_contract_feedback": contract_feedback,
         }
+        provider_started = time.monotonic()
+        provider_logical_request_count += 1
         try:
             supplied_action = supplier(provider_state)
         except Exception as exc:
+            provider_ms += _elapsed_ms(provider_started)
+            observed_attempts = _consume_provider_transport_attempt_count(supplier)
+            if observed_attempts is not None:
+                provider_transport_attempt_count = (
+                    provider_transport_attempt_count or 0
+                ) + observed_attempts
             events.append(
                 {
                     "event_type": "system_observation",
@@ -2083,9 +2261,15 @@ def run_work_design_episode(
                 }
             )
             return finish(StopReason.PROVIDER_FAILURE)
+        provider_ms += _elapsed_ms(provider_started)
+        observed_attempts = _consume_provider_transport_attempt_count(supplier)
+        if observed_attempts is not None:
+            provider_transport_attempt_count = (
+                provider_transport_attempt_count or 0
+            ) + observed_attempts
         persist_response(steps + 1, supplied_action)
         steps += 1
-        elapsed_seconds = time.monotonic() - started
+        elapsed_seconds = _elapsed_seconds(started)
         if elapsed_seconds >= episode_budget.timeout_seconds:
             events.append(
                 {
@@ -2098,7 +2282,15 @@ def run_work_design_episode(
                     "boundary": "post_provider_return",
                 }
             )
-            return finish(StopReason.BUDGET_EXHAUSTED)
+            return finish(
+                StopReason.BUDGET_EXHAUSTED,
+                failure_diagnostic=_budget_exhaustion_diagnostic(
+                    budget_kind="wall_clock_seconds",
+                    used=round(elapsed_seconds, 3),
+                    limit=episode_budget.timeout_seconds,
+                    agent_steps=steps,
+                ),
+            )
         try:
             action = AgentAction.from_value(supplied_action)
             if action.action not in skill.allowed_actions:
@@ -2120,7 +2312,15 @@ def run_work_design_episode(
         contract_feedback = None
         if action.action == "request_context":
             if context_requests >= episode_budget.max_context_requests:
-                return finish(StopReason.BUDGET_EXHAUSTED)
+                return finish(
+                    StopReason.BUDGET_EXHAUSTED,
+                    failure_diagnostic=_budget_exhaustion_diagnostic(
+                        budget_kind="context_requests",
+                        used=context_requests,
+                        limit=episode_budget.max_context_requests,
+                        agent_steps=steps,
+                    ),
+                )
             if not action.context_key:
                 rejection = EpisodeContractError(
                     "request_context requires context_key",
@@ -2138,7 +2338,15 @@ def run_work_design_episode(
             )
             encoded_size = len(json.dumps(item.content, sort_keys=True).encode("utf-8"))
             if context_bytes + encoded_size > episode_budget.max_context_bytes:
-                return finish(StopReason.BUDGET_EXHAUSTED)
+                return finish(
+                    StopReason.BUDGET_EXHAUSTED,
+                    failure_diagnostic=_budget_exhaustion_diagnostic(
+                        budget_kind="context_bytes",
+                        used=context_bytes + encoded_size,
+                        limit=episode_budget.max_context_bytes,
+                        agent_steps=steps,
+                    ),
+                )
             context_requests += 1
             context_bytes += encoded_size
             entry = {**item.manifest_entry(), "content_byte_count": encoded_size}
@@ -2158,7 +2366,15 @@ def run_work_design_episode(
             continue
         if action.action == "propose_work_design":
             if proposals >= episode_budget.max_contract_submissions:
-                return finish(StopReason.BUDGET_EXHAUSTED)
+                return finish(
+                    StopReason.BUDGET_EXHAUSTED,
+                    failure_diagnostic=_budget_exhaustion_diagnostic(
+                        budget_kind="contract_submissions",
+                        used=proposals,
+                        limit=episode_budget.max_contract_submissions,
+                        agent_steps=steps,
+                    ),
+                )
             assert action.work_design is not None
             try:
                 draft = validate_work_design_proposal(action.work_design)
@@ -2880,20 +3096,6 @@ def _contract_repair_feedback(
         if expected_fields is not None:
             feedback["expected_fields"] = expected_fields
     return feedback
-
-
-def _contract_repair_exhausted_diagnostic(
-    rejection: AgentActionRejection,
-    turn_count: int,
-) -> dict[str, Any]:
-    diagnostic = deepcopy(rejection.failure_diagnostic)
-    diagnostic.update(
-        {
-            "contract_repair_exhausted": True,
-            "contract_repair_turn_count": turn_count,
-        }
-    )
-    return diagnostic
 
 
 def _safe_provider_identity(value: dict[str, Any]) -> dict[str, Any]:

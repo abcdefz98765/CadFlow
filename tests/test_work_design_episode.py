@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import threading
 from copy import deepcopy
 
 import pytest
 
 from ai_native_cad.agents import JsonContractAgentAdapter
+from ai_native_cad.domain.records import create_artifact_reference
 from ai_native_cad.orchestration import (
     DesignEpisodeArtifact,
     DesignPartEpisodeOutcome,
@@ -56,6 +58,56 @@ class ForgedDesignPort:
                 ),
             ),
         )
+
+
+class ConcurrentDesignPort:
+    """Controlled Design port used to prove provider work happens outside commits."""
+
+    def __init__(self, outcomes: dict[str, DesignPartEpisodeOutcome]) -> None:
+        self.outcomes = outcomes
+        self.started = threading.Event()
+        self.releases = {
+            request_id: threading.Event() for request_id in outcomes
+        }
+        self._lock = threading.Lock()
+        self.requests = []
+
+    def run_part_design_episode(self, request):
+        with self._lock:
+            self.requests.append(request)
+            if len(self.requests) == len(self.outcomes):
+                self.started.set()
+        if not self.releases[request.request_id].wait(timeout=5):
+            raise RuntimeError("test Design port was not released")
+        return self.outcomes[request.request_id]
+
+
+def _episode_outcome(
+    request_id: str,
+    *,
+    stop_reason: str,
+    validated: bool,
+) -> DesignPartEpisodeOutcome:
+    status = "completed" if validated else "safely_blocked"
+    return DesignPartEpisodeOutcome(
+        request_id=request_id,
+        episode_id=f"episode_{request_id}",
+        status=status,
+        stop_reason=stop_reason,
+        capability_mode="concurrency_fixture",
+        validated=validated,
+        artifacts=(
+            DesignEpisodeArtifact(
+                artifact_id=f"episode:{request_id}:route",
+                relative_path=(
+                    f"episodes/design_part/{request_id}/product_route_result.json"
+                ),
+                checkpoint="product_design_routing",
+                trust_role="candidate" if validated else "diagnostic",
+                validation_status="passed" if validated else stop_reason,
+            ),
+        ),
+    )
 
 
 def _valid_contract() -> dict:
@@ -441,3 +493,308 @@ def test_work_orchestrator_rejects_forged_design_port_identity(
         )
 
     assert backend._work_manifest_path("clamp_work").read_bytes() == manifest_before
+
+
+def _concurrent_orchestrator(tmp_path, port):
+    backend = _prepared_backend(tmp_path)
+    backend.create_work_part_attempt(
+        "clamp_work",
+        "base",
+        run_id="base_attempt_1",
+    )
+    orchestrator = WorkOrchestrator(
+        WorkflowConsoleWorkStore(backend),
+        WorkflowConsoleDeterministicCompatibility(backend),
+        port,
+    )
+    accepted = orchestrator.accept_part_result(
+        "clamp_work",
+        part_job_id="base",
+        result_id="part_result:base:accepted",
+        attempt_run_id="base_attempt_1",
+        result_run_id="base_attempt_1",
+        review_id="review_base_001",
+        artifact_references=[
+            create_artifact_reference(
+                artifact_id="artifact:base:accepted",
+                work_id="clamp_work",
+                run_id="base_attempt_1",
+                part_job_id="base",
+                relative_path="accepted_model.step",
+                phase="build_evaluate",
+                checkpoint="reviewable_result",
+                trust_role="reviewable_result",
+                validation_status="passed",
+            )
+        ],
+    )
+    return backend, orchestrator, deepcopy(accepted["accepted_part_result"])
+
+
+@pytest.mark.parametrize(
+    ("first_request", "second_request"),
+    [("budget_request", "success_request"), ("success_request", "budget_request")],
+)
+def test_concurrent_part_design_commits_keep_sibling_evidence_and_acceptance(
+    tmp_path,
+    first_request,
+    second_request,
+) -> None:
+    port = ConcurrentDesignPort(
+        {
+            "success_request": _episode_outcome(
+                "success_request",
+                stop_reason="completed",
+                validated=True,
+            ),
+            "budget_request": _episode_outcome(
+                "budget_request",
+                stop_reason="budget_exhausted",
+                validated=False,
+            ),
+        }
+    )
+    backend, orchestrator, accepted_before = _concurrent_orchestrator(tmp_path, port)
+    results = {}
+    errors = []
+
+    def run_episode(request_id, part_job_id):
+        try:
+            results[request_id] = orchestrator.run_part_design_episode(
+                "clamp_work",
+                part_job_id,
+                request_id=request_id,
+            )
+        except BaseException as error:  # pragma: no cover - test assertion below
+            errors.append(error)
+
+    threads = {
+        "success_request": threading.Thread(
+            target=run_episode,
+            args=("success_request", "clamp"),
+        ),
+        "budget_request": threading.Thread(
+            target=run_episode,
+            args=("budget_request", "base"),
+        ),
+    }
+    for thread in threads.values():
+        thread.start()
+    assert port.started.wait(timeout=5)
+
+    port.releases[first_request].set()
+    threads[first_request].join(timeout=5)
+    assert not threads[first_request].is_alive()
+    port.releases[second_request].set()
+    for thread in threads.values():
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+    assert errors == []
+    assert results["success_request"]["orchestration"]["status"] == "completed"
+    assert results["budget_request"]["orchestration"]["status"] == "blocked"
+    manifest = backend._read_work_manifest("clamp_work")
+    assert manifest["accepted_part_results"]["base"] == accepted_before
+    assert {
+        item["artifact_id"]
+        for item in manifest["artifact_references"]
+        if item["artifact_id"] in {
+            "episode:success_request:route",
+            "episode:budget_request:route",
+        }
+    } == {
+        "episode:success_request:route",
+        "episode:budget_request:route",
+    }
+
+
+def test_acceptance_and_sibling_episode_merge_share_one_work_commit_guard(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    port = ConcurrentDesignPort({
+        "success_request": _episode_outcome(
+            "success_request",
+            stop_reason="completed",
+            validated=True,
+        ),
+    })
+    backend, orchestrator, _accepted_before = _concurrent_orchestrator(tmp_path, port)
+    acceptance_at_write = threading.Event()
+    release_acceptance = threading.Event()
+    episode_done = threading.Event()
+    errors = []
+    original_write = orchestrator.store.write_work
+
+    def controlled_write(work_id, value):
+        if threading.current_thread().name == "accept-thread":
+            acceptance_at_write.set()
+            if not release_acceptance.wait(timeout=5):
+                raise RuntimeError("test acceptance write was not released")
+        original_write(work_id, value)
+
+    monkeypatch.setattr(orchestrator.store, "write_work", controlled_write)
+
+    def run_episode():
+        try:
+            orchestrator.run_part_design_episode(
+                "clamp_work",
+                "clamp",
+                request_id="success_request",
+            )
+        except BaseException as error:  # pragma: no cover - asserted below
+            errors.append(error)
+        finally:
+            episode_done.set()
+
+    def accept_new_result():
+        try:
+            orchestrator.accept_part_result(
+                "clamp_work",
+                part_job_id="base",
+                result_id="part_result:base:second",
+                attempt_run_id="base_attempt_1",
+                result_run_id="base_attempt_1",
+                review_id="review_base_002",
+                artifact_references=[create_artifact_reference(
+                    artifact_id="artifact:base:second",
+                    work_id="clamp_work",
+                    run_id="base_attempt_1",
+                    part_job_id="base",
+                    relative_path="second_model.step",
+                    phase="build_evaluate",
+                    checkpoint="reviewable_result",
+                    trust_role="reviewable_result",
+                    validation_status="passed",
+                )],
+            )
+        except BaseException as error:  # pragma: no cover - asserted below
+            errors.append(error)
+
+    episode_thread = threading.Thread(target=run_episode, name="episode-thread")
+    acceptance_thread = threading.Thread(target=accept_new_result, name="accept-thread")
+    episode_thread.start()
+    assert port.started.wait(timeout=5)
+    acceptance_thread.start()
+    assert acceptance_at_write.wait(timeout=5)
+    port.releases["success_request"].set()
+    assert not episode_done.wait(timeout=0.1)
+    release_acceptance.set()
+    acceptance_thread.join(timeout=5)
+    episode_thread.join(timeout=5)
+
+    assert errors == []
+    assert not acceptance_thread.is_alive()
+    assert not episode_thread.is_alive()
+    manifest = backend._read_work_manifest("clamp_work")
+    assert manifest["accepted_part_results"]["base"]["result_id"] == (
+        "part_result:base:second"
+    )
+    assert {
+        item["artifact_id"] for item in manifest["artifact_references"]
+    } >= {"artifact:base:second", "episode:success_request:route"}
+
+
+def test_user_input_block_commit_is_isolated_from_sibling_success(tmp_path) -> None:
+    port = ConcurrentDesignPort(
+        {
+            "success_request": _episode_outcome(
+                "success_request",
+                stop_reason="completed",
+                validated=True,
+            ),
+            "question_request": _episode_outcome(
+                "question_request",
+                stop_reason="user_input_required",
+                validated=False,
+            ),
+        }
+    )
+    backend, orchestrator, accepted_before = _concurrent_orchestrator(tmp_path, port)
+    results = {}
+    errors = []
+
+    def run_episode(request_id, part_job_id):
+        try:
+            results[request_id] = orchestrator.run_part_design_episode(
+                "clamp_work",
+                part_job_id,
+                request_id=request_id,
+            )
+        except BaseException as error:  # pragma: no cover - test assertion below
+            errors.append(error)
+
+    success = threading.Thread(
+        target=run_episode,
+        args=("success_request", "clamp"),
+    )
+    question = threading.Thread(
+        target=run_episode,
+        args=("question_request", "base"),
+    )
+    success.start()
+    question.start()
+    assert port.started.wait(timeout=5)
+
+    port.releases["question_request"].set()
+    question.join(timeout=5)
+    assert not question.is_alive()
+    port.releases["success_request"].set()
+    success.join(timeout=5)
+    assert not success.is_alive()
+
+    assert errors == []
+    assert results["question_request"]["orchestration"]["status"] == "blocked"
+    assert (
+        results["question_request"]["orchestration"]["next_action"]
+        == "Answer the focused question, then start a new Design Episode request"
+    )
+    manifest = backend._read_work_manifest("clamp_work")
+    assert manifest["accepted_part_results"]["base"] == accepted_before
+    assert {
+        item["artifact_id"]
+        for item in manifest["artifact_references"]
+        if item["artifact_id"] in {
+            "episode:success_request:route",
+            "episode:question_request:route",
+        }
+    } == {
+        "episode:success_request:route",
+        "episode:question_request:route",
+    }
+
+
+def test_concurrent_attempt_creation_allocates_distinct_owned_child_runs(tmp_path) -> None:
+    backend = _prepared_backend(tmp_path)
+    orchestrator = backend._work_orchestrator()
+    results = []
+    errors = []
+    start = threading.Barrier(3)
+
+    def create_attempt():
+        try:
+            start.wait(timeout=5)
+            results.append(
+                orchestrator.create_part_attempt("clamp_work", "clamp")
+            )
+        except BaseException as error:  # pragma: no cover - test assertion below
+            errors.append(error)
+
+    threads = [threading.Thread(target=create_attempt) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+    assert errors == []
+    new_run_ids = [item["run"]["run_id"] for item in results]
+    assert len(new_run_ids) == 2
+    assert len(set(new_run_ids)) == 2
+    manifest = backend._read_work_manifest("clamp_work")
+    attempts = manifest["part_jobs"][0]["attempts"]
+    assert {item["run_id"] for item in attempts} == {
+        "clamp_attempt_1",
+        *new_run_ids,
+    }

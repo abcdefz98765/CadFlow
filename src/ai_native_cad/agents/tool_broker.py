@@ -15,6 +15,8 @@ import math
 import re
 import shutil
 import tarfile
+import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -45,6 +47,10 @@ STRUCTURED_CONTRACT_TOOL = "validate_structured_contract"
 MODEL_PROGRAM_SOURCE_TOOL = "validate_model_program_source"
 MODEL_PROGRAM_TOOL = "execute_model_program"
 WINDOWS_MODEL_PROGRAM_PROFILE = WSL_MODEL_PROGRAM_PROFILE
+
+# Part reasoning may overlap, while the current attested WSL launcher exposes no
+# multi-flight guarantee. Serialize only the actual CAD executor boundary.
+_MODEL_PROGRAM_EXECUTION_SLOTS = threading.BoundedSemaphore(1)
 
 
 @dataclass(frozen=True)
@@ -125,6 +131,7 @@ class ToolObservation:
     attestation_digest: str | None = None
     limits: dict[str, int] | None = None
     exit_state: str | None = None
+    cad_execution_ms: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -140,6 +147,7 @@ class ToolObservation:
             "attestation_digest": self.attestation_digest,
             "limits": self.limits,
             "exit_state": self.exit_state,
+            "cad_execution_ms": self.cad_execution_ms,
             "output": self.output,
         }
 
@@ -570,19 +578,22 @@ class CadFlowToolBroker:
         final_dir = _execution_evidence_dir(context, request.candidate_id, execution_id)
         if final_dir.exists():
             return _execution_rejected(definition, "execution_evidence_conflict")
-        try:
-            runtime_result = self._sandbox_executor.execute(request)
-        except Exception:
-            # The executor boundary is CadFlow-owned, but an adapter failure
-            # must still become typed diagnostic evidence. Conservatively mark
-            # side effects as started because the exception may have happened
-            # after the launcher crossed the isolation boundary.
-            runtime_result = SandboxExecutionResult(
-                success=False,
-                codes=("sandbox_protocol_error",),
-                exit_state="executor_exception",
-                archive=b"",
-            )
+        with _MODEL_PROGRAM_EXECUTION_SLOTS:
+            cad_started = time.monotonic()
+            try:
+                runtime_result = self._sandbox_executor.execute(request)
+            except Exception:
+                # The executor boundary is CadFlow-owned, but an adapter failure
+                # must still become typed diagnostic evidence. Conservatively mark
+                # side effects as started because the exception may have happened
+                # after the launcher crossed the isolation boundary.
+                runtime_result = SandboxExecutionResult(
+                    success=False,
+                    codes=("sandbox_protocol_error",),
+                    exit_state="executor_exception",
+                    archive=b"",
+                )
+            cad_execution_ms = max(0, int((time.monotonic() - cad_started) * 1000))
         if not isinstance(runtime_result, SandboxExecutionResult):
             runtime_result = SandboxExecutionResult(
                 success=False,
@@ -631,6 +642,7 @@ class CadFlowToolBroker:
                 attestation_digest=attestation.digest,
                 limits=dict(MODEL_PROGRAM_LIMITS),
                 exit_state=runtime_result.exit_state,
+                cad_execution_ms=cad_execution_ms,
             )
         try:
             files, worker_observation = _validate_worker_archive(runtime_result.archive)
@@ -683,6 +695,7 @@ class CadFlowToolBroker:
                 attestation_digest=attestation.digest,
                 limits=dict(MODEL_PROGRAM_LIMITS),
                 exit_state="invalid_archive",
+                cad_execution_ms=cad_execution_ms,
             )
         success = worker_observation.get("success") is True
         codes = tuple(worker_observation.get("codes") or ())
@@ -703,6 +716,7 @@ class CadFlowToolBroker:
             attestation_digest=attestation.digest,
             limits=dict(MODEL_PROGRAM_LIMITS),
             exit_state=str(worker_observation.get("exit_state") or runtime_result.exit_state),
+            cad_execution_ms=cad_execution_ms,
         )
 
     def _invoke_structured_contract_validator(

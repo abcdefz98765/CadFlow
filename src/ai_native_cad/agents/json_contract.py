@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import re
+import threading
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from ai_native_cad.agents.base import AgentAdapter
@@ -156,7 +157,7 @@ class JsonContractAgentAdapter(AgentAdapter):
             self._config = config
         else:
             self._config = JsonContractProviderConfig.from_mapping(config)
-        self._last_provider_request_trace: dict[str, Any] | None = None
+        self._provider_request_local = threading.local()
 
     @property
     def provider_identity(self) -> dict[str, Any]:
@@ -168,9 +169,21 @@ class JsonContractAgentAdapter(AgentAdapter):
 
     @property
     def last_provider_request_trace(self) -> dict[str, Any] | None:
-        if self._last_provider_request_trace is None:
+        trace = getattr(self._provider_request_local, "trace", None)
+        if not isinstance(trace, dict):
             return None
-        return dict(self._last_provider_request_trace)
+        return dict(trace)
+
+    def consume_provider_transport_attempt_count(self) -> int | None:
+        """Return one current-thread HTTP-call count without retaining traffic."""
+
+        consume = getattr(self.client, "consume_transport_attempt_count", None)
+        if not callable(consume):
+            return None
+        value = consume()
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        return max(0, value)
 
     def parse_requirement(self, prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         context = context or {}
@@ -226,7 +239,7 @@ class JsonContractAgentAdapter(AgentAdapter):
         request = _runtime_action_request(state, skill_manifest)
         skill_id = str(skill_manifest.get("skill_id") or "")
         request["provider_options"] = self._config.request_options()
-        self._last_provider_request_trace = {
+        self._provider_request_local.trace = {
             "operation": f"{skill_id}_action",
             "stage": "intent_design" if skill_id == "work_design" else "design",
             "skill": {
@@ -245,7 +258,7 @@ class JsonContractAgentAdapter(AgentAdapter):
             },
         }
         request["request_trace_summary"] = dict(
-            self._last_provider_request_trace
+            self._provider_request_local.trace
         )
         raw_response = _call_json_client(
             self.client,
@@ -313,7 +326,7 @@ class JsonContractAgentAdapter(AgentAdapter):
             payload_shape=request.get("payload_shape", {}),
             context=request.get("context"),
         )
-        self._last_provider_request_trace = dict(request["request_trace_summary"])
+        self._provider_request_local.trace = dict(request["request_trace_summary"])
         return request
 
 

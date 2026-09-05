@@ -372,18 +372,19 @@ def build_recovery_projection(
             extra=route_scope,
         )
     if stop_reason == "budget_exhausted":
+        budget_detail = _budget_exhaustion_copy(route, language)
         return _recovery(
             category="budget_exhausted",
             owner="cadflow",
             title=("本次 Agent 尝试已达到预算上限" if language == "zh" else "This Agent attempt reached its budget"),
             summary=("现有证据已保留；可以开始一个新的有界尝试。" if language == "zh" else "Existing evidence was preserved; you can start another bounded attempt."),
-            why=("CadFlow 按既定资源预算安全停止。" if language == "zh" else "CadFlow stopped safely at the declared resource budget."),
+            why=budget_detail["why"],
             action_key="retry_agent",
             action_label=("重试" if language == "zh" else "Retry"),
             destination="workbench",
             retryable=True,
             language=language,
-            extra=route_scope,
+            extra={**route_scope, **budget_detail},
         )
     if stop_reason == "insufficient_context":
         output = agent_output or {}
@@ -1010,6 +1011,7 @@ def build_agent_first_workflow_projection(
         "rationale": recovery.get("why_it_stopped") if recovery else None,
     }
     graph = {
+        "work_id": work_id,
         "topology": "dynamic_work_graph",
         "phase_groups": phase_groups,
         "nodes": nodes,
@@ -2117,6 +2119,44 @@ def _read_reference(
         checkpoint=str(reference.get("checkpoint") or ""),
     )
     return content
+
+
+def _budget_exhaustion_copy(route: dict[str, Any], language: str) -> dict[str, Any]:
+    """Use exact persisted budget diagnostics; older Runs remain deliberately generic."""
+    diagnostic = route.get("failure_diagnostic") if isinstance(route.get("failure_diagnostic"), dict) else {}
+    # Some episodes persist the diagnostic directly under their stop payload.
+    diagnostic = diagnostic or (route.get("diagnostic") if isinstance(route.get("diagnostic"), dict) else {})
+    required = ("reason_code", "budget_kind", "used", "limit", "agent_steps")
+    if not all(key in diagnostic for key in required):
+        return {
+            "why": "CadFlow 按既定资源预算安全停止。" if language == "zh" else "CadFlow stopped safely at the declared resource budget.",
+            "budget_diagnostic": None,
+        }
+    kind = str(diagnostic["budget_kind"])
+    used, limit, agent_steps = diagnostic["used"], diagnostic["limit"], diagnostic["agent_steps"]
+    labels = {
+        "wallclock": ("墙钟时间", "wall-clock time"),
+        "wall_clock_seconds": ("墙钟时间", "wall-clock time"),
+        "agent_steps": ("Agent 步数", "Agent steps"),
+        "cad_executions": ("CAD 执行次数", "CAD executions"),
+        "context": ("上下文预算", "context budget"),
+        "context_requests": ("上下文请求次数", "context requests"),
+        "context_bytes": ("上下文字节数", "context bytes"),
+        "contract_submissions": ("契约提交次数", "contract submissions"),
+        "repair_attempts": ("修复尝试次数", "repair attempts"),
+        "source_submissions": ("源程序提交次数", "source submissions"),
+        "observation_inspections": ("观察检查次数", "observation inspections"),
+        "contract_repair_turns": ("动作契约修复轮数", "action-contract repair turns"),
+    }
+    zh_kind, en_kind = labels.get(kind, (kind, kind.replace("_", " ")))
+    if language == "zh":
+        why = f"已用尽{zh_kind}预算：已使用 {used}，上限 {limit}；本次已执行 {agent_steps} 个 Agent 步骤。"
+    else:
+        why = f"The {en_kind} budget was exhausted: used {used} of {limit}; this attempt took {agent_steps} Agent steps."
+    return {
+        "why": why,
+        "budget_diagnostic": {key: diagnostic[key] for key in required},
+    }
 
 
 def _recovery(

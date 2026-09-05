@@ -1,11 +1,101 @@
 # Workflow-native UI recovery verification
 
-Status date: 2026-08-21
+Status date: 2026-09-05
 
-Branch: `codex/v1-nicegui-runtime-cleanup`
+Branch: `codex/v1-part-execution-runtime`
 
-Parent: `codex/v1-workflow-native-ui` at
-`8e4dd9acc49016e7ab8be233d851c0d2c0dfb146`
+Parent: `main` at `90d2fe7b1dbe6138f8c91dc7cbe85b9145d7d94f`
+
+## Part execution runtime verification
+
+### Budget Accounting Model
+
+| Term | CadFlow meaning |
+| --- | --- |
+| Product command | One user operation such as Retry, Continue Design, or Design runnable Parts; it may start one or several Episodes. |
+| Episode | One bounded `work_design` or `design_part` Agent attempt. |
+| Agent step | One successfully returned and parsed Agent action, including a protocol-repair response. |
+| Provider logical request | One call through the provider contract interface. A returned action normally makes it one Agent step; a provider exception need not. |
+| Provider transport attempt | One HTTP attempt inside a logical request. HTTP retries increase this value, not Agent steps. It is nullable when the adapter cannot observe it. |
+| Provider request timeout | The timeout applied to one transport request. It is distinct from the Episode budget. |
+| Episode wall-clock timeout | Elapsed Episode time across provider latency/retries, context/tool work, CAD execution, validation, and observation processing. It is checked cooperatively at bounded action boundaries. |
+| Context request / bytes | A context action and the sanitized bytes returned through the context broker. |
+| Contract submission | One submitted structured geometry contract. |
+| Contract repair | One local repair attempt for a rejected submitted contract. |
+| Contract-protocol repair turn | One extra provider logical request used to repair an invalid Agent action envelope. |
+| Source submission | One model-program source candidate submitted for policy validation. |
+| Tool invocation | One broker-controlled validation or execution invocation. |
+| CAD execution | One call that crosses the attested sandbox executor boundary. |
+| Observation inspection | One Agent action inspecting an execution observation. |
+
+Therefore one Agent action is one Agent step after a successful provider return,
+not “one HTTP call.” A logical request may consume several HTTP attempts without
+increasing Agent steps. Activity is a product event feed containing responses,
+observations, and terminal results, so Activity count and Agent step count are
+not one-to-one.
+
+### Old and current Part 4 evidence
+
+The original Part 4 Attempt #1 sequence was: `create_model_program`, then an
+invalid `request_execution` carrying an extra `reason`, followed by one
+contract-protocol repair request. It produced two Agent steps, one source
+submission, no CAD execution, and no observation inspection. The Episode
+stopped on the unchanged 180-second wall-clock budget, not the 16-step limit.
+Historical evidence did not preserve per-request timing or transport retries,
+so those older values remain unavailable rather than inferred. Its Activity
+count of about five included Agent responses, observations, and the terminal
+result.
+
+The instrumented 2026-09-05 retry first exposed and corrected a UI wiring bug:
+the budget recovery key `retry_agent` was not marked `new_attempt`, so it ran
+against the old Run. That negative trial safely stopped at 344.531 seconds with
+three steps, three logical requests, three observed transport attempts, two
+context requests, 344.514 seconds provider time, and zero tool/CAD time. No
+accepted pointer changed.
+
+After the correction, Retry persisted child Run `机械臂_part_4_2` with
+`parent_run_id = 机械臂_part_4` and the browser immediately showed Attempts 2
+while the provider was still running. Its terminal evidence recorded four
+steps, four logical requests, four observed transport attempts, three context
+requests, 252.750 seconds total, 252.748 seconds provider time, and zero source,
+tool, CAD, execution, or inspection activity. The exact cause was
+`budget_exhausted.wall_clock_seconds`, used 252.750 / limit 180.0.
+
+### Live attempts and bounded Parts
+
+The scoped runtime map is keyed by Work, Part Job, Run, and action. Retry
+persists the child before the first refresh; the graph then overlays Running on
+that real child node until a terminal canonical refresh replaces it. Duplicate
+commands for the same Attempt coalesce into one shared in-process future.
+
+The Work-level action uses existing active incomplete Attempt Runs. It launches
+at most two Part Episodes concurrently, preserves individual failure/recovery
+states, and excludes any Part currently requiring explicit Retry. Provider work
+runs outside the Work mutation lock. Actual CAD execution is single-flight
+until the WSL launcher has an explicit safe multi-flight contract.
+
+At 1440 x 900, 1024 x 768, and 414 x 896, the Overview and Workflow had no
+page-level horizontal overflow; the mobile phase rail retained intentional
+local scrolling. The real mechanical-arm browser trial displayed Part 1, 2, 3,
+and 5 as simultaneous scoped Running states from one command while Part 4
+Attempt #2 remained independently Blocked. That run exposed one final
+eligibility gap: Part 1 already had a blocked route on its active Attempt, so
+the final projection now marks such attempts `attempt_blocked` and excludes
+them from later frontiers; it must use explicit Retry to create a child.
+
+The genuinely runnable Part 2, 3, and 5 Episodes all continued independently.
+Part 2 exhausted its unchanged wall-clock budget at 243.860 / 180 seconds after
+two Agent steps. Part 3 ended with a provider failure at 176.468 seconds after
+one returned step and two logical/transport attempts. Part 5 safely blocked on
+the typed `invalid_execution_lineage` boundary before CAD execution. The
+browser showed each terminal transition while remaining siblings stayed
+Running, then showed all terminal attempts independently. All evidence sets
+survived fresh Work merges, all five accepted pointers remained null, and no
+sibling outcome cancelled another.
+
+The final affected set passed `238 passed`; the complete repository suite
+passed `878 passed, 9 skipped` in 411.47 seconds. Python compilation and
+`git diff --check` also passed.
 
 ## Failure causality and runtime-boundary correction
 

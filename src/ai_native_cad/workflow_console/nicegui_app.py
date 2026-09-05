@@ -20,6 +20,7 @@ from ai_native_cad.workflow_console.actions import WorkflowConsoleActions
 from ai_native_cad.workflow_console.actions import STAGE_REVIEW_STATUSES, STAGE_REVIEW_STAGES, STAGE_REWORK_TARGETS
 from ai_native_cad.workflow_console.artifact_display import filter_artifacts_for_display
 from ai_native_cad.workflow_console.backend import DOWNLOADABLE_FILES, WorkflowConsoleBackend
+from ai_native_cad.workflow_console.canonical_interaction import project_canonical_interaction
 from ai_native_cad.workflow_console.action_lifecycle import (
     ActionExecutionState,
     _accept_reviewable_result_async,
@@ -27,6 +28,7 @@ from ai_native_cad.workflow_console.action_lifecycle import (
     _action_identity,
     _answer_and_continue_agent_async,
     _continue_agent_async,
+    _design_runnable_parts_async,
     _continue_work_design_async,
     _execute_action_lifecycle,
     _pending_action_matches,
@@ -1641,6 +1643,16 @@ def _render_overview_current_task(
                     ).props("color=primary")
                     if action_running:
                         button.disable()
+                elif key == "design_runnable_parts":
+                    button = ui.button(
+                        recommendation.get("label") or ("设计可运行的零件" if language == "zh" else "Design runnable Parts"),
+                        icon="play_arrow",
+                        on_click=lambda: _show_design_runnable_parts_confirmation(
+                            ui, backend, recommendation, state, refresh, language
+                        ),
+                    ).props("color=primary")
+                    if action_running:
+                        button.disable()
                 elif result and result.get("reviewable_result_id") and key == "accept_reviewable_result":
                     part_id = str((active_job or {}).get("part_job_id") or "")
                     result_id = str(result["reviewable_result_id"])
@@ -1758,7 +1770,7 @@ def _render_recovery_card(
                 )
                 active = next((item for item in overview.get("part_jobs", []) if isinstance(item, dict) and item.get("part_job_id") == active_part_job_id), None)
                 if active:
-                    retry_action = {"key": "retry_agent", "label": action.get("label") or "Start a new attempt", "target_work_id": _dict_get(overview.get("advanced"), "work_id"), "part_job_id": active.get("part_job_id"), "target_run_id": recovery.get("run_id") or active.get("active_attempt_run_id"), **({"recovery_mode": "new_attempt"} if key == "start_new_attempt" else {})}
+                    retry_action = {"key": "retry_agent", "label": action.get("label") or "Start a new attempt", "target_work_id": _dict_get(overview.get("advanced"), "work_id"), "part_job_id": active.get("part_job_id"), "target_run_id": recovery.get("run_id") or active.get("active_attempt_run_id"), "recovery_mode": "new_attempt"}
                     ui.button(action.get("label") or "Start a new attempt", icon="refresh", on_click=lambda: _show_continue_agent_confirmation(ui, backend, overview, state, refresh, language, scoped_action=retry_action)).props("color=primary")
                 else:
                     work_action = {"key": "continue_work_design", "label": action.get("label") or "Retry Work Design", "target_work_id": _dict_get(overview.get("advanced"), "work_id"), "target_run_id": recovery.get("run_id")}
@@ -1787,6 +1799,36 @@ def _render_recovery_card(
                     icon="info",
                     on_click=lambda: _show_recovery_details_dialog(ui, recovery, language),
                 ).props("outline")
+            work_id = str(_dict_get(overview.get("advanced"), "work_id") or "")
+            agent_design = overview.get("agent_design") if isinstance(overview.get("agent_design"), dict) else {}
+            parts = [item for item in overview.get("part_jobs", []) if isinstance(item, dict)]
+            work_design_status = "completed" if agent_design.get("evidence_status") == "persisted_work_design" else ""
+            work_interaction = project_canonical_interaction(
+                work_id=work_id,
+                work_design={"status": work_design_status},
+                parts=parts,
+                current_result=overview.get("current_result") if isinstance(overview.get("current_result"), dict) else None,
+                recovery=recovery,
+                language=language,
+            )
+            batch_action = next(
+                (
+                    item
+                    for item in work_interaction["work"]["secondary_actions"]
+                    if item.get("key") == "design_runnable_parts"
+                ),
+                None,
+            )
+            if batch_action:
+                batch_button = ui.button(
+                    str(batch_action.get("label") or "Design runnable Parts"),
+                    icon="play_arrow",
+                    on_click=lambda: _show_design_runnable_parts_confirmation(
+                        ui, backend, batch_action, state, refresh, language
+                    ),
+                ).props("outline")
+                if _pending_action_matches(state, batch_action):
+                    batch_button.disable()
         if recovery.get("retryable"):
             ui.label(
                 str(
@@ -2264,6 +2306,38 @@ def _show_continue_agent_confirmation(
     dialog.open()
 
 
+def _show_design_runnable_parts_confirmation(
+    ui: Any,
+    backend: WorkflowConsoleBackend,
+    action: dict[str, Any],
+    state: dict[str, Any],
+    refresh: Callable[[], None],
+    language: str,
+) -> None:
+    targets = [item for item in action.get("part_targets", []) if isinstance(item, dict)]
+    if not targets:
+        return
+    dialog = ui.dialog()
+    label = str(action.get("label") or ("设计可运行的零件" if language == "zh" else "Design runnable Parts"))
+    with dialog, ui.card().classes("w-[560px] max-w-full"):
+        ui.label(label).classes("text-xl font-semibold")
+        ui.label(
+            "CadFlow 会并行推进独立零件（最多两个），每个尝试仍保留自己的结果和恢复状态。"
+            if language == "zh"
+            else "CadFlow will advance independent Parts in parallel (up to two); each attempt keeps its own result and recovery state."
+        ).classes("text-sm text-gray-700")
+        for target in targets:
+            ui.label(str(target.get("scope_label") or target.get("part_job_id"))).classes("text-sm")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button(i18n_copy(language, "cancel"), on_click=dialog.close).props("outline")
+            ui.button(
+                label,
+                icon="play_arrow",
+                on_click=lambda: (dialog.close(), _schedule_action(_design_runnable_parts_async(backend, action, state, refresh, language))),
+            ).props("color=primary")
+    dialog.open()
+
+
 
 
 def _render_works(
@@ -2683,6 +2757,16 @@ def _render_dynamic_node_actions(
                     ).props("color=primary")
                     if _pending_action_matches(state, primary):
                         button.disable()
+                elif key == "design_runnable_parts":
+                    button = ui.button(
+                        str(primary.get("label") or "Design runnable Parts"),
+                        icon="play_arrow",
+                        on_click=lambda: _show_design_runnable_parts_confirmation(
+                            ui, backend, primary, state, refresh, language
+                        ),
+                    ).props("color=primary")
+                    if _pending_action_matches(state, primary):
+                        button.disable()
                 elif key == "continue_work_design":
                     button = ui.button(
                         str(primary.get("label") or "Continue Work Design"),
@@ -2740,6 +2824,16 @@ def _render_dynamic_node_actions(
                                 icon="info",
                                 on_click=lambda: _show_recovery_details_dialog(ui, recovery, language),
                             ).props("outline")
+                        elif key == "design_runnable_parts":
+                            button = ui.button(
+                                str(secondary_action.get("label") or "Design runnable Parts"),
+                                icon="play_arrow",
+                                on_click=lambda _event=None, selected_action=secondary_action: _show_design_runnable_parts_confirmation(
+                                    ui, backend, selected_action, state, refresh, language
+                                ),
+                            ).props("outline")
+                            if _pending_action_matches(state, secondary_action):
+                                button.disable()
     elif interaction.get("unavailable_reason"):
         ui.label(str(interaction["unavailable_reason"])).classes("workflow-disabled-reason mt-3")
 

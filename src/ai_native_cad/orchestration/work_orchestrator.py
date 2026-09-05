@@ -7,9 +7,11 @@ CadFlow-owned Tool Broker and publication gate.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 import re
+from threading import RLock
 from typing import Any
 from uuid import uuid4
 
@@ -39,6 +41,12 @@ from ai_native_cad.orchestration.ports import (
 class WorkOrchestrator:
     """Sole target-product coordinator for the four user phases in M1."""
 
+    # CadFlow currently runs as one local single-user process.  These locks make
+    # the short manifest read/modify/write commits serial per Work without
+    # holding a lock across provider or CAD execution.
+    _work_locks_guard = RLock()
+    _work_locks: dict[str, RLock] = {}
+
     def __init__(
         self,
         store: WorkStorePort,
@@ -48,6 +56,14 @@ class WorkOrchestrator:
         self.store = store
         self.deterministic = deterministic
         self.design = design
+
+    @classmethod
+    @contextmanager
+    def _work_mutation_guard(cls, work_id: str):
+        with cls._work_locks_guard:
+            work_lock = cls._work_locks.setdefault(work_id, RLock())
+        with work_lock:
+            yield
 
     def create_work(
         self,
@@ -581,55 +597,56 @@ class WorkOrchestrator:
         parent_run_id: str | None = None,
         source_result_id: str | None = None,
     ) -> dict[str, Any]:
-        work = self.store.read_work(work_id)
-        if run_id is None:
-            run_id = self.store.next_run_id(
-                work_id, f"{work_id}_{part_job_id}"
-            )
         prompt_text = _require_prompt(
             prompt or f"Create another attempt for part '{part_job_id}' in Work '{work_id}'."
         )
-        candidate = append_part_attempt(
-            work,
-            part_job_id=part_job_id,
-            run_id=run_id,
-            role=role,
-            source=source,
-            status="incomplete",
-            created_at=_now(),
-            parent_run_id=parent_run_id,
-            source_result_id=source_result_id,
-        )
-        lineage = candidate.get("active_lineage")
-        if isinstance(lineage, dict):
-            lineage["latest_attempt_run_id"] = run_id
+        with self._work_mutation_guard(work_id):
+            work = self.store.read_work(work_id)
+            if run_id is None:
+                run_id = self.store.next_run_id(
+                    work_id, f"{work_id}_{part_job_id}"
+                )
+            candidate = append_part_attempt(
+                work,
+                part_job_id=part_job_id,
+                run_id=run_id,
+                role=role,
+                source=source,
+                status="incomplete",
+                created_at=_now(),
+                parent_run_id=parent_run_id,
+                source_result_id=source_result_id,
+            )
+            lineage = candidate.get("active_lineage")
+            if isinstance(lineage, dict):
+                lineage["latest_attempt_run_id"] = run_id
 
-        created = self.deterministic.create_run(
-            work_id=work_id,
-            run_id=run_id,
-            prompt=prompt_text,
-        )
-        self.store.write_work(work_id, candidate)
-        self.store.invalidate_projection()
-        job = next(
-            item
-            for item in candidate["part_jobs"]
-            if item["part_job_id"] == part_job_id
-        )
-        return {
-            "part_job": job,
-            "run": created["run"],
-            "orchestration": _completion(
-                command="create_part_attempt",
-                phase="design",
-                checkpoint="part_job_attempt",
-                postcondition=(
-                    f"Attempt {run_id} was appended to Part Job {part_job_id}; "
-                    "the accepted result was unchanged."
+            created = self.deterministic.create_run(
+                work_id=work_id,
+                run_id=run_id,
+                prompt=prompt_text,
+            )
+            self.store.write_work(work_id, candidate)
+            self.store.invalidate_projection()
+            job = next(
+                item
+                for item in candidate["part_jobs"]
+                if item["part_job_id"] == part_job_id
+            )
+            return {
+                "part_job": job,
+                "run": created["run"],
+                "orchestration": _completion(
+                    command="create_part_attempt",
+                    phase="design",
+                    checkpoint="part_job_attempt",
+                    postcondition=(
+                        f"Attempt {run_id} was appended to Part Job {part_job_id}; "
+                        "the accepted result was unchanged."
+                    ),
+                    next_action="Build and evaluate this attempt",
                 ),
-                next_action="Build and evaluate this attempt",
-            ),
-        }
+            }
 
     def run_part_design_episode(
         self,
@@ -644,116 +661,107 @@ class WorkOrchestrator:
 
         if self.design is None:
             raise ValueError("Agent Design port is unavailable")
-        work = self.store.read_work(work_id)
-        job = next(
-            (
-                item
-                for item in work.get("part_jobs", [])
-                if isinstance(item, dict)
-                and item.get("part_job_id") == part_job_id
-            ),
-            None,
-        )
-        if job is None:
-            raise ValueError(f"Work has no Part Job: {part_job_id}")
-        run_id = attempt_run_id or job.get("active_attempt_run_id")
-        if not isinstance(run_id, str) or not run_id:
-            raise ValueError("Part Job has no active attempt Run")
-        attempt_run_ids = {
-            item.get("run_id")
-            for item in job.get("attempts", [])
-            if isinstance(item, dict)
-        }
-        if run_id not in attempt_run_ids:
-            raise ValueError("Design Episode must target an owned Part Job attempt")
-        design_objective = objective or work.get("description") or (
-            f"Design Part Job '{part_job_id}' for Work '{work_id}'."
-        )
-        request = DesignPartEpisodeRequest(
-            request_id=request_id,
-            work_id=work_id,
-            run_id=run_id,
-            part_job_id=part_job_id,
-            objective=design_objective,
-            role=job.get("role") if isinstance(job.get("role"), str) else None,
-            interface_context=deepcopy(
-                job.get("interface_context")
-                if isinstance(job.get("interface_context"), dict)
-                else {}
-            ),
-            accepted_result_id=(
-                job.get("accepted_result_id")
-                if isinstance(job.get("accepted_result_id"), str)
-                else None
-            ),
-        )
-        protected_before = _protected_work_state(work)
-        outcome = self.design.run_part_design_episode(request)
-        if not outcome.artifacts:
-            raise RuntimeError("Agent Design port returned no durable Run evidence")
-        _validate_design_outcome(request, outcome, work)
-
-        timestamp = _now()
-        accepted_input_ids = [
-            item["artifact_id"]
-            for item in work.get("artifact_references", [])
-            if isinstance(item, dict)
-            and item.get("run_id") == run_id
-            and item.get("part_job_id") == part_job_id
-            and item.get("trust_role") == "accepted_input"
-            and isinstance(item.get("artifact_id"), str)
-        ]
-        references = [
-            create_artifact_reference(
-                artifact_id=artifact.artifact_id,
+        with self._work_mutation_guard(work_id):
+            work = self.store.read_work(work_id)
+            job = _owned_part_job(work, part_job_id=part_job_id)
+            run_id = attempt_run_id or job.get("active_attempt_run_id")
+            if not isinstance(run_id, str) or not run_id:
+                raise ValueError("Part Job has no active attempt Run")
+            if not _part_job_owns_run(job, run_id):
+                raise ValueError("Design Episode must target an owned Part Job attempt")
+            design_objective = objective or work.get("description") or (
+                f"Design Part Job '{part_job_id}' for Work '{work_id}'."
+            )
+            request = DesignPartEpisodeRequest(
+                request_id=request_id,
                 work_id=work_id,
                 run_id=run_id,
                 part_job_id=part_job_id,
-                relative_path=artifact.relative_path,
-                phase=_design_artifact_phase(artifact),
-                checkpoint=artifact.checkpoint,
-                trust_role=artifact.trust_role,
-                source_artifact_ids=list(dict.fromkeys([
-                    *artifact.source_artifact_ids,
-                    *(accepted_input_ids if artifact.checkpoint == "product_design_routing" else []),
-                ])),
-                validation_status=artifact.validation_status,
-                created_at=timestamp,
+                objective=design_objective,
+                role=job.get("role") if isinstance(job.get("role"), str) else None,
+                interface_context=deepcopy(
+                    job.get("interface_context")
+                    if isinstance(job.get("interface_context"), dict)
+                    else {}
+                ),
+                accepted_result_id=(
+                    job.get("accepted_result_id")
+                    if isinstance(job.get("accepted_result_id"), str)
+                    else None
+                ),
             )
-            for artifact in outcome.artifacts
-        ]
-        registered = register_artifact_references(
-            work,
-            references,
-            updated_at=timestamp,
-        )
-        if _protected_work_state(registered) != protected_before:
-            raise RuntimeError(
-                "Design Episode routing attempted to mutate protected Work state"
+        outcome = self.design.run_part_design_episode(request)
+        if not outcome.artifacts:
+            raise RuntimeError("Agent Design port returned no durable Run evidence")
+        with self._work_mutation_guard(work_id):
+            latest = self.store.read_work(work_id)
+            latest_job = _owned_part_job(latest, part_job_id=part_job_id)
+            if not _part_job_owns_run(latest_job, run_id):
+                raise ValueError("Design Episode must target an owned Part Job attempt")
+            _validate_design_outcome(request, outcome, latest)
+
+            timestamp = _now()
+            accepted_input_ids = [
+                item["artifact_id"]
+                for item in latest.get("artifact_references", [])
+                if isinstance(item, dict)
+                and item.get("run_id") == run_id
+                and item.get("part_job_id") == part_job_id
+                and item.get("trust_role") == "accepted_input"
+                and isinstance(item.get("artifact_id"), str)
+            ]
+            references = [
+                create_artifact_reference(
+                    artifact_id=artifact.artifact_id,
+                    work_id=work_id,
+                    run_id=run_id,
+                    part_job_id=part_job_id,
+                    relative_path=artifact.relative_path,
+                    phase=_design_artifact_phase(artifact),
+                    checkpoint=artifact.checkpoint,
+                    trust_role=artifact.trust_role,
+                    source_artifact_ids=list(dict.fromkeys([
+                        *artifact.source_artifact_ids,
+                        *(accepted_input_ids if artifact.checkpoint == "product_design_routing" else []),
+                    ])),
+                    validation_status=artifact.validation_status,
+                    created_at=timestamp,
+                )
+                for artifact in outcome.artifacts
+            ]
+            protected_before_merge = _protected_work_state(latest)
+            registered = register_artifact_references(
+                latest,
+                references,
+                updated_at=timestamp,
             )
-        existing_ids = {
-            item.get("artifact_id")
-            for item in work.get("artifact_references", [])
-            if isinstance(item, dict)
-        }
-        new_ids = {
-            reference["artifact_id"]
-            for reference in references
-            if reference["artifact_id"] not in existing_ids
-        }
-        persisted = registered if new_ids else work
-        if new_ids:
-            self.store.write_work(work_id, persisted)
-            self.store.invalidate_projection()
-        persisted_by_id = {
-            item["artifact_id"]: item
-            for item in persisted.get("artifact_references", [])
-            if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)
-        }
-        persisted_references = [
-            persisted_by_id[reference["artifact_id"]]
-            for reference in references
-        ]
+            if _protected_work_state(registered) != protected_before_merge:
+                raise RuntimeError(
+                    "Design Episode routing attempted to mutate protected Work state"
+                )
+            existing_ids = {
+                item.get("artifact_id")
+                for item in latest.get("artifact_references", [])
+                if isinstance(item, dict)
+            }
+            new_ids = {
+                reference["artifact_id"]
+                for reference in references
+                if reference["artifact_id"] not in existing_ids
+            }
+            persisted = registered if new_ids else latest
+            if new_ids:
+                self.store.write_work(work_id, persisted)
+                self.store.invalidate_projection()
+            persisted_by_id = {
+                item["artifact_id"]: item
+                for item in persisted.get("artifact_references", [])
+                if isinstance(item, dict) and isinstance(item.get("artifact_id"), str)
+            }
+            persisted_references = [
+                persisted_by_id[reference["artifact_id"]]
+                for reference in references
+            ]
         status = "completed" if outcome.status == "completed" else "blocked"
         if outcome.idempotent_replay:
             postcondition = (
@@ -899,40 +907,41 @@ class WorkOrchestrator:
         review_id: str,
         artifact_references: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        work = self.store.read_work(work_id)
-        timestamp = _now()
-        with_references = register_artifact_references(
-            work,
-            artifact_references,
-            updated_at=timestamp,
-        )
-        artifact_ids = [item["artifact_id"] for item in artifact_references]
-        accepted = accept_part_result(
-            with_references,
-            part_job_id=part_job_id,
-            result_id=result_id,
-            attempt_run_id=attempt_run_id,
-            result_run_id=result_run_id,
-            review_id=review_id,
-            artifact_ids=artifact_ids,
-            accepted_at=timestamp,
-        )
-        self.store.write_work(work_id, accepted)
-        self.store.invalidate_projection()
-        return {
-            "accepted_part_result": accepted["accepted_part_results"][part_job_id],
-            "product_state": project_product_state(accepted),
-            "orchestration": _completion(
-                command="accept_part_result",
-                phase="accept_deliver",
-                checkpoint="acceptance_decision",
-                postcondition=(
-                    f"Accepted-result pointer for {part_job_id} now references "
-                    f"{result_id}; active design lineage was unchanged."
+        with self._work_mutation_guard(work_id):
+            work = self.store.read_work(work_id)
+            timestamp = _now()
+            with_references = register_artifact_references(
+                work,
+                artifact_references,
+                updated_at=timestamp,
+            )
+            artifact_ids = [item["artifact_id"] for item in artifact_references]
+            accepted = accept_part_result(
+                with_references,
+                part_job_id=part_job_id,
+                result_id=result_id,
+                attempt_run_id=attempt_run_id,
+                result_run_id=result_run_id,
+                review_id=review_id,
+                artifact_ids=artifact_ids,
+                accepted_at=timestamp,
+            )
+            self.store.write_work(work_id, accepted)
+            self.store.invalidate_projection()
+            return {
+                "accepted_part_result": accepted["accepted_part_results"][part_job_id],
+                "product_state": project_product_state(accepted),
+                "orchestration": _completion(
+                    command="accept_part_result",
+                    phase="accept_deliver",
+                    checkpoint="acceptance_decision",
+                    postcondition=(
+                        f"Accepted-result pointer for {part_job_id} now references "
+                        f"{result_id}; active design lineage was unchanged."
+                    ),
+                    next_action="View accepted deliverables or start another attempt",
                 ),
-                next_action="View accepted deliverables or start another attempt",
-            ),
-        }
+            }
 
     def accept_reviewable_part_result(
         self,
@@ -944,52 +953,53 @@ class WorkOrchestrator:
     ) -> dict[str, Any]:
         """Explicit user authority for one registered reviewable result."""
 
-        work = self.store.read_work(work_id)
-        result_reference, step_reference = _registered_reviewable_result(
-            work,
-            work_id=work_id,
-            part_job_id=part_job_id,
-            reviewable_result_id=reviewable_result_id,
-        )
-        self.store.verify_reviewable_evidence(
-            work_id,
-            result_reference,
-            step_reference,
-        )
-        timestamp = _now()
-        accepted = accept_part_result(
-            work,
-            part_job_id=part_job_id,
-            result_id=reviewable_result_id,
-            attempt_run_id=result_reference["run_id"],
-            result_run_id=result_reference["run_id"],
-            review_id=review_id or f"accept_{uuid4().hex}",
-            artifact_ids=[
-                result_reference["artifact_id"],
-                step_reference["artifact_id"],
-            ],
-            accepted_at=timestamp,
-        )
-        self.store.write_work(work_id, accepted)
-        self.store.invalidate_projection()
-        return {
-            "accepted_part_result": accepted["accepted_part_results"][
-                part_job_id
-            ],
-            "reviewable_result_id": reviewable_result_id,
-            "product_state": project_product_state(accepted),
-            "orchestration": _completion(
-                command="accept_reviewable_part_result",
-                phase="accept_deliver",
-                checkpoint="acceptance_decision",
-                postcondition=(
-                    f"Explicit user acceptance moved only the {part_job_id} "
-                    f"accepted-result pointer to {reviewable_result_id}; "
-                    "active design lineage and Run evidence were unchanged."
+        with self._work_mutation_guard(work_id):
+            work = self.store.read_work(work_id)
+            result_reference, step_reference = _registered_reviewable_result(
+                work,
+                work_id=work_id,
+                part_job_id=part_job_id,
+                reviewable_result_id=reviewable_result_id,
+            )
+            self.store.verify_reviewable_evidence(
+                work_id,
+                result_reference,
+                step_reference,
+            )
+            timestamp = _now()
+            accepted = accept_part_result(
+                work,
+                part_job_id=part_job_id,
+                result_id=reviewable_result_id,
+                attempt_run_id=result_reference["run_id"],
+                result_run_id=result_reference["run_id"],
+                review_id=review_id or f"accept_{uuid4().hex}",
+                artifact_ids=[
+                    result_reference["artifact_id"],
+                    step_reference["artifact_id"],
+                ],
+                accepted_at=timestamp,
+            )
+            self.store.write_work(work_id, accepted)
+            self.store.invalidate_projection()
+            return {
+                "accepted_part_result": accepted["accepted_part_results"][
+                    part_job_id
+                ],
+                "reviewable_result_id": reviewable_result_id,
+                "product_state": project_product_state(accepted),
+                "orchestration": _completion(
+                    command="accept_reviewable_part_result",
+                    phase="accept_deliver",
+                    checkpoint="acceptance_decision",
+                    postcondition=(
+                        f"Explicit user acceptance moved only the {part_job_id} "
+                        f"accepted-result pointer to {reviewable_result_id}; "
+                        "active design lineage and Run evidence were unchanged."
+                    ),
+                    next_action="View accepted STEP or continue another Part Job",
                 ),
-                next_action="View accepted STEP or continue another Part Job",
-            ),
-        }
+            }
 
     def revise_reviewable_part_result(
         self,
@@ -1191,6 +1201,32 @@ def _protected_work_state(work: dict[str, Any]) -> dict[str, Any]:
             "run_ids": work.get("run_ids"),
         }
     )
+
+
+def _owned_part_job(
+    work: dict[str, Any],
+    *,
+    part_job_id: str,
+) -> dict[str, Any]:
+    job = next(
+        (
+            item
+            for item in work.get("part_jobs", [])
+            if isinstance(item, dict) and item.get("part_job_id") == part_job_id
+        ),
+        None,
+    )
+    if job is None:
+        raise ValueError(f"Work has no Part Job: {part_job_id}")
+    return job
+
+
+def _part_job_owns_run(job: dict[str, Any], run_id: str) -> bool:
+    return run_id in {
+        item.get("run_id")
+        for item in job.get("attempts", [])
+        if isinstance(item, dict)
+    }
 
 
 def _registered_reviewable_result(

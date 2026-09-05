@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 
@@ -33,6 +35,7 @@ def project_canonical_interaction(
     primary = None
     secondary: list[dict[str, Any]] = []
     attention = "ready"
+    runnable_frontier = _runnable_part_frontier(work_design, parts)
     if recovery:
         recommended = recovery.get("recommended_action") if isinstance(recovery.get("recommended_action"), dict) else {}
         key = str(recommended.get("key") or "")
@@ -54,7 +57,7 @@ def project_canonical_interaction(
                 target_run_id=recovery.get("run_id"),
                 **(
                     {"recovery_mode": "new_attempt"}
-                    if key == "start_new_attempt" and part_job_id
+                    if key in {"start_new_attempt", "retry_agent"} and part_job_id
                     else {}
                 ),
             )
@@ -64,6 +67,22 @@ def project_canonical_interaction(
                     **part_commands[part_job_id],
                     "primary_action": recovery_command,
                 }
+        recovery_part_id = recovery.get("part_job_id")
+        recovery_frontier = [
+            item
+            for item in runnable_frontier
+            if item.get("part_job_id") != recovery_part_id
+        ]
+        if len(recovery_frontier) >= 2:
+            secondary.append(
+                _command(
+                    "design_runnable_parts",
+                    "设计可运行的零件" if language == "zh" else "Design runnable Parts",
+                    work_id,
+                    part_targets=recovery_frontier,
+                    request_fingerprint=_frontier_fingerprint(work_id, recovery_frontier),
+                )
+            )
         attention = "needs_you" if key == "answer_question" else "blocked"
     elif not parts and work_design.get("status") != "completed":
         primary = _command(
@@ -72,6 +91,15 @@ def project_canonical_interaction(
             work_id,
             target_run_id=work_design.get("run_id"),
         )
+    elif runnable_frontier:
+        primary = _command(
+            "design_runnable_parts",
+            "设计可运行的零件" if language == "zh" else "Design runnable Parts",
+            work_id,
+            part_targets=runnable_frontier,
+            request_fingerprint=_frontier_fingerprint(work_id, runnable_frontier),
+        )
+        attention = "ready"
     elif isinstance(active, dict):
         commands = part_commands.get(str(active.get("part_job_id")), {})
         primary = commands.get("primary_action")
@@ -149,6 +177,44 @@ def _part_commands(work_id: str, part: dict[str, Any], language: str) -> dict[st
             target_run_id=run_id,
         )
     return {"primary_action": primary, "secondary_actions": secondary}
+
+
+def _runnable_part_frontier(work_design: dict[str, Any], parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return real, independent active attempts; descriptions never block them."""
+    if str(work_design.get("status") or "") not in {"completed", "ready"}:
+        return []
+    frontier: list[dict[str, Any]] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        # A reviewable/accepted result is a real terminal product state for the
+        # Part.  Do not infer scheduling dependencies from prose/interfaces.
+        if part.get("reviewable_result_id") or part.get("accepted_result_id"):
+            continue
+        if part.get("attempt_blocked") is True:
+            continue
+        run_id = part.get("active_attempt_run_id") or part.get("latest_attempt_run_id")
+        state = str(part.get("state") or "")
+        if not isinstance(run_id, str) or state not in {"design", "not_started", "ready", "incomplete", "running", "in_progress"}:
+            continue
+        frontier.append({
+            "part_job_id": str(part.get("part_job_id")),
+            "target_run_id": run_id,
+            "scope_label": part.get("name") or str(part.get("part_job_id")),
+            "label": "继续 Agent 设计" if state == "design" else "开始 Agent 设计",
+        })
+    return sorted(frontier, key=lambda item: (item["part_job_id"], item["target_run_id"])) if len(frontier) >= 2 else []
+
+
+def _frontier_fingerprint(work_id: str, frontier: list[dict[str, Any]]) -> str:
+    payload = {
+        "work_id": work_id,
+        "parts": [
+            {"part_job_id": item["part_job_id"], "attempt_run_id": item["target_run_id"]}
+            for item in frontier
+        ],
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _command(key: str, label: str, work_id: str, **targets: Any) -> dict[str, Any]:
